@@ -107,11 +107,6 @@ def can_delete_video(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bo
     return viewer.is_admin or team.sport in viewer.sport_admin or team.lineage_id in leads
 
 
-def can_record_paper_consent(viewer: Viewer, team: TeamRef) -> bool:
-    """A coach records a player's paper consent form for their own team."""
-    return can_upload(viewer, team)
-
-
 def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
     """See the NAS inbox: anyone who may upload for at least one enabled team."""
     return any(can_upload(viewer, t) for t in teams)

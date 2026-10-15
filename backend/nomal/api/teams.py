@@ -35,7 +35,7 @@ class TeamOut(BaseModel):
 
 class TeamDetailOut(TeamOut):
     lineage_id: uuid.UUID
-    # Coach/team manager of this season's team or sport admin: upload videos, record consent.
+    # Coach/team manager of this season's team or sport admin: upload videos.
     can_upload: bool
 
 

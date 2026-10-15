@@ -18,8 +18,6 @@ export function blockerMessage(t: TFunction, blocker: Blocker): string {
       return t('blockers.no_roster')
     case 'adult_check_unavailable':
       return t('blockers.adult_check_unavailable')
-    case 'consent_missing':
-      return count == null ? t('blockers.consent_missing_unknown') : t('blockers.consent_missing', { count })
     case 'roster_unavailable':
       return t('blockers.roster_unavailable')
     default:

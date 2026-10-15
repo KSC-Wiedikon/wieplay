@@ -108,7 +108,7 @@ function uploadApi(complete: { status?: number; body?: unknown } = { body: { ...
   return stubFetch({
     '/api/teams/92': { body: team },
     '/api/video/config': {
-      body: { enabled: true, part_size: PART_SIZE, max_file_bytes: 1e12, max_files: 20, notice_version: 'x' },
+      body: { enabled: true, part_size: PART_SIZE, max_file_bytes: 1e12, max_files: 20 },
     },
     '/api/teams/92/games': { body: [game] },
     '/api/teams/92/trainings': { body: [] },
@@ -202,7 +202,7 @@ describe('UploadPage', () => {
           status: 409,
           body: {
             detail: 'Filming is not allowed for this team on that day',
-            blockers: [{ code: 'consent_missing', count: 1, detail: null }],
+            blockers: [{ code: 'under_18', count: 1, detail: null }],
           },
         }),
       ),
@@ -211,7 +211,7 @@ describe('UploadPage', () => {
     await pickGameAndFile()
     fireEvent.click(await screen.findByRole('button', { name: 'Start upload' }))
 
-    expect(await screen.findByText('1 player has not agreed to filming yet.')).toBeInTheDocument()
+    expect(await screen.findByText('1 person on the roster is under 18 on that day.')).toBeInTheDocument()
     expect(screen.getByText(/filming is not allowed for this team on that day/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open the video' })).toHaveAttribute('href', `/videos/${VIDEO_ID}`)
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
@@ -233,7 +233,7 @@ describe('UploadPage', () => {
     const fetch = vi.fn(
       stubFetch({
         '/api/teams/92': { body: team },
-        '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20, notice_version: 'x' } },
+        '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
         '/api/teams/92/games': { body: [game] },
         '/api/teams/92/trainings': { body: [] },
         '/api/inbox': {
@@ -270,7 +270,7 @@ describe('UploadPage', () => {
       vi.fn(
         stubFetch({
           '/api/teams/92': { body: team },
-          '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20, notice_version: 'x' } },
+          '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
           '/api/teams/92/games': { body: [game] },
           '/api/teams/92/trainings': { body: [] },
           '/api/inbox': { body: [] },
@@ -301,7 +301,7 @@ describe('UploadPage', () => {
       vi.fn(
         stubFetch({
           '/api/teams/92': { body: team },
-          '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20, notice_version: 'x' } },
+          '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
           '/api/teams/92/games': { body: [] },
           '/api/teams/92/trainings': { body: [] },
           '/api/inbox': { body: [] },

@@ -1,4 +1,4 @@
-import type { Consent, SportName, Video } from './types'
+import type { SportName, Video } from './types'
 
 /** The API decides by extension only (415 otherwise). */
 export const VIDEO_EXTENSIONS = ['.mp4', '.mov', '.m4v', '.mts', '.m2ts', '.mkv', '.avi'] as const
@@ -26,10 +26,6 @@ export function inTeamFolder(path: string, folder: string): boolean {
   return slash > 0 && path.slice(0, slash).toLowerCase() === folder.toLowerCase()
 }
 
-/** Agreed, but to an older version of the information notice: needs a new answer. */
-export function consentOutdated(consent: Pick<Consent, 'status' | 'accepted_version'>, current: string): boolean {
-  return consent.status === 'accepted' && consent.accepted_version !== null && consent.accepted_version !== current
-}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

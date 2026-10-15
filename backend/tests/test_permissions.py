@@ -61,10 +61,9 @@ def test_board_member_without_admin_role_sees_nothing() -> None:
     assert visible_team_ids(viewer(roles=("vorstand",)), TEAMS) == set()
 
 
-# M1: videos (PLAN §5.1) — who may upload, delete, record paper consent.
+# M1: videos (PLAN §5.1) — who may upload and delete.
 from nomal.core.permissions import (  # noqa: E402
     can_delete_video,
-    can_record_paper_consent,
     can_upload,
     can_use_inbox,
     lead_lineages,
@@ -91,7 +90,6 @@ def test_video_permission_matrix() -> None:
     for who, team, upload, delete in VIDEO_MATRIX:
         leads = lead_lineages(who, TEAMS)
         assert can_upload(who, team) is upload, (who, team)
-        assert can_record_paper_consent(who, team) is upload, (who, team)
         assert can_delete_video(who, team, leads) is delete, (who, team)
 
 

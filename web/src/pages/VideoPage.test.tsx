@@ -57,7 +57,7 @@ function show(body: Video | null, status = 200, extra: Record<string, { status?:
     stubFetch({
       [`/api/videos/${ID}`]: { status, body: body ?? { detail: 'Video not found' } },
       '/api/teams/92': { body: team },
-      '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20, notice_version: 'x' } },
+      '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
       ...extra,
     }),
   )

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { consentOutdated, inboxFolder, inTeamFolder, isVideoFileName } from './video'
+import { inboxFolder, inTeamFolder, isVideoFileName } from './video'
 
 describe('inboxFolder', () => {
   it('names the folder like the API: sport prefix, runs of other characters as one dash', () => {
@@ -25,11 +25,3 @@ describe('isVideoFileName', () => {
   })
 })
 
-describe('consentOutdated', () => {
-  it('is true only for an agreement to another notice version', () => {
-    expect(consentOutdated({ status: 'accepted', accepted_version: '2026-10-draft' }, '2027-01')).toBe(true)
-    expect(consentOutdated({ status: 'accepted', accepted_version: '2027-01' }, '2027-01')).toBe(false)
-    expect(consentOutdated({ status: 'withdrawn', accepted_version: '2026-10-draft' }, '2027-01')).toBe(false)
-    expect(consentOutdated({ status: null, accepted_version: null }, '2027-01')).toBe(false)
-  })
-})

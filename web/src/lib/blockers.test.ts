@@ -20,14 +20,11 @@ describe('blockerMessage', () => {
     expect(blockerMessage(en, b('under_18', 1))).toBe('1 person on the roster is under 18 on that day.')
     expect(blockerMessage(en, b('under_18', 3))).toBe('3 people on the roster are under 18 on that day.')
     expect(blockerMessage(en, b('no_birthdate', 2))).toBe('2 people on the roster have no birthdate in Wiedisync.')
-    expect(blockerMessage(en, b('consent_missing', 1))).toBe('1 player has not agreed to filming yet.')
-    expect(blockerMessage(en, b('consent_missing', 4))).toBe('4 players have not agreed to filming yet.')
   })
 
   it('works without a count', () => {
     expect(blockerMessage(en, b('under_18'))).toBe('Someone on the roster is under 18 on that day.')
     expect(blockerMessage(en, b('no_birthdate'))).toBe('Someone on the roster has no birthdate in Wiedisync.')
-    expect(blockerMessage(en, b('consent_missing'))).toBe('Some players have not agreed to filming yet.')
   })
 
   it('explains the other codes', () => {
@@ -43,7 +40,7 @@ describe('blockerMessage', () => {
 
   it('has German plurals', () => {
     expect(blockerMessage(de, b('no_birthdate', 1))).toBe('1 Person im Kader hat kein Geburtsdatum in Wiedisync.')
-    expect(blockerMessage(de, b('consent_missing', 2))).toBe('2 Spieler haben dem Filmen noch nicht zugestimmt.')
+    expect(blockerMessage(de, b('under_18', 2))).toBe('2 Personen im Kader sind an diesem Tag unter 18.')
     expect(blockerMessage(de, b('policy_matches', null, 'U23-Liga'))).toBe(
       'Spiele dieses Teams werden nicht gefilmt. Grund: U23-Liga',
     )

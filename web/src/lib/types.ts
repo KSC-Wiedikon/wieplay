@@ -74,7 +74,6 @@ export interface VideoConfig {
   part_size: number
   max_file_bytes: number
   max_files: number
-  notice_version: string
 }
 
 export type VideoKind = 'match' | 'training'
@@ -159,7 +158,6 @@ export type BlockerCode =
   | 'no_birthdate'
   | 'no_roster'
   | 'adult_check_unavailable'
-  | 'consent_missing'
   | 'roster_unavailable'
 
 export interface Blocker {
@@ -193,29 +191,6 @@ export interface InboxFile {
   width: number | null
   height: number | null
   fps: number | null
-}
-
-export type ConsentStatus = 'accepted' | 'withdrawn'
-
-export interface Consent {
-  /** The current notice. */
-  notice_version: string
-  /** The notice the newest answer was given to; null if never answered. */
-  accepted_version: string | null
-  status: ConsentStatus | null
-  via: string | null
-  at: string | null
-}
-
-export interface RosterConsent {
-  member_id: number
-  name: string
-  number: number | null
-  status: ConsentStatus | null
-  accepted_version: string | null
-  /** 'nomal' or 'paper'. */
-  via: string | null
-  at: string | null
 }
 
 export interface Worker {

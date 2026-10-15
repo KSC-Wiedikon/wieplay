@@ -24,10 +24,6 @@ const routes: RouteObject[] = [
         path: 'videos/:id',
         lazy: () => import('./pages/VideoPage').then((m) => ({ Component: m.VideoPage })),
       },
-      {
-        path: 'consent',
-        lazy: () => import('./pages/ConsentPage').then((m) => ({ Component: m.ConsentPage })),
-      },
       { path: 'admin/teams', element: <AdminTeamsPage /> },
       {
         path: 'admin/policies',

@@ -1,8 +1,6 @@
 import type {
   AdminTeam,
   Blocker,
-  Consent,
-  ConsentStatus,
   FilmingCheck,
   Game,
   InboxFile,
@@ -11,7 +9,6 @@ import type {
   PartUrl,
   Policy,
   PolicyUpdate,
-  RosterConsent,
   SyncStatus,
   Team,
   TeamDetail,
@@ -201,15 +198,6 @@ export const api = {
     apiRequest<FilmingCheck>(`/api/teams/${teamId}/filming?kind=${kind}&on=${encodeURIComponent(on)}`, { signal }),
   upcomingFilming: (teamId: number, signal?: AbortSignal) =>
     apiRequest<UpcomingFilming[]>(`/api/teams/${teamId}/upcoming-filming`, { signal }),
-
-  // Consent
-  myConsent: (signal?: AbortSignal) => apiRequest<Consent>('/api/me/consent', { signal }),
-  setMyConsent: (status: ConsentStatus) =>
-    apiRequest<Consent>('/api/me/consent', { method: 'PUT', body: { status } }),
-  teamConsent: (teamId: number, signal?: AbortSignal) =>
-    apiRequest<RosterConsent[]>(`/api/teams/${teamId}/consent`, { signal }),
-  recordPaperConsent: (teamId: number, memberId: number, status: ConsentStatus) =>
-    apiRequest<RosterConsent>(`/api/teams/${teamId}/consent/${memberId}`, { method: 'PUT', body: { status } }),
 
   // Admin: workers, jobs, filming policies
   workers: (signal?: AbortSignal) => apiRequest<Worker[]>('/api/admin/workers', { signal }),

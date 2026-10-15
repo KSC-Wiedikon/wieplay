@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError, UnauthorizedError } from './api'
 import { keys } from './queryClient'
 import { useToast } from './toast'
-import type { AdminTeam, ConsentStatus, Job, Policy, PolicyUpdate, RosterConsent, Video, VideoKind, Worker } from './types'
+import type { AdminTeam, Job, Policy, PolicyUpdate, Video, VideoKind, Worker } from './types'
 
 export function useMe() {
   return useQuery({ queryKey: keys.me, queryFn: ({ signal }) => api.me(signal), staleTime: 5 * 60_000 })
@@ -153,54 +153,6 @@ export function useDeleteVideo() {
     onSuccess: async (_data, video) => {
       await client.invalidateQueries({ queryKey: keys.teamVideos(video.team_id) })
     },
-  })
-}
-
-// Consent
-
-export function useMyConsent() {
-  return useQuery({ queryKey: keys.myConsent, queryFn: ({ signal }) => api.myConsent(signal) })
-}
-
-export function useSetMyConsent() {
-  const client = useQueryClient()
-  const toast = useToast()
-  const { t } = useTranslation()
-  return useMutation({
-    mutationFn: (status: ConsentStatus) => api.setMyConsent(status),
-    onSuccess: async (consent) => {
-      client.setQueryData(keys.myConsent, consent)
-      toast.success(consent.status === 'accepted' ? t('consent.savedAccepted') : t('consent.savedWithdrawn'))
-      // Filming checks depend on consent.
-      await client.invalidateQueries({ queryKey: keys.teams })
-    },
-    onError: () => toast.error(t('consent.saveFailed')),
-  })
-}
-
-export function useTeamConsent(teamId: number, enabled: boolean) {
-  return useQuery({
-    queryKey: keys.teamConsent(teamId),
-    queryFn: ({ signal }) => api.teamConsent(teamId, signal),
-    enabled,
-  })
-}
-
-export function useRecordPaperConsent(teamId: number) {
-  const client = useQueryClient()
-  const toast = useToast()
-  const { t } = useTranslation()
-  return useMutation({
-    mutationFn: ({ player, status }: { player: RosterConsent; status: ConsentStatus }) =>
-      api.recordPaperConsent(teamId, player.member_id, status),
-    onSuccess: async (updated) => {
-      client.setQueryData<RosterConsent[]>(keys.teamConsent(teamId), (list) =>
-        list?.map((row) => (row.member_id === updated.member_id ? updated : row)),
-      )
-      toast.success(t('teamConsent.saved', { name: updated.name }))
-      await client.invalidateQueries({ queryKey: keys.upcomingFilming(teamId) })
-    },
-    onError: (_error, { player }) => toast.error(t('teamConsent.saveFailed', { name: player.name })),
   })
 }
 

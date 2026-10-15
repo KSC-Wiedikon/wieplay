@@ -13,7 +13,7 @@ import { useTeam, useTeamGames, useTeamTrainings } from '../lib/queries'
 import { sportOf, useSportAccent } from '../lib/sport'
 import type { Game, Training } from '../lib/types'
 import { NotFoundPage } from './NotFoundPage'
-import { ConsentSection, FilmingSection, VideosSection } from './TeamSections'
+import { FilmingSection, VideosSection } from './TeamSections'
 
 export function TeamPage() {
   const { id } = useParams()
@@ -62,7 +62,6 @@ function TeamView({ teamId }: { teamId: number }) {
         {(data) => <Trainings trainings={upcomingTrainings(data, today)} />}
       </Section>
 
-      {team.data.can_upload && <ConsentSection teamId={teamId} />}
     </div>
   )
 }

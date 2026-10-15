@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from nomal import __version__
-from nomal.api import admin, auth, consent, media, teams, videos, worker
+from nomal.api import admin, auth, media, teams, videos, worker
 from nomal.core.config import Settings, get_settings
 from nomal.core.db import make_engine, make_sessionmaker
 from nomal.core.storage import ObjectStore, make_store
@@ -128,7 +128,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin.router)
     app.include_router(videos.router)
     app.include_router(media.router)
-    app.include_router(consent.router)
     app.include_router(worker.router)
 
     if settings.web_dist:
