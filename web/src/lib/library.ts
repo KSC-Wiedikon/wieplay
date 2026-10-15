@@ -1,0 +1,301 @@
+// Clips, reels, comments and exports (M3, docs/PLAN.md §6.8, §7.7): the API calls and the
+// query hooks. Kept out of api.ts and queries.ts so the pages that use them (all loaded on
+// demand) carry them, not the main bundle.
+
+import '../i18n/pages'
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, apiRequest } from './api'
+import { peopleOf, type Person } from './clips'
+import { useTagging, useTeamConsent, useTeams } from './queries'
+import { keys } from './queryClient'
+import { compareTeams } from './teams'
+import { newestFirst } from './video'
+import type {
+  Clip,
+  ClipIn,
+  Comment,
+  CommentIn,
+  ExportIn,
+  Piece,
+  Reel,
+  ReelIn,
+  ReelItemIn,
+  ReelQuery,
+  Taxonomy,
+  TeamDetail,
+  VideoExport,
+} from './types'
+
+export const libraryApi = {
+  videoClips: (videoId: string, signal?: AbortSignal) => apiRequest<Clip[]>(`/api/videos/${videoId}/clips`, { signal }),
+  myClips: (signal?: AbortSignal) => apiRequest<Clip[]>('/api/clips/mine', { signal }),
+  putClip: (id: string, body: ClipIn) => apiRequest<Clip>(`/api/clips/${id}`, { method: 'PUT', body }),
+  deleteClip: (id: string) => apiRequest<undefined>(`/api/clips/${id}`, { method: 'DELETE' }),
+
+  reels: (signal?: AbortSignal) => apiRequest<Reel[]>('/api/reels', { signal }),
+  createReel: (body: ReelIn) => apiRequest<Reel>('/api/reels', { method: 'POST', body }),
+  updateReel: (id: string, body: ReelIn) => apiRequest<Reel>(`/api/reels/${id}`, { method: 'PUT', body }),
+  deleteReel: (id: string) => apiRequest<undefined>(`/api/reels/${id}`, { method: 'DELETE' }),
+  reelItems: (id: string, signal?: AbortSignal) => apiRequest<Piece[]>(`/api/reels/${id}/items`, { signal }),
+  previewReel: (query: ReelQuery, signal?: AbortSignal) =>
+    apiRequest<Piece[]>('/api/reels/preview', { method: 'POST', body: query, signal }),
+  condensed: (videoId: string, signal?: AbortSignal) => apiRequest<Piece[]>(`/api/videos/${videoId}/condensed`, { signal }),
+
+  comments: (videoId: string, signal?: AbortSignal) => apiRequest<Comment[]>(`/api/videos/${videoId}/comments`, { signal }),
+  addComment: (videoId: string, body: CommentIn) =>
+    apiRequest<Comment>(`/api/videos/${videoId}/comments`, { method: 'POST', body }),
+  editComment: (id: string, body: string) => apiRequest<Comment>(`/api/comments/${id}`, { method: 'PATCH', body: { body } }),
+  deleteComment: (id: string) => apiRequest<undefined>(`/api/comments/${id}`, { method: 'DELETE' }),
+
+  exports: (signal?: AbortSignal) => apiRequest<VideoExport[]>('/api/exports', { signal }),
+  createExport: (body: ExportIn) => apiRequest<VideoExport>('/api/exports', { method: 'POST', body }),
+  deleteExport: (id: string) => apiRequest<undefined>(`/api/exports/${id}`, { method: 'DELETE' }),
+
+  taxonomy: (sport: string, signal?: AbortSignal) =>
+    apiRequest<Taxonomy>(`/api/taxonomies/${encodeURIComponent(sport)}`, { signal }),
+}
+
+/** Same-origin link that answers with a 302 to a 5-minute signed download (never fetched). */
+export function downloadUrl(exportId: string): string {
+  return `/api/exports/${exportId}/download`
+}
+
+/** A reel item made from a piece of a reel (to save a manual reel again). */
+export function pieceToItem(piece: Piece): ReelItemIn {
+  return {
+    video_id: piece.video_id,
+    start_ms: piece.start_ms,
+    end_ms: piece.end_ms,
+    event_id: piece.event_id,
+    clip_id: piece.clip_id,
+    caption: piece.caption,
+  }
+}
+
+// Clips
+
+export function useVideoClips(videoId: string) {
+  return useQuery({ queryKey: keys.videoClips(videoId), queryFn: ({ signal }) => libraryApi.videoClips(videoId, signal) })
+}
+
+export function useMyClips() {
+  return useQuery({ queryKey: keys.myClips, queryFn: ({ signal }) => libraryApi.myClips(signal) })
+}
+
+export function useSaveClip() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ClipIn }) => libraryApi.putClip(id, body),
+    onSuccess: async (clip) => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: keys.videoClips(clip.video_id) }),
+        client.invalidateQueries({ queryKey: keys.myClips }),
+      ])
+    },
+  })
+}
+
+export function useDeleteClip() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (clip: Clip) => libraryApi.deleteClip(clip.id),
+    onSuccess: async (_data, clip) => {
+      client.setQueryData<Clip[]>(keys.videoClips(clip.video_id), (list) => list?.filter((c) => c.id !== clip.id))
+      client.setQueryData<Clip[]>(keys.myClips, (list) => list?.filter((c) => c.id !== clip.id))
+      await Promise.all([
+        client.invalidateQueries({ queryKey: keys.videoClips(clip.video_id) }),
+        client.invalidateQueries({ queryKey: keys.myClips }),
+      ])
+    },
+  })
+}
+
+// Reels
+
+export function useReels() {
+  return useQuery({ queryKey: keys.reels, queryFn: ({ signal }) => libraryApi.reels(signal) })
+}
+
+export function useReelItems(id: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.reelItems(id),
+    queryFn: ({ signal }) => libraryApi.reelItems(id, signal),
+    enabled,
+    // A smart reel grows as tagging continues: evaluated fresh when opened.
+    staleTime: 0,
+  })
+}
+
+/** A query evaluated without saving it; the previous answer stays while the next one loads. */
+export function useReelPreview(query: ReelQuery | null) {
+  return useQuery({
+    queryKey: keys.reelPreview(query),
+    queryFn: ({ signal }) => libraryApi.previewReel(query ?? {}, signal),
+    enabled: query !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useSaveReel() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: ReelIn }) =>
+      id ? libraryApi.updateReel(id, body) : libraryApi.createReel(body),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.reels })
+    },
+  })
+}
+
+export function useDeleteReel() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (reel: Reel) => libraryApi.deleteReel(reel.id),
+    onSuccess: async (_data, reel) => {
+      client.setQueryData<Reel[]>(keys.reels, (list) => list?.filter((r) => r.id !== reel.id))
+      await client.invalidateQueries({ queryKey: keys.reels })
+    },
+  })
+}
+
+/**
+ * Adds a moment to one of my manual reels (its items are read and saved again with the new
+ * one at the end), or starts a new private reel with it.
+ */
+export function useAddToReel() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ reel, title, item }: { reel: Reel | null; title: string; item: ReelItemIn }) => {
+      if (!reel) return libraryApi.createReel({ title, kind: 'manual', items: [item], visibility: 'private' })
+      const items = (await libraryApi.reelItems(reel.id)).map(pieceToItem)
+      return libraryApi.updateReel(reel.id, {
+        title: reel.title,
+        kind: 'manual',
+        items: [...items, item],
+        visibility: reel.visibility,
+        lineage_id: reel.lineage_id,
+      })
+    },
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.reels })
+    },
+  })
+}
+
+// Comments
+
+export function useComments(videoId: string) {
+  return useQuery({ queryKey: keys.comments(videoId), queryFn: ({ signal }) => libraryApi.comments(videoId, signal) })
+}
+
+export function useAddComment(videoId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CommentIn) => libraryApi.addComment(videoId, body),
+    onSuccess: async (comment) => {
+      client.setQueryData<Comment[]>(keys.comments(videoId), (list) => (list ? [...list, comment] : [comment]))
+      await client.invalidateQueries({ queryKey: keys.comments(videoId) })
+    },
+  })
+}
+
+export function useEditComment(videoId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ comment, body }: { comment: Comment; body: string }) => libraryApi.editComment(comment.id, body),
+    onSuccess: (updated) => {
+      client.setQueryData<Comment[]>(keys.comments(videoId), (list) => list?.map((c) => (c.id === updated.id ? updated : c)))
+    },
+  })
+}
+
+export function useDeleteComment(videoId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (comment: Comment) => libraryApi.deleteComment(comment.id),
+    onSuccess: (_data, comment) => {
+      client.setQueryData<Comment[]>(keys.comments(videoId), (list) => list?.filter((c) => c.id !== comment.id))
+    },
+  })
+}
+
+// Exports
+
+/** My exports; refreshes every 3 s while one is being rendered. */
+export function useExports() {
+  return useQuery({
+    queryKey: keys.exports,
+    queryFn: ({ signal }) => libraryApi.exports(signal),
+    refetchInterval: (query) => (query.state.data?.some((e) => e.status === 'queued') ? 3_000 : false),
+  })
+}
+
+export function useCreateExport() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ExportIn) => libraryApi.createExport(body),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.exports })
+    },
+  })
+}
+
+export function useDeleteExport() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (item: VideoExport) => libraryApi.deleteExport(item.id),
+    onSuccess: async (_data, item) => {
+      client.setQueryData<VideoExport[]>(keys.exports, (list) => list?.filter((e) => e.id !== item.id))
+      await client.invalidateQueries({ queryKey: keys.exports })
+    },
+  })
+}
+
+export function useTaxonomy(sport: string | null) {
+  return useQuery({
+    queryKey: keys.taxonomy(sport ?? ''),
+    queryFn: ({ signal }) => libraryApi.taxonomy(sport ?? '', signal),
+    enabled: sport !== null,
+    staleTime: Infinity,
+  })
+}
+
+// People and teams for the reel builder
+
+/**
+ * The players of a team, for pickers: the coaches' consent list (all players of the season),
+ * else the roster of the team's newest ready video (players can read that one).
+ */
+export function useTeamPeople(team: TeamDetail | undefined): { people: Person[]; pending: boolean } {
+  const lead = team?.can_upload ?? false
+  const consent = useTeamConsent(team?.id ?? 0, team !== undefined && lead)
+  const videos = useQuery({
+    queryKey: keys.teamVideos(team?.id ?? 0),
+    queryFn: ({ signal }) => api.teamVideos(team?.id ?? 0, signal),
+    enabled: team !== undefined && !lead,
+  })
+  const newest = newestFirst((videos.data ?? []).filter((v) => v.status === 'ready'))[0]
+  const tagging = useTagging(newest?.id ?? '', !lead && newest !== undefined)
+  if (lead) {
+    const people = (consent.data ?? [])
+      .map((p) => ({ member_id: p.member_id, name: p.name, number: p.number }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'de-CH'))
+    return { people, pending: consent.isPending }
+  }
+  return { people: peopleOf(tagging.data?.roster ?? []), pending: videos.isPending || (newest !== undefined && tagging.isPending) }
+}
+
+/** The team row (newest season) of a lineage, among the teams I see; for editing a saved reel. */
+export function useLineageTeam(lineageId: string | null): { team: TeamDetail | undefined; pending: boolean } {
+  const teams = useTeams()
+  const details = useQueries({
+    queries: (lineageId ? (teams.data ?? []) : []).map((team) => ({
+      queryKey: keys.team(team.id),
+      queryFn: ({ signal }: { signal: AbortSignal }) => api.team(team.id, signal),
+    })),
+  })
+  const found = details
+    .flatMap((d) => (d.data && d.data.lineage_id === lineageId ? [d.data] : []))
+    .sort(compareTeams)[0]
+  return { team: found, pending: lineageId !== null && (teams.isPending || (!found && details.some((d) => d.isPending))) }
+}

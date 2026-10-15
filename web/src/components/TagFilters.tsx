@@ -1,3 +1,4 @@
+import '../i18n/pages'
 import { useId, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isFiltered, playerKey, type TagFilter } from '../lib/condensed'

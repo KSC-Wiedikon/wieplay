@@ -274,7 +274,16 @@ export interface ImportChannel {
 export type Side = 'us' | 'them'
 export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
 export type TimePrecision = 'live' | 'adjusted' | 'frame'
-export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
+export type SegmentKind =
+  | 'rally'
+  | 'possession'
+  | 'timeout'
+  | 'set_break'
+  | 'warmup'
+  | 'stoppage'
+  | 'other_dead'
+  /** A training drill, with a label (M3). */
+  | 'drill'
 
 export interface TaxonomySkill {
   /** One letter for volleyball (S R E A B D F). */
@@ -330,6 +339,8 @@ export interface Period {
 export interface Segment {
   id: string
   kind: SegmentKind
+  /** A drill's name (trainings); null for everything else. */
+  label?: string | null
   start_ms: number
   end_ms: number
   /** Computed by the server: the set this segment is in. */
@@ -419,6 +430,8 @@ export interface EventIn extends ChangeBase {
 /** Who served is always derived by the server. */
 export interface SegmentIn extends ChangeBase {
   kind: SegmentKind
+  /** A drill's name, at most 80 characters. */
+  label?: string | null
   start_ms: number
   end_ms: number
   won_by?: Side | null
@@ -474,4 +487,171 @@ export interface EventRevision {
   changed_by: number | null
   changed_at: string
   after: Record<string, unknown>
+}
+
+// Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).
+
+export type Visibility = 'private' | 'team'
+
+/** A time range of a video. Nothing is rendered: watching it seeks in the stream. */
+export interface Clip {
+  id: string
+  video_id: string
+  video_title: string
+  /** yyyy-mm-dd */
+  recorded_on: string
+  start_ms: number
+  end_ms: number
+  title: string
+  note: string | null
+  event_id: string | null
+  owner: number
+  mine: boolean
+  visibility: Visibility
+  created_at: string
+}
+
+/** PUT /api/clips/{client id}: creates or updates one's own clip (at most 10 minutes). */
+export interface ClipIn {
+  video_id: string
+  start_ms: number
+  end_ms: number
+  title: string
+  note?: string | null
+  event_id?: string | null
+  /** `team` only for coaches, team managers and sport admins (403 otherwise). */
+  visibility: Visibility
+}
+
+export type ReelKind = 'smart' | 'manual'
+
+/** A smart reel's saved query, evaluated for each viewer when the reel is opened. */
+export interface ReelQuery {
+  lineage_id?: string | null
+  /** 'yyyy/yy' */
+  season?: string | null
+  video_ids?: string[]
+  member_id?: number | null
+  side?: Side | null
+  codes?: string[]
+  grades?: string[]
+  kind?: VideoKind | null
+  /** 1..500, default 200. */
+  limit?: number
+}
+
+export interface Reel {
+  id: string
+  title: string
+  kind: ReelKind
+  query: ReelQuery | null
+  visibility: Visibility
+  lineage_id: string | null
+  owner: number
+  mine: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ReelItemIn {
+  video_id: string
+  start_ms: number
+  end_ms: number
+  event_id?: string | null
+  clip_id?: string | null
+  caption?: string | null
+}
+
+export interface ReelIn {
+  title: string
+  kind: ReelKind
+  /** Smart reels only. */
+  query?: ReelQuery | null
+  /** Manual reels only, in order. */
+  items?: ReelItemIn[]
+  visibility: Visibility
+  /** Required for `team`. */
+  lineage_id?: string | null
+}
+
+/** One stretch of a reel, a smart reel's match or a condensed match, as the viewer may watch it. */
+export interface Piece {
+  video_id: string
+  start_ms: number
+  end_ms: number
+  event_id: string | null
+  clip_id: string | null
+  caption: string | null
+  video_title: string | null
+  recorded_on: string | null
+  code: string | null
+  grade: string | null
+  side: Side | null
+  number: number | null
+  member_id: number | null
+}
+
+export type Audience = 'team' | 'coaches' | 'person'
+export type CommentTarget = 'video' | 'event' | 'segment' | 'clip'
+
+export interface Comment {
+  id: string
+  video_id: string
+  target_type: CommentTarget
+  target_id: string | null
+  t_ms: number | null
+  author: number
+  author_name: string | null
+  body: string
+  /** Member ids of the team. */
+  mentions: number[]
+  audience: Audience
+  recipient: number | null
+  created_at: string
+  edited_at: string | null
+  mine: boolean
+  /** The author, and the team's coaches for any comment. */
+  can_delete: boolean
+}
+
+export interface CommentIn {
+  /** Client-made UUID. */
+  id: string
+  target_type: CommentTarget
+  /** Required unless the target is the video. */
+  target_id?: string | null
+  t_ms?: number | null
+  /** 1..4000 characters. */
+  body: string
+  mentions: number[]
+  audience: Audience
+  /** Required for `person`. */
+  recipient?: number | null
+}
+
+export type ExportKind = 'clip' | 'reel' | 'condensed'
+export type ExportStatus = 'queued' | 'ready' | 'failed' | 'expired' | 'deleted'
+
+/** A watermarked MP4 rendered by the media worker (coaches only, PLAN §5.2). */
+export interface VideoExport {
+  id: string
+  kind: ExportKind
+  title: string
+  duration_ms: number
+  status: ExportStatus
+  bytes: number | null
+  /** 0..1 while queued, when the worker reports it. */
+  progress: number | null
+  error: string | null
+  created_at: string
+  expires_at: string | null
+}
+
+export interface ExportIn {
+  kind: ExportKind
+  clip_id?: string
+  reel_id?: string
+  /** A condensed match. */
+  video_id?: string
+  title?: string
 }

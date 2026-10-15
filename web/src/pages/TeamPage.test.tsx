@@ -166,3 +166,17 @@ describe('TeamPage videos', () => {
     expect(rows[1]).toHaveTextContent('2 people on the roster are under 18 on that day.')
   })
 })
+
+describe('TeamPage highlights', () => {
+  it('offers players their highlights of the season', async () => {
+    stub(team(), [])
+    const section = await screen.findByRole('region', { name: 'My highlights' })
+    expect(within(section).getByRole('link', { name: 'Watch my highlights' })).toHaveAttribute('href', '/teams/92/highlights')
+  })
+
+  it('has no highlights section for coaches', async () => {
+    stub(team({ rel: ['coach'], can_upload: true }), [], { '/api/teams/92/consent': { body: [] } })
+    await screen.findByRole('region', { name: 'Videos' })
+    expect(screen.queryByRole('region', { name: 'My highlights' })).not.toBeInTheDocument()
+  })
+})

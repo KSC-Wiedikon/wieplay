@@ -1,19 +1,22 @@
 import { useQueryClient } from '@tanstack/react-query'
+import type { TFunction } from 'i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Button, ButtonLink } from '../../components/Button'
+import { ClipDialog } from '../../components/ClipDialog'
 import { AlertIcon, CheckIcon, KeyboardIcon, PauseIcon, PlayIcon, RedoIcon, UndoIcon } from '../../components/icons'
 import { LoadError } from '../../components/Message'
 import { PageSpinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
 import { VideoPlayer } from '../../components/VideoPlayer'
 import { api } from '../../lib/api'
+import type { ClipDraft } from '../../lib/clips'
 import { playWindows } from '../../lib/condensed'
 import { cx } from '../../lib/cx'
 import { formatDate } from '../../lib/format'
 import { formatEntry } from '../../lib/grammar'
-import { formatClock, sideLabel } from '../../lib/labels'
+import { formatClock, playerLabel, sideLabel } from '../../lib/labels'
 import { Outbox, type OutboxItem } from '../../lib/outbox'
 import { Playhead, usePlayhead } from '../../lib/playhead'
 import { keys } from '../../lib/queryClient'
@@ -23,6 +26,7 @@ import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
 import { WorkspaceContext, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
 import { Cheatsheet } from './Cheatsheet'
+import { DrillPanel } from './DrillPanel'
 import { TagController } from './controller'
 import { EntryPanel } from './EntryPanel'
 import { EventTable } from './EventTable'
@@ -199,6 +203,7 @@ function DeskLayout({
         <aside className="flex min-w-80 flex-[1_0_22rem] flex-col gap-2" aria-label={t('tagging.panel')}>
           <StatePanel />
           <EntryPanel />
+          {video.kind === 'training' && <DrillPanel />}
           <RosterPanel />
         </aside>
       </div>
@@ -207,7 +212,36 @@ function DeskLayout({
       {ui.segmentId && <SegmentPanel key={ui.segmentId} id={ui.segmentId} />}
       <EventTable />
       <Cheatsheet />
+      <WorkspaceClipDialog />
     </div>
+  )
+}
+
+/** C in the workspace: save the marked range as a clip (linked to the selected tag inside it). */
+function WorkspaceClipDialog() {
+  const { t } = useTranslation()
+  const { controller, video } = useWorkspace()
+  const ui = useUi()
+  const view = useView()
+  const request = ui.clipRequest
+  const draft = useMemo<ClipDraft | null>(() => {
+    if (!request) return null
+    const tag = request.event_id ? view.events.find((e) => e.id === request.event_id) : undefined
+    const title = tag
+      ? `${formatEntry(tag)} · ${playerLabel(t, tag.side, tag.number, view.roster, tag.member_id)}`
+      : t('clips.dialog.defaultTitle', { time: formatClock(request.start_ms, { tenths: false }) })
+    return { id: null, video_id: video.id, start_ms: request.start_ms, end_ms: request.end_ms, title, note: null, event_id: request.event_id, visibility: 'private' }
+    // The form keeps what was typed: it reads the draft once per clip range.
+  }, [request, view.events, view.roster, video.id, t])
+  return (
+    <ClipDialog
+      draft={draft}
+      // Who may tag may share with the team (PLAN §5.1).
+      canShare
+      duration_ms={video.duration_ms}
+      onClose={() => controller.closeClip(false)}
+      onSaved={() => controller.closeClip(true)}
+    />
   )
 }
 
@@ -307,9 +341,9 @@ function SyncStatus() {
   )
 }
 
-function describe(t: ReturnType<typeof useTranslation>['t'], item: OutboxItem): string {
+function describe(t: TFunction, item: OutboxItem): string {
   if (item.kind === 'event') return formatEntry({ ...item.payload, number: item.payload.number ?? null })
-  if (item.kind === 'segment') return t(`tagging.segment.kind.${item.payload.kind}`)
+  if (item.kind === 'segment') return item.payload.label || t(`tagging.segment.kind.${item.payload.kind}`)
   return t('tagging.setNo', { no: item.payload.no })
 }
 

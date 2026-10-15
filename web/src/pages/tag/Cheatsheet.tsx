@@ -62,6 +62,7 @@ export function Cheatsheet() {
         [['G'], t('tagging.keys.g')],
         [['F'], t('tagging.keys.f')],
         [['[', ']', 'C'], t('tagging.keys.clip')],
+        [['Shift + C'], t('tagging.keys.clipWindow')],
         [['?'], t('tagging.keys.help')],
       ],
     },

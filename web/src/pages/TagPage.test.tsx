@@ -5,7 +5,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { rescore, serveCodes } from '../lib/rallies'
 import type { ChangesIn, ChangesOut, Period, RosterCandidate, Segment, Tag, Tagging, Video } from '../lib/types'
-import { renderRoute, stubFetch } from '../test/render'
+import { jsonResponse, renderRoute, stubFetch } from '../test/render'
 import { bundle, period, tag, volleyball } from '../test/tagging'
 import { TagPage } from './TagPage'
 
@@ -61,7 +61,7 @@ function fakeServer(initial: Tagging) {
     for (const s of input.segments) {
       const version = (segments.get(s.id)?.version ?? 0) + 1
       segments.set(s.id, {
-        id: s.id, kind: s.kind, start_ms: s.start_ms, end_ms: s.end_ms, period_id: null, serving: null, won_by: s.won_by ?? null,
+        id: s.id, kind: s.kind, label: s.label ?? null, start_ms: s.start_ms, end_ms: s.end_ms, period_id: null, serving: null, won_by: s.won_by ?? null,
         score_us_after: null, score_them_after: null, score_source: null, source: 'manual', review: 'unreviewed', version, deleted_at: stamp(s.deleted),
       } satisfies Segment)
     }
@@ -100,18 +100,26 @@ const candidates: RosterCandidate[] = [
 
 function show(
   data: Tagging = bundle({ periods: [period({ no: 1, start_ms: 0, first_serve: 'us' })] }),
-  { down = false, postDelay = 0 } = {},
+  { down = false, postDelay = 0, videoPatch = {} as Partial<Video> } = {},
 ) {
   const server = fakeServer(data)
   const stub = stubFetch({
-      [`/api/videos/${ID}`]: { body: video },
+      [`/api/videos/${ID}`]: { body: { ...video, ...videoPatch } },
+      '/api/reels': { body: [] },
+      'POST /api/reels': { status: 201, body: ({ body }: { body: unknown }) => ({ ...(body as object), id: '00000000-0000-4000-8000-00000000e001', mine: true }) },
       [`/api/videos/${ID}/tagging`]: { body: () => server.current() },
       [`POST /api/videos/${ID}/changes`]: down ? { status: 503, body: { detail: 'Unavailable' } } : { body: server.changes },
       [`/api/videos/${ID}/roster/candidates`]: { body: candidates },
+      [`/api/videos/${ID}/comments`]: { body: [] },
       [`PUT /api/videos/${ID}/roster`]: { body: ({ body }: { body: unknown }) => (body as { entries: unknown[] }).entries },
   })
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'POST' && postDelay) await new Promise((resolve) => setTimeout(resolve, postDelay))
+    // Clips are saved under a client-made id.
+    if (init?.method === 'PUT' && String(input).startsWith('/api/clips/')) {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>
+      return jsonResponse(200, { ...body, id: String(input).slice('/api/clips/'.length), mine: true, owner: 7, created_at: '', video_title: video.title, recorded_on: video.recorded_on })
+    }
     return stub(input, init)
   })
   vi.stubGlobal('fetch', fetch)
@@ -308,7 +316,7 @@ describe('TagPage', () => {
     expect(screen.getByRole('button', { name: 'Edit 7A+' })).toBeInTheDocument()
   })
 
-  it('selects with the arrows, sets a clip window with [ ] C, and deletes with Delete only', async () => {
+  it('selects with the arrows, sets a clip window with [ ] Shift+C, and deletes with Delete only', async () => {
     const first = tag({ id: '00000000-0000-4000-8000-00000000c101', t_ms: 10_000, code: 'R', number: 11, member_id: 111, attributes: { grade: '+' } })
     const second = tag({ id: '00000000-0000-4000-8000-00000000c102', t_ms: 20_000, code: 'A', number: 7, attributes: { grade: '#' } })
     const { server } = show(bundle({ events: [first, second] }))
@@ -322,7 +330,7 @@ describe('TagPage', () => {
     player.currentTime = 7
     keys('[')
     player.currentTime = 13.5
-    keys(']', 'c')
+    keys(']', { key: 'C', shiftKey: true })
     expect(screen.getByText('Clip window set for 11R+.')).toBeInTheDocument()
 
     keys('Backspace')
@@ -517,7 +525,10 @@ describe('TagPage', () => {
     await ready()
 
     expect(within(screen.getByRole('table', { name: 'Tags' })).getByText('9B#')).toBeInTheDocument()
-    const calls = fetch.mock.calls.map(([path, init]) => `${init?.method ?? 'GET'} ${String(path)}`)
+    const calls = fetch.mock.calls
+      .map(([path, init]) => `${init?.method ?? 'GET'} ${String(path)}`)
+      // The timeline's comment markers load on their own.
+      .filter((c) => !c.endsWith('/comments'))
     expect(calls.filter((c) => c.startsWith('POST'))).toHaveLength(1)
     // The data was loaded again only once the closing session's batch had been answered.
     expect(server.posts).toHaveLength(1)
@@ -542,5 +553,95 @@ describe('TagPage', () => {
     await waitFor(() => expect(second.server.posts).toHaveLength(1), { timeout: 3000 })
     expect(second.server.posts[0]?.events).toEqual([expect.objectContaining({ code: 'E', number: 3, t_ms: 29_800 })])
     expect(await screen.findByText('All changes saved')).toBeInTheDocument()
+  })
+
+  it('saves the range marked with [ and ] as a clip with C, linked to the selected tag inside it', async () => {
+    const tagged = tag({ id: '00000000-0000-4000-8000-00000000c201', t_ms: 10_000, code: 'R', number: 11, member_id: 111, attributes: { grade: '+' } })
+    const { fetch } = show(bundle({ events: [tagged] }))
+    const player = await ready()
+    keys('c')
+    expect(screen.getByText('Mark the clip with [ and ] first.')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to 11R+ at 0:10.0' }))
+    player.currentTime = 7
+    keys('[')
+    expect(screen.getByText('Clip in at 0:07.0. Press ] at its end, then C to save the clip.')).toBeInTheDocument()
+    player.currentTime = 13.5
+    keys(']', 'c')
+    const dialog = screen.getByRole('dialog', { name: 'Save clip' })
+    expect(within(dialog).getByLabelText('Title')).toHaveValue('11R+ · #11 Noah Meier')
+    // Typing in the dialog doesn't tag.
+    fireEvent.keyDown(within(dialog).getByLabelText('Title'), { key: '7' })
+    expect(screen.queryByText(/Next: the skill/)).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByLabelText('The whole team'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save clip' }))
+    await screen.findByText('Clip saved.')
+
+    const put = fetch.mock.calls.find(([path, init]) => String(path).startsWith('/api/clips/') && init?.method === 'PUT')
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      video_id: ID,
+      start_ms: 7_000,
+      end_ms: 13_500,
+      title: '11R+ · #11 Noah Meier',
+      note: null,
+      event_id: tagged.id,
+      visibility: 'team',
+    })
+    // The marks are used up: C again asks for new ones.
+    keys('c')
+    expect(screen.getByText('Mark the clip with [ and ] first.')).toBeInTheDocument()
+  })
+
+  it('adds a tag to a reel from the tag table, with its clip window', async () => {
+    const tagged = tag({ id: '00000000-0000-4000-8000-00000000c301', t_ms: 15_000, code: 'A', number: 7, attributes: { grade: '#' } })
+    const { fetch } = show(bundle({ events: [tagged] }))
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Add 7A# to a reel' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add to reel' })
+    expect(await within(dialog).findByLabelText('New reel')).toBeChecked()
+    expect(within(dialog).getByLabelText('Title of the new reel')).toHaveValue('7A# · #7 Luca Brunner')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await screen.findByText('Added to 7A# · #7 Luca Brunner.')
+    const post = fetch.mock.calls.find(([path, init]) => path === '/api/reels' && init?.method === 'POST')
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      title: '7A# · #7 Luca Brunner',
+      kind: 'manual',
+      // Attack: 3 s before, 2 s after (the taxonomy's window).
+      items: [{ video_id: ID, start_ms: 12_000, end_ms: 17_000, event_id: tagged.id, caption: '7A# · #7 Luca Brunner' }],
+      visibility: 'private',
+    })
+  })
+
+  it('marks a drill in a training: start and end at the playhead, with a name', async () => {
+    const { server } = show(bundle(), { videoPatch: { kind: 'training', game_id: null, training_id: 601 } })
+    const player = await ready()
+    const drills = screen.getByRole('region', { name: 'Drills' })
+    expect(within(drills).getByText('No drills marked yet.')).toBeInTheDocument()
+    player.currentTime = 60
+    fireEvent.click(within(drills).getByRole('button', { name: 'Drill starts here' }))
+    expect(within(drills).getByText('Started at 1:00.0')).toBeInTheDocument()
+    fireEvent.change(within(drills).getByLabelText('Name of the drill'), { target: { value: 'Serve receive 3v3' } })
+    player.currentTime = 300
+    fireEvent.click(within(drills).getByRole('button', { name: 'Drill ends here' }))
+    expect(screen.getByText('Drill saved: Serve receive 3v3.')).toBeInTheDocument()
+    expect(within(drills).getByRole('button', { name: 'Go to Serve receive 3v3' })).toBeInTheDocument()
+    expect(within(drills).getByText('1:00–5:00')).toBeInTheDocument()
+
+    await waitFor(() => expect(server.posts).toHaveLength(1), { timeout: 3000 })
+    expect(server.posts[0]?.segments).toEqual([
+      expect.objectContaining({ kind: 'drill', label: 'Serve receive 3v3', start_ms: 60_000, end_ms: 300_000, base_version: 0 }),
+    ])
+    // Its name can be changed below the timeline.
+    fireEvent.click(within(drills).getByRole('button', { name: 'Go to Serve receive 3v3' }))
+    const panel = screen.getByRole('region', { name: 'Drill' })
+    fireEvent.change(within(panel).getByLabelText('Name'), { target: { value: 'Serve receive 4v4' } })
+    fireEvent.blur(within(panel).getByLabelText('Name'))
+    expect(within(drills).getByRole('button', { name: 'Go to Serve receive 4v4' })).toBeInTheDocument()
+  })
+
+  it('has no drills in matches', async () => {
+    show()
+    await ready()
+    expect(screen.queryByRole('region', { name: 'Drills' })).not.toBeInTheDocument()
   })
 })

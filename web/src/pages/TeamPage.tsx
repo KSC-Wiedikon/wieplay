@@ -2,6 +2,8 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router'
 import { SportBadge } from '../components/Badge'
+import { ButtonLink } from '../components/Button'
+import { PlayIcon } from '../components/icons'
 import { Card } from '../components/Card'
 import { LoadError, Message } from '../components/Message'
 import { PageSpinner, Spinner } from '../components/Spinner'
@@ -49,6 +51,7 @@ function TeamView({ teamId }: { teamId: number }) {
       </div>
 
       <VideosSection team={team.data} />
+      {team.data.rel.includes('player') && <HighlightsSection teamId={teamId} />}
       <FilmingSection teamId={teamId} />
 
       <Section title={t('team.upcomingGames')} query={games}>
@@ -59,6 +62,25 @@ function TeamView({ teamId }: { teamId: number }) {
       </Section>
 
     </div>
+  )
+}
+
+/** Players: their own tagged moments of this season, played as a reel (a smart reel preview). */
+function HighlightsSection({ teamId }: { teamId: number }) {
+  const { t } = useTranslation()
+  return (
+    <section aria-labelledby="team-highlights" className="flex flex-col gap-3">
+      <h2 id="team-highlights" className="text-lg font-semibold">
+        {t('team.highlights')}
+      </h2>
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <p className="text-sm text-muted">{t('team.highlightsHint')}</p>
+        <ButtonLink to={`/teams/${teamId}/highlights`} variant="primary">
+          <PlayIcon className="size-4" />
+          {t('team.highlightsWatch')}
+        </ButtonLink>
+      </Card>
+    </section>
   )
 }
 

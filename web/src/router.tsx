@@ -30,6 +30,34 @@ const routes: RouteObject[] = [
         handle: { wide: true },
         lazy: () => import('./pages/TagPage').then((m) => ({ Component: m.TagPage })),
       },
+      {
+        path: 'teams/:id/highlights',
+        lazy: () => import('./pages/HighlightsPage').then((m) => ({ Component: m.HighlightsPage })),
+      },
+      {
+        path: 'clips',
+        lazy: () => import('./pages/ClipsPage').then((m) => ({ Component: m.ClipsPage })),
+      },
+      {
+        path: 'reels',
+        lazy: () => import('./pages/ReelsPage').then((m) => ({ Component: m.ReelsPage })),
+      },
+      {
+        path: 'reels/new',
+        lazy: () => import('./pages/ReelBuilderPage').then((m) => ({ Component: m.ReelBuilderPage })),
+      },
+      {
+        path: 'reels/:id',
+        lazy: () => import('./pages/ReelPage').then((m) => ({ Component: m.ReelPage })),
+      },
+      {
+        path: 'reels/:id/edit',
+        lazy: () => import('./pages/ReelBuilderPage').then((m) => ({ Component: m.ReelBuilderPage })),
+      },
+      {
+        path: 'downloads',
+        lazy: () => import('./pages/ExportsPage').then((m) => ({ Component: m.ExportsPage })),
+      },
       { path: 'admin/teams', element: <AdminTeamsPage /> },
       {
         path: 'admin/policies',

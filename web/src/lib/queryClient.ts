@@ -20,6 +20,15 @@ export const keys = {
   jobs: (status: string | null) => ['admin', 'jobs', status] as const,
   policies: ['admin', 'policies'] as const,
   importChannels: ['admin', 'import-channels'] as const,
+  // M3: clips, reels, comments, exports
+  videoClips: (id: string) => ['videos', id, 'clips'] as const,
+  myClips: ['clips', 'mine'] as const,
+  comments: (id: string) => ['videos', id, 'comments'] as const,
+  reels: ['reels'] as const,
+  reelItems: (id: string) => ['reels', id, 'items'] as const,
+  reelPreview: (query: unknown) => ['reels', 'preview', query] as const,
+  exports: ['exports'] as const,
+  taxonomy: (sport: string) => ['taxonomy', sport] as const,
 }
 
 function shouldRetry(failureCount: number, error: Error): boolean {

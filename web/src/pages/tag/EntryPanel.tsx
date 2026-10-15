@@ -1,3 +1,4 @@
+import '../../i18n/pages'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '../../components/Badge'
@@ -59,7 +60,10 @@ function noticeText(t: TFunction, notice: Notice): string {
       return t('tagging.notice.segmentAdded', { kind: t(`tagging.segment.kind.${String(p.kind) as 'timeout'}`) })
     case 'clipIn':
     case 'clipOut':
+    case 'drillStarted':
       return t(`tagging.notice.${notice.key}`, { time: formatClock(Number(p.time)) })
+    case 'drillSaved':
+      return t('tagging.notice.drillSaved', { label: p.label || t('drills.label') })
     case 'clipSet':
     case 'snapped':
     case 'deleted':

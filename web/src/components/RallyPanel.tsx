@@ -1,4 +1,5 @@
-import { useId, useMemo, useState, type MouseEvent } from 'react'
+import '../i18n/pages'
+import { useId, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   filterRallies,
@@ -30,10 +31,14 @@ interface RallyPanelProps {
   duration_ms: number | null
   element: HTMLVideoElement | null
   playhead: Playhead
+  /** While a clip or drill plays, skipping dead time waits. */
+  suspended?: boolean
+  /** Next to the switch, e.g. "Download as MP4" for coaches. */
+  action?: ReactNode
 }
 
 /** Condensed playback (PLAN §9.5) for everyone who can watch: rallies only, a rally list, filters. */
-export function RallyPanel({ tagging, duration_ms, element, playhead }: RallyPanelProps) {
+export function RallyPanel({ tagging, duration_ms, element, playhead, suspended = false, action }: RallyPanelProps) {
   const { t } = useTranslation()
   const id = useId()
   const [skip, setSkip] = useState(() => readStorage(SKIP_KEY) !== 'off')
@@ -46,7 +51,7 @@ export function RallyPanel({ tagging, duration_ms, element, playhead }: RallyPan
   )
   const duration = duration_ms ?? rallies.at(-1)?.end_ms ?? null
   const windows = useMemo(() => playWindows(shown, { duration_ms: duration }), [shown, duration])
-  useCondensedPlayback(element, windows, skip)
+  useCondensedPlayback(element, windows, skip && !suspended)
 
   const currentId = usePlayhead(playhead, (s) => rallyAt(shown, s.t_ms)?.id ?? null)
   const numbers = useMemo(() => new Map(rallies.map((r, i) => [r.id, i + 1])), [rallies])
@@ -68,10 +73,13 @@ export function RallyPanel({ tagging, duration_ms, element, playhead }: RallyPan
         <h2 id={`${id}-title`} className="text-lg font-semibold">
           {t('tagging.condensed.title')}
         </h2>
-        <label className="flex cursor-pointer items-center gap-1 text-sm font-semibold">
-          <Switch checked={skip} onChange={toggle} label={t('tagging.condensed.skip')} />
-          <span aria-hidden="true">{t('tagging.condensed.skip')}</span>
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-1 text-sm font-semibold">
+            <Switch checked={skip} onChange={toggle} label={t('tagging.condensed.skip')} />
+            <span aria-hidden="true">{t('tagging.condensed.skip')}</span>
+          </label>
+          {action}
+        </div>
       </div>
       <p className="text-sm text-muted">
         {skip && duration

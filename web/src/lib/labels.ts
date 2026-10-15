@@ -85,3 +85,32 @@ export function formatClock(ms: number | null | undefined, { tenths = true } = {
   const base = h > 0 ? `${h}:${pad2(m)}:${pad2(s)}` : `${m}:${pad2(s)}`
   return tenths ? `${base}.${tenth}` : base
 }
+
+/**
+ * What a reel piece shows: its caption, else the tag it came from ("#7 Luca Brunner · Attack ·
+ * # Kill"), else the video's title. Names come from `names` (member id → name), when known.
+ */
+export function pieceLabel(
+  t: TFunction,
+  piece: { caption: string | null; code: string | null; grade: string | null; side: Side | null; number: number | null; member_id: number | null; video_title: string | null },
+  skill: Pick<TaxonomySkill, 'name_key' | 'code' | 'category'> | null,
+  names: ReadonlyMap<number, string> = new Map(),
+): string {
+  if (piece.caption) return piece.caption
+  if (!piece.code) return piece.video_title ?? ''
+  const side = piece.side ?? 'us'
+  const name = piece.member_id !== null ? names.get(piece.member_id) : undefined
+  const player =
+    side === 'them'
+      ? piece.number === null
+        ? t('tagging.them')
+        : t('tagging.themNumber', { number: piece.number })
+      : piece.number === null
+        ? t('tagging.us')
+        : name
+          ? `#${piece.number} ${name}`
+          : `#${piece.number}`
+  const meaning = skill && piece.grade ? gradeLabel(t, skill, piece.grade) : ''
+  const grade = piece.grade && meaning !== piece.grade ? `${piece.grade} ${meaning}`.trim() : (piece.grade ?? '')
+  return [player, skillLabel(t, skill, piece.code), grade].filter(Boolean).join(' · ')
+}

@@ -18,15 +18,7 @@ import type {
   Taxonomy,
 } from './types'
 
-/** A client-made id (UUID v4). randomUUID needs a secure context, so there is a fallback. */
-export function newId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  const bytes = crypto.getRandomValues(new Uint8Array(16))
-  bytes[6] = ((bytes[6] as number) & 0x0f) | 0x40
-  bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80
-  const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-}
+export { newId } from './id'
 
 // The *ToIn helpers fill base_version with the item's version; TaggingStore.commit() sets
 // the real base (the version last received from the server) when it queues the change.
@@ -56,6 +48,7 @@ export function segmentToIn(segment: Segment): SegmentIn {
     id: segment.id,
     base_version: segment.version,
     kind: segment.kind,
+    ...(segment.label != null ? { label: segment.label } : {}),
     start_ms: segment.start_ms,
     end_ms: segment.end_ms,
     won_by: segment.won_by,
@@ -112,6 +105,7 @@ function segmentFromIn(p: SegmentIn, prev: Segment | undefined): Segment {
   return {
     id: p.id,
     kind: p.kind,
+    label: p.label ?? null,
     start_ms: p.start_ms,
     end_ms: p.end_ms,
     period_id: prev?.period_id ?? null,

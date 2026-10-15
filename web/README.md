@@ -97,8 +97,35 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     narrowed down to the one bad change by splitting the batch.
   - `src/lib/rallies.ts` mirrors the server's scoring for the moments when changes are still
     queued; after each sync the server's scores are shown.
+- **Clips, reels, comments, downloads** (M3; API calls and hooks in `src/lib/library.ts`):
+  - A clip is a time range. On the video page "Clip in" / "Clip out" mark it at the playhead
+    (`[`, `]`, then `C` in the tagging workspace; `Shift+C` still sets the selected tag's clip
+    window). Playing a clip seeks to its start and stops at its end, or moves on to the next
+    one (`src/lib/useRangePlayback.ts`, `src/lib/clips.ts`). "My clips" (`/clips`) opens
+    `/videos/:id?clip=…`, which plays just that clip. Sharing with the team is offered only to
+    those the API allows (`can_tag` or `can_upload`); a 403 is still explained.
+  - Reels (`/reels`): a smart reel is a saved query; the builder (`/reels/new`) previews it
+    with `POST /api/reels/preview` 300 ms after the last change. Manual reels are made from
+    my clips, or with "Add to reel" on a clip or a tag row. The reel player
+    (`src/components/ReelPlayer.tsx`) plays the pieces across videos with two `<video>`
+    elements: one on screen, the other loading the next piece's video
+    (`src/lib/reelEngine.ts`; the sequencing is the pure `src/lib/reelPlayer.ts`). Players
+    find "My highlights" on their team page (`/teams/:id/highlights`).
+  - Comments on the video page are pinned to the playhead (or the whole video), go to the
+    team, its coaches or one person, and mention people from the video's roster with `@`.
+    Comments with a time are markers on the strip below the player and on the workspace's
+    overview timeline.
+  - "Download as MP4" (coaches; on clips, reels and the rallies of a match) queues a
+    watermarked export; the rules are shown once per device. `/downloads` lists them; the
+    download is a plain link to `/api/exports/{id}/download`, which redirects to a 5-minute
+    signed URL.
+  - Trainings: drills are segments with a label, marked in the workspace and listed on the
+    video page.
 - Text is English first, in sentence case. German strings are in `src/i18n/de.ts` (Swiss
-  spelling, informal "du"); the type of `de` makes both files keep the same keys.
+  spelling, informal "du"); the type of `de` makes both files keep the same keys. The strings
+  of the pages loaded on demand (video page and tagging: `video.*.ts`; clips, reels,
+  comments, downloads: `library.*.ts`) are registered by `src/i18n/pages.ts` when one of those
+  modules loads, so the main bundle doesn't carry them; a module using them imports it.
 
 ## Dependencies
 

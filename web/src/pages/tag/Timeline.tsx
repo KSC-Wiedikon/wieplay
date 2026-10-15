@@ -1,10 +1,12 @@
 import { useId, useMemo, useState, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
-import { Select } from '../../components/Field'
+import { Select, TextInput } from '../../components/Field'
+import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
 import { formatClock } from '../../lib/labels'
+import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
 import type { Segment, SegmentKind, Side, Tag } from '../../lib/types'
 import { useUi, useView, useWorkspace } from './context'
@@ -20,6 +22,8 @@ function segmentClass(kind: SegmentKind): string {
       return 'bg-danger/60'
     case 'set_break':
       return 'bg-muted/70'
+    case 'drill':
+      return 'bg-link/35'
     default:
       return 'bg-muted/40'
   }
@@ -73,8 +77,10 @@ export function Timeline() {
 
 function Overview({ duration, span }: { duration: number; span: number }) {
   const { t } = useTranslation()
-  const { controller } = useWorkspace()
+  const { controller, video } = useWorkspace()
   const view = useView()
+  const comments = useComments(video.id)
+  const marks = useMemo(() => commentMoments(comments.data ?? []), [comments.data])
 
   const layers = useMemo(() => {
     const pct = (ms: number) => `${Math.min(100, Math.max(0, (ms / duration) * 100))}%`
@@ -101,9 +107,17 @@ function Overview({ duration, span }: { duration: number; span: number }) {
             style={{ left: pct(e.t_ms) }}
           />
         ))}
+        {marks.map((m) => (
+          <div
+            key={m.id}
+            data-comment={m.id}
+            className="absolute top-0.5 size-2 -translate-x-1/2 rotate-45 rounded-[1px] bg-link ring-1 ring-surface"
+            style={{ left: pct(m.t_ms) }}
+          />
+        ))}
       </>
     )
-  }, [view.periods, view.segments, view.events, duration])
+  }, [view.periods, view.segments, view.events, marks, duration])
 
   return (
     <div
@@ -201,9 +215,9 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
           key={s.id}
           onClick={pickSegment(s)}
           className={cx(
-            'absolute top-5 h-7 overflow-hidden rounded-md px-1 text-xs leading-7 font-semibold text-on-accent',
+            'absolute top-5 h-7 overflow-hidden rounded-md px-1 text-xs leading-7 font-semibold whitespace-nowrap',
             segmentClass(s.kind),
-            s.kind !== 'rally' && 'text-fg',
+            s.kind === 'rally' || s.kind === 'possession' ? 'text-on-accent' : 'text-fg',
             ui.segmentId === s.id && 'ring-2 ring-fg',
           )}
           style={{ left: x(Math.max(s.start_ms, from)), width: `${((Math.min(s.end_ms, to) - Math.max(s.start_ms, from)) / span) * 100}%` }}
@@ -212,7 +226,9 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
             ? s.score_us_after !== null && s.score_them_after !== null
               ? `${s.score_us_after}:${s.score_them_after}`
               : ''
-            : t(`tagging.segment.kind.${s.kind}`)}
+            : s.kind === 'drill' && s.label
+              ? s.label
+              : t(`tagging.segment.kind.${s.kind}`)}
         </div>
       ))}
       {open && now > open.start_ms && (
@@ -249,6 +265,7 @@ function TagMarker({ tag, left, selected, onClick }: { tag: Tag; left: string; s
 
 function Legend() {
   const { t } = useTranslation()
+  const { video } = useWorkspace()
   const items: [string, string][] = [
     ['bg-accent', t('tagging.timeline.legend.rally')],
     ['bg-sunken ring-1 ring-hairline', t('tagging.timeline.legend.dead')],
@@ -256,6 +273,8 @@ function Legend() {
     ['bg-muted/70', t('tagging.segment.kind.set_break')],
     ['bg-fg', t('tagging.timeline.legend.tagUs')],
     ['bg-muted', t('tagging.timeline.legend.tagThem')],
+    ...(video.kind === 'training' ? [['bg-link/35', t('tagging.timeline.legend.drill')] as [string, string]] : []),
+    ['bg-link rotate-45 scale-75', t('tagging.timeline.legend.comment')],
   ]
   return (
     <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
@@ -269,7 +288,7 @@ function Legend() {
   )
 }
 
-const KINDS: SegmentKind[] = ['rally', 'timeout', 'set_break', 'warmup', 'stoppage', 'other_dead']
+const KINDS: SegmentKind[] = ['rally', 'timeout', 'set_break', 'warmup', 'stoppage', 'other_dead', 'drill']
 
 /** The selected rally, timeout or break: kind, start, end, point; nudge or set to the playhead. */
 export function SegmentPanel({ id }: { id: string }) {
@@ -323,6 +342,25 @@ export function SegmentPanel({ id }: { id: string }) {
             </span>
           </div>
         ))}
+        {segment.kind === 'drill' && (
+          <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${htmlId}-label`}>
+            {t('tagging.segment.label')}
+            <TextInput
+              id={`${htmlId}-label`}
+              inline
+              className="w-56"
+              maxLength={80}
+              defaultValue={segment.label ?? ''}
+              onBlur={(e) => {
+                const label = e.target.value.trim()
+                if (label !== (segment.label ?? '')) update({ label: label || null })
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+              }}
+            />
+          </label>
+        )}
         {segment.kind === 'rally' && (
           <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${htmlId}-won`}>
             {t('tagging.segment.point')}

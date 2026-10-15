@@ -1,9 +1,11 @@
+import type { TFunction } from 'i18next'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Select, TextInput } from '../../components/Field'
-import { PencilIcon, TrashIcon } from '../../components/icons'
+import { AddToReelDialog } from '../../components/AddToReelDialog'
+import { PencilIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { Table, TBody, Td, Th, THead, Tr } from '../../components/Table'
 import { TagFilters } from '../../components/TagFilters'
 import { filterTags, isFiltered, lastAtOrBefore, NO_FILTER, type TagFilter } from '../../lib/condensed'
@@ -12,7 +14,7 @@ import { formatEntry, skillByCode } from '../../lib/grammar'
 import { formatClock, gradeLabel, playerLabel, sideLabel, skillLabel } from '../../lib/labels'
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
-import type { Side, Tag, TagAttributes } from '../../lib/types'
+import type { ReelItemIn, RosterEntry, Side, Tag, TagAttributes, Taxonomy } from '../../lib/types'
 import { useUi, useView, useWorkspace } from './context'
 
 /** Keeps a row visible inside the scrolling box without scrolling the page. */
@@ -28,12 +30,28 @@ function reveal(container: HTMLElement | null, id: string | null): void {
 }
 
 /** Tags synced to the playhead (PLAN §9.1): click to seek, edit in place, delete with undo, filters. */
+/** A tag's moment as a reel item: its clip window (its own, else the skill's), captioned. */
+function reelItemOf(t: TFunction, tag: Tag, video: { id: string; duration_ms: number | null }, taxonomy: Taxonomy, roster: readonly RosterEntry[]): ReelItemIn {
+  const skill = skillByCode(taxonomy, tag.code)
+  const pre = tag.clip_pre_ms ?? skill?.pre_ms ?? 3000
+  const post = tag.clip_post_ms ?? skill?.post_ms ?? 2000
+  return {
+    video_id: video.id,
+    start_ms: Math.max(0, tag.t_ms - pre),
+    end_ms: Math.min(video.duration_ms ?? Infinity, tag.t_ms + post),
+    event_id: tag.id,
+    caption: `${formatEntry(tag)} · ${playerLabel(t, tag.side, tag.number, roster, tag.member_id)}`.slice(0, 200),
+  }
+}
+
 export function EventTable() {
   const { t } = useTranslation()
-  const { playhead, taxonomy } = useWorkspace()
+  const { playhead, taxonomy, video } = useWorkspace()
   const view = useView()
   const ui = useUi()
   const [filter, setFilter] = useState<TagFilter>(NO_FILTER)
+  const [adding, setAdding] = useState<Tag | null>(null)
+  const item = adding ? reelItemOf(t, adding, video, taxonomy, view.roster) : null
   const shown = useMemo(() => filterTags(view.events, view.periods, filter), [view.events, view.periods, filter])
   const currentId = usePlayhead(playhead, (s) => lastAtOrBefore(shown, s.t_ms)?.id ?? null)
   const container = useRef<HTMLDivElement>(null)
@@ -88,7 +106,7 @@ export function EventTable() {
                   tag.id === ui.editingId ? (
                     <EditRow key={tag.id} tag={tag} />
                   ) : (
-                    <Row key={tag.id} tag={tag} current={tag.id === currentId} selected={tag.id === ui.selectedId} />
+                    <Row key={tag.id} tag={tag} current={tag.id === currentId} selected={tag.id === ui.selectedId} onAddToReel={setAdding} />
                   ),
                 )}
               </TBody>
@@ -96,11 +114,12 @@ export function EventTable() {
           )}
         </div>
       </Card>
+      <AddToReelDialog item={item} suggestedTitle={item?.caption ?? ''} onClose={() => setAdding(null)} />
     </section>
   )
 }
 
-function Row({ tag, current, selected }: { tag: Tag; current: boolean; selected: boolean }) {
+function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boolean; selected: boolean; onAddToReel: (tag: Tag) => void }) {
   const { t } = useTranslation()
   const { controller, taxonomy } = useWorkspace()
   const view = useView()
@@ -143,6 +162,9 @@ function Row({ tag, current, selected }: { tag: Tag; current: boolean; selected:
       <Td tight className="text-right whitespace-nowrap">
         <Button variant="ghost" size="icon" aria-label={t('tagging.table.edit', { entry })} onClick={() => controller.edit(tag.id)}>
           <PencilIcon className="size-4" />
+        </Button>
+        <Button variant="ghost" size="icon" aria-label={t('tagging.table.addToReel', { entry })} title={t('reels.addToReel')} onClick={() => onAddToReel(tag)}>
+          <PlusIcon className="size-4" />
         </Button>
         <Button variant="ghostDanger" size="icon" aria-label={t('tagging.table.delete', { entry })} onClick={() => controller.deleteTag(tag.id)}>
           <TrashIcon className="size-4" />

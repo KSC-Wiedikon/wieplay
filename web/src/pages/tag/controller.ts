@@ -2,6 +2,7 @@
 // that a burst of keystrokes always sees the state the previous key left (no stale closures);
 // React renders a snapshot of it through subscribe/getState.
 
+import { clipRange } from '../../lib/clips'
 import { formatEntry, isEntryChar, parseEntry, toggleSide, type EntryError } from '../../lib/grammar'
 import type { Playhead } from '../../lib/playhead'
 import { proposeByKey, proposeByTag, rallyStartForServe, ralliesOf, type RallyProposal } from '../../lib/rallies'
@@ -29,7 +30,11 @@ export type NoticeKey =
   | 'clipIn'
   | 'clipOut'
   | 'clipSet'
+  | 'clipOrder'
   | 'noClip'
+  | 'drillStarted'
+  | 'drillSaved'
+  | 'drillOrder'
   | 'snapped'
   | 'deleted'
 
@@ -42,6 +47,13 @@ export interface Notice {
   undo?: boolean
 }
 
+export interface ClipRequest {
+  start_ms: number
+  end_ms: number
+  /** The selected tag, when it lies inside the clip. */
+  event_id: string | null
+}
+
 export interface UiState {
   /** The entry being typed and the playhead at its first keystroke. */
   entry: { text: string; t_ms: number } | null
@@ -52,6 +64,10 @@ export interface UiState {
   segmentId: string | null
   clipIn: number | null
   clipOut: number | null
+  /** C was pressed: the clip to save (the dialog asks for its title). */
+  clipRequest: ClipRequest | null
+  /** A drill being marked (trainings): its start. */
+  drillStart: number | null
   skip: boolean
   cheatsheet: boolean
   notice: Notice | null
@@ -65,6 +81,8 @@ const INITIAL: UiState = {
   segmentId: null,
   clipIn: null,
   clipOut: null,
+  clipRequest: null,
+  drillStart: null,
   skip: false,
   cheatsheet: false,
   notice: null,
@@ -447,6 +465,53 @@ export class TagController {
     this.set({ notice: this.notify('snapped', { entry: formatEntry(tag) }) })
   }
 
+  /** C: the marked in and out points (one may come from the playhead) become a clip to save. */
+  saveClip = (): void => {
+    const { clipIn, clipOut } = this.ui
+    if (clipIn === null && clipOut === null) {
+      this.set({ notice: this.notify('noClip', undefined, { tone: 'error' }) })
+      return
+    }
+    const range = clipRange(clipIn, clipOut, this.now(), this.duration())
+    if (!range) {
+      this.set({ notice: this.notify('clipOrder', undefined, { tone: 'error' }) })
+      return
+    }
+    const tag = this.tag(this.ui.selectedId)
+    const inside = tag !== null && tag.t_ms >= range.start_ms && tag.t_ms <= range.end_ms
+    this.set({ clipRequest: { ...range, event_id: inside ? tag.id : null } })
+  }
+
+  /** The clip dialog closed; a saved clip clears the marks. */
+  closeClip = (saved: boolean): void => {
+    this.set(saved ? { clipRequest: null, clipIn: null, clipOut: null } : { clipRequest: null })
+  }
+
+  // Drills (trainings)
+
+  startDrill = (): void => {
+    const start_ms = this.now()
+    this.set({ drillStart: start_ms, notice: this.notify('drillStarted', { time: start_ms }) })
+  }
+
+  cancelDrill = (): void => this.set({ drillStart: null })
+
+  /** Ends the drill being marked at the playhead and saves it with its name. */
+  endDrill = (label: string): boolean => {
+    const start_ms = this.ui.drillStart
+    if (start_ms === null) return false
+    const end_ms = this.now()
+    if (end_ms <= start_ms) {
+      this.set({ notice: this.notify('drillOrder', undefined, { tone: 'error' }) })
+      return false
+    }
+    const name = label.trim().slice(0, 80)
+    const id = newId()
+    this.commit([{ kind: 'segment', payload: { id, base_version: 0, kind: 'drill', label: name || null, start_ms, end_ms } }])
+    this.set({ drillStart: null, notice: this.notify('drillSaved', { label: name }) })
+    return true
+  }
+
   markClip = (which: 'in' | 'out'): void => {
     const now = this.now()
     if (which === 'in') this.set({ clipIn: now, notice: this.notify('clipIn', { time: now }) })
@@ -613,7 +678,9 @@ export class TagController {
         this.snapSelected()
         return true
       case 'c':
-        this.applyClip()
+        // C saves a clip; Shift+C sets the selected tag's clip window (M2).
+        if (shiftKey) this.applyClip()
+        else this.saveClip()
         return true
       default:
         return false
