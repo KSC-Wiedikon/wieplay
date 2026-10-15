@@ -1,0 +1,38 @@
+import { useTranslation } from 'react-i18next'
+import { Outlet } from 'react-router'
+import { Header } from '../components/Header'
+import { LoadError } from '../components/Message'
+import { PageSpinner } from '../components/Spinner'
+import { useMe } from '../lib/queries'
+import type { Session } from '../lib/session'
+import { LoggedOutPage } from './LoggedOutPage'
+
+export function AppLayout() {
+  const { t } = useTranslation()
+  const me = useMe()
+
+  if (me.isPending) return <PageSpinner />
+  if (me.isError) {
+    return (
+      <main className="mx-auto max-w-md px-4 py-16">
+        <LoadError onRetry={() => void me.refetch()} />
+      </main>
+    )
+  }
+  if (!me.data) return <LoggedOutPage />
+
+  return (
+    <>
+      <a
+        href="#main"
+        className="sr-only rounded-xl bg-accent px-4 py-2 text-on-accent focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+      >
+        {t('common.skipToContent')}
+      </a>
+      <Header me={me.data} />
+      <main id="main" className="mx-auto max-w-5xl px-4 py-6 sm:py-8">
+        <Outlet context={{ me: me.data } satisfies Session} />
+      </main>
+    </>
+  )
+}

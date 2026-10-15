@@ -249,8 +249,10 @@ sequenceDiagram
 
 `nomal-api` keeps a small read-only mirror of the Wiedisync data it needs (§6.2):
 
-- `GET /kscw/nomal/v1/sync?since=<ts>` on the bridge, service-token auth, called over
-  localhost on the VPS (no Cloudflare hop).
+- `GET /kscw/nomal/v1/teams` (metadata of every current and previous-season team) and
+  `GET /kscw/nomal/v1/sync?teams=<ids>` (only the enabled teams) on the bridge, with an
+  `X-Nomal-Service-Token` header, called over the VPS's Docker network (no Cloudflare hop). A
+  full snapshot each time; at this size there is no need for incremental sync.
 - Returns only **Nomal-enabled teams** (current + previous season), their rosters (member
   ID, UUID, name, jersey number, positions, relation, guest flag), and their games and
   trainings (ID, date, time, home/away names, league, hall name, **official set scores** from
@@ -262,11 +264,11 @@ sequenceDiagram
 | Change | Where | Notes |
 |---|---|---|
 | `GET /kscw/nomal/v1/authorize` | new `kscw-endpoints/src/nomal-bridge.js` | Reads `req.accountability`, builds claims, signs, redirects. Logs issuance with `writeUserLog`. |
-| `GET /kscw/nomal/v1/sync` | same file | Service-token auth, read-only, versioned contract with tests. |
+| `GET /kscw/nomal/v1/teams`, `GET /kscw/nomal/v1/sync?teams=` | same file | `X-Nomal-Service-Token` (not `Authorization: Bearer`, which Directus would claim), internal network only, read-only, versioned contract with tests. |
 | `GET /kscw/nomal/v1/adult-check?team=&date=` | same file | Pass/fail per rostered person for a recording date (§5.3); birthdates never leave Wiedisync. |
 | Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
-| Team toggle `features_enabled.nomal` | `teams.features_enabled` (edited in `RosterEditor`) | **Admin-only**, because enabling a team triggers the adult and consent checks. |
-| Env | Directus `.env` (prod + dev) | `NOMAL_JWT_PRIVATE_KEY`, `NOMAL_JWT_KID`, `NOMAL_RETURN_URLS`, `NOMAL_SYNC_TOKEN_HASH`; recreate the container (restart does not re-read env). |
+| ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in Nomal**, per lineage. The bridge returns personal data only for the team ids Nomal asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
+| Env | Directus `.env` (prod + dev) | `NOMAL_JWT_PRIVATE_KEY`, `NOMAL_JWT_KID`, `NOMAL_RETURN_URLS`, `NOMAL_SYNC_TOKEN_HASH`, and on dev `NOMAL_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
 | Later: "Video" link on game cards | `GameCard` | Plain link to `nomal.kscw.ch/games/<id>`. |
 | Docs | `INFRA.md`, `SECURITY.md`, `PERMISSIONS.md` | Same commit, per Wiedisync rules. |
 
@@ -456,7 +458,8 @@ the frame number where it matters.
 ```text
 wd_member        id int PK (= members.id), uuid, display_name, number, positions[], active, synced_at
 wd_team          id int PK (= teams.id), lineage_id → team_lineage, name, sport
-                 ('volleyball'|'basketball'), season '2026/27', league, nomal_enabled, synced_at
+                 ('volleyball'|'basketball'), season '2026/27', league, team_key, listed, synced_at
+                 -- every listed team (metadata only); personal data only for enabled lineages
 wd_team_member   (team_id, member_id, rel, is_guest)  rel ∈ player|coach|team_responsible|captain
 wd_game          id int PK (= games.id), team_id, date, time, home_name, away_name,
                  our_side 'home'|'away', league, hall_name, home_score, away_score,
@@ -473,7 +476,9 @@ No email, phone, address or birthdate ever reaches Nomal.
 Wiedisync **clones every team row on 1 June** (new IDs). A video belongs to the team row of its
 season (`video.team_id`). For "this team across seasons" Nomal has `team_lineage (id, sport,
 label)`, matched at sync by `(sport, teams.team_id)`, falling back to `(sport, name)`; an admin
-can fix a wrong match. Sport is always part of the key: "H1" exists in both sports.
+can fix a wrong match. **Whether a team uses Nomal is a flag on its lineage**
+(`team_lineage.enabled`, set by full admins in Nomal; ADR-001), so it carries over to the new
+season's team row. Sport is always part of the key: "H1" exists in both sports.
 
 ### 6.4 Videos
 
@@ -675,6 +680,10 @@ Before any of these is accepted: permission, adult gate (§5.3) and consent (§5
 means no bytes stored. YouTube-hosted footage sits outside Nomal's access control (whoever has
 the YouTube link can watch it), so the club and members should upload as *unlisted*; the
 adults-only rule applies just the same.
+
+Wiedisync already stores video links per game (`game_recordings`, often YouTube). Later the
+sync can carry them, so a coach can pick an existing link as a source in one click when its
+channel is on the allow-list.
 
 ### 7.3 Processing chain
 
@@ -1492,6 +1501,15 @@ seasons' 1080p rendition, or keep internal as the main backend.
 Sized for evenings (~6–8 h/week). Each milestone ends with something usable and a short
 written check. Rough total to launch for the first 4 teams: **5–7 months** (S0 to M4,
 including stats in M3b). Teams can start using M2 and M3 on dev before the formal launch.
+
+**Status (15.10.2026)**: M0 code is done and tested on the Lenovo server.
+- Backend: 32 tests.
+- Web: 29 tests.
+- An end-to-end run through the production image passed.
+- Wiedisync bridge: KSC-Wiedikon/wiedisync#8.
+
+Still open for M0: the dev infrastructure (database, Directus env, tunnel hostname, first
+deploy).
 
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
