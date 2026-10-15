@@ -820,6 +820,11 @@ camera (H.264/HEVC, 8/10-bit, sometimes variable frame rate); ingest normalises 
 50 fps. The Lenovo server encodes with VAAPI on the Radeon 780M where quality allows, else
 x264 with a CPU cap. Both are faster than real time for 1080p.
 
+Measured 15.10.2026 on a real H3 match (2 h 12 min, 1080p60 from the club's YouTube footage;
+worker image with its production limits, VAAPI): 1080p50 in 22.7 min (5.8× real time,
+2.2 GB/h), 540p25 in 9.1 min (14.6×, 0.6 GB/h), **32 min and 6.1 GB of renditions per
+match**, at about 0.2 CPU cores (the GPU does the work).
+
 ### 7.5 Storage tiers
 
 | Tier | Where | Holds | Size per season (100 matches × ~1.75 h) |
