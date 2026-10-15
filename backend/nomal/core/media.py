@@ -51,8 +51,11 @@ THUMB_ROWS = 10
 STANDARD_MIN_HEIGHT = 1080
 STANDARD_MIN_FPS = 49.0
 
-SEGMENT_NAME = re.compile(r"^(init\.mp4|seg_\d{5}\.m4s)$")
-THUMB_NAME = re.compile(r"^(sprite_\d{3}\.jpg|poster\.jpg)$")
+# Used with fullmatch: no trailing newline, ASCII digits only.
+SEGMENT_NAME = re.compile(r"init\.mp4|seg_[0-9]{5}\.m4s")
+THUMB_NAME = re.compile(r"sprite_[0-9]{3}\.jpg|poster\.jpg")
+RENDITION_NAMES = frozenset(r.name for r in RENDITIONS)
+CODECS = re.compile(r"[A-Za-z0-9.,]{1,64}")
 
 
 def renditions_for(source_height: int) -> list[RenditionSpec]:

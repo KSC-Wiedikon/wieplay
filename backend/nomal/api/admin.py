@@ -368,3 +368,40 @@ def set_policy(lineage_id: uuid.UUID, body: PolicyIn, viewer: AdminDep, db: DbDe
         reason=policy.reason,
         set_at=policy.set_at,
     )
+
+
+@router.post("/jobs/{job_id}/retry", response_model=JobAdminOut)
+def retry_job(job_id: uuid.UUID, viewer: AdminDep, db: DbDep) -> JobAdminOut:
+    """Run a failed video job again, with the jobs its failure cancelled."""
+    job = db.get(Job, job_id, with_for_update=True)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    if job.status not in {"failed", "cancelled"}:
+        raise HTTPException(409, "Only failed or cancelled jobs can be retried")
+    video = db.get(Video, job.video_id, with_for_update=True) if job.video_id else None
+    if video is not None and video.status == "deleted":
+        raise HTTPException(409, "The video was deleted")
+    if video is not None and video.status == "refused":
+        raise HTTPException(409, "The filming rules refused this video; it cannot be retried")
+    again = [job]
+    if video is not None:
+        again += db.scalars(
+            select(Job).where(Job.video_id == video.id, Job.status == "cancelled", Job.id != job.id)
+        ).all()
+    for j in again:
+        j.status, j.attempts, j.not_before, j.error, j.finished_at = "queued", 0, None, None, None
+    if video is not None and video.status == "failed":
+        video.status = "queued" if job.kind == "ingest" else "processing"
+        video.error = None
+    audit(
+        db,
+        viewer.member_id,
+        "job_retried",
+        "job",
+        str(job.id),
+        kind=job.kind,
+        video=str(job.video_id) if job.video_id else None,
+        with_cancelled=len(again) - 1,
+    )
+    db.commit()
+    return next(r for r in list_jobs(viewer, db, None, 200) if r.id == job.id)

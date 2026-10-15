@@ -15,10 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nomal.api.deps import DbDep, SettingsDep, audit
+from nomal.api.deps import BridgeDep, DbDep, SettingsDep, audit
 from nomal.core import jobs, pipeline
-from nomal.core.models import InboxFile, Job, Video, Worker
+from nomal.core.filming import CAMERA_DATE_WINDOW_DAYS, camera_day, check_filming
+from nomal.core.models import InboxFile, Job, Video, WdTeam, Worker
 from nomal.core.storage import ObjectStore
+from nomal.core.sync import BridgeClient
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/worker", tags=["worker"])
@@ -186,8 +188,44 @@ def sign(
     return SignOut(urls={k: sign_one(k, ttl) for k in body.keys})
 
 
+def _check_camera_day(db: Session, bridge: BridgeClient | None, video: Video) -> None:
+    """The coach picks the recording day; the camera's clock may disagree. When it names
+    another plausible day, the filming rules must hold on that day too (PLAN §5.3)."""
+    day = camera_day(video.capture)
+    if day is None or day == video.recorded_on:
+        return
+    if abs((day - video.recorded_on).days) > CAMERA_DATE_WINDOW_DAYS:
+        audit(db, None, "camera_clock_unset", "video", str(video.id), camera_day=day.isoformat())
+        return
+    team = db.get(WdTeam, video.team_id)
+    assert team is not None
+    check = check_filming(db, bridge, team, video.kind, day, fresh=True)
+    codes = [b.code for b in check.blockers]
+    if check.allowed:
+        audit(db, None, "camera_day_differs", "video", str(video.id), camera_day=day.isoformat())
+        return
+    pipeline.refuse_after_ingest(
+        db,
+        video,
+        f"The camera recorded this on {day:%d.%m.%Y}, and filming was not allowed that day: "
+        + ", ".join(codes),
+    )
+    audit(
+        db,
+        None,
+        "upload_refused",
+        "video",
+        str(video.id),
+        stage="camera_day",
+        camera_day=day.isoformat(),
+        blockers=codes,
+    )
+
+
 @router.post("/jobs/{job_id}/complete", status_code=204)
-def complete(job_id: uuid.UUID, body: dict[str, Any], worker: WorkerDep, db: DbDep) -> Response:
+def complete(
+    job_id: uuid.UUID, body: dict[str, Any], worker: WorkerDep, db: DbDep, bridge: BridgeDep
+) -> Response:
     job = _running(db, job_id, worker)
     video = db.get(Video, job.video_id, with_for_update=True) if job.video_id else None
     try:
@@ -200,6 +238,8 @@ def complete(job_id: uuid.UUID, body: dict[str, Any], worker: WorkerDep, db: DbD
         pipeline.on_failed(db, video, job)
         db.commit()
         raise HTTPException(422, f"Invalid result: {exc}") from exc
+    if job.kind == "ingest" and video is not None and video.status == "processing":
+        _check_camera_day(db, bridge, video)
     if video is not None and pipeline.finish_if_done(db, video):
         audit(db, None, "video_ready", "video", str(video.id), worker=worker.name)
     worker.last_seen_at = datetime.now(UTC)

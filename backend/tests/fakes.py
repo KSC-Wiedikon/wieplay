@@ -9,6 +9,10 @@ from dataclasses import dataclass, field
 from nomal.core.storage import UploadedPart
 
 
+class NoSuchUpload(Exception):
+    pass
+
+
 @dataclass
 class FakeStore:
     objects: dict[str, int] = field(default_factory=dict)  # key -> size
@@ -29,9 +33,9 @@ class FakeStore:
         self.uploads[upload_id] = {"key": key, "parts": {}}
         return upload_id
 
-    def presign_part(self, key: str, upload_id: str, part: int, ttl: int) -> str:
+    def presign_part(self, key: str, upload_id: str, part: int, size: int, ttl: int) -> str:
         assert self.uploads[upload_id]["key"] == key
-        return f"https://s3.test/{key}?uploadId={upload_id}&partNumber={part}"
+        return f"https://s3.test/{key}?uploadId={upload_id}&partNumber={part}&size={size}"
 
     def put_part(self, upload_id: str, part: int, size: int) -> None:
         """Test helper: what a browser PUT to a part URL does."""
@@ -40,13 +44,20 @@ class FakeStore:
         parts[part] = size
 
     def list_parts(self, key: str, upload_id: str) -> list[UploadedPart]:
+        if upload_id not in self.uploads:
+            raise NoSuchUpload()
         parts = self.uploads[upload_id]["parts"]
         assert isinstance(parts, dict)
         return [UploadedPart(n, f'"etag{n}"', size) for n, size in sorted(parts.items())]
 
     def complete_multipart(self, key: str, upload_id: str, parts: Sequence[UploadedPart]) -> None:
+        if upload_id not in self.uploads:
+            raise NoSuchUpload()
         self.objects[key] = sum(p.size for p in parts)
         del self.uploads[upload_id]
+
+    def upload_gone(self, exc: Exception) -> bool:
+        return isinstance(exc, NoSuchUpload)
 
     def abort_multipart(self, key: str, upload_id: str) -> None:
         self.uploads.pop(upload_id, None)

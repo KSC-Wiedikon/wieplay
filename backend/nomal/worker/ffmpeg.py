@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections
 import json
 import math
+import os
 import subprocess
 import threading
 from collections.abc import Callable, Sequence
@@ -12,6 +13,16 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
+
+# Camera containers only, never playlists or network protocols: a crafted .m3u8 would make
+# ffprobe read other files on the NAS. Applied to every input; the concat demuxer passes
+# the lists on to the files it opens.
+CAMERA_FORMATS = "mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,avi,mpegts"
+
+
+def input_guard(*, concat: bool = False) -> list[str]:
+    formats = f"concat,{CAMERA_FORMATS}" if concat else CAMERA_FORMATS
+    return ["-protocol_whitelist", "file", "-format_whitelist", formats]
 
 
 class Cancelled(Exception):
@@ -43,12 +54,15 @@ def _fraction(value: str | None) -> Fraction | None:
     return frac if frac > 0 else None
 
 
-def probe(path: Path) -> Probe:
+def probe(path: Path, *, camera: bool = True) -> Probe:
+    """Probe a file. `camera=True` (the default) accepts camera containers only."""
+    guard = input_guard() if camera else []
     out = subprocess.run(
         [
             "ffprobe",
             "-v",
             "error",
+            *guard,
             "-print_format",
             "json",
             "-show_format",
@@ -111,6 +125,8 @@ def concat_list(inputs: Sequence[str], target: Path) -> Path:
     """An ffconcat file joining split camera files without re-encoding (PLAN §6.4)."""
     lines = ["ffconcat version 1.0"]
     for item in inputs:
+        if any(c in item for c in "\n\r\0"):
+            raise FfmpegError("input path with a line break")
         escaped = str(Path(item).resolve()).replace("'", "'\\''")
         lines.append(f"file '{escaped}'")
     target.write_text("\n".join(lines) + "\n")
@@ -121,6 +137,10 @@ def even(value: float) -> int:
     return max(2, round(value / 2) * 2)
 
 
+def _lower_priority() -> None:
+    os.nice(10)
+
+
 def run(
     args: Sequence[str],
     *,
@@ -128,12 +148,31 @@ def run(
     on_progress: Callable[[float], None],
     cancel: threading.Event,
     cwd: Path | None = None,
+    timeout_s: float | None = None,
 ) -> None:
-    """Run ffmpeg with -progress on stdout; stop it when `cancel` is set."""
+    """Run ffmpeg with -progress on stdout; stop it when `cancel` is set or after
+    `timeout_s` (default: 2 h or 4x the media duration, whichever is longer). Runs at
+    lower CPU priority: the Lenovo server also serves DNS and other things."""
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", *args]
     proc = subprocess.Popen(
-        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        preexec_fn=_lower_priority,
     )
+    timed_out = threading.Event()
+
+    def kill() -> None:
+        timed_out.set()
+        proc.kill()
+
+    limit = timeout_s if timeout_s is not None else max(7200.0, 4 * duration_ms / 1000)
+    timer = threading.Timer(limit, kill)
+    timer.daemon = True
+    timer.start()
     tail: collections.deque[str] = collections.deque(maxlen=40)
 
     def drain() -> None:
@@ -152,9 +191,12 @@ def run(
         if key == "out_time_us" and value.isdigit() and duration_ms > 0:
             on_progress(min(1.0, int(value) / 1000 / duration_ms))
     code = proc.wait()
+    timer.cancel()
     reader.join(timeout=5)
     if cancel.is_set():
         raise Cancelled()
+    if timed_out.is_set():
+        raise FfmpegError(f"ffmpeg ran longer than {limit:.0f} s and was stopped")
     if code != 0:
         raise FfmpegError("ffmpeg failed: " + " | ".join(list(tail)[-6:]))
 
@@ -189,7 +231,8 @@ def hls_args(
             "-hwaccel_output_format",
             "vaapi",
         ]
-    args += ["-f", "concat", "-safe", "0", "-i", str(concat), "-map", "0:v:0"]
+    args += [*input_guard(concat=True), "-f", "concat", "-safe", "0", "-i", str(concat)]
+    args += ["-map", "0:v:0"]
     if has_audio:
         args += ["-map", "0:a:0?"]
     if encoder == "vaapi":
@@ -289,6 +332,7 @@ def thumbs_args(
     return [
         "-skip_frame",
         "nokey",
+        *input_guard(concat=True),
         "-f",
         "concat",
         "-safe",
@@ -314,6 +358,7 @@ def poster_args(*, concat: Path, at_s: float) -> list[str]:
     return [
         "-ss",
         f"{at_s:.2f}",
+        *input_guard(concat=True),
         "-f",
         "concat",
         "-safe",

@@ -75,7 +75,7 @@ def test_split_files_become_one_hls_rendition(parts: list[Path], tmp_path: Path)
     assert re.fullmatch(r"avc1\.[0-9a-f]{6},mp4a\.40\.2", ffmpeg.codecs_of(out / "init.mp4", True))
     assert ffmpeg.peak_bandwidth(out, playlist) > 0
     assert seen and seen[-1] > 0.5
-    joined = ffmpeg.probe(out / "index.m3u8")
+    joined = ffmpeg.probe(out / "index.m3u8", camera=False)
     assert (joined.width, joined.height, float(joined.fps)) == (320, 180, 25.0)
     assert 7800 <= joined.duration_ms <= 8200
 
@@ -95,7 +95,7 @@ def test_thumbnails_and_poster(parts: list[Path], tmp_path: Path) -> None:
     )  # fmt: skip
     sheets = sorted(p.name for p in out.glob("sprite_*.jpg"))
     assert sheets[0] == "sprite_001.jpg"
-    assert ffmpeg.probe(out / "sprite_001.jpg").width == 320  # 2 tiles of 160 px
+    assert ffmpeg.probe(out / "sprite_001.jpg", camera=False).width == 320  # 2 tiles of 160 px
     assert (out / "poster.jpg").stat().st_size > 0
 
 

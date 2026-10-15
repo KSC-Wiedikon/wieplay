@@ -505,3 +505,205 @@ def test_coach_consent_overview(club: dict[str, TestClient], as_: Any) -> None:
         == 404
     )
     assert as_("player-h3").get(f"/api/teams/{H3}/consent").status_code == 403
+
+
+# --- Hardening after the security review --------------------------------------------------
+
+
+def test_part_urls_carry_the_exact_part_size(club: dict[str, TestClient]) -> None:
+    video = create_match(club["coach"], sizes=(PART * 2 + 5,)).json()
+    f = video["files"][0]
+    urls = (
+        club["coach"]
+        .post(f"/api/videos/{video['id']}/files/{f['id']}/parts", json={"parts": [1, 3]})
+        .json()
+    )
+    assert urls[0]["url"].endswith(f"size={PART}")
+    assert urls[1]["url"].endswith("size=5")  # the last part is the remainder
+
+
+def test_a_repeated_completion_is_idempotent(
+    club: dict[str, TestClient], store: FakeStore, db_engine: Engine
+) -> None:
+    video = upload_all(club["coach"], store, create_match(club["coach"]).json())
+    f = video["files"][0]
+    # The first call completed the S3 upload but its response got lost: try again.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE video_source_file SET uploaded_at = NULL, upload_id = 'up1'"),
+        )
+        conn.execute(text("UPDATE video SET status = 'uploading'"))
+        conn.execute(text("DELETE FROM job"))
+    again = club["coach"].post(f"/api/videos/{video['id']}/files/{f['id']}/complete")
+    assert again.status_code == 200, again.text
+    assert again.json()["status"] == "queued"
+
+
+def test_consent_withdrawn_during_the_upload_refuses_it(
+    club: dict[str, TestClient], as_: Any, store: FakeStore
+) -> None:
+    coach = club["coach"]
+    video = create_match(coach).json()
+    as_("player-h3").put("/api/me/consent", json={"status": "withdrawn"})
+    f = video["files"][0]
+    signed = coach.post(f"/api/videos/{video['id']}/files/{f['id']}/parts", json={"parts": [1, 2]})
+    for p in signed.json():
+        upload_id = p["url"].split("uploadId=")[1].split("&")[0]
+        store.put_part(upload_id, p["part"], PART if p["part"] == 1 else 10)
+    done = coach.post(f"/api/videos/{video['id']}/files/{f['id']}/complete")
+    assert done.status_code == 409
+    assert done.json()["blockers"][0]["code"] == "consent_missing"
+    got = coach.get(f"/api/videos/{video['id']}").json()
+    assert got["status"] == "refused"
+
+
+def test_a_camera_date_that_was_blocked_refuses_the_video(
+    app: FastAPI, club: dict[str, TestClient], as_: Any, store: FakeStore, db_engine: Engine
+) -> None:
+    """The coach says today; the camera says a day when a player had not agreed yet."""
+    video = upload_all(club["coach"], store, create_match(club["coach"]).json())
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    [ingest] = claim(w, MEDIA_CAPS)
+    result = ingest_result(ingest)
+    # A day 10 days off is plausible; make that day fail the adult check by giving the
+    # team a member who turns 18 after it (Lia Jung is on DU23-1, so use the DU23 policy
+    # route instead: switch matches off, which applies to any day).
+    lineage = club["admin"].get(f"/api/teams/{H3}").json()["lineage_id"]
+    club["admin"].put(
+        f"/api/admin/policies/{lineage}",
+        json={"matches_allowed": False, "trainings_allowed": True, "reason": "test"},
+    )
+    camera = datetime.now(UTC) - timedelta(days=10)
+    result["capture"]["creation_time"] = camera.isoformat()
+    assert w.post(f"/api/worker/jobs/{ingest['id']}/complete", json=result).status_code == 204
+    got = club["coach"].get(f"/api/videos/{video['id']}").json()
+    assert got["status"] == "refused" and "camera recorded this" in got["error"]
+    [purge] = claim(w, MEDIA_CAPS)
+    assert purge["kind"] == "purge" and purge["params"]["raw_subdir"]
+    with db_engine.connect() as conn:
+        active = "SELECT count(*) FROM job WHERE kind='transcode' AND status <> 'cancelled'"
+        assert conn.execute(text(active)).scalar() == 0
+
+
+def test_an_unset_camera_clock_is_only_noted(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, db_engine: Engine
+) -> None:
+    upload_all(club["coach"], store, create_match(club["coach"]).json())
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    [ingest] = claim(w, MEDIA_CAPS)
+    result = ingest_result(ingest)
+    result["capture"]["creation_time"] = "2016-01-01T00:00:00Z"
+    assert w.post(f"/api/worker/jobs/{ingest['id']}/complete", json=result).status_code == 204
+    with db_engine.connect() as conn:
+        actions = conn.execute(text("SELECT action FROM audit_log")).scalars().all()
+    assert "camera_clock_unset" in actions
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"nas_path": "/nas/nomal/raw/elsewhere/01.mp4"},
+        {"nas_path": "/nas/nomal/raw/{subdir}/../../other/01.mp4"},
+        {"nas_path": "/nas/nomal/raw/{subdir}/sub/01.mp4"},
+    ],
+)
+def test_ingest_results_with_foreign_paths_are_rejected(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, bad: dict[str, str]
+) -> None:
+    upload_all(club["coach"], store, create_match(club["coach"]).json())
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    [ingest] = claim(w, MEDIA_CAPS)
+    result = ingest_result(ingest)
+    result["files"][0]["nas_path"] = bad["nas_path"].format(subdir=ingest["params"]["raw_subdir"])
+    assert w.post(f"/api/worker/jobs/{ingest['id']}/complete", json=result).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        (
+            "playlist",
+            PLAYLIST.replace('#EXT-X-MAP:URI="init.mp4"', "#EXT-X-MAP:URI=https://e/x"),
+            422,
+        ),
+        ("playlist", PLAYLIST.replace("#EXT-X-ENDLIST", "#EXT-X-KEY:METHOD=AES-128,URI=x"), 422),
+        ("playlist", PLAYLIST.replace("seg_00001.m4s", "../seg_00001.m4s"), 422),
+        ("playlist", PLAYLIST.replace("seg_00001.m4s", "seg_00001.m4s\n"), 204),  # blank line
+        ("codecs", 'avc1",URI="https://e/x', 422),
+    ],
+)
+def test_transcode_results_are_checked_line_by_line(
+    app: FastAPI,
+    club: dict[str, TestClient],
+    store: FakeStore,
+    field: str,
+    value: str,
+    expected: int,
+) -> None:
+    upload_all(club["coach"], store, create_match(club["coach"]).json())
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    [ingest] = claim(w, MEDIA_CAPS)
+    w.post(f"/api/worker/jobs/{ingest['id']}/complete", json=ingest_result(ingest))
+    job = next(j for j in iter(lambda: claim(w, MEDIA_CAPS)[0], None) if j["kind"] == "transcode")
+    body = transcode_result(job)
+    body[field] = value
+    assert w.post(f"/api/worker/jobs/{job['id']}/complete", json=body).status_code == expected
+
+
+def test_players_see_ready_videos_only_and_no_internals(
+    app: FastAPI, club: dict[str, TestClient], as_: Any, store: FakeStore
+) -> None:
+    video = upload_all(club["coach"], store, create_match(club["coach"]).json())
+    player = as_("player-h3")
+    assert player.get(f"/api/teams/{H3}/videos").json() == []
+    assert player.get(f"/api/videos/{video['id']}").status_code == 404
+    assert club["coach"].get(f"/api/videos/{video['id']}").json()["files"]
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    run_pipeline(w, MEDIA_CAPS, store)
+    seen = player.get(f"/api/videos/{video['id']}").json()
+    assert seen["status"] == "ready" and seen["files"] == [] and seen["error"] is None
+
+
+def test_filming_status_only_for_a_sensible_date_range(club: dict[str, TestClient]) -> None:
+    far = (TODAY + timedelta(days=200)).isoformat()
+    r = club["coach"].get(f"/api/teams/{H3}/filming", params={"kind": "match", "on": far})
+    assert r.status_code == 422
+
+
+def test_admin_retries_a_failed_job_with_the_ones_it_cancelled(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    video = upload_all(club["coach"], store, create_match(club["coach"]).json())
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    [ingest] = claim(w, MEDIA_CAPS)
+    w.post(f"/api/worker/jobs/{ingest['id']}/complete", json=ingest_result(ingest))
+    [first] = claim(w, MEDIA_CAPS)
+    w.post(f"/api/worker/jobs/{first['id']}/fail", json={"error": "disk full", "retryable": False})
+    assert club["coach"].get(f"/api/videos/{video['id']}").json()["status"] == "failed"
+    assert club["coach"].post(f"/api/admin/jobs/{first['id']}/retry").status_code == 403
+    retried = club["admin"].post(f"/api/admin/jobs/{first['id']}/retry")
+    assert retried.status_code == 200 and retried.json()["status"] == "queued"
+    run_left = []
+    while jobs := claim(w, MEDIA_CAPS):
+        run_left.append(jobs[0]["kind"])
+        body = transcode_result(jobs[0]) if jobs[0]["kind"] == "transcode" else THUMBS
+        w.post(f"/api/worker/jobs/{jobs[0]['id']}/complete", json=body)
+    assert sorted(run_left) == ["thumbs", "transcode", "transcode"]
+    assert club["coach"].get(f"/api/videos/{video['id']}").json()["status"] == "ready"
+
+
+def test_deleted_videos_are_swept_again_after_the_lease_window(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, db_engine: Engine
+) -> None:
+    from nomal.api.videos import sweep_deleted
+
+    video = upload_all(club["coach"], store, create_match(club["coach"]).json())
+    club["coach"].delete(f"/api/videos/{video['id']}")
+    store.objects[f"media/{video['id']}/1080p/seg_00009.m4s"] = 1  # a late upload
+    with app.state.sessionmaker() as db:
+        assert sweep_deleted(db, store) == 0  # too early
+        later = datetime.now(UTC) + timedelta(hours=3)
+        assert sweep_deleted(db, store, now=later) == 1
+    assert not [k for k in store.objects if video["id"] in k]
+    with db_engine.connect() as conn:
+        assert conn.execute(text("SELECT purged_at IS NOT NULL FROM video")).scalar() is True

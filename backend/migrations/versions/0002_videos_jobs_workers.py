@@ -133,6 +133,7 @@ def upgrade() -> None:
         ),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_by", sa.Integer(), nullable=True),
+        sa.Column("purged_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
             ["lineage_id"],
             ["team_lineage.id"],

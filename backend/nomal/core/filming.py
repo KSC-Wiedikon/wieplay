@@ -14,30 +14,64 @@ the "filming allowed / blocked" hints on the team page.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from nomal.core.models import AdultCheck, Consent, TeamPolicy, WdTeam, WdTeamMember
-from nomal.core.sync import BridgeClient, BridgeError
+from nomal.core.sync import BridgeClient, BridgeError, run_sync
 
 # Version of the information notice members agree to (docs/PRIVACY.md). Draft until the
 # club's privacy contact has reviewed §5 of the plan.
 NOTICE_VERSION = "2026-10-draft"
 ADULT_CHECK_MAX_AGE = timedelta(hours=6)
+CLUB_TZ = ZoneInfo("Europe/Zurich")
+# A camera clock further off than this was never set; its date proves nothing.
+CAMERA_DATE_WINDOW_DAYS = 60
 
 
 @dataclass(frozen=True)
 class Blocker:
     # policy_matches | policy_trainings | under_18 | no_birthdate | no_roster |
-    # adult_check_unavailable | consent_missing
+    # adult_check_unavailable | roster_unavailable | consent_missing
     code: str
     count: int | None = None
     detail: str | None = None
+
+
+def club_today() -> date:
+    return datetime.now(CLUB_TZ).date()
+
+
+def camera_day(capture: Mapping[str, Any]) -> date | None:
+    """The recording day according to the camera's metadata (creation_time), club time."""
+    raw = capture.get("creation_time")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp.astimezone(CLUB_TZ).date()
+
+
+def refresh_rosters(db: Session, bridge: BridgeClient | None) -> bool:
+    """Sync rosters right before an upload is accepted (PLAN §4.3). Commits."""
+    if bridge is None:
+        return False
+    try:
+        run_sync(db, bridge)
+    except BridgeError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -92,6 +126,7 @@ def _adult_blockers(
             cached.reasons = dict(reasons)
             cached.checked_at = now
             if not answer.get("people"):
+                cached.passed = False  # nobody on the roster proves nothing
                 cached.reasons = {"no_roster": 1}
             db.merge(cached)
             db.flush()
@@ -116,9 +151,12 @@ def check_filming(
     *,
     fresh: bool,
     now: datetime | None = None,
+    roster_fresh: bool = True,
 ) -> FilmingCheck:
     now = now or datetime.now(UTC)
     blockers: list[Blocker] = []
+    if not roster_fresh:
+        blockers.append(Blocker("roster_unavailable"))
 
     policy = db.get(TeamPolicy, team.lineage_id)
     if policy is not None:

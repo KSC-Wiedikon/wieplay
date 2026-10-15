@@ -83,6 +83,12 @@ def _download(url: str, target: Path, size: int, ctx: Context, done: list[int], 
     return digest.hexdigest()
 
 
+def _raw_inputs(ctx: Context) -> list[str]:
+    """The job's input files, each confined to the raw originals on the NAS."""
+    root = ctx.settings.raw_root
+    return [str(_inside(root, Path(item))) for item in ctx.job.params["inputs"]]
+
+
 def ingest(ctx: Context) -> dict[str, Any]:
     """Uploaded or inbox files → originals on the NAS, probed and checksummed."""
     params = ctx.job.params
@@ -199,7 +205,7 @@ def transcode(ctx: Context) -> dict[str, Any]:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    concat = ffmpeg.concat_list(params["inputs"], ctx.scratch / "inputs.ffconcat")
+    concat = ffmpeg.concat_list(_raw_inputs(ctx), ctx.scratch / "inputs.ffconcat")
     src = params["source"]
     height = int(spec["height"])
     width = ffmpeg.even(src["width"] * height / src["height"])
@@ -265,7 +271,7 @@ def thumbs(ctx: Context) -> dict[str, Any]:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    concat = ffmpeg.concat_list(params["inputs"], ctx.scratch / "inputs.ffconcat")
+    concat = ffmpeg.concat_list(_raw_inputs(ctx), ctx.scratch / "inputs.ffconcat")
     src = params["source"]
     tile_w = int(params["tile_w"])
     tile_h = ffmpeg.even(tile_w * src["height"] / src["width"])
@@ -307,6 +313,13 @@ def purge(ctx: Context) -> dict[str, Any]:
     """Delete a deleted video's originals from the NAS (PLAN §5.5)."""
     removed = 0
     root = ctx.settings.raw_root
+    subdir = ctx.job.params.get("raw_subdir")
+    if subdir:
+        # The whole folder: it may also hold files of an ingest that never finished.
+        folder = _inside(root, root / subdir)
+        if folder != root.resolve() and folder.is_dir():
+            removed += sum(1 for p in folder.rglob("*") if p.is_file())
+            shutil.rmtree(folder)
     for raw in ctx.job.params.get("nas_paths", []):
         path = _inside(root, Path(raw))
         if path.exists():

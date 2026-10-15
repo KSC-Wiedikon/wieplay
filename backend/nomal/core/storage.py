@@ -44,12 +44,13 @@ class ObjectStore(Protocol):
     def presign_get(self, key: str, ttl: int) -> str: ...
     def presign_put(self, key: str, ttl: int) -> str: ...
     def create_multipart(self, key: str, content_type: str) -> str: ...
-    def presign_part(self, key: str, upload_id: str, part: int, ttl: int) -> str: ...
+    def presign_part(self, key: str, upload_id: str, part: int, size: int, ttl: int) -> str: ...
     def list_parts(self, key: str, upload_id: str) -> list[UploadedPart]: ...
     def complete_multipart(
         self, key: str, upload_id: str, parts: Sequence[UploadedPart]
     ) -> None: ...
     def abort_multipart(self, key: str, upload_id: str) -> None: ...
+    def upload_gone(self, exc: Exception) -> bool: ...
     def size(self, key: str) -> int | None: ...
     def delete(self, keys: Iterable[str]) -> None: ...
     def delete_prefix(self, prefix: str) -> int: ...
@@ -108,10 +109,17 @@ class S3Store:
         )
         return response["UploadId"]
 
-    def presign_part(self, key: str, upload_id: str, part: int, ttl: int) -> str:
+    def presign_part(self, key: str, upload_id: str, part: int, size: int, ttl: int) -> str:
+        """Signs the exact Content-Length: a part URL takes that many bytes and no more."""
         return self._client.generate_presigned_url(
             "upload_part",
-            Params={"Bucket": self.bucket, "Key": key, "UploadId": upload_id, "PartNumber": part},
+            Params={
+                "Bucket": self.bucket,
+                "Key": key,
+                "UploadId": upload_id,
+                "PartNumber": part,
+                "ContentLength": size,
+            },
             ExpiresIn=ttl,
         )
 
@@ -140,6 +148,11 @@ class S3Store:
 
     def abort_multipart(self, key: str, upload_id: str) -> None:
         self._client.abort_multipart_upload(Bucket=self.bucket, Key=key, UploadId=upload_id)
+
+    def upload_gone(self, exc: Exception) -> bool:
+        """True for NoSuchUpload: the multipart upload was completed or aborted already."""
+        response: dict[str, Any] = getattr(exc, "response", None) or {}
+        return bool(response.get("Error", {}).get("Code") == "NoSuchUpload")
 
     def size(self, key: str) -> int | None:
         try:

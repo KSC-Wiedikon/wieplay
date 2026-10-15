@@ -60,7 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         while True:
             await asyncio.sleep(settings.reaper_interval_seconds)
             try:
-                await asyncio.to_thread(_reap_once, sessions)
+                await asyncio.to_thread(_reap_once, sessions, app.state.store)
             except Exception:
                 log.exception("job reaper failed")
 
@@ -141,11 +141,13 @@ def _sync_once(sessionmaker: sessionmaker[Session], factory: Callable[[], Bridge
         run_sync(session, factory())
 
 
-def _reap_once(sessionmaker: sessionmaker[Session]) -> None:
+def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -> None:
     with sessionmaker() as session:
         count = worker.reap(session)
         if count:
             log.warning("reaped %d expired job leases", count)
+        if store is not None:
+            videos.sweep_deleted(session, store)
 
 
 def _mount_web(app: FastAPI, dist: Path) -> None:

@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -224,7 +225,7 @@ class Video(Base):
     sport: Mapped[str] = mapped_column(String(16))
     recorded_on: Mapped[date] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(16), default="file")  # file | inbox
-    # uploading | queued | processing | ready | failed | deleted
+    # uploading | queued | processing | ready | failed | refused (filming rules) | deleted
     status: Mapped[str] = mapped_column(String(16), index=True)
     duration_ms: Mapped[int | None] = mapped_column(BigInteger)
     fps_num: Mapped[int | None] = mapped_column(Integer)
@@ -246,6 +247,9 @@ class Video(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_by: Mapped[int | None] = mapped_column(Integer)
+    # Bucket objects of a deleted video are removed again after the job lease window
+    # (late segment uploads); set once that sweep found nothing left.
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     files: Mapped[list[VideoSourceFile]] = relationship(
         back_populates="video", order_by="VideoSourceFile.part_no", cascade="all, delete-orphan"
@@ -372,3 +376,12 @@ class Job(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Claims scan only queued jobs, best first (PLAN §8.1).
+Index(
+    "ix_job_claim",
+    Job.priority.desc(),
+    Job.created_at,
+    postgresql_where=Job.status == "queued",
+)

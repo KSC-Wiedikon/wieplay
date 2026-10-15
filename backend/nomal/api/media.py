@@ -16,7 +16,13 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 
 from nomal.api.access import visible_video
 from nomal.api.deps import DbDep, SettingsDep, StoreDep, ViewerDep, audit, session_key
-from nomal.core.media import SEGMENT_NAME, THUMB_NAME, master_playlist, thumbnails_vtt
+from nomal.core.media import (
+    RENDITION_NAMES,
+    SEGMENT_NAME,
+    THUMB_NAME,
+    master_playlist,
+    thumbnails_vtt,
+)
 from nomal.core.models import Video, VideoRendition
 
 router = APIRouter(prefix="/api/media", tags=["media"])
@@ -120,7 +126,7 @@ def thumb(
     store: StoreDep,
     settings: SettingsDep,
 ) -> RedirectResponse:
-    if not THUMB_NAME.match(name):
+    if not THUMB_NAME.fullmatch(name):
         raise HTTPException(404, "Not found")
     _check(request, db, viewer, video_id)
     return _signed(store, settings, f"media/{video_id}/thumbs/{name}")
@@ -150,7 +156,7 @@ def segment(
     store: StoreDep,
     settings: SettingsDep,
 ) -> RedirectResponse:
-    if not SEGMENT_NAME.match(name) or rendition not in {"1080p", "540p"}:
+    if not SEGMENT_NAME.fullmatch(name) or rendition not in RENDITION_NAMES:
         raise HTTPException(404, "Not found")
     _check(request, db, viewer, video_id)
     return _signed(store, settings, f"media/{video_id}/{rendition}/{name}")

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from nomal.core import jobs
 from nomal.core.media import (
+    CODECS,
     SEGMENT_NAME,
     SEGMENT_SECONDS,
     THUMB_COLUMNS,
@@ -81,7 +82,14 @@ class ThumbsResult(BaseModel):
     poster: bool
 
 
-PLAYLIST_URI = re.compile(r'^(?!#)(.+)$|URI="([^"]+)"', re.MULTILINE)
+# What ffmpeg writes for a VOD fMP4 rendition; any other line is refused (PLAN §7.6: the
+# playlist the API serves may only name this rendition's own segments).
+PLAYLIST_TAGS = re.compile(
+    r"#EXTM3U|#EXT-X-VERSION:[0-9]{1,2}|#EXT-X-TARGETDURATION:[0-9]{1,3}"
+    r"|#EXT-X-MEDIA-SEQUENCE:0|#EXT-X-PLAYLIST-TYPE:VOD|#EXT-X-INDEPENDENT-SEGMENTS"
+    r'|#EXT-X-MAP:URI="init\.mp4"|#EXTINF:[0-9]{1,4}(\.[0-9]{1,6})?,|#EXT-X-ENDLIST'
+)
+NAS_PATH = re.compile(r"[A-Za-z0-9._/-]+")
 
 
 def season_of(day: date) -> str:
@@ -132,10 +140,20 @@ def start_ingest(db: Session, video: Video, team: WdTeam) -> Job:
     )
 
 
-def _on_ingest(db: Session, video: Video, result: IngestResult) -> None:
+def _on_ingest(db: Session, video: Video, job: Job, result: IngestResult) -> None:
     by_id = {f.file_id: f for f in result.files}
     if set(by_id) != {f.id for f in video.files}:
         raise ValueError("ingest result does not cover exactly the video's files")
+    folder = f"/{job.params['raw_subdir']}/"
+    for got in result.files:
+        # These paths become ffmpeg inputs and purge targets: only this video's folder.
+        if (
+            not NAS_PATH.fullmatch(got.nas_path)
+            or folder not in got.nas_path
+            or "/../" in got.nas_path
+            or "/" in got.nas_path.split(folder, 1)[1]
+        ):
+            raise ValueError("nas_path outside the video's raw folder")
     offset = 0
     for f in video.files:
         got = by_id[f.id]
@@ -193,18 +211,23 @@ def _on_ingest(db: Session, video: Video, result: IngestResult) -> None:
 
 
 def _check_playlist(playlist: str) -> None:
-    """The stored playlist may only name this rendition's own segment files."""
-    if not playlist.startswith("#EXTM3U"):
+    """An allow-list of lines: known tags, and this rendition's own segment names."""
+    lines = [line.rstrip("\r") for line in playlist.split("\n")]
+    if not lines or lines[0] != "#EXTM3U":
         raise ValueError("playlist must start with #EXTM3U")
-    for match in PLAYLIST_URI.finditer(playlist):
-        uri = (match.group(1) or match.group(2) or "").strip()
-        if uri and not SEGMENT_NAME.match(uri):
-            raise ValueError(f"unexpected URI in playlist: {uri[:40]}")
+    for line in lines:
+        if not line:
+            continue
+        ok = PLAYLIST_TAGS.fullmatch(line) if line.startswith("#") else SEGMENT_NAME.fullmatch(line)
+        if not ok:
+            raise ValueError(f"unexpected playlist line: {line[:40]}")
 
 
 def _on_transcode(db: Session, video: Video, job: Job, result: TranscodeResult) -> None:
     if result.name != job.params["rendition"]["name"]:
         raise ValueError("rendition name does not match the job")
+    if not CODECS.fullmatch(result.codecs):
+        raise ValueError("codecs must be an RFC 6381 list")
     _check_playlist(result.playlist)
     row = db.get(VideoRendition, (video.id, result.name)) or VideoRendition(
         video_id=video.id, name=result.name
@@ -246,7 +269,7 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
     if video is None:
         raise ValueError("job has no video")
     if job.kind == "ingest":
-        _on_ingest(db, video, IngestResult.model_validate(payload))
+        _on_ingest(db, video, job, IngestResult.model_validate(payload))
     elif job.kind == "transcode":
         _on_transcode(db, video, job, TranscodeResult.model_validate(payload))
     elif job.kind == "thumbs":
@@ -258,7 +281,7 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
     """A job failed for good: the video failed, its other jobs stop."""
-    if video is None or video.status == "deleted":
+    if video is None or video.status in {"deleted", "refused"}:
         return
     video.status = "failed"
     video.error = f"{job.kind}: {job.error or 'failed'}"[:2000]
@@ -273,28 +296,58 @@ def may_sign(job: Job, op: str, key: str) -> bool:
         return op in {"get", "delete"} and key in staged
     if job.kind == "transcode" and op == "put":
         prefix = f"media/{video}/{job.params['rendition']['name']}/"
-        return key.startswith(prefix) and bool(SEGMENT_NAME.match(key[len(prefix) :]))
+        return key.startswith(prefix) and bool(SEGMENT_NAME.fullmatch(key[len(prefix) :]))
     if job.kind == "thumbs" and op == "put":
         prefix = f"media/{video}/thumbs/"
-        return key.startswith(prefix) and bool(THUMB_NAME.match(key[len(prefix) :]))
+        return key.startswith(prefix) and bool(THUMB_NAME.fullmatch(key[len(prefix) :]))
     return False
+
+
+def _ingest_job(db: Session, video: Video) -> Job | None:
+    return db.scalars(
+        select(Job).where(Job.video_id == video.id, Job.kind == "ingest").order_by(Job.created_at)
+    ).first()
+
+
+def ingest_started(db: Session, video: Video) -> bool:
+    """A worker picked up the ingest: files may sit in the video's raw folder by now."""
+    job = _ingest_job(db, video)
+    return job is not None and job.attempts > 0
+
+
+def purge_raw(db: Session, video: Video) -> Job | None:
+    """Queue removal of the video's raw folder on the NAS, including half-ingested files."""
+    job = _ingest_job(db, video)
+    if job is None or job.attempts == 0:
+        return None  # nothing was ever written there
+    return jobs.enqueue(
+        db,
+        "purge",
+        caps=PURGE_CAPS,
+        video_id=video.id,
+        priority=1,
+        params={
+            "video_id": str(video.id),
+            "raw_subdir": job.params["raw_subdir"],
+            "nas_paths": [f.nas_path for f in video.files if f.nas_path],
+        },
+    )
 
 
 def mark_deleted(db: Session, video: Video, actor: int) -> list[str]:
     """Soft-delete a video and queue removal of its NAS originals. Returns the bucket
-    prefixes the caller deletes."""
+    prefixes the caller deletes now; sweep_deleted deletes them again later."""
     video.status = "deleted"
     video.deleted_at = datetime.now(UTC)
     video.deleted_by = actor
     jobs.cancel_active(db, video.id, "video deleted")
-    nas_paths = [f.nas_path for f in video.files if f.nas_path]
-    if nas_paths:
-        jobs.enqueue(
-            db,
-            "purge",
-            caps=PURGE_CAPS,
-            video_id=video.id,
-            priority=1,
-            params={"video_id": str(video.id), "nas_paths": nas_paths},
-        )
+    purge_raw(db, video)
     return [f"media/{video.id}/", f"incoming/{video.id}/"]
+
+
+def refuse_after_ingest(db: Session, video: Video, reason: str) -> None:
+    """The filming rules refused a video whose originals are already on the NAS."""
+    video.status = "refused"
+    video.error = reason[:2000]
+    jobs.cancel_active(db, video.id, "refused")
+    purge_raw(db, video)

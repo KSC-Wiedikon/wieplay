@@ -30,7 +30,14 @@ from nomal.api.deps import (
 from nomal.api.media import permission_cache
 from nomal.core import pipeline
 from nomal.core.config import Settings
-from nomal.core.filming import NOTICE_VERSION, Blocker, FilmingCheck, check_filming
+from nomal.core.filming import (
+    NOTICE_VERSION,
+    Blocker,
+    FilmingCheck,
+    check_filming,
+    club_today,
+    refresh_rosters,
+)
 from nomal.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTraining
 from nomal.core.permissions import Viewer, can_delete_video, can_upload, can_use_inbox
 from nomal.core.storage import ObjectStore, safe_file_name
@@ -38,9 +45,11 @@ from nomal.core.storage import ObjectStore, safe_file_name
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["videos"])
 
-VIDEO_EXTENSIONS = (".mp4", ".mov", ".m4v", ".mts", ".m2ts", ".mkv", ".avi", ".insv", ".lrv")
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".m4v", ".mts", ".m2ts", ".mkv", ".avi")
 DASH = "\u2013"
 UPCOMING_DAYS = 21
+FILMING_PAST_DAYS = 400
+DELETED_SWEEP_AFTER = timedelta(hours=2)  # beyond the 1 h worker upload URLs
 UPCOMING_MAX = 12
 
 
@@ -169,9 +178,16 @@ def _part_count(size: int, settings: Settings) -> int:
     return max(1, math.ceil(size / settings.upload_part_bytes))
 
 
+def _manages(viewer: Viewer, access: TeamAccess) -> bool:
+    """Coaches, team managers and sport admins of the team, and admins: they see videos
+    before they are ready, with errors and file details. Players see ready videos only."""
+    return can_upload(viewer, access.ref) or can_delete_video(viewer, access.ref, access.leads)
+
+
 def _video_out(
     db: Session, video: Video, access: TeamAccess, viewer: Viewer, settings: Settings
 ) -> VideoOut:
+    manager = _manages(viewer, access)
     progress = None
     if video.status in {"uploading", "queued", "processing"}:
         rows = db.execute(
@@ -204,7 +220,7 @@ def _video_out(
         ],
         has_thumbs=bool(video.thumbs),
         progress=progress,
-        error=video.error,
+        error=video.error if manager else None,
         created_at=video.created_at,
         created_by=video.created_by,
         can_delete=can_delete_video(viewer, access.ref, access.leads),
@@ -220,7 +236,9 @@ def _video_out(
                 uploaded=f.uploaded_at is not None,
             )
             for f in video.files
-        ],
+        ]
+        if manager
+        else [],
     )
 
 
@@ -245,6 +263,9 @@ def filming_status(
     on: Annotated[date, Query()],
 ) -> FilmingOut:
     access = visible_team(db, viewer, team_id)
+    today = club_today()
+    if not today - timedelta(days=FILMING_PAST_DAYS) <= on <= today + timedelta(days=UPCOMING_DAYS):
+        raise HTTPException(422, "Date out of range")
     check = check_filming(db, bridge, access.team, kind, on, fresh=False)
     db.commit()
     return FilmingOut(
@@ -297,11 +318,10 @@ def team_videos(
     team_id: int, viewer: ViewerDep, db: DbDep, settings: SettingsDep
 ) -> list[VideoOut]:
     access = visible_team(db, viewer, team_id)
-    videos = db.scalars(
-        select(Video)
-        .where(Video.team_id == team_id, Video.status != "deleted")
-        .order_by(Video.recorded_on.desc(), Video.created_at.desc())
-    ).all()
+    query = select(Video).where(Video.team_id == team_id, Video.status != "deleted")
+    if not _manages(viewer, access):
+        query = query.where(Video.status == "ready")
+    videos = db.scalars(query.order_by(Video.recorded_on.desc(), Video.created_at.desc())).all()
     return [_video_out(db, v, access, viewer, settings) for v in videos]
 
 
@@ -334,9 +354,10 @@ def _check_files(body: VideoCreateIn, settings: Settings) -> None:
     for f in body.files:
         if f.size > settings.max_file_bytes:
             raise HTTPException(413, f"{f.name} is larger than the limit")
-        typed_video = (f.type or "").startswith("video/")
-        if not typed_video and not f.name.lower().endswith(VIDEO_EXTENSIONS):
-            raise HTTPException(415, f"{f.name} does not look like a video file")
+        # The extension decides, never the browser's MIME type: the worker probes the
+        # file, and a playlist (.m3u8) or other container must not reach ffprobe.
+        if not f.name.lower().endswith(VIDEO_EXTENSIONS):
+            raise HTTPException(415, f"{f.name} is not a video file Nomal accepts")
 
 
 @router.post("/teams/{team_id}/videos", response_model=VideoOut, status_code=201)
@@ -357,10 +378,11 @@ def create_video(
         raise HTTPException(403, "Only the team's coaches and sport admins upload videos")
     _check_files(body, settings)
     on, default_title, game_id, training_id = _resolve_event(db, team_id, body)
-    if on > datetime.now(UTC).date() + timedelta(days=1):
+    if on > club_today():
         raise HTTPException(422, "The recording date is in the future")
 
-    check = check_filming(db, bridge, access.team, body.kind, on, fresh=True)
+    synced = refresh_rosters(db, bridge)
+    check = check_filming(db, bridge, access.team, body.kind, on, fresh=True, roster_fresh=synced)
     if not check.allowed:
         audit(
             db,
@@ -459,13 +481,28 @@ def create_video(
 @router.get("/videos/{video_id}", response_model=VideoOut)
 def get_video(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> VideoOut:
     video, access = visible_video(db, viewer, video_id)
+    if video.status != "ready" and not _manages(viewer, access):
+        raise HTTPException(404, "Video not found")
     return _video_out(db, video, access, viewer, settings)
 
 
+def _lock(db: Session, video: Video) -> None:
+    """Row lock on the video, then fresh values: completions and deletes are serialised."""
+    db.execute(
+        select(Video)
+        .where(Video.id == video.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    db.expire(video, ["files"])
+
+
 def _uploading_file(
-    db: Session, viewer: Viewer, video_id: uuid.UUID, file_id: uuid.UUID
+    db: Session, viewer: Viewer, video_id: uuid.UUID, file_id: uuid.UUID, *, lock: bool = False
 ) -> tuple[Video, VideoSourceFile, TeamAccess]:
     video, access = visible_video(db, viewer, video_id)
+    if lock:
+        _lock(db, video)
     if not can_upload(viewer, access.ref):
         raise HTTPException(403, "Only the team's coaches and sport admins upload videos")
     if video.status != "uploading":
@@ -493,11 +530,16 @@ def sign_parts(
     if any(p < 1 or p > count for p in body.parts):
         raise HTTPException(422, f"Parts run from 1 to {count}")
     assert item.object_key and item.upload_id
+    part_size = settings.upload_part_bytes
+
+    def size(p: int) -> int:  # every part is full size except the last
+        return part_size if p < count else item.bytes - part_size * (count - 1)
+
     return [
         PartUrlOut(
             part=p,
             url=store.presign_part(
-                item.object_key, item.upload_id, p, settings.upload_part_url_ttl_seconds
+                item.object_key, item.upload_id, p, size(p), settings.upload_part_url_ttl_seconds
             ),
         )
         for p in sorted(set(body.parts))
@@ -525,37 +567,80 @@ def complete_file(
     file_id: uuid.UUID,
     viewer: ViewerDep,
     db: DbDep,
+    bridge: BridgeDep,
     store: StoreDep,
     settings: SettingsDep,
+    background: BackgroundTasks,
 ) -> VideoOut:
-    video, item, access = _uploading_file(db, viewer, video_id, file_id)
+    video, item, access = _uploading_file(db, viewer, video_id, file_id, lock=True)
     if item.uploaded_at is None:
         assert item.object_key and item.upload_id
-        count = _part_count(item.bytes, settings)
-        parts = sorted(store.list_parts(item.object_key, item.upload_id), key=lambda p: p.number)
-        numbers = [p.number for p in parts]
-        if numbers != list(range(1, count + 1)):
-            missing = sorted(set(range(1, count + 1)) - set(numbers))
-            raise HTTPException(409, f"Parts missing: {missing[:10]}")
-        if sum(p.size for p in parts) != item.bytes:
-            raise HTTPException(409, "Uploaded size does not match the file size")
-        if any(p.size != settings.upload_part_bytes for p in parts[:-1]):
-            raise HTTPException(409, "Unexpected part size")
-        store.complete_multipart(item.object_key, item.upload_id, parts)
+        try:
+            _complete_multipart(store, item, settings)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if not store.upload_gone(exc) or store.size(item.object_key) != item.bytes:
+                raise
+            # An earlier call completed it but did not get to record that.
         item.uploaded_at = datetime.now(UTC)
         item.upload_id = None
-    if all(f.uploaded_at is not None for f in video.files):
-        pipeline.start_ingest(db, video, access.team)
+    db.commit()  # this file is done, whatever happens to the others
+
+    if not all(f.uploaded_at is not None for f in video.files):
+        return _video_out(db, video, access, viewer, settings)
+
+    # The last file: check the filming rules again, with fresh rosters, before ingesting
+    # (consent may have been withdrawn while the upload ran; PLAN §5.3).
+    synced = refresh_rosters(db, bridge)
+    _lock(db, video)
+    if video.status != "uploading":
+        return _video_out(db, video, access, viewer, settings)  # someone else finished it
+    check = check_filming(
+        db, bridge, access.team, video.kind, video.recorded_on, fresh=True, roster_fresh=synced
+    )
+    if not check.allowed:
+        codes = [b.code for b in check.blockers]
+        video.status = "refused"
+        video.error = "Filming was no longer allowed when the upload finished: " + ", ".join(codes)
         audit(
             db,
             viewer.member_id,
-            "video_uploaded",
+            "upload_refused",
             "video",
             str(video.id),
-            bytes=sum(f.bytes for f in video.files),
+            stage="complete",
+            blockers=codes,
         )
+        db.commit()
+        background.add_task(_purge_objects, store, [f"incoming/{video.id}/"], [])
+        raise FilmingBlocked(check)
+    pipeline.start_ingest(db, video, access.team)
+    audit(
+        db,
+        viewer.member_id,
+        "video_uploaded",
+        "video",
+        str(video.id),
+        bytes=sum(f.bytes for f in video.files),
+    )
     db.commit()
     return _video_out(db, video, access, viewer, settings)
+
+
+def _complete_multipart(store: ObjectStore, item: VideoSourceFile, settings: Settings) -> None:
+    assert item.object_key and item.upload_id
+    count = _part_count(item.bytes, settings)
+    parts = sorted(store.list_parts(item.object_key, item.upload_id), key=lambda p: p.number)
+    numbers = [p.number for p in parts]
+    if numbers != list(range(1, count + 1)):
+        missing = sorted(set(range(1, count + 1)) - set(numbers))
+        raise HTTPException(409, f"Parts missing: {missing[:10]}")
+    if sum(p.size for p in parts) != item.bytes:
+        raise HTTPException(409, "Uploaded size does not match the file size")
+    if any(p.size != settings.upload_part_bytes for p in parts[:-1]):
+        raise HTTPException(409, "Unexpected part size")
+    store.complete_multipart(item.object_key, item.upload_id, parts)
 
 
 def _purge_objects(store: ObjectStore, prefixes: list[str], uploads: list[tuple[str, str]]) -> None:
@@ -580,22 +665,54 @@ def delete_video(
     background: BackgroundTasks,
 ) -> None:
     video, access = visible_video(db, viewer, video_id)
+    _lock(db, video)
+    if video.status == "deleted":
+        raise HTTPException(404, "Video not found")
     cancelling_own_upload = video.status == "uploading" and can_upload(viewer, access.ref)
     if not (cancelling_own_upload or can_delete_video(viewer, access.ref, access.leads)):
         raise HTTPException(403, "Only the team's coaches, sport admins and admins delete videos")
     uploads = [(f.object_key, f.upload_id) for f in video.files if f.object_key and f.upload_id]
+    ingest_started = pipeline.ingest_started(db, video)
     prefixes = pipeline.mark_deleted(db, video, viewer.member_id)
     for f in video.files:
         if f.inbox_file_id:
             inbox = db.get(InboxFile, f.inbox_file_id)
-            if inbox is not None and inbox.status == "assigned" and not f.nas_path:
-                inbox.status, inbox.video_id = "new", None  # not ingested yet: back to the inbox
+            if inbox is not None and inbox.status == "assigned":
+                # Not picked up yet: the file is still in the share. Otherwise ingest moved
+                # it into the video's raw folder, which the purge job removes.
+                inbox.status = "gone" if ingest_started else "new"
+                inbox.video_id = None
     audit(db, viewer.member_id, "video_deleted", "video", str(video.id), title=video.title)
     db.commit()
     permission_cache.forget_video(video.id)  # cached segment permissions end now
     store: ObjectStore | None = request.app.state.store
     if store is not None:
         background.add_task(_purge_objects, store, prefixes, uploads)
+
+
+def sweep_deleted(db: Session, store: ObjectStore, now: datetime | None = None) -> int:
+    """Delete deleted videos' objects once more after late uploads can no longer land, and
+    retry when the first purge failed. Run by the API's background loop."""
+    now = now or datetime.now(UTC)
+    videos = db.scalars(
+        select(Video)
+        .where(
+            Video.status == "deleted",
+            Video.purged_at.is_(None),
+            Video.deleted_at < now - DELETED_SWEEP_AFTER,
+        )
+        .limit(20)
+    ).all()
+    for video in videos:
+        try:
+            for prefix in (f"media/{video.id}/", f"incoming/{video.id}/"):
+                store.delete_prefix(prefix)
+        except (BotoCoreError, ClientError):
+            log.exception("sweep of deleted video %s failed; retrying later", video.id)
+            continue
+        video.purged_at = now
+    db.commit()
+    return len(videos)
 
 
 class InboxFileOut(BaseModel):

@@ -26,6 +26,7 @@ services:
     read_only: true
     tmpfs: [/tmp, /home/nomal]
     security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
 
 secrets:
   nomal-worker-token:
