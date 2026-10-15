@@ -9,11 +9,12 @@ database trigger `nomal_write_revision`, attributed through the transaction sett
 from __future__ import annotations
 
 import uuid
+from bisect import bisect_left
 from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from nomal.core.models import (
@@ -37,11 +38,27 @@ SegmentKind = Literal[
 ]
 
 
-class EventIn(BaseModel):
+MAX_MEDIA_MS = 24 * 3600 * 1000  # no video is longer than a day
+MAX_FRAME = 10_000_000
+# Per video, to keep every write bounded (a long match has well under 2000 tags).
+MAX_EVENTS, MAX_SEGMENTS, MAX_PERIODS = 5000, 2000, 9
+
+
+class _Change(BaseModel):
+    """Every change names the version it was based on: 0 for a new item, else the version
+    the browser last saw. A change based on an older version than the server's is
+    skipped and the current item returned, so a late retry never overwrites newer work
+    (or undeletes a tag)."""
+
     id: uuid.UUID
+    base_version: int = Field(default=0, ge=0)
+    deleted: bool = False
+
+
+class EventIn(_Change):
     code: str = Field(min_length=1, max_length=8)
-    t_ms: int = Field(ge=0)
-    frame: int | None = Field(default=None, ge=0)
+    t_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
+    frame: int | None = Field(default=None, ge=0, le=MAX_FRAME)
     time_precision: Literal["live", "adjusted", "frame"] = "live"
     side: Side
     number: int | None = Field(default=None, ge=0, le=99)
@@ -51,18 +68,15 @@ class EventIn(BaseModel):
     clip_post_ms: int | None = Field(default=None, ge=0, le=60_000)
     note: str | None = Field(default=None, max_length=500)
     review: Review = "unreviewed"
-    deleted: bool = False
 
 
-class SegmentIn(BaseModel):
-    id: uuid.UUID
+class SegmentIn(_Change):
     kind: SegmentKind
-    start_ms: int = Field(ge=0)
-    end_ms: int = Field(ge=0)
-    serving: Side | None = None
+    start_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
+    end_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
+    # Who served is derived (serve tag, previous winner, the set's first server).
     won_by: Side | None = None
     review: Review = "unreviewed"
-    deleted: bool = False
 
     @model_validator(mode="after")
     def _order(self) -> SegmentIn:
@@ -71,21 +85,28 @@ class SegmentIn(BaseModel):
         return self
 
 
-class PeriodIn(BaseModel):
-    id: uuid.UUID
+class PeriodIn(_Change):
     no: int = Field(ge=1, le=9)
-    start_ms: int = Field(ge=0)
-    end_ms: int | None = Field(default=None, ge=0)
+    start_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
+    end_ms: int | None = Field(default=None, ge=0, le=MAX_MEDIA_MS)
     start_us: int = Field(default=0, ge=0, le=99)
     start_them: int = Field(default=0, ge=0, le=99)
     first_serve: Side | None = None
     our_court_side_at_start: Literal["near", "far"] | None = None
     side_switch_at_score: int | None = Field(default=None, ge=1, le=99)
-    deleted: bool = False
+
+    @model_validator(mode="after")
+    def _order(self) -> PeriodIn:
+        if self.end_ms is not None and self.end_ms <= self.start_ms:
+            raise ValueError("a set ends after it starts")
+        return self
 
 
 class TaggingError(ValueError):
     pass
+
+
+IN_USE = "this id is already in use"
 
 
 def set_actor(db: Session, member_id: int) -> None:
@@ -148,7 +169,7 @@ def _check_attributes(tax: Taxonomy, attributes: dict[str, Any]) -> dict[str, An
         raise TaggingError(f"unknown grade {grade!r}")
     for key in ("zone_from", "zone_to"):
         zone = attributes.get(key)
-        if zone is not None and zone not in tax.zones:
+        if zone is not None and (isinstance(zone, bool) or zone not in tax.zones):
             raise TaggingError(f"{key} must be one of {list(tax.zones)}")
     return {k: v for k, v in attributes.items() if v is not None}
 
@@ -161,7 +182,7 @@ EVENT_FIELDS = (
     "code", "t_ms", "frame", "time_precision", "side", "number", "member_id", "attributes",
     "segment_id", "clip_pre_ms", "clip_post_ms", "note", "review",
 )  # fmt: skip
-SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "serving", "won_by", "review")
+SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review")
 PERIOD_FIELDS = (
     "no", "start_ms", "end_ms", "start_us", "start_them", "first_serve",
     "our_court_side_at_start", "side_switch_at_score",
@@ -196,6 +217,23 @@ def upsert_event(
         return _apply_event(db, video, tax, item, attributes, member_id, actor, now)
 
 
+class Stale(Exception):
+    """The change was based on an older version; the row is left as it is."""
+
+    def __init__(self, row: Event | Segment | Period) -> None:
+        super().__init__("stale change")
+        self.row = row
+
+
+def _check_base(row: Event | Segment | Period | None, video: Video, item: _Change) -> None:
+    if row is None:
+        return
+    if row.video_id != video.id:
+        raise TaggingError(IN_USE)
+    if (row.version or 0) > item.base_version:
+        raise Stale(row)
+
+
 def _apply_event(
     db: Session,
     video: Video,
@@ -207,8 +245,7 @@ def _apply_event(
     now: datetime,
 ) -> Event:
     row = db.get(Event, item.id)
-    if row is not None and row.video_id != video.id:
-        raise TaggingError("event id belongs to another video")
+    _check_base(row, video, item)
     before = None if row is None else _snapshot(row, EVENT_FIELDS)
     if row is None:
         row = Event(id=item.id, video_id=video.id, version=0, created_by=actor, source="manual")
@@ -238,15 +275,14 @@ def upsert_segment(
     db: Session, video: Video, item: SegmentIn, actor: int, now: datetime
 ) -> Segment:
     row = db.get(Segment, item.id)
-    if row is not None and row.video_id != video.id:
-        raise TaggingError("segment id belongs to another video")
+    _check_base(row, video, item)
+    if video.duration_ms is not None and item.start_ms > video.duration_ms + 1000:
+        raise TaggingError("segment beyond the end of the video")
     before = None if row is None else _snapshot(row, SEGMENT_FIELDS)
     if row is None:
         row = Segment(id=item.id, video_id=video.id, version=0, created_by=actor, source="manual")
         db.add(row)
     row.kind, row.start_ms, row.end_ms = item.kind, item.start_ms, item.end_ms
-    if item.serving is not None:
-        row.serving = item.serving
     row.won_by, row.review = item.won_by, item.review
     _stamp(row, item.deleted, now)
     after = _snapshot(row, SEGMENT_FIELDS)
@@ -263,8 +299,9 @@ def upsert_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
 
 def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: datetime) -> Period:
     row = db.get(Period, item.id)
-    if row is not None and row.video_id != video.id:
-        raise TaggingError("period id belongs to another video")
+    _check_base(row, video, item)
+    if video.duration_ms is not None and item.start_ms > video.duration_ms + 1000:
+        raise TaggingError("set beyond the end of the video")
     before = None if row is None else _snapshot(row, PERIOD_FIELDS)
     if row is None:
         row = Period(id=item.id, video_id=video.id, version=0, created_by=actor)
@@ -339,11 +376,12 @@ def rescore(db: Session, video: Video) -> None:
             .order_by(Event.t_ms)
         ).all()
     )
+    serve_times = [t for t, _ in serves]
 
     def served_by(rally: Segment) -> str | None:
-        for t_ms, side in serves:
-            if rally.start_ms - SERVE_SLACK_MS <= t_ms <= rally.end_ms:
-                return str(side)
+        at = bisect_left(serve_times, rally.start_ms - SERVE_SLACK_MS)
+        if at < len(serves) and serves[at][0] <= rally.end_ms:
+            return str(serves[at][1])
         return None
 
     for period in periods:
@@ -370,3 +408,37 @@ def rescore(db: Session, video: Video) -> None:
 
 def now_utc() -> datetime:
     return datetime.now(UTC)
+
+
+def unlink_member(db: Session, member_id: int) -> int:
+    """A withdrawn consent turns the member's tags into "#number" (PLAN §5.4): the tags
+    stay, the link to the person goes, here and in every roster snapshot."""
+    result = db.execute(update(Event).where(Event.member_id == member_id).values(member_id=None))
+    db.execute(update(VideoRoster).where(VideoRoster.member_id == member_id).values(member_id=None))
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+def check_limits(db: Session, video: Video, events: int, segments: int) -> None:
+    """Refuse a batch that would take a video past the per-video limits."""
+    have_events = (
+        db.scalar(select(func.count()).select_from(Event).where(Event.video_id == video.id)) or 0
+    )
+    have_segments = (
+        db.scalar(select(func.count()).select_from(Segment).where(Segment.video_id == video.id))
+        or 0
+    )
+    if have_events + events > MAX_EVENTS or have_segments + segments > MAX_SEGMENTS:
+        raise TaggingError("too many tags or segments for one video")
+
+
+def check_periods(db: Session, video: Video) -> None:
+    db.flush()
+    numbers = list(
+        db.scalars(
+            select(Period.no).where(Period.video_id == video.id, Period.deleted_at.is_(None))
+        )
+    )
+    if len(numbers) != len(set(numbers)):
+        raise TaggingError("two sets with the same number")
+    if len(numbers) > MAX_PERIODS:
+        raise TaggingError("too many sets")

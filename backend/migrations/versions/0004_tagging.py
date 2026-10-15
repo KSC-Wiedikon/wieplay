@@ -22,8 +22,15 @@ LANGUAGE plpgsql AS $$
 DECLARE
   actor int := NULLIF(current_setting('nomal.actor', true), '')::int;
   act text;
+  -- Fields the server derives (score line, who served, which set): a rescore that only
+  -- changes these is not someone's edit and leaves no revision.
+  derived text[] := CASE TG_TABLE_NAME
+    WHEN 'segment' THEN ARRAY['score_us_after', 'score_them_after', 'score_source',
+                              'score_confidence', 'score_conflict', 'serving', 'period_id',
+                              'updated_at']
+    ELSE ARRAY['updated_at'] END;
 BEGIN
-  IF TG_OP = 'UPDATE' AND to_jsonb(OLD) = to_jsonb(NEW) THEN
+  IF TG_OP = 'UPDATE' AND (to_jsonb(OLD) - derived) = (to_jsonb(NEW) - derived) THEN
     RETURN NEW;
   END IF;
   IF TG_OP = 'INSERT' THEN act := 'create';

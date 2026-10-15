@@ -90,7 +90,7 @@ def test_tags_make_rallies_and_the_score(
     assert events[their_serve["id"]]["member_id"] is None
 
     # Correcting the first rally rescores the rest.
-    r1["won_by"] = "them"
+    r1["won_by"], r1["base_version"] = "them", 1
     again = club["coach"].post(f"/api/videos/{ready['id']}/changes", json={"segments": [r1]})
     segs = {s["id"]: s for s in again.json()["segments"]}
     assert (segs[r3["id"]]["score_us_after"], segs[r3["id"]]["score_them_after"]) == (1, 2)
@@ -104,9 +104,9 @@ def test_writes_are_idempotent_and_revisioned(
     first = club["coach"].post(url, json={"events": [t]}).json()["events"][0]
     resent = club["coach"].post(url, json={"events": [t]}).json()["events"][0]
     assert first["version"] == resent["version"] == 1  # a replay changes nothing
-    t["attributes"]["grade"] = "#"
+    t["attributes"]["grade"], t["base_version"] = "#", 1
     assert club["coach"].post(url, json={"events": [t]}).json()["events"][0]["version"] == 2
-    t["deleted"] = True
+    t["deleted"], t["base_version"] = True, 2
     club["coach"].post(url, json={"events": [t]})
     bundle = club["coach"].get(f"/api/videos/{ready['id']}/tagging").json()
     assert all(e["id"] != t["id"] for e in bundle["events"])
@@ -206,3 +206,108 @@ def test_the_taxonomy_table_is_seeded(club: dict[str, TestClient], db_engine: En
     assert [r.code for r in rows] == ["A", "B", "D", "E", "F", "R", "S"]
     assert dict(rows)["A"] == {"#": "self", "=": "other", "/": "other"}
     assert club["coach"].get("/api/taxonomies/basketball").status_code == 404
+
+
+# --- After the review of the M2 backend ------------------------------------------------------
+
+
+def test_a_late_retry_never_overwrites_or_undeletes(
+    ready: dict[str, Any], club: dict[str, TestClient]
+) -> None:
+    url = f"/api/videos/{ready['id']}/changes"
+    create = tag("A", 5_000, grade="+")
+    club["coach"].post(url, json={"events": [create]})
+    club["coach"].post(url, json={"events": [{**create, "deleted": True, "base_version": 1}]})
+    late = club["coach"].post(url, json={"events": [create]}).json()  # the create, again
+    assert late["stale"] == [create["id"]]
+    bundle = club["coach"].get(f"/api/videos/{ready['id']}/tagging").json()
+    assert all(e["id"] != create["id"] for e in bundle["events"])  # still deleted
+
+
+def test_several_changes_to_one_item_in_a_batch(
+    ready: dict[str, Any], club: dict[str, TestClient]
+) -> None:
+    first = tag("S", 1_000, side="them", number=None)
+    second = {**first, "attributes": {"grade": "="}}
+    period = {"id": str(uuid.uuid4()), "no": 1, "start_ms": 0}
+    body = {"events": [first, second], "periods": [period, {**period, "start_us": 3}]}
+    out = club["coach"].post(f"/api/videos/{ready['id']}/changes", json=body)
+    assert out.status_code == 200, out.text
+    assert out.json()["events"][0]["attributes"] == {"grade": "="}
+    assert out.json()["periods"][0]["start_us"] == 3
+
+
+def test_the_roster_only_takes_members_of_this_team(
+    ready: dict[str, Any], club: dict[str, TestClient]
+) -> None:
+    url = f"/api/videos/{ready['id']}/roster"
+    for outsider in (110, 107):  # DU23-1's minor, a basketball player
+        entries = [{"side": "us", "number": 9, "member_id": outsider}]
+        r = club["coach"].put(url, json={"entries": entries})
+        assert r.status_code == 422, outsider
+    assert club["coach"].put(url, json={"entries": []}).status_code == 422
+    huge = [{"side": "us", "number": 9, "member_id": 2**31}]
+    assert club["coach"].put(url, json={"entries": huge}).status_code == 422
+
+
+def test_bounds_and_references_are_checked(
+    ready: dict[str, Any], club: dict[str, TestClient]
+) -> None:
+    url = f"/api/videos/{ready['id']}/changes"
+    bad_bodies = [
+        {"events": [tag("A", 1_000, zone_from=True)]},
+        {"events": [{**tag("A", 1_000), "frame": 2**31}]},
+        {"events": [{**tag("A", 1_000), "segment_id": str(uuid.uuid4())}]},
+        {"segments": [rally(1_000, 10**19, None)]},
+        {"segments": [rally(10**9, 10**9 + 5_000, None)]},  # past the end of the video
+        {"periods": [{"id": str(uuid.uuid4()), "no": 1, "start_ms": 5_000, "end_ms": 4_000}]},
+        {
+            "periods": [
+                {"id": str(uuid.uuid4()), "no": 1, "start_ms": 0},
+                {"id": str(uuid.uuid4()), "no": 1, "start_ms": 60_000},
+            ]
+        },
+    ]
+    for body in bad_bodies:
+        assert club["coach"].post(url, json=body).status_code == 422, body
+
+
+def test_rescoring_writes_no_revisions(
+    ready: dict[str, Any], club: dict[str, TestClient], db_engine: Engine
+) -> None:
+    period = {"id": str(uuid.uuid4()), "no": 1, "start_ms": 0, "first_serve": "us"}
+    r1 = rally(1_000, 5_000, "us")
+    club["coach"].post(
+        f"/api/videos/{ready['id']}/changes", json={"periods": [period], "segments": [r1]}
+    )
+    with db_engine.connect() as conn:
+        actions = conn.execute(text("SELECT action FROM segment_revision")).scalars().all()
+    assert actions == ["create"]  # the score the server added is not someone's edit
+
+
+def test_withdrawing_consent_turns_tags_into_numbers(
+    ready: dict[str, Any], club: dict[str, TestClient], as_: Any
+) -> None:
+    url = f"/api/videos/{ready['id']}/changes"
+    mine = tag("A", 1_000, number=7, grade="#")  # Alex Muster, member 101
+    club["coach"].post(url, json={"events": [mine]})
+    as_("player-h3").put("/api/me/consent", json={"status": "withdrawn"})
+    bundle = club["coach"].get(f"/api/videos/{ready['id']}/tagging").json()
+    event = next(e for e in bundle["events"] if e["id"] == mine["id"])
+    assert event["member_id"] is None and event["number"] == 7
+    assert all(r["member_id"] != 101 for r in bundle["roster"])
+
+
+def test_simultaneous_first_opens_take_one_snapshot(
+    ready: dict[str, Any], as_: Any, db_engine: Engine
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    coaches = [as_("coach-h3") for _ in range(12)]
+    url = f"/api/videos/{ready['id']}/tagging"
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        codes = list(pool.map(lambda c: c.get(url).status_code, coaches))
+    assert codes == [200] * 12
+    with db_engine.connect() as conn:
+        rows = conn.execute(text("SELECT count(*) FROM video_roster")).scalar()
+    assert rows == 4

@@ -20,7 +20,17 @@ from sqlalchemy.orm import Session
 from nomal.api.access import TeamAccess, visible_video
 from nomal.api.deps import DbDep, ViewerDep
 from nomal.core import tagging
-from nomal.core.models import Event, Period, Segment, Video, VideoRoster, WdGame, WdMember
+from nomal.core.models import (
+    Event,
+    Period,
+    Segment,
+    Video,
+    VideoRoster,
+    WdGame,
+    WdMember,
+    WdTeam,
+    WdTeamMember,
+)
 from nomal.core.permissions import Viewer, can_delete_video, can_tag, can_upload
 from nomal.core.taxonomy import SPORTS_WITH_TAXONOMY, Taxonomy, load
 
@@ -33,7 +43,7 @@ REVISION_FIELDS = ("code", "t_ms", "side", "number", "attributes", "deleted_at")
 class RosterEntry(BaseModel):
     side: Literal["us", "them"]
     number: int = Field(ge=0, le=99)
-    member_id: int | None = None
+    member_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
     position: str | None = Field(default=None, max_length=32)
     is_libero: bool = False
 
@@ -43,7 +53,7 @@ class RosterOut(RosterEntry):
 
 
 class RosterIn(BaseModel):
-    entries: list[RosterEntry] = Field(max_length=60)
+    entries: list[RosterEntry] = Field(min_length=1, max_length=60)
 
 
 class EventOut(BaseModel):
@@ -119,6 +129,9 @@ class ChangesOut(BaseModel):
     events: list[EventOut]
     segments: list[SegmentOut]
     periods: list[PeriodOut]
+    # Changes skipped because the server had a newer version; the lists above carry the
+    # current state of those items, which the browser takes over.
+    stale: list[uuid.UUID]
 
 
 class EventPutIn(tagging.EventIn):
@@ -137,6 +150,17 @@ def _readable(db: Session, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, 
     return video, access
 
 
+def _lock(db: Session, video: Video) -> None:
+    """One writer per video at a time: the roster snapshot and the rescore read and write
+    the whole video, so concurrent taggers are serialised here."""
+    db.execute(
+        select(Video)
+        .where(Video.id == video.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
 def _writable(db: Session, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, Taxonomy]:
     video, access = _readable(db, viewer, video_id)
     if not can_tag(viewer, access.ref, access.leads):
@@ -146,6 +170,7 @@ def _writable(db: Session, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, 
     tax = _taxonomy(video.sport)
     if tax is None:
         raise HTTPException(409, f"No tagging vocabulary for {video.sport} yet")
+    _lock(db, video)
     tagging.set_actor(db, viewer.member_id)
     tagging.ensure_roster(db, video)  # numbers resolve through the snapshot from the first tag
     return video, tax
@@ -219,11 +244,11 @@ def get_taxonomy(sport: str, _: ViewerDep) -> dict[str, Any]:
 def get_tagging(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> TaggingOut:
     video, access = _readable(db, viewer, video_id)
     writer = can_tag(viewer, access.ref, access.leads)
-    if writer and video.status == "ready":
+    rows = list(db.scalars(select(VideoRoster).where(VideoRoster.video_id == video.id)))
+    if writer and video.status == "ready" and not rows:
+        _lock(db, video)  # two first opens at once must not both take the snapshot
         rows = tagging.ensure_roster(db, video)
         db.commit()
-    else:
-        rows = list(db.scalars(select(VideoRoster).where(VideoRoster.video_id == video.id)))
     tax = _taxonomy(video.sport)
     return TaggingOut(
         can_tag=writer and video.status == "ready" and tax is not None,
@@ -245,46 +270,81 @@ def put_roster(
     keys = [(e.side, e.number) for e in body.entries]
     if len(keys) != len(set(keys)):
         raise HTTPException(422, "A number appears twice on one side")
-    team_members = {
-        r.member_id for r in tagging.ensure_roster(db, video) if r.member_id is not None
-    }
+    # Only people of this team (any season) can be named: a roster edit must not reach
+    # other teams' members, let alone teams switched off for minors.
+    team_members = set(
+        db.scalars(
+            select(WdTeamMember.member_id)
+            .join(WdTeam, WdTeam.id == WdTeamMember.team_id)
+            .where(WdTeam.lineage_id == video.lineage_id)
+        )
+    )
     for entry in body.entries:
         if entry.side == "them" and entry.member_id is not None:
             raise HTTPException(422, "Opponents are numbers only")
         if entry.member_id is not None and entry.member_id not in team_members:
-            known = db.get(WdMember, entry.member_id)
-            if known is None:
-                raise HTTPException(422, f"Unknown member {entry.member_id}")
+            raise HTTPException(422, "Only members of this team can be on its roster")
     db.query(VideoRoster).filter(VideoRoster.video_id == video.id).delete()
     db.add_all(VideoRoster(video_id=video.id, **e.model_dump()) for e in body.entries)
     db.flush()
-    # Tags follow the new numbers.
+    # Tags follow the new numbers; a changed link is a new version of the tag.
     mapping = {e.number: e.member_id for e in body.entries if e.side == "us"}
     for event in db.scalars(select(Event).where(Event.video_id == video.id, Event.side == "us")):
         member = mapping.get(event.number) if event.number is not None else None
         if event.member_id != member:
             event.member_id = member
+            event.version += 1
+            event.updated_by = viewer.member_id
     db.commit()
-    return _roster_out(
-        db, list(db.scalars(select(VideoRoster).where(VideoRoster.video_id == video.id)))
-    )
+    rows = list(db.scalars(select(VideoRoster).where(VideoRoster.video_id == video.id)))
+    return _roster_out(db, rows)
+
+
+def _last_by_id[C: (tagging.EventIn, tagging.SegmentIn, tagging.PeriodIn)](
+    items: list[C],
+) -> list[C]:
+    """An outbox can hold several changes to one item: the last one counts."""
+    latest: dict[uuid.UUID, C] = {}
+    for item in items:
+        latest.pop(item.id, None)
+        latest[item.id] = item
+    return list(latest.values())
 
 
 @router.post("/videos/{video_id}/changes", response_model=ChangesOut)
 def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: DbDep) -> ChangesOut:
-    """Apply a batch from the outbox. Each item is an idempotent upsert by its id; the last
-    write wins and every change lands in the revision log."""
+    """Apply a batch from the outbox. Each item is an upsert by its id, based on the version
+    the browser last saw; stale changes are skipped and reported. Every applied change
+    lands in the revision log."""
     video, tax = _writable(db, viewer, video_id)
     now = tagging.now_utc()
+    periods, segments = _last_by_id(body.periods), _last_by_id(body.segments)
+    items = _last_by_id(body.events)
+    stale: list[uuid.UUID] = []
+    events: list[Event] = []
     try:
-        for period in body.periods:
-            tagging.upsert_period(db, video, period, viewer.member_id, now)
-        for segment in body.segments:
-            tagging.upsert_segment(db, video, segment, viewer.member_id, now)
-        events = [
-            tagging.upsert_event(db, video, tax, item, viewer.member_id, now)
-            for item in body.events
-        ]
+        tagging.check_limits(db, video, len(items), len(segments))
+        for period in periods:
+            try:
+                tagging.upsert_period(db, video, period, viewer.member_id, now)
+            except tagging.Stale:
+                stale.append(period.id)
+        for segment in segments:
+            try:
+                tagging.upsert_segment(db, video, segment, viewer.member_id, now)
+            except tagging.Stale:
+                stale.append(segment.id)
+        tagging.check_periods(db, video)
+        known_segments = set(db.scalars(select(Segment.id).where(Segment.video_id == video.id)))
+        for item in items:
+            if item.segment_id is not None and item.segment_id not in known_segments:
+                raise tagging.TaggingError("a tag points at a rally that does not exist")
+            try:
+                events.append(tagging.upsert_event(db, video, tax, item, viewer.member_id, now))
+            except tagging.Stale as exc:
+                stale.append(item.id)
+                assert isinstance(exc.row, Event)
+                events.append(exc.row)
         tagging.rescore(db, video)
     except tagging.TaggingError as exc:
         db.rollback()
@@ -294,6 +354,7 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
         events=[EventOut.model_validate(e, from_attributes=True) for e in events],
         segments=_segments(db, video),
         periods=_periods(db, video),
+        stale=stale,
     )
 
 
@@ -303,7 +364,16 @@ def put_event(event_id: uuid.UUID, body: EventPutIn, viewer: ViewerDep, db: DbDe
         raise HTTPException(422, "Path and body ids differ")
     video, tax = _writable(db, viewer, body.video_id)
     try:
-        event = tagging.upsert_event(db, video, tax, body, viewer.member_id, tagging.now_utc())
+        if body.segment_id is not None:
+            segment = db.get(Segment, body.segment_id)
+            if segment is None or segment.video_id != video.id:
+                raise tagging.TaggingError("a tag points at a rally that does not exist")
+        tagging.check_limits(db, video, 1, 0)
+        try:
+            event = tagging.upsert_event(db, video, tax, body, viewer.member_id, tagging.now_utc())
+        except tagging.Stale as exc:
+            db.rollback()
+            return EventOut.model_validate(exc.row, from_attributes=True)
         tagging.rescore(db, video)
     except tagging.TaggingError as exc:
         db.rollback()
