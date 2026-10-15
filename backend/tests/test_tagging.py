@@ -257,7 +257,6 @@ def test_bounds_and_references_are_checked(
     bad_bodies = [
         {"events": [tag("A", 1_000, zone_from=True)]},
         {"events": [{**tag("A", 1_000), "frame": 2**31}]},
-        {"events": [{**tag("A", 1_000), "segment_id": str(uuid.uuid4())}]},
         {"segments": [rally(1_000, 10**19, None)]},
         {"segments": [rally(10**9, 10**9 + 5_000, None)]},  # past the end of the video
         {"periods": [{"id": str(uuid.uuid4()), "no": 1, "start_ms": 5_000, "end_ms": 4_000}]},
@@ -311,3 +310,37 @@ def test_simultaneous_first_opens_take_one_snapshot(
     with db_engine.connect() as conn:
         rows = conn.execute(text("SELECT count(*) FROM video_roster")).scalar()
     assert rows == 4
+
+
+def test_server_links_tags_to_rallies_and_resends_are_not_conflicts(
+    ready: dict[str, Any], club: dict[str, TestClient]
+) -> None:
+    url = f"/api/videos/{ready['id']}/changes"
+    kill = tag("A", 8_000, grade="#")
+    out = club["coach"].post(url, json={"events": [kill]}).json()
+    assert out["events"][0]["segment_id"] is None  # the rally is still open in the browser
+    r1 = rally(1_000, 10_000, "us")
+    club["coach"].post(url, json={"segments": [r1]})
+    bundle = club["coach"].get(f"/api/videos/{ready['id']}/tagging").json()
+    assert bundle["events"][0]["segment_id"] == r1["id"]
+    # The answer to the first send got lost; the browser sends the same change again.
+    again = club["coach"].post(url, json={"events": [kill]}).json()
+    assert again["stale"] == [] and again["events"][0]["version"] == 1
+    # Deleting a rally echoes it back with its new version, for undo.
+    gone = club["coach"].post(url, json={"segments": [{**r1, "deleted": True, "base_version": 1}]})
+    echoed = next(s for s in gone.json()["segments"] if s["id"] == r1["id"])
+    assert echoed["deleted_at"] is not None and echoed["version"] == 2
+    bundle = club["coach"].get(f"/api/videos/{ready['id']}/tagging").json()
+    assert bundle["events"][0]["segment_id"] is None
+
+
+def test_roster_candidates_are_the_teams_players(
+    ready: dict[str, Any], club: dict[str, TestClient], as_: Any
+) -> None:
+    url = f"/api/videos/{ready['id']}/roster/candidates"
+    people = club["coach"].get(url).json()
+    assert [(c["number"], c["consent"]) for c in people] == [
+        (1, "accepted"), (3, "accepted"), (7, "accepted"), (11, "accepted"),
+    ]  # fmt: skip
+    assert as_("vb-sport-admin").get(url).status_code == 200
+    assert as_("player-h3").get(url).status_code == 403

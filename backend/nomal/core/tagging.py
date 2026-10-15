@@ -178,9 +178,11 @@ def _snapshot(row: Event | Segment | Period, fields: tuple[str, ...]) -> tuple[A
     return (*(getattr(row, f, None) for f in fields), row.deleted_at is not None)
 
 
+# What a tagger sets. member_id (from the roster) and segment_id (the rally by time) are
+# derived by the server.
 EVENT_FIELDS = (
-    "code", "t_ms", "frame", "time_precision", "side", "number", "member_id", "attributes",
-    "segment_id", "clip_pre_ms", "clip_post_ms", "note", "review",
+    "code", "t_ms", "frame", "time_precision", "side", "number", "attributes",
+    "clip_pre_ms", "clip_post_ms", "note", "review",
 )  # fmt: skip
 SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review")
 PERIOD_FIELDS = (
@@ -225,13 +227,28 @@ class Stale(Exception):
         self.row = row
 
 
-def _check_base(row: Event | Segment | Period | None, video: Video, item: _Change) -> None:
+def _check_base(
+    row: Event | Segment | Period | None,
+    video: Video,
+    item: _Change,
+    intended: tuple[Any, ...],
+    fields: tuple[str, ...],
+) -> bool:
+    """False when there is nothing to do. A change based on an older version is stale,
+    unless it asks for exactly what the item already is (a resend after a lost answer)."""
     if row is None:
-        return
+        return True
     if row.video_id != video.id:
         raise TaggingError(IN_USE)
     if (row.version or 0) > item.base_version:
+        if _snapshot(row, fields) == intended:
+            return False
         raise Stale(row)
+    return True
+
+
+def _intended(item: _Change, fields: tuple[str, ...], **overrides: Any) -> tuple[Any, ...]:
+    return (*(overrides.get(f, getattr(item, f, None)) for f in fields), item.deleted)
 
 
 def _apply_event(
@@ -245,7 +262,11 @@ def _apply_event(
     now: datetime,
 ) -> Event:
     row = db.get(Event, item.id)
-    _check_base(row, video, item)
+    if not _check_base(
+        row, video, item, _intended(item, EVENT_FIELDS, attributes=attributes), EVENT_FIELDS
+    ):
+        assert row is not None
+        return row
     before = None if row is None else _snapshot(row, EVENT_FIELDS)
     if row is None:
         row = Event(id=item.id, video_id=video.id, version=0, created_by=actor, source="manual")
@@ -260,7 +281,6 @@ def _apply_event(
     row.side, row.number = item.side, item.number
     row.member_id = member_id
     row.attributes = attributes
-    row.segment_id = item.segment_id
     row.clip_pre_ms, row.clip_post_ms, row.note = item.clip_pre_ms, item.clip_post_ms, item.note
     row.review = item.review
     _stamp(row, item.deleted, now)
@@ -275,7 +295,9 @@ def upsert_segment(
     db: Session, video: Video, item: SegmentIn, actor: int, now: datetime
 ) -> Segment:
     row = db.get(Segment, item.id)
-    _check_base(row, video, item)
+    if not _check_base(row, video, item, _intended(item, SEGMENT_FIELDS), SEGMENT_FIELDS):
+        assert row is not None
+        return row
     if video.duration_ms is not None and item.start_ms > video.duration_ms + 1000:
         raise TaggingError("segment beyond the end of the video")
     before = None if row is None else _snapshot(row, SEGMENT_FIELDS)
@@ -299,7 +321,9 @@ def upsert_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
 
 def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: datetime) -> Period:
     row = db.get(Period, item.id)
-    _check_base(row, video, item)
+    if not _check_base(row, video, item, _intended(item, PERIOD_FIELDS), PERIOD_FIELDS):
+        assert row is not None
+        return row
     if video.duration_ms is not None and item.start_ms > video.duration_ms + 1000:
         raise TaggingError("set beyond the end of the video")
     before = None if row is None else _snapshot(row, PERIOD_FIELDS)
@@ -353,6 +377,8 @@ def rescore(db: Session, video: Video) -> None:
             ):
                 found = period
         return found
+
+    _link_events(db, video, rallies)
 
     by_period: dict[uuid.UUID | None, list[Segment]] = {}
     for rally in rallies:
@@ -418,16 +444,19 @@ def unlink_member(db: Session, member_id: int) -> int:
     return int(getattr(result, "rowcount", 0) or 0)
 
 
-def check_limits(db: Session, video: Video, events: int, segments: int) -> None:
-    """Refuse a batch that would take a video past the per-video limits."""
-    have_events = (
-        db.scalar(select(func.count()).select_from(Event).where(Event.video_id == video.id)) or 0
-    )
-    have_segments = (
-        db.scalar(select(func.count()).select_from(Segment).where(Segment.video_id == video.id))
-        or 0
-    )
-    if have_events + events > MAX_EVENTS or have_segments + segments > MAX_SEGMENTS:
+def check_limits(
+    db: Session, video: Video, event_ids: list[uuid.UUID], segment_ids: list[uuid.UUID]
+) -> None:
+    """Refuse a batch that would take a video past the per-video limits (new items only)."""
+
+    def count(model: type[Event] | type[Segment], ids: list[uuid.UUID]) -> tuple[int, int]:
+        have = db.scalar(select(func.count()).select_from(model).where(model.video_id == video.id))
+        known = db.scalar(select(func.count()).select_from(model).where(model.id.in_(ids)))
+        return int(have or 0), len(ids) - int(known or 0)
+
+    have_events, new_events = count(Event, event_ids)
+    have_segments, new_segments = count(Segment, segment_ids)
+    if have_events + new_events > MAX_EVENTS or have_segments + new_segments > MAX_SEGMENTS:
         raise TaggingError("too many tags or segments for one video")
 
 
@@ -442,3 +471,16 @@ def check_periods(db: Session, video: Video) -> None:
         raise TaggingError("two sets with the same number")
     if len(numbers) > MAX_PERIODS:
         raise TaggingError("too many sets")
+
+
+def _link_events(db: Session, video: Video, rallies: list[Segment]) -> None:
+    """Each tag belongs to the rally it falls in, by time: the browser tags a rally that is
+    still open, so the server makes the link. Derived: no new version, no revision."""
+    starts = [r.start_ms for r in rallies]
+    events = db.scalars(select(Event).where(Event.video_id == video.id, Event.deleted_at.is_(None)))
+    for event in events:
+        at = bisect_left(starts, event.t_ms + 1) - 1
+        rally = rallies[at] if at >= 0 and rallies[at].end_ms >= event.t_ms else None
+        segment_id = rally.id if rally is not None else None
+        if event.segment_id != segment_id:
+            event.segment_id = segment_id

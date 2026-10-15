@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nomal.api.access import TeamAccess, visible_video
-from nomal.api.deps import DbDep, ViewerDep
+from nomal.api.deps import DbDep, ViewerDep, audit
 from nomal.core import tagging
 from nomal.core.models import (
     Event,
@@ -74,6 +74,7 @@ class EventOut(BaseModel):
     review: str
     version: int
     updated_at: datetime
+    deleted_at: datetime | None
 
 
 class SegmentOut(BaseModel):
@@ -90,6 +91,7 @@ class SegmentOut(BaseModel):
     source: str
     review: str
     version: int
+    deleted_at: datetime | None
 
 
 class PeriodOut(BaseModel):
@@ -105,6 +107,7 @@ class PeriodOut(BaseModel):
     final_us: int | None
     final_them: int | None
     version: int
+    deleted_at: datetime | None
 
 
 class TaggingOut(BaseModel):
@@ -202,19 +205,28 @@ def _events(db: Session, video: Video) -> list[EventOut]:
     return [EventOut.model_validate(r, from_attributes=True) for r in rows]
 
 
-def _segments(db: Session, video: Video) -> list[SegmentOut]:
+def _segments(
+    db: Session, video: Video, touched: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset()
+) -> list[SegmentOut]:
+    """Live segments, plus deleted ones this request touched (the browser needs their
+    version to undo the delete)."""
     rows = db.scalars(
         select(Segment)
-        .where(Segment.video_id == video.id, Segment.deleted_at.is_(None))
+        .where(
+            Segment.video_id == video.id,
+            Segment.deleted_at.is_(None) | Segment.id.in_(touched),
+        )
         .order_by(Segment.start_ms)
     )
     return [SegmentOut.model_validate(r, from_attributes=True) for r in rows]
 
 
-def _periods(db: Session, video: Video) -> list[PeriodOut]:
+def _periods(
+    db: Session, video: Video, touched: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset()
+) -> list[PeriodOut]:
     rows = db.scalars(
         select(Period)
-        .where(Period.video_id == video.id, Period.deleted_at.is_(None))
+        .where(Period.video_id == video.id, Period.deleted_at.is_(None) | Period.id.in_(touched))
         .order_by(Period.no)
     )
     return [PeriodOut.model_validate(r, from_attributes=True) for r in rows]
@@ -292,9 +304,9 @@ def put_roster(
     for event in db.scalars(select(Event).where(Event.video_id == video.id, Event.side == "us")):
         member = mapping.get(event.number) if event.number is not None else None
         if event.member_id != member:
-            event.member_id = member
-            event.version += 1
-            event.updated_by = viewer.member_id
+            event.member_id = member  # derived from the roster: no new version
+    audit(db, viewer.member_id, "roster_changed", "video", str(video.id),
+          entries=len(body.entries))  # fmt: skip
     db.commit()
     rows = list(db.scalars(select(VideoRoster).where(VideoRoster.video_id == video.id)))
     return _roster_out(db, rows)
@@ -323,7 +335,7 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
     stale: list[uuid.UUID] = []
     events: list[Event] = []
     try:
-        tagging.check_limits(db, video, len(items), len(segments))
+        tagging.check_limits(db, video, [i.id for i in items], [s.id for s in segments])
         for period in periods:
             try:
                 tagging.upsert_period(db, video, period, viewer.member_id, now)
@@ -335,10 +347,7 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
             except tagging.Stale:
                 stale.append(segment.id)
         tagging.check_periods(db, video)
-        known_segments = set(db.scalars(select(Segment.id).where(Segment.video_id == video.id)))
-        for item in items:
-            if item.segment_id is not None and item.segment_id not in known_segments:
-                raise tagging.TaggingError("a tag points at a rally that does not exist")
+        for item in items:  # the rally of a tag is set by the server, by time
             try:
                 events.append(tagging.upsert_event(db, video, tax, item, viewer.member_id, now))
             except tagging.Stale as exc:
@@ -352,8 +361,8 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
     db.commit()
     return ChangesOut(
         events=[EventOut.model_validate(e, from_attributes=True) for e in events],
-        segments=_segments(db, video),
-        periods=_periods(db, video),
+        segments=_segments(db, video, {s.id for s in segments}),
+        periods=_periods(db, video, {p.id for p in periods}),
         stale=stale,
     )
 
@@ -364,11 +373,7 @@ def put_event(event_id: uuid.UUID, body: EventPutIn, viewer: ViewerDep, db: DbDe
         raise HTTPException(422, "Path and body ids differ")
     video, tax = _writable(db, viewer, body.video_id)
     try:
-        if body.segment_id is not None:
-            segment = db.get(Segment, body.segment_id)
-            if segment is None or segment.video_id != video.id:
-                raise tagging.TaggingError("a tag points at a rally that does not exist")
-        tagging.check_limits(db, video, 1, 0)
+        tagging.check_limits(db, video, [body.id], [])
         try:
             event = tagging.upsert_event(db, video, tax, body, viewer.member_id, tagging.now_utc())
         except tagging.Stale as exc:
@@ -408,3 +413,40 @@ def event_revisions(event_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[d
         }
         for r in rows
     ]
+
+
+class CandidateOut(BaseModel):
+    member_id: int
+    name: str
+    number: int | None
+    consent: str | None  # accepted | withdrawn | None (not answered)
+
+
+@router.get("/videos/{video_id}/roster/candidates", response_model=list[CandidateOut])
+def roster_candidates(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[CandidateOut]:
+    """People who can go on this video's roster: the team's players in any season."""
+    video, access = _readable(db, viewer, video_id)
+    if not can_tag(viewer, access.ref, access.leads):
+        raise HTTPException(403, "Only the team's coaches and sport admins edit the roster")
+    from nomal.core.filming import current_consent
+
+    members = list(
+        db.scalars(
+            select(WdMember)
+            .join(WdTeamMember, WdTeamMember.member_id == WdMember.id)
+            .join(WdTeam, WdTeam.id == WdTeamMember.team_id)
+            .where(WdTeam.lineage_id == video.lineage_id, WdTeamMember.rel == "player")
+            .distinct()
+        )
+    )
+    consent = current_consent(db, [m.id for m in members])
+    out = [
+        CandidateOut(
+            member_id=m.id,
+            name=m.display_name,
+            number=m.number,
+            consent=consent[m.id].status if m.id in consent else None,
+        )
+        for m in members
+    ]
+    return sorted(out, key=lambda c: (c.number is None, c.number or 0, c.name))

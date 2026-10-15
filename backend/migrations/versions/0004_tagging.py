@@ -28,6 +28,7 @@ DECLARE
     WHEN 'segment' THEN ARRAY['score_us_after', 'score_them_after', 'score_source',
                               'score_confidence', 'score_conflict', 'serving', 'period_id',
                               'updated_at']
+    WHEN 'event' THEN ARRAY['updated_at', 'member_id', 'segment_id']
     ELSE ARRAY['updated_at'] END;
 BEGIN
   IF TG_OP = 'UPDATE' AND (to_jsonb(OLD) - derived) = (to_jsonb(NEW) - derived) THEN
