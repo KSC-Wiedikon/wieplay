@@ -31,7 +31,6 @@ from nomal.api.media import permission_cache
 from nomal.core import pipeline
 from nomal.core.config import Settings
 from nomal.core.filming import (
-    NOTICE_VERSION,
     Blocker,
     FilmingCheck,
     check_filming,
@@ -85,7 +84,6 @@ class VideoConfigOut(BaseModel):
     part_size: int
     max_file_bytes: int
     max_files: int
-    notice_version: str
 
 
 class RenditionOut(BaseModel):
@@ -276,7 +274,6 @@ def video_config(_: ViewerDep, settings: SettingsDep) -> VideoConfigOut:
         part_size=settings.upload_part_bytes,
         max_file_bytes=settings.max_file_bytes,
         max_files=settings.max_files_per_video,
-        notice_version=NOTICE_VERSION,
     )
 
 
@@ -626,7 +623,7 @@ def complete_file(
         return _video_out(db, video, access, viewer, settings)
 
     # The last file: check the filming rules again, with fresh rosters, before ingesting
-    # (consent may have been withdrawn while the upload ran; PLAN §5.3).
+    # (a roster or the team's policy may have changed while the upload ran; PLAN §5.3).
     synced = refresh_rosters(db, bridge)
     _lock(db, video)
     if video.status != "uploading":

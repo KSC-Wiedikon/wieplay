@@ -98,7 +98,7 @@ From the Q&A on 15.10.2026 (second round supersedes the first):
 | D9 | Brand | Own Nomal brand (§13): assets in `docs/brand/`, `-vb` / `-bb` variants (default `vb`), wordmark "nomal" in Bricolage Grotesque ExtraBold. |
 | D10 | Budget | **~CHF 210 per season** running cost in total (cloud GPU ~80, backup storage ~50, test GPU ~35, reserve). Lines that would exceed it are flagged (§16). |
 | D11 | Tier 2 scope | Includes dead-time skipping (like Balltime) and automatic scoring. |
-| D12 | Defaults accepted | Download policy (coaches only, watermarked, 30 days), retention (season + 1), audio kept with per-video mute, players who leave lose access, consent opt-in. |
+| D12 | Defaults accepted | Download policy (coaches only, watermarked, 30 days), retention (season + 1), audio kept with per-video mute, players who leave lose access, no per-player consent (16.10.2026, §5.4). |
 | D13 | Opponents | Opponents in adult leagues are adults (the club's position, 15.10.2026); no per-upload confirmation (§5.3). |
 | D14 | Camera models | Not collected: Nomal reads resolution, frame rate and codec from each file (§7.1). |
 
@@ -344,14 +344,16 @@ linked to a game are refused for that team, and its upcoming games show *filming
 
 ### 5.4 Consent and information
 
-Explicit **opt-in per player** (accepted default), recorded in Nomal (`consent`: notice
-version, accepted/withdrawn, how). New players see it on first login; the coach can record a
-paper consent. A team can be filmed when every current roster player has opted in.
-Withdrawal turns the player's tags into "#7", deletes their personal reels, and blocks
-filming of the team until resolved. The consent text names the processors (§5.6) and describes
-GPU processing as "on club hardware, or at a provider in Switzerland or the EU named on the
-privacy page", so the planned move (§8.6) needs an updated privacy page and a notice to
-members, not a new consent round.
+**No per-player consent** (decided 16.10.2026, replacing the opt-in of the first plan).
+Swiss Volley allows anyone to record a match (Volleyballreglement 2026/27, Art. 86 "video
+recording": third parties may record; the home team provides the opponent's camera spot
+behind the court, centred, about 3 m high). The club films its own matches and trainings
+on that basis and informs its members instead of asking each one: the privacy page and
+`docs/PRIVACY.md` say what is filmed, who sees it, the processors (§5.6) and GPU processing
+"on club hardware, or at a provider in Switzerland or the EU named on the privacy page", so
+the planned move (§8.6) needs an updated privacy page and a notice to members. A member who
+objects asks a coach or admin, who can delete a video or untag them. The adult gate (§5.3)
+and the team policy stay.
 
 The club's privacy policy on `kscw.ch` gets a Nomal section; Nomal has its own short privacy
 page (what, why, who sees it, how long, processors, contact, rights).
@@ -627,7 +629,7 @@ become rows.
 session          id_hash, member_id, claims jsonb, created_at, expires_at, last_seen_at, user_agent
 login_nonce      jti, used_at
 team_grant       lineage_id, member_id, grant 'analyst', granted_by, granted_at, revoked_at
-consent          member_id, scope 'nomal', notice_version, status 'accepted'|'withdrawn',
+consent          (unused since 16.10.2026, §5.4; dropped after M4) member_id, scope 'nomal', notice_version, status 'accepted'|'withdrawn',
                  via 'nomal'|'paper', recorded_by, at
 youtube_channel  channel_id, label, owner ('club' | member_id), proposed_by, confirmed_by,
                  confirmed_at    -- allow-list: the club's and members' own channels
@@ -676,7 +678,7 @@ distortion (§10.6). See §19, O8.
 | **Browser upload** | Coaches elsewhere | Resumable S3 **multipart** upload straight to object storage (`incoming/<video>/`), parts signed by the API (64 MB parts → files up to ~640 GB; 4 in parallel; survives reloads). Several files per video (split recordings). The Lenovo worker downloads, archives to NAS, deletes the staging object. |
 | **YouTube link** | The club's own channel | Accepted only if the video's channel is on the allow-list: the club's channel and members' own channels (each player can have one). A member proposes their channel, a coach or admin confirms it; every link's channel is checked with one YouTube Data API metadata call (no download). Later, members could prove ownership by signing in with Google. Plays through the YouTube IFrame API (nocookie) with the same tagging UI; tags, clips, reels and skip-dead-time (manual rallies) work. **No export, no tier 2** (no file; YouTube may also serve fewer than 50 fps). Nomal does not download from YouTube (YouTube's terms). The UI keeps nudging: "Upload the original for 50 fps, export and automatic analysis". When the original arrives, the video switches to `source='file'`, keeping all tags; if the two versions start at different points, the coach marks one shared moment (e.g. the first serve whistle) and Nomal stores the offset. |
 
-Before any of these is accepted: permission, adult gate (§5.3) and consent (§5.4). Refused
+Before any of these is accepted: permission, team policy and adult gate (§5.3). Refused
 means no bytes stored. YouTube-hosted footage sits outside Nomal's access control (whoever has
 the YouTube link can watch it), so the club and members should upload as *unlisted*; the
 adults-only rule applies just the same.
@@ -881,7 +883,7 @@ scale to zero, free egress, start-up credits.
 2. Benchmark the S0 match on the top two, paid from the test-GPU line: wall time, GPU-hours,
    CHF per video, start-up time. Outputs must match the internal run within tolerance.
 3. Sign the DPA; add the provider to `docs/PRIVACY.md` and the privacy page; tell members (the
-   consent text already covers "a provider in Switzerland or the EU named on the privacy page").
+   privacy page already covers "a provider in Switzerland or the EU named on the privacy page").
 4. Implement the `cloud-<provider>` adapter (submit, poll, cancel), analysis copies to object
    storage, and the CHF cap in the budget guard.
 5. Run both backends in parallel on five matches and compare.
@@ -1551,7 +1553,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 |---|---|---|---|
 | **S0** | Spike (before M1) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court, run a draft `ml_analyse` and **measure GPU-hours per video**; one benchmark run on Infomaniak or OVHcloud (test-GPU line). Whistle detection on its audio. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured on the Framework 16 and one provider |
 | **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the Nomal brand (icons already in `docs/brand/icons/`); Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `nomal-dev.kscw.ch` with a Wiedisync dev account and see your Nomal-enabled teams and games |
-| **M1** | Video in, video out | Job queue + Lenovo media worker; NAS inbox + browser multipart upload (split files); ingest + transcode + thumbnails; HLS with per-segment signing; adult hard gate + *filming allowed/blocked*; consent; audit log; DU23 decision applied | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403; a blocked team cannot upload |
+| **M1** | Video in, video out | Job queue + Lenovo media worker; NAS inbox + browser multipart upload (split files); ingest + transcode + thumbnails; HLS with per-segment signing; adult hard gate + *filming allowed/blocked*; consent (dropped 16.10.2026, §5.4); audit log; DU23 decision applied | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403; a blocked team cannot upload |
 | **M2** | Tagging + condensed playback | Volleyball taxonomy; roster snapshot; grammar + hotkeys; timeline + event table; rally key + rally/score from tags; **skip dead time (manual)** with timeout/set-break keys; set boundaries + starting score; rally list filters (player, action, outcome, set); outbox; revision triggers | A full match tagged in ≤ 1.5× its length; condensed playback works; pulling the network cable loses nothing |
 | **M3** | Clips, reels, export, comments | Virtual clips; smart per-player reels; highlight builder across matches; comments pinned to a moment with @mentions and audience; drill segments for trainings; ffmpeg export with watermark (incl. condensed match) | A player opens "my attacks this season" on a phone; a coach downloads a watermarked condensed match |
 | **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in Nomal without a spreadsheet |

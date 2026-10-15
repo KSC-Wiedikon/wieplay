@@ -19,7 +19,6 @@ from tests.fakes import FakeStore
 TODAY = datetime.now(UTC).date()
 P = personas(TODAY)
 H3, D1, DU23, HERREN1 = 9101, 9102, 9103, 9104
-H3_PLAYERS = (101, 102, 103, 104)
 PART = 64 * 1024 * 1024
 PLAYLIST = (
     "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:4\n#EXT-X-PLAYLIST-TYPE:VOD\n"
@@ -58,17 +57,13 @@ def as_(app: FastAPI) -> Iterator[Any]:
 
 @pytest.fixture
 def club(as_: Any, store: FakeStore) -> dict[str, TestClient]:
-    """Teams synced and enabled; H3's players have all agreed to filming."""
+    """Teams synced and enabled."""
     admin = as_("admin")
     assert admin.post("/api/admin/sync").status_code == 200
     for team in (H3, D1, DU23, HERREN1):
         assert admin.put(f"/api/admin/teams/{team}", json={"enabled": True}).status_code == 200
     assert admin.post("/api/admin/sync").status_code == 200
-    coach = as_("coach-h3")
-    for mid in H3_PLAYERS:
-        r = coach.put(f"/api/teams/{H3}/consent/{mid}", json={"status": "accepted"})
-        assert r.status_code == 200, r.text
-    return {"admin": admin, "coach": coach}
+    return {"admin": admin, "coach": as_("coach-h3")}
 
 
 def worker_client(app: FastAPI, admin: TestClient, caps: list[str]) -> TestClient:
@@ -196,17 +191,27 @@ def run_pipeline(w: TestClient, caps: list[str], store: FakeStore) -> None:
 MEDIA_CAPS = ["ingest", "transcode", "thumbs", "nas"]
 
 
-def test_upload_is_refused_until_every_player_agreed(
-    as_: Any, store: FakeStore, db_engine: Engine
-) -> None:
+def test_an_adult_team_films_without_asking_each_player(as_: Any, store: FakeStore) -> None:
+    """Swiss Volley allows recording matches (Art. 86); the club asks no per-player consent."""
     admin = as_("admin")
     admin.post("/api/admin/sync")
     admin.put(f"/api/admin/teams/{H3}", json={"enabled": True})
     admin.post("/api/admin/sync")
-    coach = as_("coach-h3")
-    refused = create_match(coach)
+    assert create_match(as_("coach-h3")).status_code == 201
+    assert as_("player-h3").get("/api/me/consent").status_code == 404  # no such thing any more
+
+
+def test_a_refused_upload_stores_nothing(
+    club: dict[str, TestClient], store: FakeStore, db_engine: Engine
+) -> None:
+    lineage = club["coach"].get(f"/api/teams/{H3}").json()["lineage_id"]
+    policy = {"matches_allowed": False, "trainings_allowed": True, "reason": "test"}
+    assert club["admin"].put(f"/api/admin/policies/{lineage}", json=policy).status_code == 200
+    refused = create_match(club["coach"])
     assert refused.status_code == 409
-    assert refused.json()["blockers"] == [{"code": "consent_missing", "count": 4, "detail": None}]
+    assert refused.json()["blockers"] == [
+        {"code": "policy_matches", "count": None, "detail": "test"}
+    ]
     assert store.uploads == {}  # nothing stored, not even a staging upload
     with db_engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM video")).scalar_one() == 0
@@ -217,19 +222,10 @@ def test_upload_is_refused_until_every_player_agreed(
             == 1
         )
 
-    player = as_("player-h3")
-    assert player.put("/api/me/consent", json={"status": "accepted"}).json()["status"] == "accepted"
-    for mid in (102, 103, 104):
-        coach.put(f"/api/teams/{H3}/consent/{mid}", json={"status": "accepted"})
-    assert create_match(coach).status_code == 201
-    # A withdrawal blocks the team again.
-    player.put("/api/me/consent", json={"status": "withdrawn"})
-    assert create_match(coach).status_code == 409
-
 
 def test_adults_only_and_team_policy(club: dict[str, TestClient], as_: Any) -> None:
     sport_admin = as_("vb-sport-admin")
-    # DU23-1 has a fictional 15-year-old on the roster: blocked, before consent is even asked.
+    # DU23-1 has a fictional 15-year-old on the roster: blocked.
     du23 = sport_admin.post(
         f"/api/teams/{DU23}/videos",
         json={
@@ -502,17 +498,6 @@ def as_inbox_status(client: TestClient) -> None:
     assert client.get("/api/inbox").status_code == 403  # admins do not upload
 
 
-def test_coach_consent_overview(club: dict[str, TestClient], as_: Any) -> None:
-    rows = club["coach"].get(f"/api/teams/{H3}/consent").json()
-    assert [r["member_id"] for r in rows] == [104, 102, 101, 103]  # by shirt number
-    assert {r["via"] for r in rows} == {"paper"}
-    assert (
-        club["coach"].put(f"/api/teams/{H3}/consent/107", json={"status": "accepted"}).status_code
-        == 404
-    )
-    assert as_("player-h3").get(f"/api/teams/{H3}/consent").status_code == 403
-
-
 # --- Hardening after the security review --------------------------------------------------
 
 
@@ -545,12 +530,14 @@ def test_a_repeated_completion_is_idempotent(
     assert again.json()["status"] == "queued"
 
 
-def test_consent_withdrawn_during_the_upload_refuses_it(
-    club: dict[str, TestClient], as_: Any, store: FakeStore
+def test_a_policy_change_during_the_upload_refuses_it(
+    club: dict[str, TestClient], store: FakeStore
 ) -> None:
     coach = club["coach"]
     video = create_match(coach).json()
-    as_("player-h3").put("/api/me/consent", json={"status": "withdrawn"})
+    lineage = coach.get(f"/api/teams/{H3}").json()["lineage_id"]
+    policy = {"matches_allowed": False, "trainings_allowed": True}
+    assert club["admin"].put(f"/api/admin/policies/{lineage}", json=policy).status_code == 200
     f = video["files"][0]
     signed = coach.post(f"/api/videos/{video['id']}/files/{f['id']}/parts", json={"parts": [1, 2]})
     for p in signed.json():
@@ -558,7 +545,7 @@ def test_consent_withdrawn_during_the_upload_refuses_it(
         store.put_part(upload_id, p["part"], PART if p["part"] == 1 else 10)
     done = coach.post(f"/api/videos/{video['id']}/files/{f['id']}/complete")
     assert done.status_code == 409
-    assert done.json()["blockers"][0]["code"] == "consent_missing"
+    assert done.json()["blockers"][0]["code"] == "policy_matches"
     got = coach.get(f"/api/videos/{video['id']}").json()
     assert got["status"] == "refused"
 
@@ -566,7 +553,7 @@ def test_consent_withdrawn_during_the_upload_refuses_it(
 def test_a_camera_date_that_was_blocked_refuses_the_video(
     app: FastAPI, club: dict[str, TestClient], as_: Any, store: FakeStore, db_engine: Engine
 ) -> None:
-    """The coach says today; the camera says a day when a player had not agreed yet."""
+    """The coach says today; the camera says a day when filming was not allowed."""
     video = upload_all(club["coach"], store, create_match(club["coach"]).json())
     w = worker_client(app, club["admin"], MEDIA_CAPS)
     [ingest] = claim(w, MEDIA_CAPS)

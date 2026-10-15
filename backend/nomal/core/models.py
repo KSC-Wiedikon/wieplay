@@ -183,7 +183,8 @@ class TeamPolicy(Base):
 
 
 class Consent(Base):
-    """Opt-in to being filmed, append-only; a member's newest row is their current answer."""
+    """Unused since 16.10.2026 (the club films without per-player consent, PLAN §5.3). Kept
+    until a migration after the M2-M4 ones drops the table."""
 
     __tablename__ = "consent"
 

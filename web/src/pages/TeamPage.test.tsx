@@ -48,7 +48,7 @@ const video = (patch: Partial<Video>): Video => ({
   ...patch,
 })
 
-const config = { enabled: true, part_size: 67_108_864, max_file_bytes: 2e11, max_files: 20, notice_version: 'x' }
+const config = { enabled: true, part_size: 67_108_864, max_file_bytes: 2e11, max_files: 20 }
 
 function stub(teamDetail: TeamDetail, videos: Video[], extra: Record<string, { status?: number; body?: unknown }> = {}) {
   vi.stubGlobal(
@@ -92,7 +92,6 @@ describe('TeamPage videos', () => {
           progress: 0.4,
         }),
       ],
-      { '/api/teams/92/consent': { body: [] } },
     )
 
     const section = await screen.findByRole('region', { name: 'Videos' })
@@ -118,30 +117,12 @@ describe('TeamPage videos', () => {
   it('says so when video storage is not set up', async () => {
     stub(team({ can_upload: true }), [], {
       '/api/video/config': { body: { ...config, enabled: false } },
-      '/api/teams/92/consent': { body: [] },
     })
     const section = await screen.findByRole('region', { name: 'Videos' })
     expect(await within(section).findByText('Video storage is not set up yet.')).toBeInTheDocument()
     expect(within(section).queryByRole('link', { name: /Upload video/ })).not.toBeInTheDocument()
   })
 
-  it('marks roster answers to an older notice and offers the paper form again', async () => {
-    stub(team({ can_upload: true }), [], {
-      '/api/video/config': { body: { ...config, notice_version: '2027-01' } },
-      '/api/teams/92/consent': {
-        body: [
-          { member_id: 1, name: 'Luca Beispiel', number: 4, status: 'accepted', accepted_version: '2027-01', via: 'nomal', at: null },
-          { member_id: 2, name: 'Marco Alt', number: 5, status: 'accepted', accepted_version: '2026-10-draft', via: 'nomal', at: null },
-        ],
-      },
-    })
-    const section = await screen.findByRole('region', { name: 'Consent' })
-    const rows = (await within(section).findAllByRole('row')).slice(1)
-    expect(rows[0]).toHaveTextContent('Agreed')
-    expect(within(rows[0] as HTMLElement).getByRole('button', { name: 'Record a withdrawal for Luca Beispiel' })).toBeInTheDocument()
-    expect(rows[1]).toHaveTextContent('Agreed to an older notice')
-    expect(within(rows[1] as HTMLElement).getByRole('button', { name: 'Record a signed paper form for Marco Alt' })).toBeInTheDocument()
-  })
 
   it('shows upcoming games as filming allowed or blocked, with the reasons', async () => {
     stub(team(), [], {
@@ -154,7 +135,7 @@ describe('TeamPage videos', () => {
             date: '2026-10-20',
             label: 'Sihlhölzli',
             allowed: false,
-            blockers: [{ code: 'consent_missing', count: 2, detail: null }],
+            blockers: [{ code: 'under_18', count: 2, detail: null }],
             adult_checked_at: null,
           },
         ],
@@ -165,6 +146,6 @@ describe('TeamPage videos', () => {
     expect(rows[0]).toHaveTextContent('18.10.2026')
     expect(rows[0]).toHaveTextContent('Filming allowed')
     expect(rows[1]).toHaveTextContent('Filming blocked')
-    expect(rows[1]).toHaveTextContent('2 players have not agreed to filming yet.')
+    expect(rows[1]).toHaveTextContent('2 people on the roster are under 18 on that day.')
   })
 })

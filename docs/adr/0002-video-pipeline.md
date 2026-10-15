@@ -18,7 +18,8 @@
    - The team policy: DU23-1 films trainings only.
    - Wiedisync's adult check: every rostered person must be 18 or older on the recording
      day, and a missing birthdate fails. Birthdates never reach Nomal.
-   - Consent: every roster player has agreed.
+   - (Per-player consent was dropped on 16.10.2026: Swiss Volley allows recording matches,
+     Volleyballreglement Art. 86; see PLAN §5.4.)
    - A refusal is a 409 with reason codes and an audit entry. No video row and no
      multipart upload are created.
    - The team page shows the same check for the next 21 days from a 6-hour cache.

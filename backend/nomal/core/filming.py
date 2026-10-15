@@ -1,11 +1,13 @@
 """May this team be filmed on this day? (PLAN §5.3, §5.4)
 
-Three rules, enforced here and nowhere else:
+Two rules, enforced here and nowhere else:
 
 1. The team's policy: DU23-1 films trainings only (team_policy).
 2. Adults only: every rostered person is 18 or older on the day. Wiedisync answers this
    (`adult-check`); birthdates never reach Nomal. Missing birthdate = fails.
-3. Consent: every current roster player has opted in.
+
+No per-player consent: Swiss Volley allows anyone to record a match (Volleyballreglement
+2026/27, Art. 86), and the club decided on 16.10.2026 not to ask for it (docs/PRIVACY.md).
 
 The check runs fresh before anything is stored (`fresh=True`) and from a short cache for
 the "filming allowed / blocked" hints on the team page.
@@ -14,22 +16,17 @@ the "filming allowed / blocked" hints on the team page.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
-from nomal.core.models import AdultCheck, Consent, TeamPolicy, WdTeam, WdTeamMember
+from nomal.core.models import AdultCheck, TeamPolicy, WdTeam
 from nomal.core.sync import BridgeClient, BridgeError, run_sync
 
-# Version of the information notice members agree to (docs/PRIVACY.md). Draft until the
-# club's privacy contact has reviewed §5 of the plan.
-NOTICE_VERSION = "2026-10-draft"
 ADULT_CHECK_MAX_AGE = timedelta(hours=6)
 CLUB_TZ = ZoneInfo("Europe/Zurich")
 # A camera clock further off than this was never set; its date proves nothing.
@@ -39,7 +36,7 @@ CAMERA_DATE_WINDOW_DAYS = 60
 @dataclass(frozen=True)
 class Blocker:
     # policy_matches | policy_trainings | under_18 | no_birthdate | no_roster |
-    # adult_check_unavailable | roster_unavailable | consent_missing
+    # adult_check_unavailable | roster_unavailable
     code: str
     count: int | None = None
     detail: str | None = None
@@ -79,32 +76,6 @@ class FilmingCheck:
     allowed: bool
     blockers: tuple[Blocker, ...] = field(default_factory=tuple)
     adult_checked_at: datetime | None = None
-
-
-def current_consent(db: Session, member_ids: Iterable[int]) -> dict[int, Consent]:
-    """Each member's newest consent row (append-only table)."""
-    ids = sorted(set(member_ids))
-    if not ids:
-        return {}
-    rows = db.scalars(
-        select(Consent)
-        .where(Consent.member_id.in_(ids))
-        .order_by(Consent.member_id, Consent.at.desc(), Consent.id.desc())
-        .ext(distinct_on(Consent.member_id))
-    )
-    return {row.member_id: row for row in rows}
-
-
-def roster_players(db: Session, team_id: int) -> list[int]:
-    return sorted(
-        set(
-            db.scalars(
-                select(WdTeamMember.member_id).where(
-                    WdTeamMember.team_id == team_id, WdTeamMember.rel == "player"
-                )
-            )
-        )
-    )
 
 
 def _adult_blockers(
@@ -167,11 +138,5 @@ def check_filming(
 
     adult, checked_at = _adult_blockers(db, bridge, team, on, fresh, now)
     blockers += adult
-
-    players = roster_players(db, team.id)
-    consents = current_consent(db, players)
-    missing = [m for m in players if (c := consents.get(m)) is None or c.status != "accepted"]
-    if missing:
-        blockers.append(Blocker("consent_missing", len(missing)))
 
     return FilmingCheck(not blockers, tuple(blockers), checked_at)
