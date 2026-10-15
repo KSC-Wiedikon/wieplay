@@ -336,6 +336,11 @@ Enforced in code, not just stated:
    confirmation. Opponents appear by jersey number only, their data stays team-internal, and
    footage is deleted or trimmed on request. Recorded in `docs/PRIVACY.md`.
 
+**DU23-1: switched off for now** (decided 15.10.2026, evening). On the real rosters 6 of its
+15 people are under 18, so even its trainings fail the hard check; switching it off also stops
+Nomal from mirroring their names. Switch it back on (Admin → Teams) once its roster passes,
+e.g. next season; its stored policy below then applies.
+
 **DU23-1: trainings only** (decided 15.10.2026). Its opponents are U23 teams that very likely
 field under-18 players, which Nomal cannot check, so DU23-1 matches are not filmed for Nomal.
 Its trainings pass the same hard check as everyone else: every rostered person needs a
