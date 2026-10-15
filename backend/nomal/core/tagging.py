@@ -98,7 +98,7 @@ class PeriodIn(_Change):
     @model_validator(mode="after")
     def _order(self) -> PeriodIn:
         if self.end_ms is not None and self.end_ms <= self.start_ms:
-            raise ValueError("a set ends after it starts")
+            raise ValueError("a set or quarter ends after it starts")
         return self
 
 
@@ -327,7 +327,7 @@ def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
         assert row is not None
         return row
     if video.duration_ms is not None and item.start_ms > video.duration_ms + 1000:
-        raise TaggingError("set beyond the end of the video")
+        raise TaggingError("set or quarter beyond the end of the video")
     before = None if row is None else _snapshot(row, PERIOD_FIELDS)
     if row is None:
         row = Period(id=item.id, video_id=video.id, version=0, created_by=actor)
@@ -465,7 +465,7 @@ def check_periods(db: Session, video: Video) -> None:
         )
     )
     if len(numbers) != len(set(numbers)):
-        raise TaggingError("two sets with the same number")
+        raise TaggingError("two sets or quarters with the same number")
     if len(numbers) > MAX_PERIODS:
         raise TaggingError("too many sets")
 
@@ -483,39 +483,52 @@ def _link_events(db: Session, video: Video, rallies: list[Segment]) -> None:
             event.segment_id = segment_id
 
 
-def _rescore_basketball(db: Session, video: Video) -> None:
+def basketball_running_score(
+    db: Session, video_id: uuid.UUID
+) -> tuple[dict[uuid.UUID, tuple[int, int]], list[tuple[Period, int, int]]]:
     """Basketball keeps a running score across quarters: the first quarter's starting score
-    seeds it (a recording may start mid-game), every made shot adds its points, and each
-    quarter's final is the running score at its end."""
+    seeds it (a recording may start mid-game) and every made shot inside a quarter adds its
+    points. Returns the score right after each tag and each quarter's final."""
     from nomal.core.taxonomy import load
 
     tax = load("basketball")
     periods = list(
         db.scalars(
             select(Period)
-            .where(Period.video_id == video.id, Period.deleted_at.is_(None))
+            .where(Period.video_id == video_id, Period.deleted_at.is_(None))
             .order_by(Period.start_ms, Period.no)
         )
     )
     shots = db.execute(
-        select(Event.t_ms, Event.side, Event.code, Event.attributes)
-        .where(Event.video_id == video.id, Event.deleted_at.is_(None))
+        select(Event.id, Event.t_ms, Event.side, Event.code, Event.attributes)
+        .where(Event.video_id == video_id, Event.deleted_at.is_(None))
         .order_by(Event.t_ms)
     ).all()
     us = periods[0].start_us if periods else 0
     them = periods[0].start_them if periods else 0
+    after: dict[uuid.UUID, tuple[int, int]] = {}
+    finals: list[tuple[Period, int, int]] = []
     at = 0
     for n, period in enumerate(periods):
         end = period.end_ms
         if end is None and n + 1 < len(periods):
             end = periods[n + 1].start_ms
-        while at < len(shots) and (end is None or shots[at][0] < end):
-            t_ms, side, code, attributes = shots[at]
+        while at < len(shots) and (end is None or shots[at][1] < end):
+            event_id, t_ms, side, code, attributes = shots[at]
             points = tax.points(code, (attributes or {}).get("grade"))
             if t_ms >= period.start_ms and points:
                 if side == "us":
                     us += points
                 else:
                     them += points
+            after[event_id] = (us, them)
             at += 1
+        finals.append((period, us, them))
+    return after, finals
+
+
+def _rescore_basketball(db: Session, video: Video) -> None:
+    """Each quarter's final is the running score at its end."""
+    _, finals = basketball_running_score(db, video.id)
+    for period, us, them in finals:
         period.final_us, period.final_them = us, them

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from nomal.api.access import TeamAccess, team_refs, visible_team, visible_video
 from nomal.api.deps import DbDep, SettingsDep, StoreDep, ViewerDep, audit
-from nomal.core import pipeline, reels
+from nomal.core import pipeline, reels, tagging
 from nomal.core.models import (
     Clip,
     Comment,
@@ -271,6 +271,12 @@ def _pieces_out(db: Session, pieces: list[reels.Piece]) -> list[PieceOut]:
             .where(Event.id.in_({e for _, e in wanted}), Event.deleted_at.is_(None))
         ).all()
         tags = {e.id: (e, us, them) for e, us, them in rows if (e.video_id, e.id) in wanted}
+        # Basketball has no rallies: the score is the running score right after the tag.
+        for video_id in {e.video_id for e, _, _ in tags.values() if e.sport == "basketball"}:
+            running, _ = tagging.basketball_running_score(db, video_id)
+            for event_id, (event, _, _) in list(tags.items()):
+                if event.video_id == video_id and event_id in running:
+                    tags[event_id] = (event, *running[event_id])
     filled = []
     for p in pieces:
         tag = tags.get(p.event_id) if p.event_id else None

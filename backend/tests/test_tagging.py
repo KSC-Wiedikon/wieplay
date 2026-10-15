@@ -383,3 +383,12 @@ def test_basketball_quarters_and_score_from_made_shots(
     assert (
         coach.post(url, json={"events": [tag("S2", 1, number=5, zone_from=4)]}).status_code == 422
     )
+    # Reel moments carry the running score right after the tag (there are no rallies).
+    preview = coach.post(
+        "/api/reels/preview", json={"video_ids": [video["id"]], "codes": ["S2", "S3"]}
+    ).json()
+    assert [(p["code"], p["player_name"], p["score_us"], p["score_them"]) for p in preview] == [
+        ("S3", "Mika Korb", 3, 0),
+        ("S2", "Lou Dunk", 3, 0),
+        ("S2", "Lou Dunk", 5, 1),
+    ]
