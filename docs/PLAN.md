@@ -5,15 +5,18 @@
 
 | | |
 |---|---|
-| Status | **Plan, nothing built yet** (written 15.10.2026) |
+| Status | **Plan, revision 2** (15.10.2026). Nothing built yet. |
 | Owner | Luca Canepa (sole developer) |
-| Repo | `KSC-Wiedikon/nomal` (AGPL-3.0, like Wiedisync) |
+| Repo | `KSC-Wiedikon/nomal` (AGPL-3.0, like Wiedisync; private for now) |
 | Live host (planned) | `nomal.kscw.ch` (prod), `nomal-dev.kscw.ch` (dev) |
-| Depends on | Wiedisync (accounts, teams, rosters, games), `KSC-Wiedikon/wiedisync` |
+| Depends on | Wiedisync (accounts, teams, rosters, games): `KSC-Wiedikon/wiedisync` |
 
-This document is the single plan of record. Decisions that change it get a short ADR in
-`docs/adr/` and a one-line edit here. It deliberately contains **no secrets, IPs, vault
-paths or account IDs**: those belong in the private ops notes (see §13).
+This is the plan of record. Decisions that change it get a short ADR in `docs/adr/` and an
+edit here. It contains **no secrets, IPs, vault paths or home hostnames**: those belong in
+the private ops notes (§15).
+
+**Flags** (things that break a stated constraint or need a decision) are marked ⚠ and
+collected in §19.
 
 ---
 
@@ -27,61 +30,74 @@ paths or account IDs**: those belong in the private ops notes (see §13).
 6. [Data model](#6-data-model)
 7. [Video pipeline](#7-video-pipeline)
 8. [Jobs and workers (how the GPU gets work)](#8-jobs-and-workers-how-the-gpu-gets-work)
-9. [Tagging UI (tier 1)](#9-tagging-ui-tier-1)
+9. [Tagging and playback (tier 1)](#9-tagging-and-playback-tier-1)
 10. [Automatic analysis (tier 2)](#10-automatic-analysis-tier-2)
-11. [Designing tier 1 as training data for tier 3](#11-designing-tier-1-as-training-data-for-tier-3)
-12. [Repo, stack, environments, deploy](#12-repo-stack-environments-deploy)
-13. [Operations and handover](#13-operations-and-handover)
-14. [Running cost](#14-running-cost)
-15. [Roadmap](#15-roadmap)
-16. [Risks](#16-risks)
-17. [Open questions and assumptions](#17-open-questions-and-assumptions)
+11. [Tier 1 as training data for tier 3](#11-tier-1-as-training-data-for-tier-3)
+12. [Feature benchmark: Balltime and competitors](#12-feature-benchmark-balltime-and-competitors)
+13. [Brand and UI](#13-brand-and-ui)
+14. [Repo, stack, environments, deploy](#14-repo-stack-environments-deploy)
+15. [Operations and handover](#15-operations-and-handover)
+16. [Budget](#16-budget)
+17. [Roadmap](#17-roadmap)
+18. [Risks](#18-risks)
+19. [Open questions and flags](#19-open-questions-and-flags)
 
 ---
 
 ## 1. Goals, non-goals, tiers
 
 **Goal.** Coaches and players upload match and practice footage, tag what happens, and
-watch clips and highlight reels, all behind their existing Wiedisync login. Volleyball
-first; basketball is in the first batch of teams too, so the design is sport-generic
-from day one (sport-specific parts are data, not code).
+watch clips, highlight reels and condensed matches without dead time, all behind their
+existing Wiedisync login. Volleyball first; basketball is in the first batch of teams, so
+everything sport-specific is data (taxonomies), not code.
 
-**Starting scope.** 4 adult teams (volleyball and basketball), about 100 matches in total
-per season, plus some trainings.
+**First teams (season 2026/27)**, about 100 matches in total:
+
+| Team in Wiedisync | Sport | League | Note |
+|---|---|---|---|
+| H3 | Volleyball | 2. Liga | |
+| D1 | Volleyball | 2. Liga | Not the basketball "Lions D1" |
+| DU23-1 | Volleyball | U23 | ⚠ under-18 question, §5.3 |
+| Herren 1 | Basketball | 1. Liga regional A (`H1LRA`) | Called "H1" in conversation; Wiedisync also has a *volleyball* H1 (2. Liga), which is not in scope |
 
 ### Tiers
 
 | Tier | What | Runs where |
 |---|---|---|
-| **1 · MVP** | Upload a match video (file or YouTube link) · timestamp-synced manual tagging with keyboard shortcuts (event type + player number) · clips and per-player highlight reels · clip/reel export with ffmpeg · Wiedisync login | Web app + API on Hetzner, transcode/export on the home media worker |
-| **2 · Automatic** | Rally detection (cut a 2 h match to the rallies) · ball tracking (TrackNet-style) · player detection + tracking (YOLO + tracker) · court homography → serve placement | Offline batch jobs on the RTX 4090 PC |
-| **3 · Later / maybe** | Per-touch action classification and player attribution | Same GPU; trained on tier 1 + 2 data |
+| **1 · MVP** | Upload a match (original file, or a YouTube link from the club's channel) · timestamp-synced manual tagging with keyboard shortcuts (event type + player number) · rally markers and **skip-dead-time playback from manual markers** · clips and per-player highlight reels · clip/reel export with ffmpeg · Wiedisync login | API + web on Hetzner; media work on the Lenovo server |
+| **2 · Automatic** | **Dead-time skipping** (rallies vs. timeouts, set breaks, warm-up) · **automatic scoring** (volleyball from the serving side, scoreboard OCR when the scoreboard is in frame; basketball later) · ball tracking (TrackNet-style) · player detection + tracking (YOLO + tracker) · court homography → serve placement. Coach corrections become training data. | CPU stages on the Lenovo server; GPU stages on a rented serverless GPU, queued like everything else |
+| **3 · Later / maybe** | Per-touch action classification and player attribution | Same GPU path, trained on tier 1 + 2 data (training on the Framework 16) |
 
 ### Non-goals (to stay finishable by one person in the evenings)
 
-- No live streaming, no live tagging during the match. Footage is processed after the fact.
+- No live streaming, no live tagging during the match. Footage is processed afterwards.
 - No public links of any kind, no social sharing, no embedding outside Nomal.
-- No face recognition and no cross-video person re-identification, ever (see §5.6).
+- No face recognition and no cross-video person re-identification, ever (§5.7).
 - No full DataVolley replacement. Statistics stay simple (counts and efficiencies per skill).
-- No multi-camera sync, no drawing/telestration in the MVP (possible later).
-- No minors: Nomal only processes footage of adult teams (§5.3).
+- No multi-camera sync, no camera hardware. Telestration comes after launch (§12).
+- No minors: nothing under 18 is filmed for Nomal or stored by it (§5.3).
+- No camera purchases: each team films with its own camera.
 
 ---
 
 ## 2. Decisions so far
 
-From the Q&A on 15.10.2026:
+From the Q&A on 15.10.2026 (second round supersedes the first):
 
 | # | Topic | Decision |
 |---|---|---|
-| D1 | Capture | Dedicated camera, **minimum 1080p50**, one elevated tripod behind the baseline. Some matches arrive as a **YouTube link** instead of (or as well as) a file. |
-| D2 | Volume | 4 teams to start, ~100 matches per season. |
-| D3 | Delivery | Small API on Hetzner; video bytes from **Hetzner Object Storage** via short-lived signed links, never through Cloudflare. Long matches are handled by signing **each 4-second segment** separately at request time (§7.6). |
-| D4 | Compute | GPU worker = the RTX 4090 PC (Linux). Always-on media worker (transcode, export) = the **Framework 16**, not the Lenovo server (see assumption A1). |
-| D5 | Permissions | Team-scoped (roster, coaches, team managers, picked analysts, sport admins). Players stream, coaches download. Opponents by number only. **Nothing under 18**: adult teams only, enforced in code. |
-| D6 | OpenVolley | Not now. Keep the door open (rally boundaries and rosters from the e-scoresheet), see §10.6. |
-| D7 | Stack | Own repo `KSC-Wiedikon/nomal`, AGPL. Python/FastAPI for API + workers, React (kscw-ui look) for the web app, own `nomal` database on the existing Postgres server, a small signed-token bridge in Wiedisync. |
-| D8 | Docs | This plan lives in the Nomal repo and is committed (secret-free by rule). |
+| D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube link** is accepted as a source **for the club's own uploads only**; the **original file is preferred** (YouTube re-encodes and may drop 50 fps) and can replace the YouTube source later. |
+| D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 matches per season in total. |
+| D3 | Delivery | Hetzner Object Storage. **HLS**: the authenticated API serves the playlist and every segment URL is signed with a **TTL of minutes** at the moment the player asks for it. No long-lived link per video anywhere. A copied link dies quickly; a 2 h match plays without interruption (§7.6). |
+| D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference on a rented serverless GPU** (per-second billing; budget assumes ~1.5 GPU-h per video on an L4). **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; checked) = local development and training only. The worker interface is backend-agnostic (queue → worker), so local, cloud and a future GPU box are interchangeable (§8). |
+| D5 | Permissions | Team-scoped defaults accepted (§5.1). **Adults only**: a hard check against member birthdates; nothing under 18 is filmed or stored. |
+| D6 | OpenVolley | Not now. The data model stays open for importing points later (§6.6, §10.8). |
+| D7 | Repo | `KSC-Wiedikon/nomal`, AGPL-3.0 (created, private). |
+| D8 | Docs | This plan lives in the repo and is committed (secret-free by rule). |
+| D9 | Brand | Own Nomal brand (§13): assets in `docs/brand/`, `-vb` / `-bb` variants (default `vb`), wordmark "nomal" in Bricolage Grotesque ExtraBold. |
+| D10 | Budget | **~CHF 210 per season** running cost in total (cloud GPU ~80, backup storage ~50, test GPU ~35, reserve). Lines that would exceed it are flagged (§16). |
+| D11 | Tier 2 scope | Includes dead-time skipping (like Balltime) and automatic scoring. |
+| D12 | Defaults accepted | Download policy (coaches only, watermarked, 30 days), retention (season + 1), audio kept with per-video mute, players who leave lose access, consent opt-in. |
 
 ---
 
@@ -97,68 +113,73 @@ flowchart LR
 
   subgraph CF[Cloudflare]
     T[Tunnel: nomal.kscw.ch<br/>HTML, JSON, 302s only]
-    P[Pages: wiedisync.kscw.ch]
   end
 
   subgraph H[Hetzner VPS]
     API[nomal-api<br/>FastAPI + built SPA]
     DX[Directus<br/>Wiedisync API + bridge]
-    PG[(Postgres<br/>db: postgres = Wiedisync<br/>db: nomal)]
+    PG[(Postgres<br/>Wiedisync db + nomal db)]
   end
 
-  OS[(Hetzner Object Storage<br/>bucket: renditions, uploads, exports)]
+  OS[(Hetzner Object Storage<br/>renditions, staging, exports, analysis copies)]
 
   subgraph Home[Home LAN / tailnet]
-    FW[Framework 16<br/>media worker<br/>ingest · transcode · export]
-    GPU[GPU PC RTX 4090<br/>GPU worker<br/>ML + NVENC]
-    NAS[(Synology NAS<br/>raw originals · datasets · models)]
+    LS[Lenovo server<br/>media worker + GPU dispatcher]
+    NAS[(Synology NAS<br/>raw originals, datasets, models)]
+    FW[Framework 16, RTX 5070<br/>dev + training only]
+  end
+
+  subgraph GPU[Rented serverless GPU]
+    ML[nomal-ml container<br/>L4, billed per second]
   end
 
   B -- "app + API (cookie)" --> T --> API
   B -- "login redirect" --> DX
-  B -- "video segments (signed, 5 min)" --> OS
-  B -. "YouTube embeds (nocookie)" .-> YT[(YouTube)]
+  B -- "HLS segments (signed, minutes)" --> OS
+  B -. "YouTube embed (club channel only)" .-> YT[(YouTube)]
   API --- PG
   DX --- PG
   API -- "sync rosters/games (localhost)" --> DX
-  FW -- "claim jobs (tailnet)" --> API
-  GPU -- "claim jobs (tailnet)" --> API
-  FW <-- "signed PUT/GET" --> OS
-  GPU <-- "signed PUT/GET" --> OS
+  LS -- "claim jobs (tailnet)" --> API
+  LS <-- "signed PUT/GET" --> OS
+  LS <--> NAS
+  LS -- "submit job spec, poll" --> ML
+  ML <-- "signed GET/PUT" --> OS
   FW <--> NAS
-  GPU <--> NAS
 ```
 
-The rule that shapes everything: **Cloudflare only ever carries small things** (the SPA,
-JSON, 302 redirects). Cloudflare's terms do not allow serving video through the normal
-proxy or a Tunnel on non-Enterprise plans, so every video byte goes straight from object
-storage to the browser, and straight between object storage and the home workers.
+The rule that shapes everything: **Cloudflare only carries small things** (the SPA, JSON,
+302 redirects). Its terms do not allow serving video through the normal proxy or a Tunnel
+on non-Enterprise plans, so video bytes go straight between object storage and browsers,
+the Lenovo server and the GPU.
 
 ### 3.2 Components
 
 | Component | Runs on | Does | Tech |
 |---|---|---|---|
-| **nomal-web** | Built into the `nomal-api` image, served at `nomal.kscw.ch` | Library, player, tagging UI, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn (kscw-ui tokens), TanStack Query, hls.js |
-| **nomal-api** | Hetzner VPS, Docker, `127.0.0.1` only, reached via the existing Cloudflare Tunnel; worker routes reachable only over the tailnet | Auth, permissions, metadata CRUD, upload orchestration, media redirects, job queue, audit log | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
+| **nomal-web** | Built into the `nomal-api` image, served at `nomal.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
+| **nomal-api** | Hetzner VPS, Docker, bound to `127.0.0.1`, reached via the existing Cloudflare Tunnel; worker routes only over the tailnet | Auth, permissions, metadata, upload orchestration, media redirects, job queue, audit log, budget ledger | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
 | **Postgres `nomal`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All Nomal state incl. the job queue | Postgres 16 |
-| **Object storage** | Hetzner Object Storage, same region as the VPS, private bucket | HLS renditions, thumbnails, upload staging, exports | S3 API |
-| **Media worker** | Framework 16 at home, always on | Ingest (NAS inbox + browser uploads), transcode to HLS, thumbnails, audio extract, clip/reel export | Same Python package, `nomal-worker` container, ffmpeg |
-| **GPU worker** | GPU PC (RTX 4090, 61 GB RAM, Linux), on when it is on | Tier 2/3 ML jobs; also transcode/export via NVENC when idle | `nomal-worker:gpu` container, NVIDIA Container Toolkit, PyTorch |
+| **Object storage** | Hetzner Object Storage, same region as the VPS, private bucket | HLS renditions, thumbnails, upload staging, exports, temporary analysis copies | S3 API |
+| **Media worker** | **Lenovo server** (always on; Ryzen 7 PRO 8700GE 8C/16T, 30 GB RAM, Radeon 780M with VAAPI H.264 encode, ~690 GB free) | Ingest (NAS inbox + browser uploads), transcode, thumbnails, audio, CPU analysis (whistles, motion, scoreboard OCR), analysis copies, clip/reel export, retention | `nomal-worker` container, ffmpeg. **CPU-capped** (it also runs the LAN's DNS and other services) |
+| **GPU dispatcher** | Same container on the Lenovo server | Claims GPU jobs from the queue, submits them to the configured GPU backend, enforces the GPU budget | Part of `nomal-worker` |
+| **GPU backend** | Rented serverless GPU (default), or any local CUDA machine | Runs `nomal-ml run <spec>`: reads inputs, writes Parquet + results | `nomal-ml` image (CUDA, PyTorch) |
+| **Framework 16** | At home | Development, model training/fine-tuning, local test runs of the GPU image | RTX 5070 Laptop GPU, 8 GB (Blackwell: needs a PyTorch build with CUDA 12.8 or later) |
 | **NAS** | Synology at home (≈18 TB free) | Raw originals (master copies), ML datasets, model weights, weekly mirror of the bucket | NFS/SMB share `nomal` |
-| **Wiedisync bridge** | Inside Wiedisync's `kscw-endpoints` (Directus) | Mints the login token; serves roster/game sync to nomal-api | ~2 small endpoints, §4 |
+| **Wiedisync bridge** | Inside Wiedisync's `kscw-endpoints` (Directus) | Mints the login token; serves roster/game sync to nomal-api | Small endpoints (§4) |
 
 ### 3.3 Why this shape
 
-- **Same origin for app and API** (`nomal.kscw.ch` serves both): Nomal's own session
-  cookie is host-only, there is no CORS for Nomal's API, and the Android WebView just works.
-- **Separate service, shared Postgres server**: keeps Wiedisync's Directus permissions out
-  of the hot path (its CLAUDE.md is a list of permission traps) while reusing the existing
-  backup pipeline and server. No cross-database foreign keys: Nomal stores Wiedisync IDs and
-  a synced mirror (§6.2).
-- **Pull-based workers**: home machines are behind NAT, sometimes off, and one of them is a
-  gaming PC. They poll for work; nothing on the internet can reach them.
-- **Python everywhere except the browser**: the ML side is Python regardless, so API, worker
-  and ML share one package, one set of models and one test setup.
+- **Same origin for app and API** (`nomal.kscw.ch` serves both): Nomal's own session cookie
+  is host-only, Nomal's API needs no CORS, and the Android WebView just works.
+- **Separate service, shared Postgres server**: keeps Wiedisync's Directus permissions out of
+  the hot path and reuses the existing backup pipeline. No cross-database foreign keys:
+  Nomal stores Wiedisync IDs and a synced mirror (§6.2).
+- **Pull-based home worker**: the Lenovo server is behind NAT; it polls for work, nothing on
+  the internet can reach it.
+- **GPU as a pluggable backend**: the queue does not know where a GPU job runs. A cloud
+  provider, the Framework 16 or a future box take the same job spec (§8.3).
+- **Python everywhere except the browser**: API, workers and ML share one package.
 
 ---
 
@@ -168,8 +189,8 @@ storage to the browser, and straight between object storage and the home workers
 
 The Wiedisync login cookie (`kscw_session`) has been **httpOnly and host-only on
 `directus.kscw.ch`** since 28.09.2026. No other host, including `nomal.kscw.ch`, can read it.
-Wiedisync's other apps (Spielplanung, Accounting) call Directus with credentialed CORS,
-which needs entries in both the Directus `CORS_ORIGIN` env and `cors-credentials.js`.
+Wiedisync's other apps call Directus with credentialed CORS, which needs entries in the
+Directus `CORS_ORIGIN` env and in `cors-credentials.js`.
 
 Nomal avoids credentialed CORS entirely with a **redirect + signed token** flow (a minimal,
 OIDC-shaped authorization flow).
@@ -200,58 +221,53 @@ sequenceDiagram
   N-->>B: Set-Cookie nomal_session (host-only, Secure, HttpOnly, Lax, 8 h) + 302 to next
 ```
 
-- **Token**: EdDSA (Ed25519) JWT, `iss=wiedisync-prod|wiedisync-dev`, `aud=nomal`, 60 s
-  lifetime, `jti` recorded by Nomal so it can be used once. The private key lives only in
-  the Directus env; Nomal holds the public key(s), selected by `kid` (rotation = add a new
-  key, then retire the old one).
-- **Return URLs are allow-listed** in the bridge (`https://nomal.kscw.ch/api/auth/callback`,
-  `https://nomal-dev.kscw.ch/...`, `http://localhost:…` on dev only). No open redirect.
+- **Token**: EdDSA (Ed25519) JWT, `iss=wiedisync-prod|wiedisync-dev`, `aud=nomal`, 60 s,
+  `jti` recorded by Nomal so it can be used once. The private key lives only in the Directus
+  env; Nomal holds the public key(s), chosen by `kid` (rotation = add new, retire old).
+- **Return URLs are allow-listed** in the bridge. No open redirect.
 - **Claims are minimal**: member ID and UUID, display name, global roles, sport-admin scopes,
-  and team relations for the current and previous season. No email, no birthdate.
+  team relations for the current and previous season. No email, no birthdate.
 
 ```json
 {
   "iss": "wiedisync-prod", "aud": "nomal", "sub": "<members.uuid>", "mid": 123,
   "name": "First Last", "roles": ["user"], "sport_admin": [],
-  "teams": [{"team": 456, "season": "2026/27", "rel": ["player", "captain"]},
-            {"team": 457, "season": "2026/27", "rel": ["coach"]}],
+  "teams": [{"team": 92, "season": "2026/27", "rel": ["player", "captain"]}],
   "state": "…", "jti": "…", "iat": 0, "exp": 60
 }
 ```
 
-- **Session**: server-side row in `session` (hashed ID in the cookie), 8 h, renewed by
-  repeating the redirect silently (instant while the Wiedisync session is valid). Role
-  changes reach Nomal within 8 h at most; admins get a "sign out everyone" button.
-- **Logout** ends the Nomal session only; the UI links to Wiedisync logout.
+- **Session**: server-side row (hashed ID in the cookie), 8 h, renewed by repeating the
+  redirect silently. Role changes reach Nomal within 8 h at most; admins can sign everyone out.
+- **Logout** ends the Nomal session; the UI links to Wiedisync logout.
 
 ### 4.3 Server-to-server sync
 
 `nomal-api` keeps a small read-only mirror of the Wiedisync data it needs (§6.2):
 
-- `GET /kscw/nomal/v1/sync?since=<ts>` on the bridge, authorized by a service token
-  (hash compared in the endpoint), called over localhost on the VPS (both containers run
-  there; no Cloudflare hop).
+- `GET /kscw/nomal/v1/sync?since=<ts>` on the bridge, service-token auth, called over
+  localhost on the VPS (no Cloudflare hop).
 - Returns only **Nomal-enabled teams** (current + previous season), their rosters (member
-  ID, UUID, name, jersey number, positions, relation, **`adult_verified` boolean, never the
-  birthdate**), and their games and trainings (ID, date, time, home/away names, league,
-  hall name, score).
-- Runs hourly, on admin demand, and right before an upload is accepted (to re-check the
-  adult gate).
+  ID, UUID, name, jersey number, positions, relation, guest flag), and their games and
+  trainings (ID, date, time, home/away names, league, hall name, **official set scores** from
+  `games.sets_json`). Never birthdates.
+- Runs hourly, on admin demand, and right before an upload is accepted.
 
 ### 4.4 Changes needed in Wiedisync (small, separate PR there)
 
 | Change | Where | Notes |
 |---|---|---|
-| `GET /kscw/nomal/v1/authorize` | new `kscw-endpoints/src/nomal-bridge.js` | Reads `req.accountability`, builds claims, signs, redirects. Logs the issuance with `writeUserLog` (actor capture rule). |
+| `GET /kscw/nomal/v1/authorize` | new `kscw-endpoints/src/nomal-bridge.js` | Reads `req.accountability`, builds claims, signs, redirects. Logs issuance with `writeUserLog`. |
 | `GET /kscw/nomal/v1/sync` | same file | Service-token auth, read-only, versioned contract with tests. |
-| Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths today) | Only the bridge's authorize URL. |
-| Team toggle `features_enabled.nomal` | `teams.features_enabled` (edited in `RosterEditor` today) | **Admin-only** toggle, not coach-editable, because enabling a team triggers the adult/consent checks. |
+| `GET /kscw/nomal/v1/adult-check?team=&date=` | same file | Pass/fail per rostered person for a recording date (§5.3); birthdates never leave Wiedisync. |
+| Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
+| Team toggle `features_enabled.nomal` | `teams.features_enabled` (edited in `RosterEditor`) | **Admin-only**, because enabling a team triggers the adult and consent checks. |
 | Env | Directus `.env` (prod + dev) | `NOMAL_JWT_PRIVATE_KEY`, `NOMAL_JWT_KID`, `NOMAL_RETURN_URLS`, `NOMAL_SYNC_TOKEN_HASH`; recreate the container (restart does not re-read env). |
-| Later: "Video" link on game cards | `GameCard` | Plain link to `nomal.kscw.ch/games/<id>`; Nomal shows the video or "no video yet". |
+| Later: "Video" link on game cards | `GameCard` | Plain link to `nomal.kscw.ch/games/<id>`. |
 | Docs | `INFRA.md`, `SECURITY.md`, `PERMISSIONS.md` | Same commit, per Wiedisync rules. |
 
-No `CORS_ORIGIN` change is needed for this flow. A Cloudflare Tunnel public hostname
-`nomal.kscw.ch` (and `nomal-dev.kscw.ch`) pointing at the API's local port is.
+No `CORS_ORIGIN` change is needed. A Cloudflare Tunnel public hostname `nomal.kscw.ch`
+(and `nomal-dev.kscw.ch`) pointing at the API's local port is.
 
 ---
 
@@ -262,107 +278,139 @@ reasonable; have the club's privacy contact read §5 before launch.*
 
 ### 5.1 Who can do what
 
-Relations come from the login token (team relations) and Nomal's own `team_grant` table
-(analysts). "Team" means the team's **lineage** (§6.3) unless a season is named.
+Relations come from the login token and Nomal's `team_grant` table (analysts). "Team" means
+the team's **lineage** (§6.3) unless a season is named.
 
 | Action | Player | Analyst¹ | Coach / team manager | Sport admin (that sport) | Admin / superuser² |
 |---|---|---|---|---|---|
 | Watch team videos, tags, clips | own seasons³ | ✓ | ✓ all seasons | ✓ | ✓ (logged, banner) |
-| Create own private reels | ✓ | ✓ | ✓ | ✓ | |
+| Create own private reels, comment on clips | ✓ | ✓ | ✓ | ✓ | |
 | Share a reel with the team | | ✓ | ✓ | ✓ | |
 | Upload / link a video, edit roster snapshot | | ✓ | ✓ | ✓ | |
-| Tag, mark rallies, correct model output | | ✓ | ✓ | ✓ | |
+| Tag, mark rallies, correct scores and model output | | ✓ | ✓ | ✓ | |
 | Download / export MP4 (watermarked) | | | ✓ | ✓ | |
 | Delete a video | | | ✓ | ✓ | ✓ |
 | Grant analyst | | | ✓ | ✓ | |
 | Enable a team for Nomal | | | | | in Wiedisync |
 
 ¹ A player a coach picks to help tag; Nomal-local grant per team lineage.
-² Board members without an admin scope get no access: they don't need match footage.
-³ Players see the seasons they were rostered in. Coaches see the lineage's history.
+² Board members without an admin scope get no access.
+³ Players see the seasons they were rostered in; they lose access when they leave.
 
-The rules live in **one module** (`nomal/core/permissions.py`) with a table-driven unit test
-that enumerates this matrix. Every API route goes through it; nothing is filtered in the UI only.
+The rules live in **one module** (`nomal/core/permissions.py`) with a table-driven test
+that enumerates this matrix. Every API route goes through it.
 
 ### 5.2 No public links
 
-- Every media request goes through `nomal-api` with the session cookie; the API answers
-  with a 302 to an object-storage URL signed for **5 minutes** and **one 4-second segment**
-  (§7.6). A copied link is a few seconds of video that stops working within minutes.
-- Exports (MP4) are downloadable by coaches only, via the same redirect mechanism, are
-  **burned-in watermarked** ("KSCW intern · <name> · <date>"), and expire after 30 days.
+- Every media request goes through `nomal-api` with the session cookie. Segments get a
+  302 to an object-storage URL **signed for 5 minutes, for one 4-second segment** (§7.6).
+- Exports (MP4) are for coaches only, **burned-in watermarked** ("KSCW intern · <name> ·
+  <date>"), expire after 30 days, and are downloaded through the same redirect (signed at click).
 - No share-by-link feature exists. Sharing means "visible to the team in Nomal".
 
-### 5.3 Adults only (nothing under 18)
+### 5.3 Adults only: nothing under 18 filmed or stored
 
-Enforced, not just stated:
+Enforced in code, not just stated:
 
-1. Wiedisync computes `adult_verified` per rostered member: birthdate known and ≥ 18 at the
-   recording date. If only `yob` is known, the member counts as verified only from the
-   year they turn 19 (the safe side). Unknown means **not verified**.
-2. A team can be enabled only if every rostered player is verified. Nomal shows the coach
-   which members block it ("birthdate missing in Wiedisync").
-3. Every upload re-checks the gate against the recording date. Blocked uploads are refused
-   before any bytes are stored.
-4. Nightly check: if a non-verified member joins an enabled team, new uploads freeze, the
-   coach and admin are notified, existing videos stay but are flagged for review.
-5. Nomal is for teams in **adult competitions** only. Opponent teams in adult leagues can
-   still field a 16- or 17-year-old; Nomal never names opponents (numbers only), keeps their
-   data team-internal, and deletes or trims footage on request. This residual risk is
-   documented in `docs/PRIVACY.md`.
+1. **Hard check against `members.birthdate`.** For a recording date, a rostered person
+   (players, guests, coaches, team managers) passes only if a birthdate exists and they are
+   18 or older on that date. **No birthdate = fails** (the year of birth alone is not accepted).
+   The check runs inside Wiedisync (`adult-check`), so birthdates never reach Nomal.
+2. **Before filming**: the team page in Nomal shows each upcoming game as *filming allowed* or
+   *blocked*, with the reason ("2 roster members without birthdate"), so a coach knows before
+   setting up the camera. The filming guide says: no camera if blocked.
+3. **Before storing**: every upload, inbox file and YouTube link re-runs the check for the
+   recording date. Blocked means refused before any bytes are stored (browser uploads are
+   checked before the first part is signed; refused inbox files are deleted from the share).
+4. **Nightly**: if someone who fails the check joins an enabled team, new uploads freeze, the
+   coach and admin are notified, existing videos are flagged for review.
+5. **Opponents**: Nomal cannot verify opponents' ages. Policy: only teams in adult
+   competitions, opponents by jersey number only, data team-internal, deletion or trimming on
+   request. This residual risk is written down in `docs/PRIVACY.md`.
+
+⚠ **DU23-1 plays in the U23 league.** Two problems: (a) its own roster may include players
+under 18 (not checked: production reads were not available while writing this; see §19, O1),
+and (b) its **opponents are U23 teams that very likely field under-18 players**, which Nomal
+cannot check and which conflicts with "nothing under 18 gets filmed". Recommendation: DU23-1
+**trainings only** (own players, all verified), no DU23-1 matches, unless you decide the
+opponent risk is acceptable.
 
 ### 5.4 Consent and information
 
-Recommended (see open question Q4): **explicit opt-in per player**, recorded in Nomal
-(`consent` table: notice version, accepted/withdrawn, how). New players see it on first
-login; the coach can record a paper consent. A team can be filmed when every current
-roster player has opted in. Withdrawal removes the player's name from tags (they become
-"#7"), deletes their personal reels, and blocks future filming of the team until resolved.
-Opt-in is stricter than strictly needed for adults, but it is simple, provable, and also
-covers the "profiling" question once automatic analysis rates individual performance.
+Explicit **opt-in per player** (accepted default), recorded in Nomal (`consent`: notice
+version, accepted/withdrawn, how). New players see it on first login; the coach can record a
+paper consent. A team can be filmed when every current roster player has opted in.
+Withdrawal turns the player's tags into "#7", deletes their personal reels, and blocks
+filming of the team until resolved. The consent text names every processor, including the
+GPU provider and where it runs (§5.6).
 
-The club's privacy policy on `kscw.ch` gets a Nomal section; Nomal has its own short
-privacy page (what, why, who sees it, how long, contact, rights).
+The club's privacy policy on `kscw.ch` gets a Nomal section; Nomal has its own short privacy
+page (what, why, who sees it, how long, processors, contact, rights).
 
 ### 5.5 Retention
 
 | Data | Where | Default retention |
 |---|---|---|
 | Upload staging | Object storage `incoming/` | Until ingested; lifecycle rule deletes after 14 days regardless |
-| HLS renditions, thumbnails | Object storage `media/` | Recording season + 1 more (e.g. a 2026/27 match until 31.05.2028) |
-| Raw originals | NAS `nomal/raw/` | Same as renditions, then deleted; short labelled windows may stay in the ML dataset (§11) |
+| Analysis copies (GPU input) | Object storage `analysis/` | Deleted when the GPU job finishes; lifecycle rule after 3 days |
+| HLS renditions, thumbnails | Object storage `media/` | Recording season + 1 (a 2026/27 match until 31.05.2028). After the recording season, the 1080p rendition is dropped and 540p kept (§16 cost lever) |
+| Raw originals | NAS `nomal/raw/` | Same as renditions; short labelled windows may stay in the ML dataset (§11) |
 | Exports | Object storage `exports/` | 30 days |
-| Tags, rallies, rosters | Postgres | As long as the video; member link removed when a player withdraws or leaves and asks |
-| ML datasets (labelled windows) | NAS `nomal/datasets/` | Until the model using them is retired; listed in a dataset manifest |
+| Tags, rallies, scores, rosters | Postgres | As long as the video; member link removed when a player withdraws or leaves and asks |
+| ML datasets, models | NAS | Until the model using them is retired; listed in a dataset manifest |
 | Audit log | Postgres | 12 months |
 | Sessions, login nonces | Postgres | Purged after 30 days |
 
-A nightly `retention` job enforces this and writes what it deleted to the audit log.
+A nightly `retention` job enforces this and logs what it deleted.
 
-### 5.6 Things Nomal never does
+### 5.6 Processors and where data goes
+
+| Processor | Data | Where | Note |
+|---|---|---|---|
+| Hetzner (VPS, Object Storage) | Everything Nomal stores | Germany / EU | Adequate country; DPA with Hetzner |
+| Cloudflare | HTML, JSON, redirects (no video bytes) | Global edge | Already the club's provider |
+| GPU provider | Temporary analysis copies (video), no names, no IDs | Depends on provider | ⚠ see below |
+| YouTube (Google) | Embedded playback of club-channel videos only | Google | Only on YouTube-sourced videos, via `youtube-nocookie.com` |
+
+⚠ **The GPU provider is a cross-border question.** Modal (the example given) is a US company.
+On its free Starter plan, jobs run in US regions; even with region pinning (Team plan, about
+USD 250/month, far beyond budget) inputs and outputs pass its US control plane, per its docs. I
+found no public Swiss-US Data Privacy Framework certification or downloadable DPA for Modal
+(search on 15.10.2026; ask them). Under the revDSG, disclosing personal data (video of
+identifiable players) to the US needs a DPF-certified recipient or contractual safeguards, plus
+transparency to the people concerned. Options:
+
+1. **EU-based serverless GPU** with per-second billing (e.g. Koyeb lists L4 at about USD 0.70/h;
+   check EU-region availability, billing granularity and DPA). Preferred if it holds up.
+2. **Modal** with a signed DPA + standard contractual clauses, named in the consent text.
+3. **A local GPU** for production runs: no transfer at all.
+
+The backend-agnostic interface (§8.3) makes this a configuration choice. Minimisation applies
+in every case: the GPU receives only a temporary, court-cropped analysis copy of the live
+segments, without audio unless a task needs it, with no names or IDs, deleted after the job.
+Decision: §19, O4.
+
+### 5.7 Things Nomal never does
 
 - No face recognition, no face embeddings, no person re-identification across videos.
-  Player attribution uses **jersey numbers and position on court only**. (Biometric data
+  Player attribution uses **jersey numbers and position on court only**. (Biometric data used
   for unique identification is sensitive personal data under the revDSG; avoid it entirely.)
-- No processing of people outside the court where avoidable: detection is masked to the
-  court polygon plus a margin, which also excludes spectators.
-- No third-party analytics. The only third party in the browser is the YouTube embed, and
-  only on YouTube-sourced videos, via `youtube-nocookie.com`.
-- No data outside Switzerland/EU: Hetzner (Germany/Finland) for servers and storage.
-  Cloudflare only carries HTML/JSON/redirects.
+- Detection is masked to the court polygon plus a margin, which also excludes spectators.
+- No third-party analytics. The only third party in the browser is the YouTube embed, only on
+  YouTube-sourced videos.
 
-### 5.7 Audit log
+### 5.8 Audit log
 
-`audit_log` records: logins, video views (once per video per session, not per segment),
-uploads, deletions, exports and downloads, permission changes, admin "view as", consent
-changes, retention deletions. Coaches can see the log for their team's videos; members can
+Records logins, video views (once per video per session), uploads, deletions, exports and
+downloads, permission and consent changes, admin "view as", GPU submissions (which video,
+which provider), retention deletions. Coaches see the log for their team's videos; members can
 request their own entries.
 
-### 5.8 Audio
+### 5.9 Audio
 
-Camera audio carries whistles (useful for rally detection) and also bench talk. Default:
-keep audio in renditions; a per-video "mute for viewers" switch strips it from playback
-(the NAS original keeps it for ML).
+Camera audio carries whistles (used for dead-time detection) and also bench talk. Default:
+kept in renditions; a per-video "mute for viewers" switch strips it from playback. The NAS
+original keeps it.
 
 ---
 
@@ -379,103 +427,127 @@ erDiagram
   team_lineage ||--o{ team_grant : analysts
   wd_team ||--o{ video : owns
   wd_game |o--o{ video : "recorded in"
+  video ||--o{ video_source_file : "made of"
   video ||--o{ video_rendition : has
-  video ||--o{ video_roster : "snapshot"
-  video ||--o{ segment : "rallies/possessions"
+  video ||--o{ video_roster : snapshot
+  video ||--o{ period : "sets / quarters"
+  video ||--o{ segment : "rallies and dead time"
+  video ||--o{ sync_point : "external clocks"
   video ||--o{ event : tags
   segment |o--o{ event : contains
   taxonomy ||--o{ event : "typed by"
   event ||--o{ event_revision : history
+  segment ||--o{ segment_revision : history
   video ||--o{ clip : has
   reel ||--o{ reel_item : lists
   video ||--o{ job : processing
   job |o--o| model_run : produces
   model_run ||--o{ analysis_artifact : outputs
   video ||--o| calibration : "court homography"
+  video ||--o| scoreboard_region : "OCR area"
+  job ||--o{ compute_usage : "GPU seconds"
 ```
 
 Sketches below are **not final DDL**; they fix names, keys and the shape of the hard parts.
-All IDs are UUIDv7 (time-ordered, client-generatable) except mirrored Wiedisync IDs
-(integers). All timestamps are `timestamptz`. Video times are **integer milliseconds of
-media time** plus the frame number where it matters.
+IDs are UUIDv7 (time-ordered, client-generatable) except mirrored Wiedisync IDs (integers).
+Timestamps are `timestamptz`. Video times are **integer milliseconds of media time**, plus
+the frame number where it matters.
 
 ### 6.2 Wiedisync mirror (read-only, replaced by sync)
 
 ```text
-wd_member        id int PK (= members.id), uuid, display_name, number, positions[],
-                 adult_verified bool, active bool, synced_at
+wd_member        id int PK (= members.id), uuid, display_name, number, positions[], active, synced_at
 wd_team          id int PK (= teams.id), lineage_id → team_lineage, name, sport
                  ('volleyball'|'basketball'), season '2026/27', league, nomal_enabled, synced_at
-wd_team_member   (team_id, member_id, rel)  rel ∈ player|coach|team_responsible|captain
+wd_team_member   (team_id, member_id, rel, is_guest)  rel ∈ player|coach|team_responsible|captain
 wd_game          id int PK (= games.id), team_id, date, time, home_name, away_name,
-                 our_side 'home'|'away', league, hall_name, home_score, away_score
+                 our_side 'home'|'away', league, hall_name, home_score, away_score,
+                 official_sets jsonb  -- from games.sets_json, used by auto scoring (§10.3)
 wd_training      id int PK (= trainings.id), team_id, date, start_time, hall_name
+adult_check      (team_id, date) → passed bool, failing_count, checked_at   -- no birthdates
 sync_state       last_run, last_ok, counts, error
 ```
 
-Data minimisation: no email, phone, address or birthdate ever reaches Nomal.
+No email, phone, address or birthdate ever reaches Nomal.
 
 ### 6.3 Seasons and team lineage
 
-Wiedisync **clones every team row on 1 June** (new IDs, `active=false` on the old rows).
-A video belongs to the team row of its season (`video.team_id`), so history stays correct.
-For "this team across seasons" Nomal has `team_lineage (id, sport, label)`, matched at sync
-time by `(sport, teams.team_id)` falling back to `(sport, name)`; an admin can fix a wrong
-match. Analyst grants, coach history access and season-spanning reels hang off the lineage.
-Player-centric views ("my attacks") hang off `member_id` and never need the lineage.
+Wiedisync **clones every team row on 1 June** (new IDs). A video belongs to the team row of its
+season (`video.team_id`). For "this team across seasons" Nomal has `team_lineage (id, sport,
+label)`, matched at sync by `(sport, teams.team_id)`, falling back to `(sport, name)`; an admin
+can fix a wrong match. Sport is always part of the key: "H1" exists in both sports.
 
 ### 6.4 Videos
 
 ```text
-video            id, team_id → wd_team, kind 'match'|'training'|'other',
-                 game_id → wd_game NULL, training_id → wd_training NULL,
-                 title, recorded_at, sport,
-                 source 'file'|'youtube', youtube_id NULL, youtube_offset_ms NULL,
-                 status 'awaiting_upload'|'uploading'|'queued'|'processing'|'ready'|'failed'|'deleted',
-                 duration_ms, fps_num, fps_den, width, height, has_audio, audio_muted bool,
-                 raw_path NULL (NAS), raw_sha256, raw_bytes,
-                 retention_until, created_by → wd_member, created_at, deleted_at, deleted_by
-video_rendition  video_id, name '1080p50'|'540p25', codec, bitrate, segment_seconds,
-                 segment_count, storage_prefix, bytes, job_id
-video_roster     video_id, side 'us'|'them', number, member_id NULL (us only),
-                 position NULL, is_libero bool    UNIQUE(video_id, side, number)
-inbox_file       id, nas_path, size, probed jsonb, recorded_at_guess, status, video_id NULL
+video             id, team_id → wd_team, kind 'match'|'training'|'other',
+                  game_id → wd_game NULL, training_id → wd_training NULL,
+                  title, sport, recorded_at, recording_started_at NULL (wall clock, for imports),
+                  source 'file'|'youtube', youtube_id NULL, youtube_channel_id NULL,
+                  replaced_youtube_offset_ms NULL,
+                  status 'awaiting_upload'|'uploading'|'queued'|'processing'|'ready'|'failed'|'deleted',
+                  duration_ms, fps_num, fps_den, width, height, has_audio, audio_muted,
+                  capture jsonb  -- camera make/model, codec, bitrate, VFR flag, from metadata
+                  meets_standard bool, standard_issues text[]  -- e.g. '25fps', '720p'
+                  retention_until, created_by, created_at, deleted_at, deleted_by
+video_source_file video_id, part_no, nas_path, bytes, sha256, duration_ms, offset_ms
+video_rendition   video_id, name '1080p50'|'540p25', codec, bitrate, segment_seconds,
+                  segment_count, storage_prefix, bytes, job_id
+video_roster      video_id, side 'us'|'them', number, member_id NULL (us only),
+                  position NULL, is_libero    UNIQUE(video_id, side, number)
+inbox_file        id, nas_path, size, probed jsonb, recorded_at_guess, status, video_id NULL
 ```
 
-`video_roster` is a **snapshot**: filled from the Wiedisync roster when the video is
-created, editable by the coach (numbers differ between teams, guests play). Opponents get
-numbers only. Tags resolve number → member through this snapshot, so later roster changes
-never rewrite history.
+- Cameras split long recordings into several files: `video_source_file` keeps the parts and
+  their offsets; ingest joins them losslessly.
+- `meets_standard = false` (e.g. 25 fps, 720p) still plays and can be tagged, but is skipped
+  by tier 2 and shown with a hint.
+- `video_roster` is a **snapshot** (numbers differ between teams, guests play); tags resolve
+  number → member through it, so later roster changes never rewrite history.
 
 ### 6.5 Taxonomy (sport-specific, data not code)
 
 ```text
 taxonomy         sport, version, code, name_key (i18n), hotkey, category,
                  default_pre_ms, default_post_ms, lead_ms,
-                 attributes_schema jsonb (JSON Schema: grade enum, zones, sub-types…),
-                 starts_segment bool, ends_segment_on jsonb, active
+                 attributes_schema jsonb (JSON Schema: grade, zones, sub-types…),
+                 starts_rally bool, ends_rally_on jsonb, active
                  PK (sport, version, code)
 ```
 
-Seeded from reviewed YAML in the repo (`taxonomies/volleyball.yaml`,
-`taxonomies/basketball.yaml`). Volleyball codes follow **DataVolley conventions** (skills
-S R E A B D F, grades `# + ! - / =`, zones 1–9) so coaches recognise them and a `.dvw`
-import/export stays possible later. Changing a taxonomy creates a new `version`; old
-events keep theirs, and a mapping table translates between versions for datasets.
+Seeded from reviewed YAML (`taxonomies/volleyball.yaml`, `taxonomies/basketball.yaml`).
+Volleyball follows **DataVolley conventions** (skills S R E A B D F, grades `# + ! - / =`,
+zones 1–9). A taxonomy change creates a new `version`; a mapping table translates for datasets.
 
-### 6.6 Segments (rallies, possessions)
+### 6.6 Periods, segments, scores
 
 ```text
-segment          id, video_id, kind 'rally'|'possession'|'timeout'|'break'|'set_break',
-                 start_ms, end_ms, period (set or quarter),
-                 score_us_after, score_them_after, won_by 'us'|'them' NULL, serving 'us'|'them' NULL,
-                 source 'manual'|'model'|'import', model_run_id NULL, confidence NULL,
+period           id, video_id, no (set or quarter), start_ms, end_ms,
+                 our_court_side_at_start 'near'|'far', side_switch_at_score NULL (5th set: 8),
+                 final_us, final_them, source, review
+segment          id, video_id, period_id NULL,
+                 kind 'rally'|'possession'|'timeout'|'set_break'|'warmup'|'stoppage'|'other_dead',
+                 start_ms, end_ms,
+                 serving 'us'|'them' NULL, serving_court 'near'|'far' NULL,
+                 won_by 'us'|'them' NULL, score_us_after NULL, score_them_after NULL,
+                 score_source 'tags'|'serve_inference'|'scoreboard_ocr'|'manual'|'import' NULL,
+                 score_confidence NULL, score_conflict bool,
+                 source 'manual'|'model'|'import', import_system NULL, import_ref NULL,
+                 model_run_id NULL, confidence NULL,
                  review 'unreviewed'|'confirmed'|'corrected'|'rejected',
-                 created_by, updated_by, timestamps, deleted_at
+                 created_by, updated_by, timestamps, deleted_at, version
+segment_revision same shape as event_revision (§6.7), written by trigger
+sync_point       id, video_id, video_ms, system ('openvolley'|'scoreboard'|'manual'),
+                 external_ts NULL, external_ref NULL, note
 ```
 
-Tier 1 creates rallies manually (one key, §9). Tier 2 proposes them as `source='model'`.
-The "rallies only" view is a query over this table, not a new file.
+- **Skip dead time** = play only `rally`/`possession` segments. Everything between rallies is
+  dead by default; explicit dead kinds (`timeout`, `set_break`, `warmup`) exist for reports
+  ("points after a timeout") and for training the gap classifier.
+- **Scores live on rallies** (`score_*_after`, `won_by`), with where they came from and how
+  sure the system is. A coach correction is a revision, i.e. a training label.
+- **Ready for OpenVolley later**: `source='import'`, `import_system`, `import_ref` on segments,
+  and `sync_point` to map the e-scoresheet's wall-clock point times onto video time.
 
 ### 6.7 Events (the tags)
 
@@ -488,57 +560,63 @@ event            id (client UUIDv7), video_id, segment_id NULL, sport, taxonomy_
                  clip_pre_ms NULL, clip_post_ms NULL, note NULL,
                  source 'manual'|'model'|'import', model_run_id NULL, confidence NULL,
                  review 'unreviewed'|'confirmed'|'corrected'|'rejected',
-                 supersedes_id NULL, track_ref NULL (model_run + track id, tier 2/3),
+                 supersedes_id NULL, track_ref NULL,
                  created_by, created_at, updated_by, updated_at, deleted_at, version int
-event_revision   id, event_id, version, changed_by, changed_at, action
-                 'create'|'update'|'delete'|'restore'|'confirm'|'reject', before jsonb, after jsonb
+event_revision   id, event_id, version, changed_by, changed_at,
+                 action 'create'|'update'|'delete'|'restore'|'confirm'|'reject', before jsonb, after jsonb
 ```
 
-- `event_revision` is written by a **Postgres trigger**, so no code path can skip it.
-- Deletes are soft (`deleted_at`): undo is trivial, and rejected model output is kept as a
-  hard negative for training.
-- The client generates the ID, so saving is an idempotent `PUT /api/events/{id}` (§9.5).
+- Revisions are written by a **Postgres trigger**, so no code path can skip them.
+- Deletes are soft: undo is trivial, rejected model output stays as a hard negative.
+- The client generates the ID, so saving is an idempotent `PUT /api/events/{id}` (§9.6).
 
-### 6.8 Clips, reels, exports
+### 6.8 Clips, reels, comments, exports
 
 ```text
 clip             id, video_id, start_ms, end_ms, title, note, event_id NULL,
                  owner, visibility 'private'|'team', created_at
+comment          id, target_type 'clip'|'event'|'segment'|'video', target_id, t_ms NULL,
+                 author, body, mentions int[], created_at, edited_at, deleted_at
 reel             id, owner, lineage_id NULL, title, kind 'smart'|'manual',
-                 query jsonb NULL   -- smart: {member_id, codes, grades, seasons, videos…}
-                 visibility 'private'|'team', created_at
+                 query jsonb NULL, visibility 'private'|'team', created_at
 reel_item        reel_id, position, video_id, start_ms, end_ms, event_id NULL, clip_id NULL, caption
 export           id, kind 'clip'|'reel'|'condensed', source jsonb, params_hash,
                  status, object_key, bytes, requested_by, job_id, expires_at
 ```
 
-- A **clip** is just a time range. Watching it seeks inside the HLS stream: no file, no
-  waiting, no storage.
+- A **clip** is a time range. Watching it seeks inside the HLS stream: no file, no storage.
 - A **per-player highlight reel** is a *smart reel*: a saved query ("member 123, attacks
   graded #, season 2026/27") evaluated on open, so it updates as tagging continues.
-- An **export** renders a clip or reel to MP4 with ffmpeg on a worker (§7.7).
+- An **export** renders a clip, reel or condensed match to MP4 with ffmpeg (§7.7).
 
-### 6.9 Jobs, workers, ML provenance
+### 6.9 Jobs, workers, ML provenance, budget
 
 ```text
-job              id, kind, video_id NULL, params jsonb, priority int,
-                 required_caps text[], depends_on uuid[],
-                 status 'queued'|'leased'|'running'|'succeeded'|'failed'|'cancelled',
-                 attempts, max_attempts, not_before,
-                 lease_owner → worker, lease_expires_at, heartbeat_at, progress real, message,
-                 checkpoint jsonb, result jsonb, error, created_at, started_at, finished_at
-worker           id, name, caps text[], token_hash, paused bool, version, last_seen_at
+job              id, kind, video_id NULL, params jsonb, priority, required_caps text[],
+                 depends_on uuid[], status 'queued'|'leased'|'running'|'waiting_budget'|
+                 'succeeded'|'failed'|'cancelled', attempts, max_attempts, not_before,
+                 lease_owner → worker, lease_expires_at, heartbeat_at, progress, message,
+                 backend NULL, backend_ref NULL, checkpoint jsonb, result jsonb, error,
+                 created_at, started_at, finished_at
+worker           id, name, caps text[], token_hash, paused, version, last_seen_at
 model_run        id, job_id, model_name, model_version (git sha), weights_sha256,
-                 params jsonb, metrics jsonb, created_at
-analysis_artifact id, video_id, model_run_id, kind 'ball_track'|'player_tracks'|'audio_features'|…,
-                 object_key or nas_path, format 'parquet', schema_version, stats jsonb
-calibration      id, video_id, image_points jsonb, court_points jsonb, homography jsonb (3×3),
+                 dataset_manifest NULL, params jsonb, metrics jsonb, created_at
+analysis_artifact id, video_id, model_run_id, kind 'ball_track'|'player_tracks'|'audio_events'|
+                 'motion'|'scoreboard_ocr'|…, object_key or nas_path, format 'parquet',
+                 schema_version, stats jsonb
+calibration      id, video_id, hall_name, image_points, court_points, homography (3×3),
                  method 'manual'|'auto', reproj_error_cm, created_by, copied_from NULL
+scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
+                 clock), created_by, copied_from NULL
+compute_usage    id, job_id, backend, gpu_type, gpu_seconds, cpu_core_seconds, gib_seconds,
+                 est_cost_chf, at
+budget           period ('2026/27'), line ('cloud_gpu'|'test_gpu'), cap_chf
 ```
 
-Per-frame data (ball positions, player boxes) is **not** stored in Postgres: a 2 h match at
-50 fps is 360 000 frames. It goes into Parquet files referenced by `analysis_artifact`;
-only derived facts (rallies, serve placements, proposed events) become rows.
+Per-frame data (ball positions, player boxes, OCR readings) is **not** stored in Postgres: a
+2 h match at 50 fps is 360 000 frames. It goes into Parquet files referenced by
+`analysis_artifact`; only derived facts (segments, scores, serve placements, proposed events)
+become rows.
 
 ### 6.10 People, access, privacy
 
@@ -548,6 +626,7 @@ login_nonce      jti, used_at
 team_grant       lineage_id, member_id, grant 'analyst', granted_by, granted_at, revoked_at
 consent          member_id, scope 'nomal', notice_version, status 'accepted'|'withdrawn',
                  via 'nomal'|'paper', recorded_by, at
+youtube_channel  channel_id, label, added_by        -- the club's own channels (allow-list)
 audit_log        id, at, actor_member_id, action, object_type, object_id, details jsonb
 ```
 
@@ -557,46 +636,57 @@ audit_log        id, at, actor_member_id, action, object_type, object_id, detail
 
 ### 7.1 Capture standard (goes into `docs/FILMING_GUIDE.md`)
 
+Each team brings its own camera, so the guide has a common standard plus a short page per
+camera model as teams register theirs (menu path for 50 fps, shutter, file splitting).
+
 | Setting | Standard | Why |
 |---|---|---|
-| Position | Elevated tripod (≥ 3 m if possible) behind the baseline, centred | Whole court visible, net divides the teams (helps tier 2) |
-| Framing | Whole court + ~2 m margin, **fixed zoom**, never moved during the match | One homography per video; consistent ML input |
-| Resolution / rate | **1080p50 minimum**, 4K50 if the camera can | Far-court ball tracking needs pixels |
-| Shutter | **1/500 s or faster** (raise ISO, accept noise) | Motion blur is what kills ball tracking |
-| Exposure / focus / white balance | Locked (manual) | Auto modes pump during play |
-| Audio | On | Whistles help rally detection |
-| Start | Record from warm-up, one continuous file if possible | Simpler sync; splits are fine (multi-part ingest) |
+| Position | Tripod centred on the end line, **2.5–3 m high** (at least 1.5 m) | Whole court visible, net divides the teams. Same spec as Hudl/Balltime (8–10 ft, min 5 ft), so footage works in either |
+| Framing | Whole court + ~2 m margin, **all four far-court corners visible**, **fixed zoom**, never moved during the match | One homography per video; consistent ML input |
+| Lens | **No wide-angle or fisheye mode** | Distortion breaks court calibration |
+| Rate / resolution | **50 fps, 1080p minimum**; 4K50 if the camera can | Far-court ball tracking needs pixels; 50 fps for fast actions, and it matches 50 Hz hall lighting (60 fps can flicker under it) |
+| Shutter | **1/500 s or faster**; if a hall's lights show flicker bands at that speed, use the fastest speed without banding | Motion blur is what kills ball tracking |
+| Exposure, focus, white balance | Locked (manual) | Auto modes pump during play |
+| Audio | On | Whistles drive dead-time detection |
+| Scoreboard | In frame if possible without losing court | Enables scoreboard OCR (§10.3) |
+| Start | From warm-up, continuous; split files are fine | Ingest joins parts |
+| Check | Nomal shows *filming allowed / blocked* for the game (§5.3) | Adults only |
 
-Basketball note: behind the baseline sees one half well and the far half badly.
-Basketball is normally filmed elevated from the side at half court. See Q3.
+⚠ **Basketball (Herren 1)**: behind the baseline sees the near half well and the far half
+badly. Basketball is normally filmed elevated from the side at half court. See §19, O7.
 
-### 7.2 Three ways in
+### 7.2 Ways in
 
 | Path | For | How |
 |---|---|---|
-| **NAS inbox** (preferred) | Anyone at home with SD card access | Copy files into the `nomal-inbox` share. The media worker sees stable files (size unchanged for 2 min), probes them, registers them as *inbox files*. In Nomal the coach picks the game (suggested from the recording time vs. games that day). Nothing crosses the internet twice. |
-| **Browser upload** | Coaches elsewhere | Resumable S3 **multipart** upload straight to object storage (`incoming/<video>/`), parts signed by the API (64 MB parts → files up to ~640 GB, 4 in parallel, survives page reloads). The worker then downloads, archives to NAS, deletes the staging object. Works in the Android WebView, but 20–40 GB from a phone is not a supported path. |
-| **YouTube link** | League/club streams | No download. The video plays through the YouTube IFrame API (nocookie) with the same tagging UI; tags, clips and reels work as time ranges. No export, no tier 2 (no file). If the club owns the channel, download the original from YouTube Studio and upload it; Nomal converts the video to `source='file'` keeping all tags (with an offset if the two versions differ in start). Nomal does not use `yt-dlp` (YouTube's terms). |
+| **NAS inbox** (preferred at home) | Anyone with SD-card access at home | Copy files into the `nomal-inbox` share. The Lenovo worker sees stable files (size unchanged for 2 min), probes them, groups split parts, registers *inbox files*. In Nomal the coach picks the game (suggested from recording time vs. games that day). Nothing crosses the internet twice. |
+| **Browser upload** | Coaches elsewhere | Resumable S3 **multipart** upload straight to object storage (`incoming/<video>/`), parts signed by the API (64 MB parts → files up to ~640 GB; 4 in parallel; survives reloads). Several files per video (split recordings). The Lenovo worker downloads, archives to NAS, deletes the staging object. |
+| **YouTube link** | The club's own channel | Accepted only if the video's channel is in the club allow-list (checked with the YouTube Data API, one metadata call, no download). Plays through the YouTube IFrame API (nocookie) with the same tagging UI; tags, clips, reels and skip-dead-time (manual rallies) work. **No export, no tier 2** (no file; YouTube may also serve fewer than 50 fps). Nomal does not download from YouTube (YouTube's terms). The UI keeps nudging: "Upload the original for 50 fps, export and automatic analysis". When the original arrives, the video switches to `source='file'`, keeping all tags; if the two versions start at different points, the coach marks one shared moment (e.g. the first serve whistle) and Nomal stores the offset. |
 
-Before any of these is accepted: the adult gate (§5.3), consent (§5.4) and a permission
-check run. Refused means no bytes stored.
+Before any of these is accepted: permission, adult gate (§5.3) and consent (§5.4). Refused
+means no bytes stored. YouTube-hosted footage sits outside Nomal's access control (whoever has
+the YouTube link can watch it), so the club should upload as *unlisted*; the adults-only rule
+applies just the same.
 
 ### 7.3 Processing chain
 
 ```mermaid
 flowchart LR
-  A[source in NAS inbox<br/>or incoming/ in bucket] --> I[ingest<br/>probe · checksum · copy raw to NAS]
+  A[inbox parts or<br/>incoming/ objects] --> I[ingest on Lenovo<br/>probe · join parts · checksum · raw to NAS]
   I --> T1[transcode 1080p50]
   I --> T2[transcode 540p25]
   I --> TH[thumbnails + sprite]
-  I --> AU[audio extract 16 kHz]
+  I --> AU[audio 16 kHz]
   T1 & T2 & TH --> R[video ready]
-  AU --> ML[tier 2 jobs<br/>rally · ball · players]
-  I --> ML
+  AU --> CPU[CPU analysis on Lenovo<br/>whistles · motion · scoreboard OCR]
+  CPU --> DT[dead-time proposals]
+  CPU --> AC[analysis copy<br/>live segments, court crop]
+  AC --> G[GPU job<br/>serve side · ball · players]
+  G --> SC[score + event proposals]
 ```
 
-Each box is a `job` row (§8). `ready` needs both renditions and thumbnails; tier 2 jobs
-are queued automatically for matches once the GPU features exist.
+Each box is a `job` row (§8). `ready` needs both renditions and thumbnails; tier 2 jobs follow
+automatically for matches that meet the standard, once those features exist.
 
 ### 7.4 Renditions
 
@@ -606,61 +696,62 @@ are queued automatically for matches once the GPU features exist.
 | `540p25` | Phones, weak connections | ~1.2 Mb/s, GOP 2 s, 4 s segments | 0.6 GB/h |
 | Thumbnail sprite + WebVTT | Scrub previews | 1 frame / 10 s, 160 px wide | few MB |
 
-H.264 rather than HEVC/AV1 because every browser and the Android WebView decode it in
-hardware. The FW16 encodes with x264 (or VAAPI); the 4090 uses NVENC when it is on and
-idle. Both are many times faster than real time.
+H.264 because every browser and the Android WebView decode it in hardware. Inputs vary by
+camera (H.264/HEVC, 8/10-bit, sometimes variable frame rate); ingest normalises to constant
+50 fps. The Lenovo server encodes with VAAPI on the Radeon 780M where quality allows, else
+x264 with a CPU cap. Both are faster than real time for 1080p.
 
 ### 7.5 Storage tiers
 
 | Tier | Where | Holds | Size per season (100 matches × ~1.75 h) |
 |---|---|---|---|
-| Hot | Hetzner Object Storage | HLS renditions, thumbnails, exports, staging | ≈ 0.5–0.6 TB |
+| Hot | Hetzner Object Storage | HLS renditions, thumbnails, exports, staging, analysis copies | ≈ 0.5–0.6 TB |
 | Master | NAS `nomal/raw/` | Original camera files (25–50 Mb/s) | ≈ 2–4 TB (NAS has ≈ 18 TB free) |
-| ML | NAS `nomal/datasets/`, `nomal/models/`, GPU PC local NVMe cache | Labelled windows, Parquet tracks, weights | tens of GB |
+| ML | NAS `nomal/datasets/`, `nomal/models/` | Labelled windows, Parquet tracks, weights | tens of GB |
 | Mirror | NAS `nomal/bucket-mirror/` | Weekly `rclone sync` of the bucket | = hot |
 
-Raw originals are **not** copied offsite (too big, and the renditions are a usable fallback).
-The database (tags) is backed up with Wiedisync's existing pipeline (§13.2).
+Raw originals are **not** copied offsite (2–4 TB/season; renditions are the fallback). The
+database is backed up with Wiedisync's existing pipeline (§15.2).
 
-### 7.6 Playback, and why long matches are fine
+### 7.6 Playback: HLS with short-lived segment URLs
 
-The question was whether a signed link that expires after an hour breaks a 2 h match. It
-doesn't, because no link covers the whole match:
+As decided: the authenticated API serves the playlist, segment URLs are signed with a TTL of
+minutes, and the player keeps going for the full match.
 
-1. The player (hls.js) loads `GET /api/media/{video}/{rendition}/index.m3u8` from
-   `nomal.kscw.ch` with the session cookie. The API checks permission and returns a playlist
-   whose segment URIs point back at the API: `/api/media/{video}/{rendition}/seg/{n}.m4s`.
-2. For each 4-second segment, as the player needs it, the API checks the session (cached
-   per session + video for 60 s) and answers **302** to an object-storage URL **signed for
-   5 minutes, for that one segment**.
+1. hls.js loads `GET /api/media/{video}/{rendition}/index.m3u8` from `nomal.kscw.ch` with the
+   session cookie. The API checks permission and returns a VOD playlist whose segment URIs
+   point back at the API: `/api/media/{video}/{rendition}/seg/{n}.m4s`.
+2. As the player needs each 4-second segment, it requests that URI; the API checks the
+   session (cached per session + video for 60 s) and answers **302** to an object-storage URL
+   **signed for 5 minutes, for that one segment**. Signing is a local HMAC, no network call.
 3. The browser fetches the bytes directly from object storage (bucket CORS allows
    `nomal.kscw.ch`).
 
-A 2 h match is ~1 800 segments per rendition; each redirect costs the API about a
-millisecond and Cloudflare carries only the tiny 302. A 3 h match or a 6 h tournament
-works the same. Signing is local HMAC, no call to the storage service.
+So signing happens continuously as playback advances: a 2 h match (~1 800 segments per
+rendition) plays without interruption, while any copied URL is either useless without the
+session (API URL) or dead within 5 minutes and covers 4 seconds (storage URL). Cloudflare
+carries only the tiny 302s.
 
-Seeking is exact (hls.js decodes from the segment start); frame stepping uses
-`requestVideoFrameCallback` for the true media time of the shown frame. iPhones: hls.js
-runs on iOS 17.1+ (Managed Media Source); older iOS falls back to native HLS, which follows
-redirects. **Test on an iPhone in M1.**
+Fallback, if per-segment redirects ever add noticeable start-up latency: the API returns the
+playlist with **directly signed segment URLs** (TTL ~10 min), and an hls.js custom loader
+re-fetches the playlist before the signatures expire or on a 403. Same security properties.
 
-If redirects ever add noticeable start latency, the fallback is an hls.js custom loader
-that asks the API for signed URLs of the next N segments in one call.
+Seeking is exact; frame stepping uses `requestVideoFrameCallback` for the true media time.
+iPhones: hls.js runs on iOS 17.1+ (Managed Media Source); older iOS uses native HLS, which
+follows redirects. **Test on an iPhone in M1.**
 
-### 7.7 Clips, reels, exports with ffmpeg
+### 7.7 Clips, reels, condensed matches, exports with ffmpeg
 
-- **Watching** a clip or reel never renders anything: the player seeks to `start_ms`,
-  plays to `end_ms`, jumps to the next item (preloading it). Per-event clip windows come from
-  the taxonomy (`default_pre_ms` / `default_post_ms`, e.g. attack −3 s/+2 s), adjustable per event.
-- **Condensed match** ("rallies only") is the same mechanism over the rally segments.
-- **Export** (coach only) queues an `export` job: the worker cuts from the **NAS
-  original** (best quality; falls back to the 1080p rendition if the raw is gone),
-  re-encodes each piece for frame-accurate in/out points, concatenates, burns in the
-  watermark and optional captions (player, opponent, date), uploads to `exports/`, and
-  notifies. Re-encoding a 2-minute reel takes seconds.
-- If both home workers are off, exports wait and the UI says so. An optional low-priority
-  export worker on the VPS (1 CPU, renditions only) can be enabled later if that becomes annoying.
+- **Watching** a clip, reel or condensed match never renders anything: the player seeks to
+  `start_ms`, plays to `end_ms`, jumps to the next item (preloading it). Clip windows come from
+  the taxonomy (e.g. attack −3 s/+2 s), adjustable per event.
+- **Skip dead time** is the same mechanism over rally segments, with 2 s pre-roll (serve toss)
+  and 1.5 s post-roll (reaction).
+- **Export** (coach only) queues an `export` job on the Lenovo server: cut from the NAS
+  original (best quality; falls back to the 1080p rendition), re-encode each piece for
+  frame-accurate in/out points, concatenate, burn in the watermark and optional captions
+  (player, opponent, date, score), upload to `exports/`, notify. A 2-minute reel takes seconds;
+  a condensed match a few minutes.
 
 ---
 
@@ -668,413 +759,705 @@ that asks the API for signed URLs of the next N segments in one call.
 
 ### 8.1 Queue in Postgres, workers pull
 
-No message broker. The `job` table *is* the queue, and only `nomal-api` touches it.
-Workers call four endpoints over the **tailnet** (the VPS is already on it; worker routes
-are refused when a request arrives through Cloudflare):
+No message broker. The `job` table *is* the queue; only `nomal-api` touches it. Workers call
+four endpoints over the **tailnet** (worker routes are refused when a request arrives through
+Cloudflare):
 
 | Endpoint | Does |
 |---|---|
-| `POST /api/worker/claim` `{caps, max}` | Atomically leases the highest-priority runnable job whose `required_caps` ⊆ the worker's caps and whose dependencies succeeded (`SELECT … FOR UPDATE SKIP LOCKED`). Lease: 5 min. Long-polls up to 30 s when empty. |
+| `POST /api/worker/claim` `{caps, max}` | Atomically leases the highest-priority runnable job whose `required_caps` ⊆ the worker's caps and whose dependencies succeeded (`SELECT … FOR UPDATE SKIP LOCKED`). Lease 5 min. Long-polls up to 30 s. |
 | `POST /api/worker/jobs/{id}/heartbeat` `{progress, message, checkpoint}` | Extends the lease, stores progress and a resumable checkpoint. |
-| `POST /api/worker/jobs/{id}/sign` `{op, keys}` | Returns signed PUT/GET URLs for the object keys this job may touch. **Workers never hold storage credentials**, so a compromised gaming PC can only touch its current job's objects. |
-| `POST /api/worker/jobs/{id}/complete` / `fail` `{result | error, retryable}` | Finishes the job; the API writes derived rows (renditions, segments, events) in one transaction. |
+| `POST /api/worker/jobs/{id}/sign` `{op, keys}` | Signed PUT/GET URLs for the objects this job may touch. **Workers never hold storage credentials.** |
+| `POST /api/worker/jobs/{id}/complete` / `fail` | Finishes the job; the API writes derived rows in one transaction. |
 
-A reaper in the API returns expired leases to the queue (`attempts+1`, back-off via
-`not_before`) or fails them after `max_attempts`. Each worker authenticates with its own
-token (stored hashed in `worker`), revocable from the admin page.
+A reaper returns expired leases to the queue (`attempts+1`, back-off) or fails them after
+`max_attempts`. Each worker has its own token (hashed in `worker`), revocable from the admin page.
 
-### 8.2 Worker hosts
+### 8.2 Workers
 
-| Worker | Caps | Availability | Notes |
-|---|---|---|---|
-| **Framework 16** (`media`) | `ingest`, `transcode`, `thumbs`, `audio`, `export`, `nas`, `inbox` | Always on | Suspend disabled, plugged in, **battery charge limit ~80 %** in firmware. Mounts the NAS share. If it is ever retired, the same container runs on any Linux box (e.g. the Lenovo server) unchanged. |
-| **GPU PC** (`gpu`) | `cuda`, `ml`, `transcode`, `export`, `nas` | When it is on | See gaming guard below. Local NVMe (1.6 TB free) caches raw files during ML jobs. |
+| Worker | Caps | Notes |
+|---|---|---|
+| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas`, `gpu_dispatch` | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. |
+| **Framework 16** (`dev`) | Optional `gpu_local` for tests | Not a production worker. Runs the `nomal-ml` image locally for development and training. |
 
-**Gaming guard** on the GPU worker: it stops claiming new jobs when (a) a configured game
-or GPU-heavy process is running, (b) outside a configurable window (default: any time it
-is idle, or only at night), or (c) `nomal-worker pause` was run. ML jobs process video in
-**5-minute chunks** and checkpoint after each, so pausing or switching the PC off loses at
-most one chunk. Optional later: the FW16 sends Wake-on-LAN to the GPU PC at night when ML
-jobs are waiting.
+### 8.3 The GPU interface (backend-agnostic)
 
-### 8.3 Job kinds
+GPU work is **one job per video** (`ml_analyse`), not one per model, so a provider's container
+starts once and loads models once. The dispatcher on the Lenovo server claims it from the queue
+like any other job and hands it to a backend:
+
+```text
+GpuBackend
+  submit(spec) -> handle          # start the run
+  poll(handle) -> state, progress, metrics
+  cancel(handle)
+
+spec (JSON)
+  job_id, image "ghcr.io/ksc-wiedikon/nomal-ml:<version>", tasks ["serve_side","ball","players"]
+  inputs   analysis copy + time map + calibration (signed GET, valid for the job's max runtime)
+  outputs  Parquet + result.json (signed PUT)
+  limits   gpu "L4", max_seconds, max_cost_chf
+
+container entrypoint:  nomal-ml run --spec spec.json   -> writes outputs, exits 0/1
+```
+
+| Backend | How it runs the image | Use |
+|---|---|---|
+| `cloud-serverless` | A thin provider adapter (e.g. a Modal function or an EU provider's job API) that starts the image on an L4 with per-second billing | Production default (provider: §19, O4) |
+| `local-docker` | `docker run --gpus all … nomal-ml run` on a CUDA host over SSH | Framework 16 for tests; any future GPU box |
+| `fake` | Returns canned outputs | CI |
+
+The container never calls Nomal's API: inputs and outputs are pre-signed object URLs, and the
+dispatcher relays progress and results over the tailnet. Swapping providers touches only the
+adapter. The analysis-copy input URLs are the only long-ish signed URLs in the system: they
+point at a temporary object no user ever sees, deleted when the job ends.
+
+**Budget guard.** Before submitting, the dispatcher checks the season's `compute_usage` against
+the `budget` cap for the line; when it would be exceeded, the job waits in `waiting_budget` and
+admins are told. Every run records GPU, CPU and memory seconds and the estimated cost.
+
+### 8.4 Job kinds
 
 | Kind | Caps | Output |
 |---|---|---|
-| `ingest` | `ingest`, `nas` | Probe, SHA-256, raw on NAS, staging object deleted |
+| `ingest` | `ingest`, `nas` | Probe, join parts, SHA-256, raw on NAS, staging deleted |
 | `transcode` (per rendition) | `transcode` | HLS in `media/{video}/{rendition}/` |
 | `thumbs`, `audio` | `thumbs` / `audio` | Sprite + VTT; 16 kHz mono FLAC on NAS |
+| `cpu_analysis` | `cpu_analysis` | Whistle events, motion energy, scoreboard OCR (Parquet); dead-time proposals |
+| `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
+| `ml_analyse` | `gpu_dispatch` | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
-| `retention`, `bucket_mirror` | `nas` | Deletions (audited), weekly mirror |
-| `ml_rally`, `ml_ball`, `ml_players`, `ml_homography_auto`, `ml_serve_map` | `cuda`, `ml` | Parquet artifacts + proposed segments/events (§10) |
+| `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
 
-### 8.4 Visibility
+### 8.5 Visibility
 
-Admin page: queue (with age of the oldest queued job), workers (last seen, paused,
-version), recent failures with logs. Uptime Kuma (already at `status.kscw.ch`) gets push
-monitors for each worker's heartbeat and for "a job has been queued > 24 h".
+Admin page: queue (with age of the oldest queued job), workers, GPU spend this season vs. cap,
+recent failures with logs. Uptime Kuma (already at `status.kscw.ch`) gets push monitors for the
+worker heartbeat and for "a job has been queued > 24 h".
 
 ---
 
-## 9. Tagging UI (tier 1)
+## 9. Tagging and playback (tier 1)
 
 ### 9.1 Layout (desktop; tagging is a keyboard task)
 
 ```
 ┌─────────────────────────────────────────────┬──────────────────────────────┐
-│                                             │ Roster   us: 1 3 5 7 9 11 …  │
-│                 video                       │          them: 2 4 8 12 …    │
+│                                             │ Set 2 · 14:12 · serve: us    │
+│                 video                       │ Roster  us: 1 3 5 7 9 11 …   │
+│                                             │         them: 2 4 8 12 …     │
 │                                             ├──────────────────────────────┤
 │                                             │ Entry:  7A#_          ⏎ save │
 │                                             │ → #7 Attack · Kill · 12:31.4 │
-├─────────────────────────────────────────────┼──────────────────────────────┤
-│ timeline: rally bands + tag markers + playhead (canvas)                    │
+├─────────────────────────────────────────────┴──────────────────────────────┤
+│ timeline: rally bands · dead time greyed · tag markers · score line        │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ event table (synced to playhead, click = seek, inline edit)                │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-On phones Nomal is a viewer (library, reels, "my clips"); tagging needs a keyboard. A
+On phones Nomal is a viewer (library, condensed matches, reels, "my clips", comments). A
 touch layout with roster and skill buttons exists for tablets and as a fallback.
 
 ### 9.2 Keyboard (configurable, cheatsheet on `?`)
+
+Single-letter commands work when the entry buffer is empty; typing a digit or `a` starts a tag.
 
 | Key | Action |
 |---|---|
 | `Space` | Play / pause |
 | `←` / `→` | 1 frame back/forward when paused, 2 s while playing |
-| `Shift+←` / `Shift+→` | 5 s |
+| `Shift+←` / `Shift+→` | 5 s; `Ctrl+←/→` previous/next rally |
 | `,` / `.` | Speed down / up (0.25×–2×) |
-| `R` | Start rally here; again = end rally (prompts winner `u`/`t` unless the last tag implies it) |
+| `Shift+D` | Toggle **skip dead time** |
+| `R` | Start rally here; again = end rally (winner `u`/`t`, preset from the last tag) |
+| `T` / `B` | Mark timeout / set break (optional; for reports and training) |
 | digits + skill + grade, `Enter` | Create a tag (grammar below) |
 | `Tab` (while typing) | Toggle side us/them |
 | `Esc` | Cancel entry |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo |
-| `[` / `]` | Mark clip in / out, `C` saves the clip |
-| `G` | Go to the selected event; `F` snaps its time to the current frame (precision → `frame`) |
+| `[` / `]`, then `C` | Mark clip in / out, save clip |
+| `G`, then `F` | Go to the selected event; snap its time to the current frame |
 
-### 9.3 Entry grammar (volleyball, DataVolley-flavoured)
+### 9.3 Entry grammar
 
-`[a]<number><skill>[grade][zones]`, e.g. `7A#` = our #7 attack, kill; `a12S=` = their
-#12 serve error; `5R+` = our #5 reception, positive; `9E` = our #9 set (grade optional).
-The parser shows a live preview with names from the roster snapshot; unknown numbers are
-flagged but allowed. Basketball has its own short grammar from its taxonomy (shots 2/3/FT
-made/missed, rebound O/D, assist, turnover, steal, block, foul).
+Volleyball (DataVolley-flavoured): `[a]<number><skill>[grade][zones]`, e.g. `7A#` = our #7
+attack, kill; `a12S=` = their #12 serve error; `5R+` = our #5 reception, positive. Live
+preview with names from the roster snapshot; unknown numbers flagged but allowed.
 
-**Time capture**: the tag time is the playhead at the *first keystroke*, minus the
-taxonomy's `lead_ms` (people react late), marked `time_precision='live'`. `F` snaps to the
-exact frame later (`'frame'`). That distinction matters for training data (§11).
+Basketball (Herren 1, from M4): `[a]<number><code>`, e.g. `23S3+` = our #23 three-point shot
+made, `23S2-` missed, `11RO` offensive rebound, `11AS` assist, `7TO` turnover, `7ST` steal,
+`9BL` block, `14F` foul, `5FT+` free throw made.
 
-### 9.4 Rally automation from tags (volleyball)
+**Time capture**: the tag time is the playhead at the *first keystroke*, minus the taxonomy's
+`lead_ms`, marked `time_precision='live'`; `F` snaps to the exact frame (`'frame'`).
 
-A serve tag opens a rally if none is open. A terminal grade (`#` on attack/serve/block,
-`=` error) proposes ending the rally, the winner and the next score. The coach confirms
-with `Enter` or corrects. Result: tagging a match also produces the rally list and the
-score line, which tier 2 rally detection is trained and evaluated against.
+### 9.4 Rallies and score from tags (volleyball)
 
-### 9.5 Never lose work
+A serve tag opens a rally if none is open. A terminal grade (`#` on attack/serve/block, `=`
+error) proposes ending the rally, the winner and the next score; the coach confirms with
+`Enter` or corrects. Tagging a match therefore also produces the rally list, the dead time
+between rallies and the score line, which tier 2 is trained and evaluated against.
 
-Tagging a match is an hour or more of work. Every change goes to an IndexedDB outbox
-first and is sent as an idempotent `PUT /api/events/{id}` with the client-generated ID and
-`version`. Network loss shows a "n unsynced" badge; reload resumes. Concurrent taggers on
-the same video: last write wins per event, and every change is in `event_revision`.
+### 9.5 Skip dead time from day one
 
-### 9.6 Simple statistics (MVP+)
+From M2, any video with rally markers (from `R`, from tags, or later from tier 2) plays in
+**condensed mode**: rallies only, with pre/post-roll, timeouts and set breaks skipped, a rally
+strip to jump around, and the score shown per rally. Before tier 2 exists, a coach who only
+wants condensed playback can press `R` twice per rally while watching at 2×; that is the
+fastest useful manual pass.
 
-Per match and per season, per player and team: counts by skill and grade, efficiencies
-(e.g. attack: (kills − errors − blocked) / attempts; reception: positive %), with every
-number clickable into a reel of the underlying tags. That covers most of what coaches use
-Balltime stats for.
+### 9.6 Never lose work
+
+Every change goes to an IndexedDB outbox first and is sent as an idempotent
+`PUT /api/events/{id}` with the client-generated ID and `version`. Network loss shows a
+"n unsynced" badge; reload resumes. Concurrent taggers: last write wins per event, every change
+is in the revision log.
+
+### 9.7 Statistics and reports (M3b)
+
+Per match and season, per player and team, each number clickable into a reel of the
+underlying tags:
+
+- Box score: counts by skill and grade, efficiencies (e.g. attack: (kills − errors −
+  blocked) / attempts; reception: positive %, plus a 0–3 pass-rating view mapped from the
+  DataVolley grades).
+- Side-out % and break-point % from the rally list and the serving side.
+- Rotation analysis: points, side-out and break-point per rotation, from the starting rotation
+  entered per set (`period`) and the serving sequence (a team rotates on every side-out).
+- Zone heatmaps for serves and attacks (zones 1–9 from the tags).
+- Search bar and saved filters ("#3 attack #", "set 3, rotation 2, reception -").
+- CSV export.
+
+A **regrade queue** (Hudl-style: the list advances, number keys set the grade, `U` undoes)
+makes grading passes or attacks after a quick first tagging pass fast.
 
 ---
 
 ## 10. Automatic analysis (tier 2)
 
-All on the GPU PC (RTX 4090), as checkpointed jobs, writing Parquet artifacts and
-**proposals** (`source='model'`, `review='unreviewed'`) that a human confirms in the UI.
-Nothing a model produces is shown as fact until reviewed or until its measured accuracy
-passes the bar below.
+Everything produces **proposals** (`source='model'`, `review='unreviewed'`) that a coach
+confirms or corrects in one **Review** tab per video (modelled on Hudl's, §12.3: rally
+boundaries, set boundaries, starting rotations, serving sides and scores, calibration, later
+unidentified players; keyboard-first, the list advances on each answer). Corrections are
+revisions and become training data.
+Nothing is shown as fact until reviewed or until its measured accuracy passes the bar below.
+CPU stages run free on the Lenovo server; only what needs a GPU goes to the GPU backend.
 
-### 10.1 Rally detection
+### 10.1 Dead-time skipping (volleyball)
 
-- **v0 (no training)**: whistle detection on the audio (narrow-band energy peaks around
-  2–4 kHz with tonal check) plus frame-difference motion energy inside the court mask,
-  combined with simple rules (serve whistle → rally; quiet + low motion → dead ball).
-- **v1 (learned)**: a small temporal model over per-second features (audio embedding,
-  motion, ball-visible ratio and ball speed from §10.2, player spread) trained on the
-  manual rally segments from tier 1.
-- **Output**: `segment` proposals; "rally review" UI (`Enter` accept, `←/→` nudge
-  boundaries, `X` reject); condensed playback.
-- **Bar**: boundary F1 ≥ 0.9 at ±1 s on held-out matches before "rallies only" is the
-  default view.
+The Balltime-style "skip the downtime" feature. Live play = rallies; everything else is dead.
 
-### 10.2 Ball tracking
+- **v0, CPU only (Lenovo)**: referee **whistle detection** on the audio (narrow-band energy
+  around 2–4.5 kHz with a tonal check and a duration window), **motion energy** inside the
+  court mask, and a small state machine: dead → serve whistle → serve (toss/hit within a few
+  seconds) → rally → end whistle → dead. Gaps are classified by duration and position: before
+  the first serve = `warmup`; ~30 s = `timeout`; minutes between sets = `set_break`; else
+  `other_dead`.
+- **v1, learned**: a small temporal model over per-second features (audio embedding, motion,
+  and, once available, ball-visible ratio and ball speed), trained on the manual rally segments
+  from tier 1 and the corrected v0 output.
+- **Review UI**: rally strip with `Enter` accept, `←/→` nudge a boundary, `X` reject, `M`
+  merge, `S` split.
+- **Bar**: boundary F1 ≥ 0.9 at ±1 s on held-out matches before condensed mode is the default
+  view for new videos.
+- **Bonus**: the live segments define the **analysis copy** for the GPU (§8.4), which cuts GPU
+  time to the live share of the match.
 
-- TrackNet-family heatmap model (TrackNetV3 or later; check licence before use) on
-  3-frame stacks, fine-tuned on our footage. Labels: a "click the ball" tool on sampled
-  frames (target 3–5 k labelled frames across halls and lighting), plus negatives.
-- Post-processing: outlier removal, gap interpolation, trajectory fitting; contact and
-  bounce candidates from direction changes.
-- Throughput: hundreds of frames per second on a 4090; a 2 h match at 50 fps (360 k
-  frames) in roughly 10–20 min.
-- **Bar**: precision ≥ 0.9 at recall ≥ 0.8 within 5 px on held-out frames, reported
-  separately for near and far court.
+### 10.2 Dead-time skipping (basketball, later)
 
-### 10.3 Player detection and tracking
+Basketball play is continuous; dead ball means the game clock is stopped (fouls, free throws,
+timeouts, quarter breaks). With the scoreboard in frame, **game-clock OCR** gives this almost
+for free (clock running = live). Without it, whistles + motion as in v0. Planned after volleyball.
+
+### 10.3 Automatic scoring (volleyball)
+
+Rally scoring: **the team that wins a rally serves the next one.** So the score follows from
+knowing who serves each rally, plus the rules and the official result:
+
+1. **Serving court per rally** (near/far): a small image classifier on frames around the
+   serve, trained on the manual serve tags from tier 1 (every serve tag is a labelled example);
+   later cross-checked against where the ball track starts (§10.4).
+2. **Court side → team** per set from `period.our_court_side_at_start` (one click per video,
+   or inferred from the first set's serve tags), with the rules: teams change sides after each
+   set and, in a deciding fifth set, when the leading team reaches 8.
+3. **Winner of rally i = serving team of rally i+1.** The last rally of a set has no next
+   serve; its winner is whoever reaches the set-winning score.
+4. **Constraint from the official result**: Wiedisync holds the official set scores
+   (`games.sets_json`, synced from Swiss Volley). The inferred point sequence of each set must
+   end at that score; a small alignment step finds the cheapest consistent sequence (missed or
+   extra rallies, misread serve sides) and marks the uncertain rallies for review.
+5. **Scoreboard OCR when the scoreboard is in frame**: the coach draws the scoreboard box once
+   per hall (`scoreboard_region`, reused for later videos in that hall); the Lenovo worker
+   samples it at 2 fps, reads digits (seven-segment/LED digits: a tiny digit classifier trained
+   on our crops, PaddleOCR as an alternative), smooths over time, and turns changes into
+   timestamped points. Where OCR is confident it wins; disagreements with serve inference are
+   flagged.
+6. **Edge cases** the constraint will surface: replayed rallies (no point), points from
+   sanctions (point without a rally), scorer corrections on the scoreboard. The coach fixes
+   these in the score line; each fix is a labelled correction.
+
+Output: `won_by`, `serving`, `score_*_after`, `score_source`, `score_confidence` per rally;
+the score line in the UI; scores in exports and reels ("set 3, 22:20"). **Bar**: ≥ 98 % of
+rallies with the right winner on held-out matches with the set-score constraint; flagged
+rallies ≤ 5 %.
+
+Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
+proposes the shot type.
+
+### 10.4 Ball tracking
+
+- TrackNet-family heatmap model (TrackNetV3 or later; check licence) on 3-frame stacks,
+  fine-tuned on our footage on the Framework 16. Labels: a "click the ball" tool on sampled
+  frames (target 3–5 k frames across halls and lighting), plus negatives.
+- Post-processing: outlier removal, gap interpolation, trajectory fitting; contact and bounce
+  candidates from direction changes.
+- Runs only on live segments of the analysis copy.
+- **Bar**: precision ≥ 0.9 at recall ≥ 0.8 within 5 px on held-out frames, near and far court
+  reported separately.
+
+### 10.5 Player detection and tracking
 
 - Ultralytics YOLO person detector (AGPL-3.0, compatible with Nomal's licence) + ByteTrack
-  (MIT), detections masked to the court polygon + margin.
+  (MIT), masked to the court polygon + margin, at 25 fps on live segments (tracker fills in).
 - Team assignment: side of the net (volleyball); kit-colour clustering (basketball).
-- No identity across videos (§5.6). Track IDs are per video.
-- Output: Parquet tracks; foot points mapped to court coordinates via §10.4.
+- No identity across videos (§5.7). Track IDs are per video.
 
-### 10.4 Court homography
+### 10.6 Court homography
 
-- The camera is fixed, so **one homography per video**. M7 ships a manual calibration
-  UI: click 6–8 court landmarks (corners, centre line ends, attack lines) on a frame;
-  `cv2.findHomography`; reprojection error shown. Pre-filled from the last calibration in
-  the same hall (halls repeat every week).
+- The camera is fixed, so **one homography per video**: a calibration UI (click 6–8 court
+  landmarks on a frame, `cv2.findHomography`, reprojection error shown), pre-filled from the
+  last calibration in the same hall. Runs on the Lenovo server (CPU).
 - Later: automatic line/keypoint detection initialised from the hall's last calibration.
 - **Bar**: reprojection error < 15 cm on held-out landmarks.
 
-### 10.5 Serve placement
+### 10.7 Serve placement
 
-A homography maps the **floor plane** only, and the ball is in the air. So serve placement
-uses floor-level evidence: (a) the bounce point when the ball lands, else (b) the
-receiving player's foot position at the reception contact (tagged `R` event or nearest
-player track to the ball at contact). Output: `event.court_x/court_y` on serve events and
-a serve-placement chart per server, filterable by result. **Bar**: ≥ 80 % agreement with
-manually tagged serve zones.
+A homography maps the **floor plane** only, and the ball is in the air. So placement uses
+floor-level evidence: the bounce point when the ball lands, else the receiver's foot position
+at the reception contact. Output: `court_x/court_y` on serve events and a serve chart per
+server, filterable by result. **Bar**: ≥ 80 % agreement with manually tagged serve zones.
 
-### 10.6 Later: OpenVolley import
+### 10.8 Later: OpenVolley import
 
-OpenVolley's e-scoresheet logs every point with a wall-clock timestamp plus rosters with
-numbers. With one manual sync point (first serve), that gives rally ends, scores and the
-serving team for free: excellent labels for §10.1. Planned as an `import` source for
-`segment` and `video_roster`, not now.
+OpenVolley's e-scoresheet logs every point with a wall-clock time plus rosters with numbers.
+With one `sync_point` (first serve), it gives rally ends, scores and the serving team: perfect
+labels for §10.1 and §10.3. The model is ready (§6.6); the importer is not planned yet.
 
----
+### 10.9 GPU time per video
 
-## 11. Designing tier 1 as training data for tier 3
+The budget assumes **~1.5 L4-hours per video**. The design aims lower, because CPU stages run
+at home and the GPU sees only the live part of the match:
 
-Tier 3 (per-touch action classification and player attribution) needs labels that tier 1
-produces anyway, if they are captured with care. The rules:
+| Stage | Where | Estimate per 2 h match (to be measured in spike S0) |
+|---|---|---|
+| Whistles, motion, dead time, scoreboard OCR, calibration | Lenovo CPU | free (tens of minutes of CPU) |
+| Analysis copy (live segments, court crop) | Lenovo CPU/VAAPI | free |
+| Serve-side classifier | GPU | 1–2 min |
+| Ball tracking, 50 fps on live segments | GPU | ~5–10 min |
+| Player detection, 25 fps on live segments | GPU | ~10–15 min |
+| Container start, model load, decode overhead | GPU | ~3–5 min |
+| **Total** | | **≈ 0.4–0.6 L4-h**, design cap **0.8 L4-h** |
 
-1. **Every label carries provenance**: `source`, `created_by`, `model_run_id`,
-   `confidence`, `review`. A dataset query can say "frame-precise, human-made or
-   human-confirmed, taxonomy v2".
-2. **Time precision is explicit** (`live` / `adjusted` / `frame`). Live tags are good weak
-   labels for "something happened around here"; only frame-precise tags train temporal
-   localisation. The UI makes snapping cheap (`G`, `F`).
-3. **Corrections are data**. Model proposals are never overwritten silently: confirm,
-   correct (before/after in `event_revision`) or reject (soft delete). Rejections are hard
-   negatives; corrections are the most valuable labels.
-4. **Stable vocabulary**: versioned taxonomy with explicit mappings; a tagging guide
-   (`docs/TAGGING_GUIDE.md`) defines each code precisely, *including the exact frame to tag*
-   (e.g. "attack = the frame the hand touches the ball").
-5. **Link labels to tracks**: when tier 2 tracks exist, each event gets a `track_ref` (the
-   player track nearest the ball at the contact frame, on the correct side), which the
-   human implicitly confirms by confirming the event. That is the player-attribution label.
-6. **Datasets are snapshots**: `nomal-ml export-dataset` writes a manifest (query, event
-   IDs, taxonomy version, video SHA-256s) and cuts short labelled windows (e.g. ±2 s at full
-   resolution) from the NAS originals into `nomal/datasets/<name>/`. Models record the
-   dataset manifest they were trained on (`model_run.params`). This is also data
-   minimisation: once the raw file is deleted under §5.5, only the labelled windows remain.
-7. **Evaluation split by match** (never by frame), with held-out matches from different
-   halls, so metrics mean something.
-
-Tier 3 ships the same way as tier 2: proposals in a review queue first, auto-accept only
-above a measured precision bar per skill.
+Spike S0 (§17) measures the real number on one match before the GPU line of the budget is
+committed.
 
 ---
 
-## 12. Repo, stack, environments, deploy
+## 11. Tier 1 as training data for tier 3
 
-### 12.1 Repo layout
+1. **Every label carries provenance**: `source`, `created_by`, `model_run_id`, `confidence`,
+   `review`. A dataset query can say "frame-precise, human-made or human-confirmed, taxonomy v2".
+2. **Time precision is explicit** (`live` / `adjusted` / `frame`). Live tags are weak labels;
+   only frame-precise tags train temporal localisation. The UI makes snapping cheap (`G`, `F`).
+3. **Corrections are data**: confirm, correct (before/after in the revision tables) or reject
+   (soft delete). Rejections are hard negatives; corrections are the most valuable labels.
+   This covers events, rally boundaries, dead-time kinds, serving side and scores.
+4. **Stable vocabulary**: versioned taxonomy with mappings; `docs/TAGGING_GUIDE.md` defines each
+   code, *including the exact frame to tag* ("attack = the frame the hand touches the ball").
+5. **Link labels to tracks**: once tracks exist, each event gets a `track_ref` (player track
+   nearest the ball at the contact frame, on the correct side), confirmed with the event. That
+   is the player-attribution label.
+6. **Datasets are snapshots**: `nomal-ml export-dataset` writes a manifest (query, IDs, taxonomy
+   version, video SHA-256s) and cuts short labelled windows from the NAS originals into
+   `nomal/datasets/<name>/`. Models record their dataset manifest. Once a raw file is deleted
+   under §5.5, only these windows remain (minimisation).
+7. **Evaluation split by match**, never by frame, with held-out matches from other halls.
+8. **Training happens on the Framework 16** (RTX 5070 Laptop, 8 GB): fine-tuning TrackNet and
+   small YOLO variants fits with modest batch sizes. Runs that do not fit use the test-GPU
+   budget line (§16).
+
+Tier 3 ships like tier 2: proposals in a review queue first, auto-accept only above a measured
+precision bar per skill.
+
+---
+
+## 12. Feature benchmark: Balltime and competitors
+
+Researched on 15.10.2026 from vendor help centres, manuals and pricing pages. Full notes with
+sources: [`docs/research/competitors-2026-10.md`](research/competitors-2026-10.md).
+
+### 12.1 What the market looks like
+
+- **Balltime is now Hudl** (acquired 06.02.2025, sold as "Hudl Assist powered by Balltime AI")
+  and is **volleyball only**. Its pipeline runs in the same order as Nomal's tier 2: downtime
+  removal → actions → teams → players → ball → court positions.
+- **Their recording spec is our setup**: centred on the end line, 8–10 ft high, 1080p, no
+  wide-angle lens, all four far-court corners visible. Footage filmed for Nomal would also
+  work there, and vice versa.
+- **Downtime is most of a match**: Balltime cites about 67 % downtime indoors. A condensed
+  2-hour match is about 40 minutes; the GPU (§10.9) only needs to see that part.
+- **Nobody documents** separate timeouts and set breaks, or scoreboard OCR. Hudl's editable
+  AI score is the closest thing to automatic scoring.
+- **Price context** (USD, US list prices): Hudl club volleyball from $500 per team per year
+  (Core; Plus $1,250, Premier $1,600), club basketball from $400. SportsVisio volleyball season
+  pack $900 per team (22 games). DataVolley 4 €299–799 per year (no video AI). For four teams,
+  Hudl Core alone is about USD 2,000 a year; Nomal's target is CHF 210.
+
+### 12.2 Triage: what Nomal adds, and when
+
+Difficulty for Nomal: **Easy** = days of evenings, no new ML; **Medium** = a couple of weeks
+or depends on a tier 2 output; **Hard** = new ML or 3D from one camera; **Out** = against a
+non-goal or policy.
+
+| Feature | Who has it | Nomal | When |
+|---|---|---|---|
+| **Skip dead time / condensed match** | Balltime/Hudl, Pixellot (basketball) | Planned | Manual M2, auto M5 (VB), M9 (BB) |
+| Timeouts and set breaks as separate segments | Nobody documents it | Easy (gap rules + `T`/`B` keys) | M2 manual, M5 auto |
+| Merge several files into one match | Balltime/Hudl | Planned (split parts) | M1 |
+| Rally list filtered by player, action, outcome, set, rotation | Balltime, Hudl, DataVolley | Easy | M2 |
+| Search bar + saved filters ("#3 attack #") | Hudl | Easy (reuses the tag grammar) | M3b |
+| Edit set boundaries and starting score | Hudl Review tab | Easy (`period` rows) | M2 |
+| Starting rotation per set | Hudl, DataVolley | Easy | M3b |
+| Box score, every stat links to its video | Hudl, DataVolley, SportsVisio | Planned | M3b |
+| Side-out % and break-point % | Hudl Assist, DataVolley, SoloStats | Easy (rally list + serving side) | M3b |
+| Rotation analysis | Hudl, DataVolley, SoloStats | Easy once starting rotations and serving are known (rotation advances on each side-out) | M3b from tags, automatic with M6 |
+| Zone heatmaps (serve/attack zones 1–9) | Hudl, DataVolley | Easy (zones are in the tags) | M3b |
+| Regrade queue with number keys (pass 0–3, attack outcome) | Hudl | Easy | M3b; reused for model review from M5 |
+| CSV export of stats | Hudl (CSV), VolleyStation (XLSX) | Easy | M3b |
+| Practice / drill breakdowns | Balltime/Hudl, VBStats, SoloStats | Easy (training videos + `drill` segments with a label) | M3 |
+| Comments pinned to a moment, @mentions, audience (coaches / team / one person) | Hudl | Easy | M3 |
+| Clips, playlists, highlight builder across matches | Most | Planned | M3 |
+| Automatic per-player highlight reels | Balltime/Hudl, VS Next, SportsVisio, Pixellot, Trace | Planned as smart reels from tags; automatic once tier 3 tags exist | M3 |
+| Click a court diagram for attack/serve start and end → lines and charts | Hudl (fill-in), ovscout2, DataVolley | Medium (court widget; floor coordinates) | After launch; automatic with M8 |
+| Setter distribution | Hudl, DataVolley | Medium (needs set and attack zones) | After launch |
+| Telestration on a paused frame (arrow, circle, line, freehand) | Hudl, Veo, Spiideo, Pixellot | Medium (vector overlay stored with a time; burned in on export) | After launch |
+| Season trends and goals | Hudl, Synergy | Easy–medium | After launch |
+| DVW export/import (DataVolley) | DataVolley, Volleymetrics, ovscout2 | Medium (format is documented by the openvolley tools) | When a coach asks |
+| AI-written match summary | Hudl Plus, SportsVisio | Easy technically (a language model over aggregated stats), but adds a processor | Optional; numbers only, no names |
+| Automatic scoring | Balltime (editable), VS Next [mkt] | Planned | M6 |
+| Scoreboard OCR | Nobody | Medium | M6 |
+| Court calibration (6 points) | Hudl (6), ovscout2 (4) | Planned | M8 (simple UI could come earlier) |
+| Ball trajectories | Balltime/Hudl | Medium–hard | M7 |
+| Data overlays (court lines, trajectories) | Hudl | Medium (after calibration + ball) | M8 |
+| Unidentified-athlete queue (assign a track to a roster player) | Hudl | Medium (needs tracks) | M9 |
+| Automatic actions and stats | Balltime/Hudl, VS Next, SportsVisio, Pixellot | Hard | Tier 3 |
+| Jersey-number recognition | Pixellot [mkt] | Hard | Tier 3, maybe |
+| Ball speed, contact and jump height | Balltime/Hudl, Pixellot | Hard (3D from one camera) | Out for now |
+| Workload metrics from video | VS Next [mkt], Pixellot | Hard, and borderline physical profiling | Out |
+| Livestreaming, auto-tracking or panoramic cameras, multi-angle | Hudl Focus, Veo, Pixellot, Spiideo | Out (no hardware, non-goal) | — |
+| Vertical social reels, recruiting profiles, export to YouTube | Balltime/Hudl, VS Next | Out (no public links; players don't download) | Revisit only as a coach-approved export |
+| Live tagging, live data to the bench, analyst service, league exchange | DataVolley, Hudl, Volleymetrics | Out (non-goals) | — |
+
+### 12.3 Patterns worth copying
+
+- **Hudl's Review tab**: one place per video for everything that needs a human: set
+  boundaries, starting rotations, court calibration, missing coordinates, unidentified
+  athletes, regrades. Number keys and auto-advance make it fast. Nomal's review screens (§10)
+  become one **Review** tab per video with the same order and the same keyboard-first style.
+- **ovscout2** (open source, R/Shiny) is the closest prior art to tier 1: fixed end-line
+  camera, 4-corner calibration, typed codes, the video pausing for input after key touches,
+  and .dvw output. Worth reading before M2.
+- **Pixellot** recognises players by height, kit colour and jersey number without face
+  recognition: the same line Nomal draws in §5.7.
+
+### 12.4 What Nomal does that they don't (or don't document)
+
+- Timeouts and set breaks as their own segments, not just "downtime".
+- Automatic scoring checked against the **official set scores** from Wiedisync, plus
+  scoreboard OCR.
+- Data stays with the club (Hetzner, NAS), adults only, no face recognition.
+- Every correction is stored as training data with full provenance (§11).
+
+---
+
+## 13. Brand and UI
+
+### 13.1 Assets
+
+The logo assets go into **`docs/brand/`** (not in the repo yet as of 15.10.2026): icon and
+wordmark SVGs in a **`-vb`** (volleyball) and a **`-bb`** (basketball) variant. **Default is
+`vb`** (login, library home, anything not tied to one sport).
+
+The **wordmark** is lowercase "nomal" in **Bricolage Grotesque ExtraBold**. The font is under
+the SIL Open Font License and is **self-hosted** (e.g. via `@fontsource`), not loaded from
+Google Fonts, so viewers' IP addresses are not sent to Google.
+
+### 13.2 Colours
+
+| Token | Hex | Use |
+|---|---|---|
+| `navy` | `#13203A` | Primary text on light, app bar, dark-mode background |
+| `light` | `#EEF1F5` | Light-mode background, text on navy |
+| `vb-yellow` | `#FFC72C` | Volleyball accent: fills, highlights, focus rings, active states |
+| `vb-blue` | `#1F5FBF` | Volleyball accent: links, primary buttons in light mode |
+| `bb-orange` | `#F26B1D` | Basketball accent |
+
+The sport accent is switched by a `data-sport="vb|bb"` attribute on the page root, set from the
+current team or video; the logo and favicon follow (default `vb`).
+
+Contrast (WCAG 2.x), computed for these exact values:
+
+| Combination | Ratio | Rule |
+|---|---|---|
+| navy on light | 14.3 | ✓ body text |
+| vb-blue on light / white on vb-blue | 5.4 / 6.1 | ✓ links, primary buttons (white label) |
+| navy on vb-yellow | 10.4 | ✓ text on yellow fills |
+| navy on bb-orange | 5.3 | ✓ **use navy, not white, on orange buttons** |
+| white on bb-orange | 3.05 | large text only |
+| bb-orange on light | 2.7 | ✗ never as text on light; fills and icons with a navy outline only |
+| vb-yellow on light | 1.4 | ✗ never as text or thin icons on light |
+| vb-yellow / bb-orange on navy | 10.4 / 5.3 | ✓ dark-mode accents |
+| vb-blue on navy | 2.7 | ✗ dark mode uses yellow for volleyball accents |
+
+### 13.3 Icons
+
+`scripts/brand/build-icons` (M0, once the SVGs are in `docs/brand/`) renders from the icon SVGs
+with `resvg` + Pillow: `favicon.svg`, `favicon.ico` (16/32/48), `apple-touch-icon.png` (180),
+PWA icons 192 and 512, a maskable 512 with safe-zone padding, and the web manifest (theme
+colour navy). Both variants are generated; the page swaps the favicon link for basketball.
+Generated files are committed so builds do not need the toolchain.
+
+### 13.4 Behaviour conventions
+
+Borrowed from Wiedisync's kscw-ui rules: the `Button` height scale (44 px touch targets),
+tables for lists of records, Swiss formats (`dd.mm.yyyy`, 24 h, locale `de-CH`), sentence-case
+labels, no native browser dialogs, dark mode from tokens, English first with German at minimum.
+The colours are Nomal's own.
+
+---
+
+## 14. Repo, stack, environments, deploy
+
+### 14.1 Repo layout
 
 ```text
 nomal/
-  README.md                  what it is, how to run it locally
-  LICENSE                    AGPL-3.0
+  README.md, LICENSE (AGPL-3.0)
   docs/
     PLAN.md                  this file
     adr/                     one file per decision change
+    brand/                   logo assets (provided), generated icons
+    research/                competitor research (competitors-2026-10.md)
     ARCHITECTURE.md          written in M0 from §3–§8, kept current
-    PRIVACY.md               processing record, retention, rights, residual risks
-    FILMING_GUIDE.md         §7.1 for coaches, with photos
+    PRIVACY.md               processing record, processors, retention, rights, residual risks
+    FILMING_GUIDE.md         §7.1 for coaches, one page per camera model
     TAGGING_GUIDE.md         codes, grammar, exact-frame definitions
-    RUNBOOK.md               deploy, restore, rotate keys, add a worker, common failures
+    RUNBOOK.md               deploy, restore, rotate keys, add a worker, switch GPU backend
   backend/                   one Python package (uv)
-    nomal/core/              models, schemas, permissions, storage signing, taxonomy loader
+    nomal/core/              models, schemas, permissions, signing, taxonomy loader
     nomal/api/               FastAPI app, routes, auth, media redirects, job queue
-    nomal/worker/            agent loop, job handlers (ingest, transcode, export, retention)
-    nomal/ml/                tier 2/3 pipelines, dataset export, training scripts
+    nomal/worker/            agent loop, media jobs, CPU analysis, GPU dispatcher + backends
+    nomal/ml/                nomal-ml entrypoint, models, training, dataset export
     migrations/              Alembic
     tests/
   web/                       React app (Vite), built into the API image
   taxonomies/                volleyball.yaml, basketball.yaml
+  scripts/brand/             icon generation
   deploy/
     hetzner/compose.yaml     nomal-api (prod + dev)
-    worker/compose.yaml      media worker
-    worker-gpu/compose.yaml  GPU worker (NVIDIA runtime)
+    lenovo/compose.yaml      media worker + dispatcher
+    ml/Dockerfile            nomal-ml (CUDA) image
   .github/workflows/         lint, test, build images, release
 ```
 
-### 12.2 Stack choices
+### 14.2 Stack
 
 | Area | Choice | Why |
 |---|---|---|
-| API | FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, psycopg 3 | Familiar to the maintainer, typed, shares code with workers/ML |
+| API | FastAPI, SQLAlchemy 2, Alembic, Pydantic 2, psycopg 3 | Typed, shares code with workers/ML |
 | Python tooling | uv, ruff, mypy (strict on `core`), pytest | Fast, one lockfile |
-| Web | React 19, TS, Vite, Tailwind v4, shadcn, TanStack Query, hls.js, i18next | Same as Wiedisync; kscw-ui tokens copied in (blue/gold, stone neutrals, navy dark) |
-| Upload | Uppy with S3 multipart | Resumable, battle-tested |
-| Media | ffmpeg (pinned static build in the image), ffprobe | — |
-| ML | PyTorch, Ultralytics YOLO, ByteTrack (via `supervision`), OpenCV, Polars/PyArrow | Licences compatible with AGPL |
-| Languages | English first, German at minimum (Wiedisync convention); Swiss date/time formats (`dd.mm.yyyy`, 24 h) | — |
+| Web | React 19, TS, Vite, Tailwind v4, shadcn, TanStack Query, hls.js, i18next | Same as Wiedisync |
+| Upload | Uppy with S3 multipart | Resumable |
+| Media | ffmpeg (pinned build in the image), ffprobe | — |
+| ML | PyTorch (CUDA 12.8+ builds for Blackwell), Ultralytics YOLO, ByteTrack via `supervision`, OpenCV, Polars/PyArrow | Licences compatible with AGPL |
+| YouTube | YouTube Data API v3 (metadata only, API key), IFrame Player API | Channel check, playback |
 
-### 12.3 Environments
+### 14.3 Environments
 
 | | Dev | Prod |
 |---|---|---|
 | Web + API | `nomal-dev.kscw.ch` | `nomal.kscw.ch` |
-| Wiedisync | `directus-dev.kscw.ch` (dev DB is a nightly scrubbed prod clone, so IDs match) | `directus.kscw.ch` |
+| Wiedisync | `directus-dev.kscw.ch` (nightly scrubbed prod clone, IDs match) | `directus.kscw.ch` |
 | Database | `nomal_dev` | `nomal` |
 | Bucket | `…-nomal-dev` (lifecycle: 30 days) | `…-nomal` |
-| Workers | Same workers, `--env dev` second agent with lower priority | Primary |
-| Local | `docker compose` with Postgres + MinIO + a fake bridge that issues dev tokens | — |
+| Workers | Same Lenovo worker, second agent with `--env dev`, lower priority | Primary |
+| GPU backend | `local-docker` on the Framework 16, or `fake` | `cloud-serverless` |
+| Local | `docker compose`: Postgres + MinIO + a fake bridge that issues dev tokens | — |
 
-Same rule as Wiedisync: everything goes to dev first.
+Everything goes to dev first, as in Wiedisync.
 
-### 12.4 Deploy
+### 14.4 Deploy
 
-- GitHub Actions: lint + tests on every push; on a tag, build `nomal-api`, `nomal-worker`,
-  `nomal-worker:gpu` images to GHCR (private).
-- VPS: `deploy/hetzner/compose.yaml` in `/opt/nomal`; `scripts/deploy.sh dev|prod` pulls
-  the tag, runs Alembic migrations (`upgrade head`, after a `pg_dump` snapshot of the
-  `nomal` DB), restarts, smoke-tests `/api/health` and a login with a test account.
-- Container limits on the VPS (it also runs prod Directus): API `mem_limit: 512m`,
-  `cpus: 1.0`. If Nomal ever needs more, it moves to its own small server (same compose file).
-- Workers: `docker compose pull && up -d` on each home machine (a systemd timer can do it
-  nightly for the tag in a `stable` file).
+- GitHub Actions: lint + tests on every push; on a tag, build `nomal-api`, `nomal-worker` and
+  `nomal-ml` images to GHCR (private).
+- VPS: `scripts/deploy.sh dev|prod` pulls the tag, snapshots the `nomal` DB, runs Alembic,
+  restarts, smoke-tests `/api/health` and a login with a test account.
+- Container limits on the VPS (it also runs prod Directus): API `mem_limit: 512m`, `cpus: 1.0`.
+- Lenovo server: `docker compose pull && up -d` (systemd timer for the tag in a `stable` file).
 
-### 12.5 Testing
+### 14.5 Testing
 
-- Unit: permissions matrix, entry grammar parser, taxonomy loader, retention rules, token
-  verification (good, expired, wrong audience, replayed `jti`).
-- Integration (pytest + Postgres + MinIO): upload → ingest → transcode on a 20 s fixture
-  clip → HLS playable; job leasing under concurrency; lease expiry.
-- E2E (Playwright): log in via the fake bridge, tag a fixture video with keyboard only,
-  build a smart reel, play it; a non-member gets 403 on playlist and segment.
+- Unit: permissions matrix, entry grammars, taxonomy loader, retention, token verification
+  (expired, wrong audience, replayed `jti`), score inference on synthetic rally sequences
+  (incl. side switches and the fifth-set switch at 8), budget guard.
+- Integration (pytest + Postgres + MinIO): upload → ingest → transcode on a 20 s fixture clip
+  with two split parts → HLS playable; job leasing under concurrency; lease expiry; the GPU
+  dispatcher against the `fake` backend.
+- E2E (Playwright): log in via the fake bridge, tag a fixture video with the keyboard, toggle
+  skip dead time, build a smart reel; a non-member gets 403 on playlist and segment; a segment
+  URL is refused after its TTL.
 - Contract test for the Wiedisync bridge payloads (fixtures shared with the Wiedisync PR).
 
 ---
 
-## 13. Operations and handover
+## 15. Operations and handover
 
-### 13.1 What someone taking over needs
+### 15.1 What someone taking over needs
 
 - `docs/RUNBOOK.md`: deploy, roll back, restore the DB, rotate the JWT key and worker tokens,
-  add or replace a worker, clear a stuck job, what each alert means.
+  add or replace a worker, **switch the GPU backend**, raise a budget cap, clear a stuck job,
+  what each alert means.
 - `docs/ARCHITECTURE.md` and the ADRs: why things are the way they are.
-- Secrets live in the password vault, referenced by entry name in the private runbook notes,
-  never in the repo. Env files on hosts are `0600`.
-- Ops-specific details that must not be public (hostnames of home machines, tailnet
-  names, bucket credentials) go in the private infra notes next to Wiedisync's
-  `INFRA.md`, with a pointer from the runbook.
+- Secrets live in the password vault, referenced by entry name in the private ops notes, never
+  in the repo. Env files on hosts are `0600`.
+- Ops details that must not be public (home hostnames, tailnet names, bucket names,
+  credentials) live in the private infra notes next to Wiedisync's `INFRA.md`.
 
-### 13.2 Backups
+### 15.2 Backups
 
 | What | How |
 |---|---|
-| `nomal` DB (tags = the irreplaceable part) | Add the `nomal` database to Wiedisync's existing `backup-postgres.sh` (6-hourly dump → GPG → Google Drive + R2 + NAS). Restore test extended to assert row floors on `event` and `video`. |
-| Renditions | Weekly mirror to NAS; can always be re-encoded from raw while raw exists. |
-| Raw originals | NAS only (RAID). Conscious decision: no offsite copy (2–4 TB/season). |
-| Models + datasets | NAS; small enough to also sync to an offsite target if wanted. |
+| `nomal` DB (tags, scores: the irreplaceable part) | Add the `nomal` database to Wiedisync's existing `backup-postgres.sh` (6-hourly dump → GPG → Google Drive + R2 + NAS). Restore test extended with row floors on `event`, `segment`, `video`. |
+| Renditions | Weekly mirror to NAS; re-encodable from raw while raw exists. |
+| Raw originals | NAS only (RAID). Conscious decision: no offsite copy. |
+| Models + datasets | NAS; small enough to sync offsite if wanted. |
 
-### 13.3 Monitoring
+### 15.3 Monitoring
 
-Uptime Kuma: `nomal.kscw.ch/api/health`, worker heartbeats, oldest-queued-job age.
-Errors: structured JSON logs; frontend errors to the club's Sentry (same org, new project).
-
----
-
-## 14. Running cost
-
-Annual, rough, at list prices as found on 15.10.2026 (third-party reports for Object
-Storage; verify on hetzner.com before ordering).
-
-| Item | Estimate | Notes |
-|---|---|---|
-| Hetzner Object Storage | **€70–90 / year** | Base ~€5–6/month includes 1 TB stored + 1 TB egress per month. Year 1 ≈ 0.6 TB; year 2 (two seasons) ≈ 1.2 TB. Ingress and API calls free. |
-| Extra egress | ~€0 | Viewing is well under 1 TB/month at this size; ingest downloads (if every match were browser-uploaded) ≈ 3 TB/season at ~€1/TB beyond the included TB |
-| Hetzner VPS | €0 extra | Runs on the existing server. Own small server later: roughly +€50–70/year |
-| Electricity | **~CHF 40–60 / year** | FW16 always on (~10–15 W ≈ 100 kWh) + GPU (~100 GPU-hours × 0.5 kW ≈ 50 kWh) at ~CHF 0.30/kWh |
-| NAS disks | CHF 0 now | ≈ 18 TB free; raw needs 2–4 TB/season with 2-season retention |
-| Domains, Cloudflare, GitHub | CHF 0 | Subdomains of `kscw.ch`; Actions minutes within free tier for a private repo at this size (watch it) |
-| **Total** | **≈ CHF 110–150 / year** | Target was "a few hundred CHF at most" |
+Uptime Kuma: `nomal.kscw.ch/api/health`, worker heartbeat, oldest-queued-job age, GPU spend vs.
+cap. Errors: structured JSON logs; frontend errors to the club's Sentry (new project).
 
 ---
 
-## 15. Roadmap
+## 16. Budget
+
+Target: **~CHF 210 per season, all running costs.** Your breakdown: cloud GPU ~80, backup
+storage ~50, test GPU ~35, reserve (~45). Assumed rates: 1 USD ≈ CHF 0.80, 1 EUR ≈ CHF 0.94
+(check current rates). Prices from public pricing pages and third-party trackers on 15.10.2026;
+verify before ordering.
+
+### 16.1 Cloud GPU (100 videos)
+
+Serverless providers bill GPU, CPU and memory per second. Modal's listed L4 price is about
+USD 0.80/h, plus about USD 0.047 per CPU core-hour and USD 0.008 per GiB-hour.
+
+| Scenario | GPU-h | Est. cost per season | vs. CHF 80 |
+|---|---|---|---|
+| Your assumption: 1.5 L4-h/video, GPU only | 150 | ≈ CHF 96 | ⚠ over |
+| 1.5 L4-h/video incl. 4 CPU cores + 16 GiB | 150 | ≈ CHF 134 | ⚠ over by ~CHF 54 |
+| Design cap: 0.8 L4-h/video incl. CPU/RAM (§10.9) | 80 | ≈ CHF 71 | ✓ |
+| Design estimate: 0.5 L4-h/video incl. CPU/RAM | 50 | ≈ CHF 45 | ✓ |
+
+⚠ **At 1.5 L4-hours per video the GPU line exceeds CHF 80** (≈ CHF 96 for the GPU alone,
+≈ CHF 134 with the CPU and memory a real job needs). The plan keeps it under by running the
+dead-time, OCR and calibration stages on the Lenovo CPU and sending only live segments to the
+GPU (§10.9). Spike S0 measures the real number. The budget guard (§8.3) enforces the cap either
+way.
+
+Not counted, upside only: Modal's free Starter plan includes about USD 30 of compute per month
+(third-party sources; terms can change). At ~12 matches a month that would cover the whole run
+rate. Not counted either: a local GPU (no cloud cost; electricity only).
+
+### 16.2 Everything
+
+| Line | Your budget | Plan estimate per season | Note |
+|---|---|---|---|
+| Cloud GPU inference | 80 | **45–71** (design) / ⚠ 134 (at 1.5 h incl. CPU/RAM) | §16.1 |
+| Hot storage (Hetzner Object Storage) | — | ⚠ **≈ 68–80** | **Not in your breakdown.** Base ~€5–6/month for 1 TB + 1 TB traffic; year 2 holds two seasons (~1.1 TB) unless the 1080p rendition of past seasons is dropped (§5.5) |
+| Backup storage | 50 | **≈ 0–5** | DB rides Wiedisync's existing backups; renditions mirror and raw stay on the NAS. Proposal: **move this line to hot storage** |
+| Test GPU (cloud experiments, training that doesn't fit 8 GB) | 35 | 35 (capped by the budget guard) | |
+| Electricity | — | ≈ 5–10 | Lenovo server is on anyway; Framework 16 training runs |
+| VPS, egress, domains, YouTube API | — | ≈ 0 | Existing server; traffic within included quota |
+| **Total** | **210** | **≈ CHF 155–200** with the design GPU target · ⚠ **≈ CHF 240–265** if 1.5 L4-h/video holds | |
+
+So: with hot storage taking the backup line, the plan fits CHF 210 **only if** the GPU stays
+near the design target. Levers if it doesn't: process only the matches coaches ask for, player
+detection at 10 fps, drop past seasons' 1080p rendition, or run production inference on a local
+GPU.
+
+---
+
+## 17. Roadmap
 
 Sized for evenings (~6–8 h/week). Each milestone ends with something usable and a short
-written check. Rough total to launch for the first 4 teams: **4–6 months**.
+written check. Rough total to launch for the first 4 teams: **5–7 months** (S0 to M4,
+including stats in M3b). Teams can start using M2 and M3 on dev before the formal launch.
 
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
-| **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with kscw-ui look; Alembic; Wiedisync bridge on **dev** (authorize + sync) and Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 (this architecture) | You log in on `nomal-dev.kscw.ch` with a Wiedisync dev account and see your Nomal-enabled teams and their games |
-| **M1** | Video in, video out | Job queue + media worker on FW16; NAS inbox + browser multipart upload; ingest + transcode + thumbnails; HLS playback with per-segment signing; adult gate; consent; audit log | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403 |
-| **M2** | Tagging | Volleyball taxonomy; roster snapshot; entry grammar + hotkeys; timeline + event table; rally key + rally automation; outbox; revision trigger | A full match tagged in ≤ 1.5× its length; pulling the network cable mid-session loses nothing |
-| **M3** | Clips, reels, export | Virtual clips; smart per-player reels; condensed match; ffmpeg export with watermark; simple stats | A player opens "my attacks this season" on a phone; a coach downloads a watermarked reel |
-| **M4** | Launch | Basketball taxonomy + grammar; YouTube source; German UI; privacy page; FILMING/TAGGING guides; RUNBOOK; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
-| **M5** | Tier 2a: rallies | Audio + motion v0, rally review UI, then the learned v1 on ~20 manually marked matches | F1 ≥ 0.9 at ±1 s; "rallies only" becomes the default view |
-| **M6** | Tier 2b: ball | GPU worker + gaming guard; ball-labelling tool; TrackNet fine-tune; Parquet artifacts | Ball bar met on near court; far court measured |
-| **M7** | Tier 2c: players + court | YOLO + ByteTrack; calibration UI; serve placement charts | Serve zones agree ≥ 80 % with manual tags |
-| **M8** | Tier 3 spike | Event proposals from tracks + ball contacts; review queue; first per-skill classifier | A measured precision per skill; decide whether to continue |
-
-**Do one spike before M1**: film one match to the standard, run an off-the-shelf
-TrackNet and YOLO on it on the 4090, and look at the far court. If tracking is hopeless at
-1080p from the planned camera height, the capture standard changes (4K, higher mount)
-**before** a season of footage is recorded.
+| **S0** | Spike (before M1) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court. On a cloud L4: run a draft `ml_analyse` once and **measure GPU-hours per video**. Whistle detection on its audio. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured → GPU budget line confirmed |
+| **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the Nomal brand; icons from `docs/brand/`; Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `nomal-dev.kscw.ch` with a Wiedisync dev account and see your Nomal-enabled teams and games |
+| **M1** | Video in, video out | Job queue + Lenovo media worker; NAS inbox + browser multipart upload (split files); ingest + transcode + thumbnails; HLS with per-segment signing; adult hard gate + *filming allowed/blocked*; consent; audit log; DU23 decision applied | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403; a blocked team cannot upload |
+| **M2** | Tagging + condensed playback | Volleyball taxonomy; roster snapshot; grammar + hotkeys; timeline + event table; rally key + rally/score from tags; **skip dead time (manual)** with timeout/set-break keys; set boundaries + starting score; rally list filters (player, action, outcome, set); outbox; revision triggers | A full match tagged in ≤ 1.5× its length; condensed playback works; pulling the network cable loses nothing |
+| **M3** | Clips, reels, export, comments | Virtual clips; smart per-player reels; highlight builder across matches; comments pinned to a moment with @mentions and audience; drill segments for trainings; ffmpeg export with watermark (incl. condensed match) | A player opens "my attacks this season" on a phone; a coach downloads a watermarked condensed match |
+| **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in Nomal without a spreadsheet |
+| **M4** | Launch | Basketball taxonomy + grammar for Herren 1; YouTube source (club channel); German UI; privacy page; filming/tagging guides; runbook; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
+| **M5** | Tier 2a: automatic dead time | CPU v0 (whistles + motion) on the Lenovo worker; rally review UI; analysis copies; GPU dispatcher + backends + budget guard; learned v1 once ~20 matches have manual rallies | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
+| **M6** | Tier 2b: automatic scoring (VB) | Serve-side classifier from tier-1 serve tags; side-switch rules; official-set-score constraint; scoreboard region UI + OCR; score correction UI | ≥ 98 % correct rally winners with ≤ 5 % flagged on held-out matches |
+| **M7** | Tier 2c: ball | Ball-labelling tool; TrackNet fine-tune on the Framework 16; Parquet artifacts | Ball bar met on near court; far court measured |
+| **M8** | Tier 2d: players + court | YOLO + ByteTrack; calibration UI; serve placement charts | Serve zones agree ≥ 80 % with manual tags |
+| **M9** | Basketball tier 2 + tier 3 spike | Clock/score OCR for basketball dead time and scoring; event proposals from tracks + ball contacts; unidentified-athlete queue | Measured precision per skill; decide whether to continue |
+| **Later** | Pick by demand | Court-diagram clicks for attack/serve lines; setter distribution; telestration; trends and goals; DVW import/export; optional AI match summary (§12.2) | Each one when a coach asks for it |
 
 ---
 
-## 16. Risks
+## 18. Risks
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| One developer, evenings | Stalls, bus factor | Small stack, ADRs, runbook, milestone-sized scope, non-goals in §1 |
-| Tagging is too slow for coaches | Nobody tags, nothing else works | DataVolley-style grammar, rally automation, measure tagging time in M2, recruit analysts |
-| Far-court ball tracking at 1080p | Tier 2 weak | Spike before M1; 4K / higher mount; fast shutter |
-| GPU PC is a gaming PC | ML backlog | Pull model, chunked checkpoints, night window, WoL later; tier 2 is batch anyway |
-| FW16 as an always-on laptop | Sleep, battery wear | Disable suspend, charge limit; container moves to the Lenovo server unchanged if needed |
-| VPS shared with prod Directus | Nomal hurts Wiedisync | Container CPU/memory limits; video never touches the VPS; move out if needed |
-| iOS playback quirks (cookies, redirects) | iPhone users can't watch | Test in M1; loader fallback (§7.6) |
-| A leaked export | Privacy incident | Coach-only, watermark, 30-day expiry, audit log |
-| Minors in opposing adult teams | Privacy | Numbers only, team-internal, delete on request, documented residual risk |
-| Wiedisync changes (season rollover, schema) | Broken sync | Versioned bridge contract + tests; lineage mapping; bridge owned in the Wiedisync repo |
-| Cloudflare terms on video | Account action | Video never through Cloudflare (§3.1) |
-| Price changes (Hetzner) | Cost creep | Storage is S3-standard; moving to another S3 (e.g. R2) is a config change plus a copy |
+| One developer, evenings | Stalls, bus factor | Small stack, ADRs, runbook, milestone-sized scope, non-goals |
+| Tagging too slow for coaches | Nobody tags | Grammar, rally/score automation, measure in M2, recruit analysts, condensed mode first |
+| Different camera per team | Inconsistent input, some below 50 fps | Ingest normalises; `meets_standard` flag; per-camera page in the filming guide; tier 2 skips sub-standard videos |
+| Far-court ball tracking at 1080p | Tier 2 weak | Spike S0; 4K / higher mount; fast shutter |
+| GPU cost above plan | Budget broken | S0 measurement, CPU stages at home, live segments only, budget guard, local GPU fallback |
+| GPU provider outside Switzerland/EU | revDSG exposure | EU provider preferred; DPA/SCCs; minimised analysis copies; named in consent (§5.6) |
+| DU23-1 and U23 opponents | Breaks "nothing under 18" | Trainings only unless decided otherwise (§5.3) |
+| Lenovo server is also the LAN's DNS and runs other services | Transcodes hurt the LAN | Container CPU/memory caps, `nice`, VAAPI |
+| VPS shared with prod Directus | Nomal hurts Wiedisync | Container limits; video never touches the VPS |
+| iOS playback quirks | iPhone users can't watch | Test in M1; playlist-refresh fallback (§7.6) |
+| Leaked export | Privacy incident | Coach-only, watermark, 30-day expiry, audit |
+| YouTube footage outside Nomal's control | Visible to anyone with the link | Club channel only, unlisted, original file preferred |
+| Wiedisync changes (rollover, schema) | Broken sync | Versioned bridge contract + tests; lineage mapping |
+| "H1" exists in both sports | Wrong team linked | Sport is part of every team key and every picker |
+| Cloudflare terms on video | Account action | Video never through Cloudflare |
+| Price changes | Cost creep | S3-standard storage; GPU backends are swappable |
 
 ---
 
-## 17. Open questions and assumptions
+## 19. Open questions and flags
 
-Assumptions made so the plan could be written. Correct any that are wrong; each is a
-small change.
-
-| # | Question / assumption | Current assumption |
+| # | Question | Recommendation |
 |---|---|---|
-| A1 | "Linux, the FW16" | The GPU worker is the Linux PC with the RTX 4090 (checked); the **always-on media worker is the Framework 16** instead of the Lenovo server. |
-| A2 | Team mix | 4 teams: you wrote "2× volleyball, 1× basketball"; the fourth is assumed volleyball. Basketball is supported from M4. |
-| A3 | Uploaders | Mostly you via the NAS inbox; browser upload for other coaches. Home upload speed unknown (only matters for browser uploads from home). |
-| Q1 | YouTube sources | Whose channels? Club-owned → file import possible; third-party → embed only (no export, no tier 2). |
-| Q2 | Download policy | Coaches only, watermarked, 30 days. OK? |
-| Q3 | Basketball camera | Behind the baseline works poorly for basketball. Use an elevated sideline position for basketball? |
-| Q4 | Consent | Explicit opt-in per player (recommended) vs. information + right to object. |
-| Q5 | Retention | Recording season + 1 for renditions and raw. OK? |
-| Q6 | Players who leave | Lose access to the team's videos; their tags stay (as name or as number if they ask). OK? |
-| Q7 | Audio | Kept by default, per-video mute. OK? |
-| Q8 | Camera model | Which camera? Needed for the capture spike (shutter, 4K, bitrate, file splitting). |
-| Q9 | Hetzner | Verify Object Storage price and pick the region of the existing VPS. |
-| Q10 | Repo visibility | Created **private**; flip to public when you're happy, like Wiedisync. |
+| **O1** ⚠ | **DU23-1**: does its roster include anyone under 18 or without a birthdate? And U23 opponents very likely include under-18s, which Nomal cannot check. | DU23-1 **trainings only**. Filming its matches would break "nothing under 18 gets filmed" for opponents. The roster check needs a production read (aggregate counts only). |
+| **O2** | Adult-league opponents (2. Liga, 1. Liga regional) can still field a 16- or 17-year-old. | Accept as documented residual risk with deletion on request, or have the coach confirm per upload "no under-18 player on court that I know of". |
+| **O3** | "H1 (basketball)" = basketball **Herren 1** (league H1LRA), not volleyball H1 (2. Liga)? | Assumed yes. |
+| **O4** ⚠ | GPU provider: Modal (US, no public DPF certification/DPA found, EU region only on a USD 250/month plan) vs. an EU per-second provider vs. local GPU. | Build the interface first (M5); run S0 on a cloud L4 with test footage; choose an **EU provider** if pricing and billing granularity hold, else Modal with DPA + SCCs named in the consent text. |
+| **O5** ⚠ | 1.5 L4-h/video exceeds the CHF 80 GPU line (≈ CHF 96 GPU-only, ≈ CHF 134 incl. CPU/RAM). | Design to ≤ 0.8 h (§10.9), confirm in S0. |
+| **O6** ⚠ | Hot storage (≈ CHF 68–80/season) is not in the budget breakdown. | Move the CHF 50 backup line to hot storage (backups cost ~0) and drop past seasons' 1080p rendition. |
+| **O7** | Basketball camera: behind the baseline films basketball poorly. | Elevated sideline at half court for Herren 1. |
+| **O8** | Club YouTube channel ID(s) for the allow-list. | Needed in M4. |
+| **O9** | Camera models per team. | Needed for S0 and the filming guide. |
+| **O10** | The existing RTX 4090 PC could run the `local-docker` backend at near-zero cost. | Not in your plan; keep as a budget fallback only if you want it. |
+| **O11** | Brand assets in `docs/brand/`. | Icons are generated in M0 once the SVGs are there. |
+| **O12** | Repo visibility. | Private now; flip to public when you're happy, like Wiedisync. |
