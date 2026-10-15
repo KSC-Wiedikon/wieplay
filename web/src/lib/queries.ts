@@ -134,22 +134,6 @@ export function useTagging(id: string, enabled: boolean) {
   })
 }
 
-/**
- * The same data for the tagging workspace, which keeps its own copy once open: always fetched
- * anew when the workspace mounts (a cached copy may miss changes just sent), and not refetched
- * behind its back. Wait for `isFetchedAfterMount` before using it.
- */
-export function useTaggingForWorkspace(id: string, enabled: boolean) {
-  return useQuery({
-    queryKey: keys.tagging(id),
-    queryFn: ({ signal }) => api.tagging(id, signal),
-    enabled,
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  })
-}
-
 /** The team's players (any season) with their consent, for the roster editor (coaches, sport admins). */
 export function useRosterCandidates(videoId: string) {
   return useQuery({

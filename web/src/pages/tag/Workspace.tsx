@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { Button, ButtonLink } from '../../components/Button'
 import { AlertIcon, CheckIcon, KeyboardIcon, PauseIcon, PlayIcon, RedoIcon, UndoIcon } from '../../components/icons'
+import { LoadError } from '../../components/Message'
 import { PageSpinner } from '../../components/Spinner'
 import { Switch } from '../../components/Switch'
 import { VideoPlayer } from '../../components/VideoPlayer'
@@ -29,49 +30,91 @@ import { RosterPanel } from './RosterPanel'
 import { SetsBar } from './SetsBar'
 import { SegmentPanel, Timeline } from './Timeline'
 
+/**
+ * Workspaces of this tab that were just closed and are still sending their last changes, by
+ * video. A new workspace for the same video waits for them, so the data it loads includes them.
+ */
+const closing = new Map<string, Promise<void>>()
+
+interface Session {
+  store: TaggingStore
+  outbox: Outbox
+  bundle: Tagging
+}
+
+/**
+ * One tagging session: loads the video's tagging data fresh (never a cached copy, which may
+ * miss changes sent moments ago), opens the outbox (queued changes of an earlier visit come
+ * back), then shows the desk. Closing it sends what is still queued.
+ */
+export function Workspace({ video, taxonomy }: { video: Video; taxonomy: Taxonomy }) {
+  const client = useQueryClient()
+  const [session, setSession] = useState<Session | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    let opened: Session | null = null
+    const start = async () => {
+      await closing.get(video.id)
+      const bundle = await client.fetchQuery({
+        queryKey: keys.tagging(video.id),
+        queryFn: ({ signal }) => api.tagging(video.id, signal),
+        staleTime: 0,
+      })
+      if (cancelled) return
+      const store = new TaggingStore(video.id, bundle)
+      const outbox = await Outbox.open({
+        videoId: video.id,
+        send: (body) => api.postChanges(video.id, body),
+        onSynced: (out) => store.applySynced(out),
+      })
+      if (cancelled) {
+        outbox.close()
+        return
+      }
+      store.attach(outbox)
+      opened = { store, outbox, bundle }
+      setSession(opened)
+    }
+    start().catch(() => {
+      if (!cancelled) setFailed(true)
+    })
+    return () => {
+      cancelled = true
+      const ended = opened
+      if (!ended) return
+      ended.store.detach()
+      // Leaving: send what is queued now rather than at the next visit.
+      const done = ended.outbox.flush().finally(() => {
+        ended.outbox.close()
+        if (closing.get(video.id) === done) closing.delete(video.id)
+        void client.invalidateQueries({ queryKey: keys.tagging(video.id) })
+      })
+      closing.set(video.id, done)
+    }
+  }, [client, video.id, attempt])
+
+  if (failed) {
+    return (
+      <LoadError
+        onRetry={() => {
+          setFailed(false)
+          setSession(null)
+          setAttempt((n) => n + 1)
+        }}
+      />
+    )
+  }
+  if (!session) return <PageSpinner />
+  return <Desk video={video} bundle={session.bundle} taxonomy={taxonomy} store={session.store} outbox={session.outbox} />
+}
+
 interface WorkspaceProps {
   video: Video
   bundle: Tagging
   taxonomy: Taxonomy
-}
-
-/** Opens the outbox (queued changes of an earlier visit come back) and then shows the desk. */
-export function Workspace({ video, bundle, taxonomy }: WorkspaceProps) {
-  const client = useQueryClient()
-  const [store] = useState(() => new TaggingStore(video.id, bundle))
-  const [outbox, setOutbox] = useState<Outbox | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    let opened: Outbox | null = null
-    void Outbox.open({
-      videoId: video.id,
-      send: (body) => api.postChanges(video.id, body),
-      onSynced: (out) => store.applySynced(out),
-    }).then((o) => {
-      if (cancelled) {
-        o.close()
-        return
-      }
-      opened = o
-      store.attach(o)
-      setOutbox(o)
-    })
-    return () => {
-      cancelled = true
-      store.detach()
-      const o = opened
-      if (!o) return
-      // Leaving: send what is queued now rather than at the next visit.
-      void o.flush().finally(() => {
-        o.close()
-        void client.invalidateQueries({ queryKey: keys.tagging(video.id) })
-      })
-    }
-  }, [store, video.id, client])
-
-  if (!outbox) return <PageSpinner />
-  return <Desk video={video} bundle={bundle} taxonomy={taxonomy} store={store} outbox={outbox} />
 }
 
 function Desk({ video, bundle, taxonomy, store, outbox }: WorkspaceProps & { store: TaggingStore; outbox: Outbox }) {

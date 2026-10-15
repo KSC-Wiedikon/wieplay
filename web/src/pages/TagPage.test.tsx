@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 
 import { IDBFactory } from 'fake-indexeddb'
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { rescore, serveCodes } from '../lib/rallies'
 import type { ChangesIn, ChangesOut, Period, RosterCandidate, Segment, Tag, Tagging, Video } from '../lib/types'
@@ -98,17 +98,22 @@ const candidates: RosterCandidate[] = [
   { member_id: 117, name: 'Lea Graf', number: null, consent: null },
 ]
 
-function show(data: Tagging = bundle({ periods: [period({ no: 1, start_ms: 0, first_serve: 'us' })] }), { down = false } = {}) {
+function show(
+  data: Tagging = bundle({ periods: [period({ no: 1, start_ms: 0, first_serve: 'us' })] }),
+  { down = false, postDelay = 0 } = {},
+) {
   const server = fakeServer(data)
-  const fetch = vi.fn(
-    stubFetch({
+  const stub = stubFetch({
       [`/api/videos/${ID}`]: { body: video },
       [`/api/videos/${ID}/tagging`]: { body: () => server.current() },
       [`POST /api/videos/${ID}/changes`]: down ? { status: 503, body: { detail: 'Unavailable' } } : { body: server.changes },
       [`/api/videos/${ID}/roster/candidates`]: { body: candidates },
       [`PUT /api/videos/${ID}/roster`]: { body: ({ body }: { body: unknown }) => (body as { entries: unknown[] }).entries },
-    }),
-  )
+  })
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST' && postDelay) await new Promise((resolve) => setTimeout(resolve, postDelay))
+    return stub(input, init)
+  })
   vi.stubGlobal('fetch', fetch)
   const view = renderRoute(<TagPage />, {
     path: '/videos/:id/tag',
@@ -467,6 +472,58 @@ describe('TagPage', () => {
     await router.navigate(`/videos/${ID}/tag`)
     await ready()
     expect(within(screen.getByRole('table', { name: 'Tags' })).getByText('9B#')).toBeInTheDocument()
+  })
+
+  it('keeps the session when the window is narrow for a moment (a full-page screenshot does that)', async () => {
+    // A media query that tests can flip, like Chromium reporting a 1×1 viewport while it captures.
+    let wide = true
+    const listeners = new Set<() => void>()
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      get matches() {
+        return wide
+      },
+      media: query,
+      addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+    }))
+    const { server } = show()
+    const player = await ready()
+    player.currentTime = 12
+    type('7A#')
+    keys('Enter')
+    await waitFor(() => expect(server.posts).toHaveLength(1), { timeout: 3000 })
+    await screen.findByText('All changes saved')
+
+    for (const value of [false, true]) {
+      wide = value
+      act(() => listeners.forEach((listener) => listener()))
+    }
+    expect(screen.queryByText(/Tagging needs a larger screen/)).not.toBeInTheDocument()
+    expect(document.querySelector('video')).toBe(player)
+    expect(within(screen.getByRole('table', { name: 'Tags' })).getByText('7A#')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Match state' })).toHaveTextContent('Set 1')
+  })
+
+  it('waits for a just-closed session to finish sending before loading again', async () => {
+    const { router, server, fetch } = show(undefined, { postDelay: 300 })
+    const player = await ready()
+    player.currentTime = 50
+    type('9B#')
+    keys('Enter')
+    // Leave and come straight back, before the 1 s debounce: the closing session sends at once.
+    fireEvent.click(screen.getByRole('link', { name: 'Back to the video' }))
+    await screen.findByText('Video page')
+    await router.navigate(`/videos/${ID}/tag`)
+    await ready()
+
+    expect(within(screen.getByRole('table', { name: 'Tags' })).getByText('9B#')).toBeInTheDocument()
+    const calls = fetch.mock.calls.map(([path, init]) => `${init?.method ?? 'GET'} ${String(path)}`)
+    expect(calls.filter((c) => c.startsWith('POST'))).toHaveLength(1)
+    // The data was loaded again only once the closing session's batch had been answered.
+    expect(server.posts).toHaveLength(1)
+    expect(calls.at(-1)).toBe(`GET /api/videos/${ID}/tagging`)
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    expect(server.posts).toHaveLength(1) // nothing sent twice
   })
 
   it('keeps unsent changes over a reload and sends them on the next visit', async () => {
