@@ -1397,8 +1397,15 @@ Everything goes to dev first, as in Wiedisync.
 
 - GitHub Actions: lint + tests on every push; on a tag, build `nomal-api`, `nomal-worker` and
   `nomal-ml` images to GHCR (private).
-- VPS: `scripts/deploy.sh dev|prod` pulls the tag, snapshots the `nomal` DB, runs Alembic,
-  restarts, smoke-tests `/api/health` and a login with a test account.
+- VPS, once per environment: `scripts/setup-hetzner.sh dev|prod`.
+  - It creates the secrets, the database and its login role, the `NOMAL_*` lines in the
+    Directus `.env` and `/opt/nomal-<env>/.env`.
+  - It recreates Directus once and runs the first deploy.
+  - It moves the secrets into the vault (`scripts/vault-secrets.sh`).
+  - The tunnel route (`kscw-club` → `http://127.0.0.1:8090` dev, `:8091` prod) is separate.
+- VPS, every release: `scripts/deploy.sh dev|prod`.
+  - It builds the image locally (no registry yet), loads it on the VPS and dumps the database.
+  - Then it runs Alembic, restarts, and checks `/api/health`.
 - Container limits on the VPS (it also runs prod Directus): API `mem_limit: 512m`, `cpus: 1.0`.
 - Lenovo server: `docker compose pull && up -d` (systemd timer for the tag in a `stable` file).
 
@@ -1512,7 +1519,11 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 - `nomal_dev` database, Directus dev env and the `kscw-club` tunnel route are in place.
 - The first sync covered H3, D1, DU23-1 and Herren 1.
 
-Still open for M0: one real login by a person (the "done when" check), and the prod setup.
+Still open for M0: one real login by a person (the "done when" check), and the prod setup
+(`scripts/setup-hetzner.sh prod`; the Wiedisync prod bridge code is already live, unconfigured).
+
+D1 2026/27 shares a lineage with D2 2025/26. That is correct: Swiss Volley team 1393 was promoted
+from 3. Liga and renamed (16 of 19 players stayed).
 
 | # | Milestone | Contents | Done when |
 |---|---|---|---|

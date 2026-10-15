@@ -55,8 +55,11 @@ database (`docker exec nomal-local-db-1 psql -U nomal -c 'CREATE DATABASE nomal_
 ## Deploy
 
 `scripts/deploy.sh dev|prod` builds the image here, loads it on the VPS, dumps the database,
-runs migrations and restarts. The one-time setup per environment (database, `.env`, tunnel
-hostname, Wiedisync bridge env) is described in `docs/PLAN.md` §4.4 and §14.
+runs migrations and restarts.
+
+Once per environment, `scripts/setup-hetzner.sh dev|prod` creates the secrets, the database,
+the Wiedisync bridge env and `/opt/nomal-<env>/.env`, then deploys and moves the secrets into
+the vault (`scripts/vault-secrets.sh`). Add the tunnel hostname separately (`docs/PLAN.md` §14.4).
 
 ## License
 
