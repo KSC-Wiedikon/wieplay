@@ -38,7 +38,7 @@ from nomal.core.filming import (
     club_today,
     refresh_rosters,
 )
-from nomal.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTraining
+from nomal.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTeam, WdTraining
 from nomal.core.permissions import Viewer, can_delete_video, can_upload, can_use_inbox
 from nomal.core.storage import ObjectStore, safe_file_name
 
@@ -108,6 +108,9 @@ class FileOut(BaseModel):
 class VideoOut(BaseModel):
     id: uuid.UUID
     team_id: int
+    team_name: str
+    team_season: str
+    sport: Literal["volleyball", "basketball"]
     kind: Literal["match", "training"]
     game_id: int | None
     training_id: int | None
@@ -184,22 +187,46 @@ def _manages(viewer: Viewer, access: TeamAccess) -> bool:
     return can_upload(viewer, access.ref) or can_delete_video(viewer, access.ref, access.leads)
 
 
+IN_PROGRESS = ("uploading", "queued", "processing")
+
+
+def _progress(db: Session, videos: list[Video]) -> dict[uuid.UUID, float]:
+    """Share of each unfinished video's jobs that is done, in one query."""
+    ids = [v.id for v in videos if v.status in IN_PROGRESS]
+    if not ids:
+        return {}
+    done: dict[uuid.UUID, list[float]] = {}
+    for video_id, status, progress in db.execute(
+        select(Job.video_id, Job.status, Job.progress).where(
+            Job.video_id.in_(ids), Job.kind != "purge"
+        )
+    ):
+        if video_id is not None:
+            done.setdefault(video_id, []).append(
+                1.0 if status == "succeeded" else (progress or 0.0)
+            )
+    return {k: round(sum(v) / len(v), 3) for k, v in done.items()}
+
+
 def _video_out(
-    db: Session, video: Video, access: TeamAccess, viewer: Viewer, settings: Settings
+    db: Session,
+    video: Video,
+    access: TeamAccess,
+    viewer: Viewer,
+    settings: Settings,
+    progress_by_video: dict[uuid.UUID, float] | None = None,
 ) -> VideoOut:
     manager = _manages(viewer, access)
-    progress = None
-    if video.status in {"uploading", "queued", "processing"}:
-        rows = db.execute(
-            select(Job.status, Job.progress).where(Job.video_id == video.id, Job.kind != "purge")
-        ).all()
-        if rows:
-            done = [1.0 if s == "succeeded" else (p or 0.0) for s, p in rows]
-            progress = round(sum(done) / len(done), 3)
+    if progress_by_video is None:
+        progress_by_video = _progress(db, [video])
+    progress = progress_by_video.get(video.id)
     fps = video.fps_num / video.fps_den if video.fps_num and video.fps_den else None
     return VideoOut(
         id=video.id,
         team_id=video.team_id,
+        team_name=access.team.name,
+        team_season=access.team.season,
+        sport=access.team.sport,
         kind=video.kind,
         game_id=video.game_id,
         training_id=video.training_id,
@@ -321,8 +348,11 @@ def team_videos(
     query = select(Video).where(Video.team_id == team_id, Video.status != "deleted")
     if not _manages(viewer, access):
         query = query.where(Video.status == "ready")
-    videos = db.scalars(query.order_by(Video.recorded_on.desc(), Video.created_at.desc())).all()
-    return [_video_out(db, v, access, viewer, settings) for v in videos]
+    videos = list(
+        db.scalars(query.order_by(Video.recorded_on.desc(), Video.created_at.desc())).all()
+    )
+    progress = _progress(db, videos)
+    return [_video_out(db, v, access, viewer, settings, progress) for v in videos]
 
 
 def _resolve_event(
@@ -406,6 +436,11 @@ def create_video(
         )
         if len(inbox) != len(set(body.inbox_file_ids)) or any(i.status != "new" for i in inbox):
             raise HTTPException(409, "An inbox file is no longer available")
+        folder = pipeline.team_folder(access.team).lower()
+        if any(inbox_folder(i.path) != folder for i in inbox):
+            raise HTTPException(
+                409, f"Only files from the inbox folder {folder} belong to this team"
+            )
         order = {fid: n for n, fid in enumerate(body.inbox_file_ids)}
         inbox.sort(key=lambda i: order[i.id])
 
@@ -727,11 +762,24 @@ class InboxFileOut(BaseModel):
     fps: float | None
 
 
+def inbox_folder(path: str) -> str:
+    return path.split("/", 1)[0].lower() if "/" in path else ""
+
+
 @router.get("/inbox", response_model=list[InboxFileOut])
 def list_inbox(viewer: ViewerDep, db: DbDep) -> list[InboxFileOut]:
-    """Camera files waiting in the NAS inbox, for coaches to attach to a game (PLAN §7.2)."""
-    if not can_use_inbox(viewer, team_refs(db)):
+    """Camera files waiting in the NAS inbox, for coaches to attach to a game (PLAN §7.2).
+
+    The inbox has one folder per team (vb-H3, bb-Herren-1, …): a coach sees the files in
+    the folders of the teams they upload for, and nothing else."""
+    refs = team_refs(db)
+    if not can_use_inbox(viewer, refs):
         raise HTTPException(403, "Coaches and sport admins only")
+    upload_ids = {r.id for r in refs if can_upload(viewer, r)}
+    folders = {
+        pipeline.team_folder(t).lower()
+        for t in db.scalars(select(WdTeam).where(WdTeam.id.in_(upload_ids)))
+    }
     rows = db.scalars(
         select(InboxFile)
         .where(InboxFile.status == "new")
@@ -739,6 +787,8 @@ def list_inbox(viewer: ViewerDep, db: DbDep) -> list[InboxFileOut]:
     )
     out = []
     for row in rows:
+        if inbox_folder(row.path) not in folders:
+            continue
         probe = row.probe or {}
         out.append(
             InboxFileOut(

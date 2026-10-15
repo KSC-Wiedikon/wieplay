@@ -141,7 +141,9 @@ def poster(
     store: StoreDep,
     settings: SettingsDep,
 ) -> RedirectResponse:
-    _check(request, db, viewer, video_id)
+    video = _playable(db, viewer, video_id)
+    if not (video.thumbs or {}).get("poster"):
+        raise HTTPException(404, "No poster")
     return _signed(store, settings, f"media/{video_id}/thumbs/poster.jpg")
 
 

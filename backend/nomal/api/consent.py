@@ -24,7 +24,8 @@ Status = Literal["accepted", "withdrawn"]
 
 
 class ConsentOut(BaseModel):
-    notice_version: str
+    notice_version: str  # the current notice
+    accepted_version: str | None  # the notice the newest answer was given to
     status: Status | None
     via: str | None
     at: datetime | None
@@ -38,6 +39,7 @@ class RosterConsentOut(BaseModel):
     member_id: int
     name: str
     number: int | None
+    accepted_version: str | None
     status: Status | None
     via: str | None
     at: datetime | None
@@ -45,9 +47,12 @@ class RosterConsentOut(BaseModel):
 
 def _out(row: Consent | None) -> ConsentOut:
     if row is None:
-        return ConsentOut(notice_version=NOTICE_VERSION, status=None, via=None, at=None)
+        return ConsentOut(
+            notice_version=NOTICE_VERSION, accepted_version=None, status=None, via=None, at=None
+        )
     return ConsentOut(
         notice_version=NOTICE_VERSION,
+        accepted_version=row.notice_version,
         status=row.status,
         via=row.via,
         at=row.at,
@@ -98,6 +103,7 @@ def team_consent(team_id: int, viewer: ViewerDep, db: DbDep) -> list[RosterConse
                 member_id=mid,
                 name=member.display_name if member else f"#{mid}",
                 number=member.number if member else None,
+                accepted_version=row.notice_version if row else None,
                 status=row.status if row else None,
                 via=row.via if row else None,
                 at=row.at if row else None,
@@ -145,6 +151,7 @@ def record_paper_consent(
         member_id=member_id,
         name=member.display_name if member else f"#{member_id}",
         number=member.number if member else None,
+        accepted_version=NOTICE_VERSION,
         status=body.status,
         via="paper",
         at=row.at,

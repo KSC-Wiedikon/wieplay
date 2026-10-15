@@ -103,13 +103,18 @@ def retention_until(day: date) -> date:
     return date(start + 2, 5, 31)
 
 
+def team_folder(team: WdTeam) -> str:
+    """A team's folder name on the NAS, e.g. vb-H3, bb-Herren-1: in raw/ and in the inbox."""
+    sport = "vb" if team.sport == "volleyball" else "bb"
+    team_part = re.sub(r"[^A-Za-z0-9-]+", "-", team.name).strip("-") or str(team.id)
+    return f"{sport}-{team_part}"
+
+
 def raw_subdir(video: Video, team: WdTeam) -> str:
     """Where the originals go on the NAS, readable for people:
     2026-27/vb-H3/2026-10-11_match_ab12cd34"""
-    sport = "vb" if video.sport == "volleyball" else "bb"
-    team_part = re.sub(r"[^A-Za-z0-9-]+", "-", team.name).strip("-") or str(team.id)
     return (
-        f"{season_of(video.recorded_on).replace('/', '-')}/{sport}-{team_part}/"
+        f"{season_of(video.recorded_on).replace('/', '-')}/{team_folder(team)}/"
         f"{video.recorded_on.isoformat()}_{video.kind}_{video.id.hex[:8]}"
     )
 

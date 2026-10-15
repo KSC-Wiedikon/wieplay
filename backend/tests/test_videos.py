@@ -466,12 +466,15 @@ def test_inbox_files_become_a_video_without_upload(
     now = datetime.now(UTC)
     an_hour_ago = (now - timedelta(hours=1)).isoformat()
     files = [
-        {"path": "H3/C0001.MP4", "size": 5_000_000_000, "mtime": an_hour_ago,
+        {"path": "vb-H3/C0001.MP4", "size": 5_000_000_000, "mtime": an_hour_ago,
          "probe": {"duration_ms": 3_600_000, "width": 1920, "height": 1080, "fps": 50.0}},
-        {"path": "H3/C0002.MP4", "size": 1_000_000_000, "mtime": now.isoformat(), "probe": {}},
+        {"path": "vb-H3/C0002.MP4", "size": 1_000_000_000, "mtime": now.isoformat(), "probe": {}},
     ]  # fmt: skip
     assert w.post("/api/worker/inbox", json={"files": files}).status_code == 204
-    assert as_inbox(club["coach"]) == ["H3/C0001.MP4", "H3/C0002.MP4"]
+    other = {"path": "vb-D1/C0009.MP4", "size": 1, "mtime": an_hour_ago, "probe": {}}
+    assert w.post("/api/worker/inbox", json={"files": [*files, other]}).status_code == 204
+    # The H3 coach sees H3's folder only (D1's file is another team's).
+    assert as_inbox(club["coach"]) == ["vb-H3/C0001.MP4", "vb-H3/C0002.MP4"]
     ids = [f["id"] for f in club["coach"].get("/api/inbox").json()]
     created = club["coach"].post(
         f"/api/teams/{H3}/videos",
@@ -481,7 +484,10 @@ def test_inbox_files_become_a_video_without_upload(
     assert created.json()["status"] == "queued" and created.json()["source"] == "inbox"
     assert as_inbox(club["coach"]) == []
     [ingest] = claim(w, [*MEDIA_CAPS, "inbox"])
-    assert [f["inbox_path"] for f in ingest["params"]["files"]] == ["H3/C0001.MP4", "H3/C0002.MP4"]
+    assert [f["inbox_path"] for f in ingest["params"]["files"]] == [
+        "vb-H3/C0001.MP4",
+        "vb-H3/C0002.MP4",
+    ]
     # A file that disappears from the share disappears from the list.
     assert w.post("/api/worker/inbox", json={"files": files[:1]}).status_code == 204
     assert club["coach"].get("/api/inbox").json() == []
