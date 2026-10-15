@@ -5,6 +5,8 @@ services:
   worker:
     image: nomal-worker:${NOMAL_TAG:?NOMAL_TAG must be set in .env}
     restart: unless-stopped
+    # The NAS share is mounted (CIFS) as the host user: run as that user to write to it.
+    user: "${NOMAL_WORKER_UID:-10001}:${NOMAL_WORKER_GID:-10001}"
     env_file: .env
     environment:
       NOMAL_WORKER_TOKEN_FILE: /run/secrets/nomal-worker-token
