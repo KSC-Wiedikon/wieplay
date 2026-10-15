@@ -1534,6 +1534,12 @@ from 3. Liga and renamed (16 of 19 players stayed).
   - both renditions decode through the API's 302s;
   - the same files through the NAS inbox.
 - In the worker image, VAAPI encodes about 5.8× real time.
+- On dev since 15.10.2026: the M1 API (video off until the bucket exists), the media worker
+  on the Lenovo server (VAAPI, reaching the API over the tailnet, data on local disk until
+  the NAS share exists), and the DU23-1 policy "trainings only".
+- **Wiedisync's adult check on real (dev) rosters, 15.10.2026**: H3, D1 and Herren 1 pass.
+  DU23-1 fails because 6 of its 15 rostered people are under 18. So DU23-1 trainings are
+  blocked too, as long as minors are on that roster.
 - Waiting on:
   - the Hetzner bucket and its keys (budget line O7);
   - the NAS shares `nomal/raw-*` and `nomal/inbox-*`;
