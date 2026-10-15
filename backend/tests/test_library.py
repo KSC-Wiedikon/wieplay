@@ -344,6 +344,12 @@ def test_team_and_video_say_what_the_viewer_may_do(
     assert [coach.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [True] * 3
     assert [player.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [False] * 3
 
+    listed = {t["id"]: t for t in coach.get("/api/teams").json()}
+    assert listed[9101]["can_share"] and listed[9101]["lineage_id"]
+    assert not next(t for t in player.get("/api/me").json()["teams"] if t["id"] == 9101)[
+        "can_share"
+    ]
+
     seasons = player.get("/api/teams/9101/seasons").json()
     assert [s["team_id"] for s in seasons] == [9101, 9001]  # newest first
     assert as_("basketball-player").get("/api/teams/9101/seasons").status_code == 404
