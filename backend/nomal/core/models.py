@@ -491,8 +491,9 @@ class Segment(Base):
         ForeignKey("video.id", ondelete="CASCADE"), index=True
     )
     period_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
-    # rally | possession | timeout | set_break | warmup | stoppage | other_dead
+    # rally | possession | timeout | set_break | warmup | stoppage | other_dead | drill
     kind: Mapped[str] = mapped_column(String(16))
+    label: Mapped[str | None] = mapped_column(String(80))  # a drill's name in a training
     start_ms: Mapped[int] = mapped_column(BigInteger)
     end_ms: Mapped[int] = mapped_column(BigInteger)
     serving: Mapped[str | None] = mapped_column(String(8))
@@ -595,3 +596,115 @@ class SegmentRevision(Base):
 
 Index("ix_event_video_t", Event.video_id, Event.t_ms)
 Index("ix_segment_video_start", Segment.video_id, Segment.start_ms)
+
+
+# --- M3: clips, reels, comments, exports (PLAN §6.8, §7.7) -----------------------------------
+
+
+class Clip(Base):
+    """A time range of a video. Watching it seeks inside the stream: no file (PLAN §6.8)."""
+
+    __tablename__ = "clip"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True)  # client-generated
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    start_ms: Mapped[int] = mapped_column(BigInteger)
+    end_ms: Mapped[int] = mapped_column(BigInteger)
+    title: Mapped[str] = mapped_column(String(200))
+    note: Mapped[str | None] = mapped_column(Text)
+    event_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    owner: Mapped[int] = mapped_column(Integer, index=True)
+    visibility: Mapped[str] = mapped_column(String(16), default="private")  # private | team
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Reel(Base):
+    """A playlist: manual (items) or smart (a saved query evaluated on open)."""
+
+    __tablename__ = "reel"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True)
+    owner: Mapped[int] = mapped_column(Integer, index=True)
+    lineage_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("team_lineage.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(16))  # smart | manual
+    query: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    visibility: Mapped[str] = mapped_column(String(16), default="private")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    items: Mapped[list[ReelItem]] = relationship(
+        back_populates="reel", order_by="ReelItem.position", cascade="all, delete-orphan"
+    )
+
+
+class ReelItem(Base):
+    __tablename__ = "reel_item"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    reel_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reel.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    video_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("video.id", ondelete="CASCADE"))
+    start_ms: Mapped[int] = mapped_column(BigInteger)
+    end_ms: Mapped[int] = mapped_column(BigInteger)
+    event_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    clip_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    caption: Mapped[str | None] = mapped_column(String(200))
+
+    reel: Mapped[Reel] = relationship(back_populates="items")
+
+
+class Comment(Base):
+    """A comment pinned to a moment, with @mentions and an audience (PLAN §6.8, §12)."""
+
+    __tablename__ = "comment"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True)
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    target_type: Mapped[str] = mapped_column(String(16))  # video | event | segment | clip
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    t_ms: Mapped[int | None] = mapped_column(BigInteger)
+    author: Mapped[int] = mapped_column(Integer, index=True)
+    body: Mapped[str] = mapped_column(Text)
+    mentions: Mapped[list[int]] = mapped_column(ARRAY(Integer), default=list)
+    audience: Mapped[str] = mapped_column(String(16), default="team")  # team | coaches | person
+    recipient: Mapped[int | None] = mapped_column(Integer)  # audience = person
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class VideoExport(Base):
+    """A watermarked MP4 of a clip, reel or condensed match, for coaches (PLAN §5.2, §7.7)."""
+
+    __tablename__ = "video_export"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(String(16))  # clip | reel | condensed
+    title: Mapped[str] = mapped_column(String(200))
+    source: Mapped[dict[str, Any]] = mapped_column(JSONB)  # the pieces and where they came from
+    duration_ms: Mapped[int] = mapped_column(BigInteger)
+    # queued | processing | ready | failed | expired
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    object_key: Mapped[str | None] = mapped_column(String(512))
+    bytes: Mapped[int | None] = mapped_column(BigInteger)
+    requested_by: Mapped[int] = mapped_column(Integer, index=True)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

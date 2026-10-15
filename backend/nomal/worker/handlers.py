@@ -295,8 +295,10 @@ def thumbs(ctx: Context) -> dict[str, Any]:
         cancel=ctx.cancel,
         cwd=out,
     )
+    first = _raw_inputs(ctx)[0]
+    first_ms = ffmpeg.probe(Path(first)).duration_ms
     ffmpeg.run(
-        ffmpeg.poster_args(concat=concat, at_s=min(60.0, duration_ms / 1000 * 0.1)),
+        ffmpeg.poster_args(source=Path(first), at_s=min(60.0, first_ms / 1000 * 0.1)),
         duration_ms=1,
         on_progress=lambda p: None,
         cancel=ctx.cancel,
@@ -386,10 +388,84 @@ def import_video(ctx: Context) -> dict[str, Any]:
     return {"file_name": params["file_name"], "bytes": target.stat().st_size, "info": info}
 
 
+def export(ctx: Context) -> dict[str, Any]:
+    """A watermarked MP4 of a clip, reel or condensed match (PLAN §7.7)."""
+    params = ctx.job.params
+    out = ctx.scratch / "export"
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    watermark = out / "watermark.txt"
+    watermark.write_text(str(params["watermark"])[:200])
+    pieces = params["pieces"]
+    total_ms = sum(int(p["end_ms"]) - int(p["start_ms"]) for p in pieces)
+    done_ms = 0
+    parts: list[str] = []
+    root = ctx.settings.raw_root
+    for piece in pieces:
+        # A piece in the video's timeline may span two camera files: cut per file.
+        for part in piece["parts"]:
+            offset, length = int(part["offset_ms"]), int(part["duration_ms"])
+            start = max(int(piece["start_ms"]), offset)
+            end = min(int(piece["end_ms"]), offset + length)
+            if end - start < 40:  # less than two frames of this file
+                continue
+            source = _inside(root, Path(part["path"]))
+            name = f"piece_{len(parts):03d}.mp4"
+            base, cut_ms = done_ms, end - start
+
+            def report(p: float, base: int = base, cut_ms: int = cut_ms) -> None:
+                ctx.report(0.9 * (base + p * cut_ms) / max(total_ms, 1), "rendering")
+
+            ffmpeg.run(
+                ffmpeg.export_piece_args(
+                    source=source,
+                    start_s=(start - offset) / 1000,
+                    duration_s=cut_ms / 1000,
+                    has_audio=bool(piece.get("has_audio", True)),
+                    watermark_file=watermark,
+                    font_file=ctx.settings.font_file,
+                    output=name,
+                ),
+                duration_ms=cut_ms,
+                on_progress=report,
+                cancel=ctx.cancel,
+                cwd=out,
+            )
+            parts.append(name)
+            done_ms += cut_ms
+    if not parts:
+        raise PermanentError("nothing to render")
+    parts_list = out / "parts.ffconcat"
+    parts_list.write_text("ffconcat version 1.0\n" + "".join(f"file '{name}'\n" for name in parts))
+    ffmpeg.run(
+        ffmpeg.join_args(parts_list=parts_list, output="export.mp4"),
+        duration_ms=total_ms,
+        on_progress=lambda p: ctx.report(0.9 + 0.05 * p, "joining"),
+        cancel=ctx.cancel,
+        cwd=out,
+    )
+    result = out / "export.mp4"
+    size = result.stat().st_size
+    url = ctx.api.sign(ctx.job.id, "put", [params["key"]])[params["key"]]
+    ctx.report(0.95, "uploading")
+    with result.open("rb") as handle:
+        response = httpx.put(
+            url,
+            content=handle,
+            headers={"Content-Type": "video/mp4", "Content-Length": str(size)},
+            timeout=httpx.Timeout(600.0, connect=15.0),
+        )
+    if response.status_code not in (200, 201, 204):
+        raise RuntimeError(f"export upload failed: HTTP {response.status_code}")
+    return {"bytes": size, "duration_ms": total_ms}
+
+
 HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "import": import_video,
     "ingest": ingest,
     "transcode": transcode,
     "thumbs": thumbs,
     "purge": purge,
+    "export": export,
 }

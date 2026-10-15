@@ -80,6 +80,7 @@ class EventOut(BaseModel):
 class SegmentOut(BaseModel):
     id: uuid.UUID
     kind: str
+    label: str | None
     start_ms: int
     end_ms: int
     period_id: uuid.UUID | None

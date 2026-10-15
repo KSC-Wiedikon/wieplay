@@ -34,6 +34,9 @@ class WorkerSettings(BaseSettings):
     threads: int = 6  # x264 threads; keeps the box responsive for its other services
     x264_preset: str = "veryfast"
 
+    # The watermark's font (Debian package fonts-dejavu-core in the worker image).
+    font_file: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
     heartbeat_seconds: int = 30
     upload_concurrency: int = 6
 

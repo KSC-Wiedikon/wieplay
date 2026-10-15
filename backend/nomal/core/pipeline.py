@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -32,13 +32,15 @@ from nomal.core.media import (
     renditions_for,
     standard_issues,
 )
-from nomal.core.models import Job, Video, VideoRendition, WdTeam
+from nomal.core.models import Job, Video, VideoExport, VideoRendition, WdTeam
 
 INGEST_CAPS = ("ingest", "nas")
 IMPORT_CAPS = ("import", "nas")
 TRANSCODE_CAPS = ("transcode", "nas")
 THUMBS_CAPS = ("thumbs", "nas")
 PURGE_CAPS = ("nas",)
+EXPORT_CAPS = ("export", "nas")
+EXPORT_DAYS = 30
 
 
 class IngestedFile(BaseModel):
@@ -93,6 +95,11 @@ class ThumbsResult(BaseModel):
 
 # What ffmpeg writes for a VOD fMP4 rendition; any other line is refused (PLAN §7.6: the
 # playlist the API serves may only name this rendition's own segments).
+class ExportResult(BaseModel):
+    bytes: int = Field(gt=0)
+    duration_ms: int = Field(ge=0)
+
+
 PLAYLIST_TAGS = re.compile(
     r"#EXTM3U|#EXT-X-VERSION:[0-9]{1,2}|#EXT-X-TARGETDURATION:[0-9]{1,3}"
     r"|#EXT-X-MEDIA-SEQUENCE:0|#EXT-X-PLAYLIST-TYPE:VOD|#EXT-X-INDEPENDENT-SEGMENTS"
@@ -352,6 +359,17 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
     if job.kind == "purge":
         jobs.succeed(job, payload)
         return
+    if job.kind == "export":
+        result = ExportResult.model_validate(payload)
+        export = db.get(VideoExport, uuid.UUID(job.params["export_id"]), with_for_update=True)
+        if export is None:
+            raise ValueError("export row is gone")
+        export.status = "ready"
+        export.bytes = result.bytes
+        export.object_key = job.params["key"]
+        export.expires_at = datetime.now(UTC) + timedelta(days=EXPORT_DAYS)
+        jobs.succeed(job, payload)
+        return
     if video is None:
         raise ValueError("job has no video")
     if job.kind == "import":
@@ -368,7 +386,13 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 
 
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
-    """A job failed for good: the video failed, its other jobs stop."""
+    """A job failed for good: the video failed, its other jobs stop. A failed export only
+    fails that export."""
+    if job.kind == "export":
+        export = db.get(VideoExport, uuid.UUID(job.params["export_id"]))
+        if export is not None:
+            export.status, export.error = "failed", (job.error or "failed")[:2000]
+        return
     if video is None or video.status in {"deleted", "refused"}:
         return
     video.status = "failed"
@@ -385,6 +409,8 @@ def may_sign(job: Job, op: str, key: str) -> bool:
     if job.kind == "transcode" and op == "put":
         prefix = f"media/{video}/{job.params['rendition']['name']}/"
         return key.startswith(prefix) and bool(SEGMENT_NAME.fullmatch(key[len(prefix) :]))
+    if job.kind == "export" and op == "put":
+        return key == job.params.get("key")
     if job.kind == "thumbs" and op == "put":
         prefix = f"media/{video}/thumbs/"
         return key.startswith(prefix) and bool(THUMB_NAME.fullmatch(key[len(prefix) :]))
@@ -442,3 +468,26 @@ def refuse_after_ingest(db: Session, video: Video, reason: str) -> None:
     video.error = reason[:2000]
     jobs.cancel_active(db, video.id, "refused")
     purge_raw(db, video)
+
+
+def enqueue_export(
+    db: Session, export: VideoExport, pieces: list[dict[str, Any]], watermark: str
+) -> Job:
+    """Queue the rendering of an export (PLAN §7.7). Each piece names its video's NAS
+    originals; the worker cuts frame-accurately, burns in the watermark and joins."""
+    key = f"exports/{export.id}.mp4"
+    job = jobs.enqueue(
+        db,
+        "export",
+        caps=EXPORT_CAPS,
+        priority=3,
+        params={
+            "export_id": str(export.id),
+            "key": key,
+            "pieces": pieces,
+            "watermark": watermark,
+            "duration_ms": export.duration_ms,
+        },
+    )
+    export.job_id = job.id
+    return job

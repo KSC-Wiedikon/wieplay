@@ -118,3 +118,21 @@ def can_tag(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
     if not team.enabled:
         return False
     return team.sport in viewer.sport_admin or team.lineage_id in leads
+
+
+def is_team_manager(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Coaches and team managers (any season), sport admins, admins: they see coach-only
+    comments and manage the team's shared clips and reels."""
+    if not team.enabled:
+        return False
+    return viewer.is_admin or team.sport in viewer.sport_admin or team.lineage_id in leads
+
+
+def can_share_with_team(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Share a clip or reel with the team (§5.1): coaches, team managers, sport admins."""
+    return can_tag(viewer, team, leads)
+
+
+def can_export(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Download a watermarked MP4 (§5.1, §5.2): coaches, team managers, sport admins."""
+    return can_tag(viewer, team, leads)

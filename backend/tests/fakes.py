@@ -20,9 +20,10 @@ class FakeStore:
     signed: list[tuple[str, str, int]] = field(default_factory=list)  # (op, key, ttl)
     _ids: itertools.count[int] = field(default_factory=lambda: itertools.count(1))
 
-    def presign_get(self, key: str, ttl: int) -> str:
+    def presign_get(self, key: str, ttl: int, download_name: str | None = None) -> str:
         self.signed.append(("get", key, ttl))
-        return f"https://s3.test/{key}?X-Amz-Expires={ttl}&X-Amz-Signature=x"
+        name = f"&download={download_name}" if download_name else ""
+        return f"https://s3.test/{key}?X-Amz-Expires={ttl}&X-Amz-Signature=x{name}"
 
     def presign_put(self, key: str, ttl: int) -> str:
         self.signed.append(("put", key, ttl))
