@@ -1506,10 +1506,13 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 - Backend: 32 tests.
 - Web: 29 tests.
 - An end-to-end run through the production image passed.
-- Wiedisync bridge: KSC-Wiedikon/wiedisync#8.
+- Wiedisync bridge: KSC-Wiedikon/wiedisync#8, merged and deployed to dev.
 
-Still open for M0: the dev infrastructure (database, Directus env, tunnel hostname, first
-deploy).
+**Live on dev since 15.10.2026**: https://nomal-dev.kscw.ch.
+- `nomal_dev` database, Directus dev env and the `kscw-club` tunnel route are in place.
+- The first sync covered H3, D1, DU23-1 and Herren 1.
+
+Still open for M0: one real login by a person (the "done when" check), and the prod setup.
 
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
