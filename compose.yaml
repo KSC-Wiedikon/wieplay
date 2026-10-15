@@ -1,0 +1,22 @@
+# Local development only: Postgres for the API and its tests.
+#   docker compose up -d        (stop: docker compose down; wipe: docker compose down -v)
+name: nomal-local
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: nomal
+      POSTGRES_PASSWORD: nomal
+      POSTGRES_DB: nomal
+    ports:
+      - "127.0.0.1:55488:5432"
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nomal"]
+      interval: 2s
+      retries: 30
+
+volumes:
+  db:

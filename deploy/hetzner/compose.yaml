@@ -1,0 +1,23 @@
+# Nomal API on the Hetzner VPS, one directory per environment (/opt/nomal-dev, /opt/nomal-prod)
+# holding this file and a .env (template: deploy/hetzner/env.example). scripts/deploy.sh
+# copies it there and runs: docker compose up -d
+services:
+  api:
+    image: nomal-api:${NOMAL_TAG:?NOMAL_TAG must be set in .env}
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:${NOMAL_PORT:?NOMAL_PORT must be set in .env}:8000"
+    networks: [kscw]
+    # The VPS also runs prod Directus: Nomal stays small.
+    mem_limit: 512m
+    cpus: 1.0
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  kscw:
+    # The Docker network that reaches kscw-postgres and the Directus containers.
+    external: true
+    name: ${NOMAL_DOCKER_NETWORK:-coolify}

@@ -1,0 +1,101 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Brand palette (docs/PLAN.md §13.2). Tailwind's default palette is dropped so
+   every colour in the UI comes from these tokens. */
+@theme {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-navy: #13203a;
+  --color-light: #eef1f5;
+  --color-vb-yellow: #ffc72c;
+  --color-vb-blue: #1f5fbf;
+  --color-bb-orange: #f26b1d;
+
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-wordmark: 'Bricolage Grotesque', var(--font-sans);
+}
+
+/* Semantic tokens. Components use only these; the values switch with the
+   theme (.dark on <html>) and the sport (data-sport on <html>). */
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-hairline: var(--hairline);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-link: var(--link);
+  --color-ring: var(--ring);
+  --color-danger: var(--danger);
+}
+
+/* Contrast rules: white on blue, navy on yellow and orange; never yellow or
+   orange text on light, never blue text on navy. */
+:root {
+  color-scheme: light;
+  --page: var(--color-light);
+  --surface: var(--color-white);
+  --sunken: #f5f7fa;
+  --fg: var(--color-navy);
+  --muted: #4a5670;
+  --hairline: rgb(19 32 58 / 0.14);
+  --accent: var(--color-vb-blue);
+  --on-accent: var(--color-white);
+  --link: var(--color-vb-blue);
+  --ring: var(--color-vb-blue);
+  --danger: #b42318;
+}
+
+:root[data-sport='bb'] {
+  --accent: var(--color-bb-orange);
+  --on-accent: var(--color-navy);
+  --link: var(--color-navy);
+}
+
+:root.dark {
+  color-scheme: dark;
+  --page: var(--color-navy);
+  --surface: #1a2a48;
+  --sunken: #16243f;
+  --fg: var(--color-light);
+  --muted: #b4bdcc;
+  --hairline: rgb(238 241 245 / 0.16);
+  --accent: var(--color-vb-yellow);
+  --on-accent: var(--color-navy);
+  --link: var(--color-vb-yellow);
+  --ring: var(--color-vb-yellow);
+  --danger: #ff9b8f;
+}
+
+:root.dark[data-sport='bb'] {
+  --accent: var(--color-bb-orange);
+  --link: var(--color-bb-orange);
+}
+
+@layer base {
+  html {
+    background-color: var(--page);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Until main.tsx sets .light or .dark, follow the system so dark-mode users
+     don't get a light flash. */
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light, .dark) {
+      background-color: var(--color-navy);
+    }
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
