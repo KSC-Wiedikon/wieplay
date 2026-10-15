@@ -11,13 +11,18 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from nomal.api.access import team_refs
 from nomal.api.deps import DbDep, ViewerDep
 from nomal.core.models import TeamLineage, WdGame, WdTeam
 from nomal.core.permissions import (
     TeamRef,
     Viewer,
+    can_export,
     can_manage_nomal,
+    can_share_with_team,
+    can_tag,
     can_upload,
+    lead_lineages,
     visible_team_ids,
 )
 
@@ -38,6 +43,10 @@ class TeamOut(BaseModel):
 class TeamDetailOut(TeamOut):
     # Coach/team manager of this season's team or sport admin: upload videos.
     can_upload: bool
+    # Coaches and team managers (any season) and sport admins: tag, share, download.
+    can_tag: bool
+    can_share: bool
+    can_export: bool
 
 
 class MemberOut(BaseModel):
@@ -118,7 +127,30 @@ def list_teams(viewer: ViewerDep, db: DbDep) -> list[TeamOut]:
 def get_team(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamDetailOut:
     team = _get_visible_team(db, viewer, team_id)
     ref = TeamRef(team.id, team.sport, team.lineage_id, team.lineage.enabled)
-    return TeamDetailOut(**_team_out(team, viewer).model_dump(), can_upload=can_upload(viewer, ref))
+    leads = lead_lineages(viewer, team_refs(db))
+    return TeamDetailOut(
+        **_team_out(team, viewer).model_dump(),
+        can_upload=can_upload(viewer, ref),
+        can_tag=can_tag(viewer, ref, leads),
+        can_share=can_share_with_team(viewer, ref, leads),
+        can_export=can_export(viewer, ref, leads),
+    )
+
+
+class SeasonOut(BaseModel):
+    team_id: int
+    name: str
+    season: str
+
+
+@router.get("/teams/{team_id}/seasons", response_model=list[SeasonOut])
+def team_seasons(team_id: int, viewer: ViewerDep, db: DbDep) -> list[SeasonOut]:
+    """The seasons of this team the viewer can see (newest first)."""
+    team = _get_visible_team(db, viewer, team_id)
+    visible = {t.id for t in _visible_teams(db, viewer)}
+    rows = db.scalars(select(WdTeam).where(WdTeam.lineage_id == team.lineage_id))
+    out = [SeasonOut(team_id=t.id, name=t.name, season=t.season) for t in rows if t.id in visible]
+    return sorted(out, key=lambda s: s.season, reverse=True)
 
 
 @router.get("/teams/{team_id}/games", response_model=list[GameOut])

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from typing import Any, Literal
 
@@ -29,11 +30,14 @@ from nomal.core import pipeline, reels
 from nomal.core.models import (
     Clip,
     Comment,
+    Event,
     Job,
     Reel,
     ReelItem,
+    Segment,
     Video,
     VideoExport,
+    WdMember,
     WdTeam,
     WdTeamMember,
 )
@@ -86,6 +90,7 @@ class ClipOut(BaseModel):
     note: str | None
     event_id: uuid.UUID | None
     owner: int
+    owner_name: str | None
     mine: bool
     visibility: str
     created_at: datetime
@@ -144,6 +149,27 @@ class PieceOut(BaseModel):
     side: str | None
     number: int | None
     member_id: int | None
+    player_name: str | None
+    # The score after the rally the moment belongs to, when tagged.
+    score_us: int | None
+    score_them: int | None
+
+
+class ReelDetailOut(BaseModel):
+    reel: ReelOut
+    item_count: int
+    total_ms: int
+
+
+class ReelItemsIn(BaseModel):
+    items: list[ReelItemIn] = Field(min_length=1, max_length=100)
+
+
+class PersonOut(BaseModel):
+    member_id: int
+    name: str
+    number: int | None
+    roles: list[str]
 
 
 class CommentIn(BaseModel):
@@ -181,6 +207,7 @@ class CommentOut(BaseModel):
     mentions: list[int]
     audience: str
     recipient: int | None
+    recipient_name: str | None
     created_at: datetime
     edited_at: datetime | None
     mine: bool
@@ -222,11 +249,69 @@ def _watchable(db: Session, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video,
     return video, access
 
 
-def _piece_out(piece: reels.Piece) -> PieceOut:
-    return PieceOut(**{k: getattr(piece, k) for k in PieceOut.model_fields})
+def _names(db: Session, member_ids: set[int]) -> dict[int, str]:
+    if not member_ids:
+        return {}
+    return {
+        m.id: m.display_name
+        for m in db.scalars(select(WdMember).where(WdMember.id.in_(member_ids)))
+    }
 
 
-def _clip_out(clip: Clip, video: Video, viewer: Viewer) -> ClipOut:
+def _pieces_out(db: Session, pieces: list[reels.Piece]) -> list[PieceOut]:
+    """Pieces with their tag (a manual item names only the event), the player's name and
+    the score after the rally. An event counts only inside the piece's own video, which
+    the caller already checked the viewer may watch."""
+    wanted = {(p.video_id, p.event_id) for p in pieces if p.event_id}
+    tags: dict[uuid.UUID, tuple[Event, int | None, int | None]] = {}
+    if wanted:
+        rows = db.execute(
+            select(Event, Segment.score_us_after, Segment.score_them_after)
+            .outerjoin(Segment, Segment.id == Event.segment_id)
+            .where(Event.id.in_({e for _, e in wanted}), Event.deleted_at.is_(None))
+        ).all()
+        tags = {e.id: (e, us, them) for e, us, them in rows if (e.video_id, e.id) in wanted}
+    filled = []
+    for p in pieces:
+        tag = tags.get(p.event_id) if p.event_id else None
+        if tag is not None and p.code is None:
+            event = tag[0]
+            p = replace(
+                p,
+                code=event.code,
+                grade=(event.attributes or {}).get("grade"),
+                side=event.side,
+                number=event.number,
+                member_id=event.member_id,
+            )
+        filled.append((p, tag))
+    names = _names(db, {p.member_id for p, _ in filled if p.member_id})
+    out = []
+    for p, tag in filled:
+        out.append(
+            PieceOut(
+                video_id=p.video_id,
+                start_ms=p.start_ms,
+                end_ms=p.end_ms,
+                event_id=p.event_id,
+                clip_id=p.clip_id,
+                caption=p.caption,
+                video_title=p.video_title,
+                recorded_on=p.recorded_on,
+                code=p.code,
+                grade=p.grade,
+                side=p.side,
+                number=p.number,
+                member_id=p.member_id,
+                player_name=names.get(p.member_id) if p.member_id else None,
+                score_us=tag[1] if tag else None,
+                score_them=tag[2] if tag else None,
+            )
+        )
+    return out
+
+
+def _clip_out(clip: Clip, video: Video, viewer: Viewer, owner_name: str | None = None) -> ClipOut:
     return ClipOut(
         id=clip.id,
         video_id=clip.video_id,
@@ -238,6 +323,7 @@ def _clip_out(clip: Clip, video: Video, viewer: Viewer) -> ClipOut:
         note=clip.note,
         event_id=clip.event_id,
         owner=clip.owner,
+        owner_name=owner_name,
         mine=clip.owner == viewer.member_id,
         visibility=clip.visibility,
         created_at=clip.created_at,
@@ -270,7 +356,9 @@ def video_clips(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[ClipO
         )
         .order_by(Clip.start_ms)
     )
-    return [_clip_out(c, video, viewer) for c in rows]
+    clips = list(rows)
+    names = _names(db, {c.owner for c in clips})
+    return [_clip_out(c, video, viewer, names.get(c.owner)) for c in clips]
 
 
 @router.get("/clips/mine", response_model=list[ClipOut])
@@ -288,7 +376,7 @@ def my_clips(viewer: ViewerDep, db: DbDep) -> list[ClipOut]:
         )
         .order_by(Video.recorded_on.desc(), Clip.start_ms)
     ).all()
-    return [_clip_out(c, v, viewer) for c, v in rows]
+    return [_clip_out(c, v, viewer, viewer.name) for c, v in rows]
 
 
 @router.put("/clips/{clip_id}", response_model=ClipOut)
@@ -309,7 +397,7 @@ def put_clip(clip_id: uuid.UUID, body: ClipIn, viewer: ViewerDep, db: DbDep) -> 
     clip.visibility = body.visibility
     clip.deleted_at = None
     db.commit()
-    return _clip_out(clip, video, viewer)
+    return _clip_out(clip, video, viewer, viewer.name if clip.owner == viewer.member_id else None)
 
 
 @router.delete("/clips/{clip_id}", status_code=204)
@@ -373,18 +461,39 @@ def _check_team_share(db: Session, viewer: Viewer, body: ReelIn) -> None:
         raise HTTPException(403, "Only coaches share reels with the team")
 
 
-def _store_items(db: Session, viewer: Viewer, reel: Reel, items: list[ReelItemIn]) -> None:
+def _check_items(db: Session, viewer: Viewer, items: list[ReelItemIn]) -> None:
     ids = _visible_ids(db, viewer)
     videos = {
         v.id: v for v in db.scalars(select(Video).where(Video.id.in_({i.video_id for i in items})))
     }
-    reel.items.clear()
-    for position, item in enumerate(items):
+    for item in items:
         video = videos.get(item.video_id)
         if video is None or video.status != "ready" or video.team_id not in ids:
             raise HTTPException(422, "A reel item names a video you cannot watch")
         if item.end_ms <= item.start_ms:
             raise HTTPException(422, "A reel item ends after it starts")
+    # A named tag or clip belongs to the item's own video.
+    event_ids = {i.event_id for i in items if i.event_id}
+    if event_ids:
+        found = {
+            (r[0], r[1])
+            for r in db.execute(select(Event.id, Event.video_id).where(Event.id.in_(event_ids)))
+        }
+        if any(i.event_id and (i.event_id, i.video_id) not in found for i in items):
+            raise HTTPException(422, "A reel item names a tag of another video")
+    clip_ids = {i.clip_id for i in items if i.clip_id}
+    if clip_ids:
+        found = set(
+            db.execute(select(Clip.id, Clip.video_id).where(Clip.id.in_(clip_ids))).tuples()
+        )
+        if any(i.clip_id and (i.clip_id, i.video_id) not in found for i in items):
+            raise HTTPException(422, "A reel item names a clip of another video")
+
+
+def _store_items(db: Session, viewer: Viewer, reel: Reel, items: list[ReelItemIn]) -> None:
+    _check_items(db, viewer, items)
+    reel.items.clear()
+    for position, item in enumerate(items):
         reel.items.append(ReelItem(position=position, **item.model_dump()))
 
 
@@ -480,19 +589,71 @@ def _reel_pieces(db: Session, viewer: Viewer, reel: Reel) -> list[reels.Piece]:
 
 @router.get("/reels/{reel_id}/items", response_model=list[PieceOut])
 def reel_items(reel_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[PieceOut]:
-    return [_piece_out(p) for p in _reel_pieces(db, viewer, _readable_reel(db, viewer, reel_id))]
+    return _pieces_out(db, _reel_pieces(db, viewer, _readable_reel(db, viewer, reel_id)))
 
 
 @router.post("/reels/preview", response_model=list[PieceOut])
 def preview_reel(query: reels.ReelQuery, viewer: ViewerDep, db: DbDep) -> list[PieceOut]:
     """Evaluate a query without saving it: "my attacks this season", the highlight builder."""
-    return [_piece_out(p) for p in reels.evaluate(db, _visible_ids(db, viewer), query)]
+    return _pieces_out(db, reels.evaluate(db, _visible_ids(db, viewer), query))
+
+
+@router.get("/reels/{reel_id}", response_model=ReelDetailOut)
+def get_reel(reel_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> ReelDetailOut:
+    reel = _readable_reel(db, viewer, reel_id)
+    pieces = _reel_pieces(db, viewer, reel)
+    return ReelDetailOut(
+        reel=_reel_out(reel, viewer), item_count=len(pieces), total_ms=reels.total_ms(pieces)
+    )
+
+
+@router.post("/reels/{reel_id}/items", response_model=ReelDetailOut)
+def append_reel_items(
+    reel_id: uuid.UUID, body: ReelItemsIn, viewer: ViewerDep, db: DbDep
+) -> ReelDetailOut:
+    """Add items at the end of a manual reel, under a row lock (two adds never lose one)."""
+    reel = db.get(Reel, reel_id, with_for_update=True)
+    if reel is None or reel.deleted_at is not None or reel.owner != viewer.member_id:
+        raise HTTPException(404, "Reel not found")
+    if reel.kind != "manual":
+        raise HTTPException(409, "A smart reel takes no items")
+    if len(reel.items) + len(body.items) > 500:
+        raise HTTPException(413, "A reel holds at most 500 items")
+    # Only the new items are checked: an old one whose video went away is skipped on
+    # playback and must not block adding more.
+    _check_items(db, viewer, body.items)
+    start = max((i.position for i in reel.items), default=-1) + 1
+    for offset, item in enumerate(body.items):
+        reel.items.append(ReelItem(position=start + offset, **item.model_dump()))
+    reel.updated_at = datetime.now(UTC)
+    db.commit()
+    return get_reel(reel_id, viewer, db)
+
+
+@router.get("/videos/{video_id}/people", response_model=list[PersonOut])
+def video_people(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[PersonOut]:
+    """The people of the video's team (any season): who can be mentioned or addressed."""
+    video, _ = _watchable(db, viewer, video_id)
+    rows = db.execute(
+        select(WdTeamMember.member_id, WdTeamMember.rel)
+        .join(WdTeam, WdTeam.id == WdTeamMember.team_id)
+        .where(WdTeam.lineage_id == video.lineage_id)
+    ).all()
+    roles: dict[int, set[str]] = {}
+    for member_id, rel in rows:
+        roles.setdefault(member_id, set()).add(rel)
+    members = {m.id: m for m in db.scalars(select(WdMember).where(WdMember.id.in_(roles)))}
+    out = [
+        PersonOut(member_id=mid, name=m.display_name, number=m.number, roles=sorted(roles[mid]))
+        for mid, m in members.items()
+    ]
+    return sorted(out, key=lambda p: (p.number is None, p.number or 0, p.name))
 
 
 @router.get("/videos/{video_id}/condensed", response_model=list[PieceOut])
 def condensed(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[PieceOut]:
     video, _ = _watchable(db, viewer, video_id)
-    return [_piece_out(p) for p in reels.condensed(db, video)]
+    return _pieces_out(db, reels.condensed(db, video))
 
 
 # --- comments ------------------------------------------------------------------------------
@@ -517,13 +678,8 @@ def list_comments(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[Com
         .where(Comment.video_id == video.id)
         .order_by(Comment.t_ms.nulls_first(), Comment.created_at)
     )
-    from nomal.core.models import WdMember
-
     visible = [c for c in rows if _comment_visible(c, viewer, manager)]
-    names = {
-        m.id: m.display_name
-        for m in db.scalars(select(WdMember).where(WdMember.id.in_({c.author for c in visible})))
-    }
+    names = _names(db, {c.author for c in visible} | {c.recipient for c in visible if c.recipient})
     return [
         CommentOut(
             id=c.id,
@@ -537,6 +693,7 @@ def list_comments(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[Com
             mentions=list(c.mentions or []),
             audience=c.audience,
             recipient=c.recipient,
+            recipient_name=names.get(c.recipient) if c.recipient else None,
             created_at=c.created_at,
             edited_at=c.edited_at,
             mine=c.author == viewer.member_id,

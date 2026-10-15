@@ -253,3 +253,97 @@ def test_drill_segments_carry_a_label(tagged: dict[str, Any], club: dict[str, Te
     assert r.status_code == 200
     labels = [s["label"] for s in r.json()["segments"] if s["kind"] == "drill"]
     assert labels == ["Serve receive 6v6"]
+
+
+def test_reel_pieces_name_the_player_and_the_score(tagged: dict[str, Any], as_: Any) -> None:
+    pieces = as_("player-h3").post("/api/reels/preview", json={"codes": ["A"]}).json()
+    # Rally 1 (10-20 s) went to us, rally 2 (21-30 s) to them.
+    assert [(p["player_name"], p["score_us"], p["score_them"]) for p in pieces] == [
+        ("Alex Muster", 1, 0),
+        ("Alex Muster", 1, 1),
+    ]
+
+
+def test_single_reel_and_append(
+    tagged: dict[str, Any], club: dict[str, TestClient], as_: Any
+) -> None:
+    coach, player = club["coach"], as_("player-h3")
+    lineage = coach.get("/api/teams/9101").json()["lineage_id"]
+    kill = next(
+        e["id"]
+        for e in coach.get(f"/api/videos/{tagged['id']}/tagging").json()["events"]
+        if e["attributes"].get("grade") == "#"
+    )
+    first = {"video_id": tagged["id"], "start_ms": 5_000, "end_ms": 9_000}
+    reel = coach.post(
+        "/api/reels",
+        json={"title": "Set 1", "kind": "manual", "items": [first], "visibility": "team",
+              "lineage_id": lineage},
+    ).json()  # fmt: skip
+    detail = player.get(f"/api/reels/{reel['id']}").json()
+    assert (detail["reel"]["title"], detail["item_count"], detail["total_ms"]) == (
+        "Set 1",
+        1,
+        4_000,
+    )
+
+    more = [
+        {"video_id": tagged["id"], "start_ms": 12_000, "end_ms": 17_000, "event_id": kill},
+        {"video_id": tagged["id"], "start_ms": 40_000, "end_ms": 42_000, "caption": "End"},
+    ]
+    added = coach.post(f"/api/reels/{reel['id']}/items", json={"items": more})
+    assert added.status_code == 200, added.text
+    assert (added.json()["item_count"], added.json()["total_ms"]) == (3, 11_000)
+    items = player.get(f"/api/reels/{reel['id']}/items").json()
+    assert [i["start_ms"] for i in items] == [5_000, 12_000, 40_000]  # appended in order
+    # A manual item that names a tag shows the tag, the player and the score.
+    assert (items[1]["code"], items[1]["grade"], items[1]["player_name"]) == (
+        "A",
+        "#",
+        "Alex Muster",
+    )
+    assert (items[1]["score_us"], items[1]["score_them"]) == (1, 0)
+
+    url = f"/api/reels/{reel['id']}/items"
+    assert player.post(url, json={"items": more}).status_code == 404  # not the owner
+    stranger = [{**more[0], "event_id": str(uuid.uuid4())}]
+    assert coach.post(url, json={"items": stranger}).status_code == 422
+    assert coach.post(url, json={"items": []}).status_code == 422
+    smart = coach.post(
+        "/api/reels", json={"title": "s", "kind": "smart", "query": {"codes": ["A"]}}
+    ).json()
+    assert coach.post(f"/api/reels/{smart['id']}/items", json={"items": more}).status_code == 409
+    assert as_("basketball-player").get(f"/api/reels/{reel['id']}").status_code == 404
+
+
+def test_people_and_names(tagged: dict[str, Any], club: dict[str, TestClient], as_: Any) -> None:
+    coach, player = club["coach"], as_("player-h3")
+    people = player.get(f"/api/videos/{tagged['id']}/people").json()
+    by_id = {p["member_id"]: p for p in people}
+    assert by_id[101]["name"] == "Alex Muster" and "player" in by_id[101]["roles"]
+    assert 107 not in by_id and 110 not in by_id  # not on this team
+    assert as_("basketball-player").get(f"/api/videos/{tagged['id']}/people").status_code == 404
+
+    url = f"/api/videos/{tagged['id']}/comments"
+    sent = coach.post(
+        url, json={"id": str(uuid.uuid4()), "body": "x", "audience": "person", "recipient": 102}
+    )
+    assert sent.json()["recipient_name"] == "Sam Beispiel"
+    assert player.put(f"/api/clips/{uuid.uuid4()}", json=clip(tagged)).status_code == 200
+    mine = player.get(f"/api/videos/{tagged['id']}/clips").json()
+    assert [c["owner_name"] for c in mine] == ["Alex Muster"]
+
+
+def test_team_and_video_say_what_the_viewer_may_do(
+    tagged: dict[str, Any], club: dict[str, TestClient], as_: Any
+) -> None:
+    coach, player = club["coach"], as_("player-h3")
+    flags = ("can_tag", "can_share", "can_export")
+    assert [coach.get("/api/teams/9101").json()[f] for f in flags] == [True] * 3
+    assert [player.get("/api/teams/9101").json()[f] for f in flags] == [False] * 3
+    assert [coach.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [True] * 3
+    assert [player.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [False] * 3
+
+    seasons = player.get("/api/teams/9101/seasons").json()
+    assert [s["team_id"] for s in seasons] == [9101, 9001]  # newest first
+    assert as_("basketball-player").get("/api/teams/9101/seasons").status_code == 404
