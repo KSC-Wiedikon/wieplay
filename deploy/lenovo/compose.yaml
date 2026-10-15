@@ -13,6 +13,7 @@ services:
       NOMAL_WORKER_WORK_DIR: /work
       NOMAL_WORKER_RAW_ROOT: /nas/raw
       NOMAL_WORKER_INBOX_ROOT: /nas/inbox
+      HOME: /tmp  # the host uid has no home in the image (Mesa's shader cache)
     secrets: [nomal-worker-token]
     volumes:
       - ${NOMAL_NAS_RAW:?NOMAL_NAS_RAW must be set}:/nas/raw
