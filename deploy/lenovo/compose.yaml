@@ -1,0 +1,35 @@
+# Nomal media worker on the Lenovo server (PLAN §8.2), one directory per environment
+# (~/stacks/nomal-worker-dev, ~/stacks/nomal-worker-prod) holding this file and a .env
+# (template: env.example). Start: docker compose up -d
+services:
+  worker:
+    image: nomal-worker:${NOMAL_TAG:?NOMAL_TAG must be set in .env}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NOMAL_WORKER_TOKEN_FILE: /run/secrets/nomal-worker-token
+      NOMAL_WORKER_WORK_DIR: /work
+      NOMAL_WORKER_RAW_ROOT: /nas/raw
+      NOMAL_WORKER_INBOX_ROOT: /nas/inbox
+    secrets: [nomal-worker-token]
+    volumes:
+      - ${NOMAL_NAS_RAW:?NOMAL_NAS_RAW must be set}:/nas/raw
+      - ${NOMAL_NAS_INBOX:?NOMAL_NAS_INBOX must be set}:/nas/inbox
+      - work:/work
+    devices:
+      - /dev/dri:/dev/dri  # VAAPI on the Radeon 780M
+    group_add:
+      - "${NOMAL_RENDER_GID:?getent group render | cut -d: -f3}"
+    # The box also runs DNS and other services: cap the worker (PLAN §8.2).
+    cpus: 6
+    mem_limit: 8g
+    read_only: true
+    tmpfs: [/tmp, /home/nomal]
+    security_opt: ["no-new-privileges:true"]
+
+secrets:
+  nomal-worker-token:
+    file: ./worker.token  # mode 0600; from Admin → Workers (shown once)
+
+volumes:
+  work:

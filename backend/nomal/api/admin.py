@@ -1,16 +1,19 @@
-"""Nomal administration: which teams use Nomal, and the Wiedisync sync."""
+"""Nomal administration: which teams use Nomal, the Wiedisync sync, workers, jobs and
+each team's filming policy."""
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from nomal.api.deps import AdminDep, DbDep, audit
-from nomal.core.models import SyncState, WdTeam
+from nomal.core import jobs
+from nomal.core.models import Job, SyncState, TeamLineage, TeamPolicy, Video, WdTeam, Worker
 from nomal.core.sync import BridgeError, run_sync
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -107,3 +110,261 @@ def sync_now(request: Request, viewer: AdminDep, db: DbDep) -> SyncStateOut:
         audit(db, viewer.member_id, "sync_run")
         db.commit()
     return _state(db)
+
+
+# --- Workers, jobs, filming policy (M1) ---------------------------------------------------
+
+KNOWN_CAPS = frozenset(
+    {
+        "ingest",
+        "inbox",
+        "transcode",
+        "thumbs",
+        "audio",
+        "cpu_analysis",
+        "analysis_copy",
+        "export",
+        "retention",
+        "nas",
+        "cuda",
+        "ml",
+        "gpu_dispatch",
+    }
+)
+
+
+class WorkerOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    caps: list[str]
+    paused: bool
+    version: str | None
+    last_seen_at: datetime | None
+    created_at: datetime
+    revoked: bool
+
+
+class WorkerCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    caps: list[str] = Field(min_length=1, max_length=16)
+
+
+class WorkerCreatedOut(BaseModel):
+    worker: WorkerOut
+    token: str  # shown once
+
+
+class WorkerUpdateIn(BaseModel):
+    paused: bool
+
+
+class JobAdminOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    status: str
+    video_id: uuid.UUID | None
+    video_title: str | None
+    attempts: int
+    max_attempts: int
+    progress: float | None
+    message: str | None
+    error: str | None
+    worker: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+class PolicyOut(BaseModel):
+    lineage_id: uuid.UUID
+    sport: Literal["volleyball", "basketball"]
+    label: str
+    matches_allowed: bool
+    trainings_allowed: bool
+    reason: str | None
+    set_at: datetime | None
+
+
+class PolicyIn(BaseModel):
+    matches_allowed: bool
+    trainings_allowed: bool
+    reason: str | None = Field(default=None, max_length=500)
+
+
+def _worker_out(w: Worker) -> WorkerOut:
+    return WorkerOut(
+        id=w.id,
+        name=w.name,
+        caps=sorted(w.caps),
+        paused=w.paused,
+        version=w.version,
+        last_seen_at=w.last_seen_at,
+        created_at=w.created_at,
+        revoked=w.revoked_at is not None,
+    )
+
+
+@router.get("/workers", response_model=list[WorkerOut])
+def list_workers(_: AdminDep, db: DbDep) -> list[WorkerOut]:
+    return [_worker_out(w) for w in db.scalars(select(Worker).order_by(Worker.name))]
+
+
+@router.post("/workers", response_model=WorkerCreatedOut, status_code=201)
+def create_worker(body: WorkerCreateIn, viewer: AdminDep, db: DbDep) -> WorkerCreatedOut:
+    unknown = set(body.caps) - KNOWN_CAPS
+    if unknown:
+        raise HTTPException(422, f"Unknown capabilities: {sorted(unknown)}")
+    if db.scalar(select(Worker.id).where(Worker.name == body.name)):
+        raise HTTPException(409, "A worker with this name exists")
+    token, token_hash = jobs.new_worker_token()
+    worker = Worker(
+        id=uuid.uuid4(),
+        name=body.name,
+        caps=sorted(set(body.caps)),
+        token_hash=token_hash,
+        created_by=viewer.member_id,
+    )
+    db.add(worker)
+    audit(
+        db,
+        viewer.member_id,
+        "worker_created",
+        "worker",
+        str(worker.id),
+        name=body.name,
+        caps=worker.caps,
+    )
+    db.commit()
+    return WorkerCreatedOut(worker=_worker_out(worker), token=token)
+
+
+@router.put("/workers/{worker_id}", response_model=WorkerOut)
+def update_worker(
+    worker_id: uuid.UUID, body: WorkerUpdateIn, viewer: AdminDep, db: DbDep
+) -> WorkerOut:
+    worker = db.get(Worker, worker_id)
+    if worker is None:
+        raise HTTPException(404, "Worker not found")
+    if worker.paused != body.paused:
+        worker.paused = body.paused
+        audit(
+            db,
+            viewer.member_id,
+            "worker_paused" if body.paused else "worker_resumed",
+            "worker",
+            str(worker.id),
+        )
+        db.commit()
+    return _worker_out(worker)
+
+
+@router.delete("/workers/{worker_id}", status_code=204)
+def revoke_worker(worker_id: uuid.UUID, viewer: AdminDep, db: DbDep) -> None:
+    worker = db.get(Worker, worker_id)
+    if worker is None:
+        raise HTTPException(404, "Worker not found")
+    if worker.revoked_at is None:
+        worker.revoked_at = datetime.now(UTC)
+        audit(db, viewer.member_id, "worker_revoked", "worker", str(worker.id), name=worker.name)
+        db.commit()
+
+
+@router.get("/jobs", response_model=list[JobAdminOut])
+def list_jobs(
+    _: AdminDep,
+    db: DbDep,
+    status: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[JobAdminOut]:
+    query = (
+        select(Job, Video.title, Worker.name)
+        .outerjoin(Video, Video.id == Job.video_id)
+        .outerjoin(Worker, Worker.id == Job.lease_owner)
+        .order_by(Job.created_at.desc())
+        .limit(limit)
+    )
+    if status:
+        query = query.where(Job.status == status)
+    return [
+        JobAdminOut(
+            id=j.id,
+            kind=j.kind,
+            status=j.status,
+            video_id=j.video_id,
+            video_title=title,
+            attempts=j.attempts,
+            max_attempts=j.max_attempts,
+            progress=j.progress,
+            message=j.message,
+            error=j.error,
+            worker=worker_name,
+            created_at=j.created_at,
+            started_at=j.started_at,
+            finished_at=j.finished_at,
+        )
+        for j, title, worker_name in db.execute(query).all()
+    ]
+
+
+@router.get("/policies", response_model=list[PolicyOut])
+def list_policies(_: AdminDep, db: DbDep) -> list[PolicyOut]:
+    rows = db.execute(
+        select(TeamLineage, TeamPolicy)
+        .outerjoin(TeamPolicy, TeamPolicy.lineage_id == TeamLineage.id)
+        .where(TeamLineage.enabled.is_(True))
+        .order_by(TeamLineage.sport.desc(), TeamLineage.label)
+    ).all()
+    return [
+        PolicyOut(
+            lineage_id=lineage.id,
+            sport=lineage.sport,
+            label=_lineage_label(db, lineage),
+            matches_allowed=policy.matches_allowed if policy else True,
+            trainings_allowed=policy.trainings_allowed if policy else True,
+            reason=policy.reason if policy else None,
+            set_at=policy.set_at if policy else None,
+        )
+        for lineage, policy in rows
+    ]
+
+
+def _lineage_label(db: DbDep, lineage: TeamLineage) -> str:
+    """The newest season's team name (D2 became D1 after promotion)."""
+    newest = db.scalars(
+        select(WdTeam).where(WdTeam.lineage_id == lineage.id).order_by(WdTeam.season.desc())
+    ).first()
+    return newest.name if newest else lineage.label
+
+
+@router.put("/policies/{lineage_id}", response_model=PolicyOut)
+def set_policy(lineage_id: uuid.UUID, body: PolicyIn, viewer: AdminDep, db: DbDep) -> PolicyOut:
+    lineage = db.get(TeamLineage, lineage_id)
+    if lineage is None:
+        raise HTTPException(404, "Team not found")
+    policy = db.get(TeamPolicy, lineage_id) or TeamPolicy(lineage_id=lineage_id)
+    policy.matches_allowed = body.matches_allowed
+    policy.trainings_allowed = body.trainings_allowed
+    policy.reason = (body.reason or "").strip() or None
+    policy.set_by = viewer.member_id
+    policy.set_at = datetime.now(UTC)
+    db.add(policy)
+    audit(
+        db,
+        viewer.member_id,
+        "team_policy_set",
+        "team_lineage",
+        str(lineage_id),
+        matches_allowed=body.matches_allowed,
+        trainings_allowed=body.trainings_allowed,
+        reason=policy.reason,
+    )
+    db.commit()
+    return PolicyOut(
+        lineage_id=lineage.id,
+        sport=lineage.sport,
+        label=_lineage_label(db, lineage),
+        matches_allowed=policy.matches_allowed,
+        trainings_allowed=policy.trainings_allowed,
+        reason=policy.reason,
+        set_at=policy.set_at,
+    )

@@ -37,7 +37,23 @@ MEMBERS = [
     (107, "Mika Korb", 23, ["guard"]),
     (108, "Lou Dunk", 5, ["center"]),
     (109, "Ada Admin", None, []),
+    (110, "Lia Jung", 14, ["outside"]),
 ]
+
+# Fictional birthdates for the adult check. Lia Jung (DU23-1) is under 18, so DU23-1 shows
+# "filming blocked" locally; Ada Admin has none (not on any roster).
+BIRTHDATES: dict[int, date | None] = {
+    101: date(1996, 3, 14),
+    102: date(1999, 7, 2),
+    103: date(2001, 11, 23),
+    104: date(1994, 1, 9),
+    105: date(2004, 5, 30),
+    106: date(1981, 9, 17),
+    107: date(1998, 12, 1),
+    108: date(2000, 6, 6),
+    109: None,
+    110: date(2010, 2, 11),
+}
 
 
 def _member_uuid(member_id: int) -> str:
@@ -81,7 +97,7 @@ ROSTERS: dict[int, list[tuple[int, str]]] = {
         (106, "coach"),
     ],
     2: [(105, "player"), (102, "player")],
-    3: [(105, "player")],
+    3: [(105, "player"), (110, "player")],
     4: [(107, "player"), (108, "player"), (106, "team_responsible")],
 }
 
@@ -195,4 +211,25 @@ def personas(today: date) -> dict[str, dict[str, Any]]:
             ],
         ),
         "vb-sport-admin": claims(105, ["vb_admin"], [], ["volleyball"]),
+    }
+
+
+def adult_check(team_id: int, on: date) -> dict[str, Any]:
+    """Same shape as Wiedisync's /adult-check: counts and reasons, never birthdates."""
+    member_ids = sorted({mid for mid, _ in ROSTERS.get(team_id % 100, [])})
+    people = []
+    for mid in member_ids:
+        born = BIRTHDATES.get(mid)
+        if born is None:
+            people.append({"member": mid, "ok": False, "reason": "no_birthdate"})
+            continue
+        adult = (on.year - born.year, on.month, on.day) >= (18, born.month, born.day)
+        people.append({"member": mid, "ok": adult, "reason": None if adult else "under_18"})
+    return {
+        "version": 1,
+        "team": team_id,
+        "date": on.isoformat(),
+        "passed": bool(people) and all(p["ok"] for p in people),
+        "failing_count": sum(1 for p in people if not p["ok"]),
+        "people": people,
     }

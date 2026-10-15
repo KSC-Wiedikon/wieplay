@@ -31,6 +31,9 @@ class FixtureBridgeClient:
     def snapshot(self, team_ids: Sequence[int]) -> Mapping[str, Any]:
         return dev_fixtures.snapshot(team_ids, date.today())
 
+    def adult_check(self, team_id: int, on: date) -> Mapping[str, Any]:
+        return dev_fixtures.adult_check(team_id, on)
+
 
 def make_dev_bridge(settings: Settings) -> tuple[APIRouter, str]:
     """Router for /api/dev-bridge and the public key it signs with."""

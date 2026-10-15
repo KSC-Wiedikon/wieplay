@@ -13,19 +13,26 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from nomal import __version__
-from nomal.api import admin, auth, teams
+from nomal.api import admin, auth, consent, media, teams, videos, worker
 from nomal.core.config import Settings, get_settings
 from nomal.core.db import make_engine, make_sessionmaker
+from nomal.core.storage import ObjectStore, make_store
 from nomal.core.sync import BridgeClient, BridgeError, HttpBridgeClient, run_sync
 
 log = logging.getLogger(__name__)
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-CSP = (
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
-    "script-src 'self'; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; "
-    "base-uri 'self'; form-action 'self'"
-)
+
+
+def content_security_policy(storage_origin: str | None) -> str:
+    """Media bytes and upload parts go straight to object storage (PLAN §7.6)."""
+    storage = f" {storage_origin}" if storage_origin else ""
+    return (
+        f"default-src 'self'; img-src 'self' data: blob:{storage}; "
+        f"media-src 'self' blob:{storage}; connect-src 'self'{storage}; "
+        "worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+        "font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -49,11 +56,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception:
                 log.exception("background sync failed")
 
+    async def reaper_loop() -> None:
+        while True:
+            await asyncio.sleep(settings.reaper_interval_seconds)
+            try:
+                await asyncio.to_thread(_reap_once, sessions)
+            except Exception:
+                log.exception("job reaper failed")
+
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        task = asyncio.create_task(sync_loop()) if settings.sync_interval_minutes > 0 else None
+        tasks = []
+        if settings.sync_interval_minutes > 0:
+            tasks.append(asyncio.create_task(sync_loop()))
+        if settings.reaper_interval_seconds > 0:
+            tasks.append(asyncio.create_task(reaper_loop()))
         yield
-        if task:
+        for task in tasks:
             task.cancel()
         engine.dispose()
 
@@ -67,6 +86,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.sessionmaker = sessions
     app.state.bridge_client_factory = bridge_client_factory
+    store: ObjectStore | None = make_store(settings)
+    app.state.store = store
+    csp = content_security_policy(settings.storage_origin)
 
     if settings.dev_bridge:
         from nomal.api.dev_bridge import DEV_KID, make_dev_bridge
@@ -90,8 +112,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "same-origin")
         if response.headers.get("content-type", "").startswith("text/html"):
-            response.headers.setdefault("Content-Security-Policy", CSP)
+            response.headers.setdefault("Content-Security-Policy", csp)
         return response
+
+    @app.exception_handler(videos.FilmingBlocked)
+    async def filming_blocked(_: Request, exc: videos.FilmingBlocked) -> JSONResponse:
+        return JSONResponse(videos.blocked_body(exc.check), status_code=409)
 
     @app.get("/api/health", tags=["health"])
     def health() -> dict[str, str]:
@@ -100,6 +126,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(teams.router)
     app.include_router(admin.router)
+    app.include_router(videos.router)
+    app.include_router(media.router)
+    app.include_router(consent.router)
+    app.include_router(worker.router)
 
     if settings.web_dist:
         _mount_web(app, Path(settings.web_dist))
@@ -109,6 +139,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 def _sync_once(sessionmaker: sessionmaker[Session], factory: Callable[[], BridgeClient]) -> None:
     with sessionmaker() as session, contextlib.suppress(BridgeError):  # recorded in sync_state
         run_sync(session, factory())
+
+
+def _reap_once(sessionmaker: sessionmaker[Session]) -> None:
+    with sessionmaker() as session:
+        count = worker.reap(session)
+        if count:
+            log.warning("reaped %d expired job leases", count)
 
 
 def _mount_web(app: FastAPI, dist: Path) -> None:

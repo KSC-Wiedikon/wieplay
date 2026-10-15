@@ -1,5 +1,7 @@
-# Local development only: Postgres for the API and its tests.
+# Local development only: Postgres for the API and its tests, and an S3 server for videos.
 #   docker compose up -d        (stop: docker compose down; wipe: docker compose down -v)
+# SeaweedFS stands in for Hetzner Object Storage (MinIO no longer ships images). Its keys
+# are local-only and live in deploy/local/seaweedfs-s3.json.
 name: nomal-local
 
 services:
@@ -18,5 +20,15 @@ services:
       interval: 2s
       retries: 30
 
+  s3:
+    image: chrislusf/seaweedfs:3.97
+    command: server -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -dir=/data
+    ports:
+      - "127.0.0.1:55490:8333"
+    volumes:
+      - ./deploy/local/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+      - s3:/data
+
 volumes:
   db:
+  s3:

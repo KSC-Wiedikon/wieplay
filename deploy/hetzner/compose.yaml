@@ -8,6 +8,8 @@ services:
     env_file: .env
     ports:
       - "127.0.0.1:${NOMAL_PORT:?NOMAL_PORT must be set in .env}:8000"
+      # Workers reach the API over the tailnet (PLAN §8.1). Unset = loopback only.
+      - "${NOMAL_TAILNET_IP:-127.0.0.2}:${NOMAL_PORT}:8000"
     networks: [kscw]
     # The VPS also runs prod Directus: Nomal stays small.
     mem_limit: 512m

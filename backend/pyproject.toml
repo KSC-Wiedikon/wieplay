@@ -6,6 +6,7 @@ license = "AGPL-3.0-only"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
+    "boto3>=1.43.114",
     "fastapi>=0.143.1",
     "httpx>=0.28.1",
     "psycopg[binary]>=3.3.6",
@@ -33,6 +34,9 @@ ignore = ["S101"]  # assert is fine in tests
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S105", "S106"]
 "migrations/**" = ["E501"]
+# ffmpeg/ffprobe from PATH with argument lists, never a shell.
+"nomal/worker/ffmpeg.py" = ["S603", "S607"]
+"tests/test_worker_ffmpeg.py" = ["S603", "S607"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -46,6 +50,7 @@ packages = ["nomal"]
 
 [dependency-groups]
 dev = [
+    "boto3-stubs[s3]>=1.43.114",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.17.0",

@@ -1,0 +1,332 @@
+"""ffprobe and ffmpeg: probing camera files, HLS renditions, thumbnails (PLAN §7.4)."""
+
+from __future__ import annotations
+
+import collections
+import json
+import math
+import subprocess
+import threading
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from fractions import Fraction
+from pathlib import Path
+from typing import Any
+
+
+class Cancelled(Exception):
+    pass
+
+
+class FfmpegError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Probe:
+    duration_ms: int
+    width: int
+    height: int
+    fps: Fraction
+    has_audio: bool
+    video_codec: str
+    capture: dict[str, Any] = field(default_factory=dict)
+
+
+def _fraction(value: str | None) -> Fraction | None:
+    if not value or value in {"0/0", "0"}:
+        return None
+    try:
+        frac = Fraction(value)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return frac if frac > 0 else None
+
+
+def probe(path: Path) -> Probe:
+    out = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if out.returncode != 0:
+        raise FfmpegError(f"ffprobe failed for {path.name}: {out.stderr.strip()[-300:]}")
+    data = json.loads(out.stdout)
+    streams = data.get("streams", [])
+    video = next(
+        (
+            s
+            for s in streams
+            if s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")
+        ),
+        None,
+    )
+    if video is None:
+        raise FfmpegError(f"{path.name} has no video stream")
+    fmt = data.get("format", {})
+    avg, real = _fraction(video.get("avg_frame_rate")), _fraction(video.get("r_frame_rate"))
+    fps = avg or real
+    if fps is None:
+        raise FfmpegError(f"{path.name}: unknown frame rate")
+    fps = fps.limit_denominator(1001)
+    duration = float(fmt.get("duration") or video.get("duration") or 0)
+    if duration <= 0:
+        raise FfmpegError(f"{path.name}: unknown duration")
+    tags = {**fmt.get("tags", {}), **video.get("tags", {})}
+    capture = {
+        "container": fmt.get("format_name"),
+        "codec": video.get("codec_name"),
+        "profile": video.get("profile"),
+        "pix_fmt": video.get("pix_fmt"),
+        "bit_rate": int(fmt["bit_rate"]) if str(fmt.get("bit_rate", "")).isdigit() else None,
+        "vfr": bool(avg and real and abs(float(avg) - float(real)) > 0.01),
+        "make": tags.get("com.apple.quicktime.make") or tags.get("make"),
+        "model": tags.get("com.apple.quicktime.model") or tags.get("model"),
+        "encoder": tags.get("encoder"),
+        "creation_time": tags.get("creation_time"),
+    }
+    return Probe(
+        duration_ms=round(duration * 1000),
+        width=int(video["width"]),
+        height=int(video["height"]),
+        fps=fps,
+        has_audio=any(s.get("codec_type") == "audio" for s in streams),
+        video_codec=str(video.get("codec_name")),
+        capture={k: v for k, v in capture.items() if v is not None},
+    )
+
+
+def concat_list(inputs: Sequence[str], target: Path) -> Path:
+    """An ffconcat file joining split camera files without re-encoding (PLAN §6.4)."""
+    lines = ["ffconcat version 1.0"]
+    for item in inputs:
+        escaped = str(Path(item).resolve()).replace("'", "'\\''")
+        lines.append(f"file '{escaped}'")
+    target.write_text("\n".join(lines) + "\n")
+    return target
+
+
+def even(value: float) -> int:
+    return max(2, round(value / 2) * 2)
+
+
+def run(
+    args: Sequence[str],
+    *,
+    duration_ms: int,
+    on_progress: Callable[[float], None],
+    cancel: threading.Event,
+    cwd: Path | None = None,
+) -> None:
+    """Run ffmpeg with -progress on stdout; stop it when `cancel` is set."""
+    cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-progress", "pipe:1", "-nostats", *args]
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
+    )
+    tail: collections.deque[str] = collections.deque(maxlen=40)
+
+    def drain() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            tail.append(line.rstrip())
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        if cancel.is_set():
+            proc.terminate()
+            break
+        key, _, value = line.strip().partition("=")
+        if key == "out_time_us" and value.isdigit() and duration_ms > 0:
+            on_progress(min(1.0, int(value) / 1000 / duration_ms))
+    code = proc.wait()
+    reader.join(timeout=5)
+    if cancel.is_set():
+        raise Cancelled()
+    if code != 0:
+        raise FfmpegError("ffmpeg failed: " + " | ".join(list(tail)[-6:]))
+
+
+def hls_args(
+    *,
+    concat: Path,
+    out_width: int,
+    out_height: int,
+    fps: float,
+    video_kbps: int,
+    max_kbps: int,
+    audio_kbps: int,
+    has_audio: bool,
+    segment_seconds: int,
+    encoder: str,
+    threads: int,
+    preset: str,
+    vaapi_device: str,
+) -> list[str]:
+    """One HLS rendition: H.264 + AAC, closed 2-second GOPs, fMP4 segments (PLAN §7.4)."""
+    gop = max(1, round(fps * 2))
+    fps_text = f"{fps:g}"
+    level = "4.2" if out_height > 720 or fps > 30 else "3.1"
+    args: list[str] = []
+    if encoder == "vaapi":
+        args += [
+            "-hwaccel",
+            "vaapi",
+            "-hwaccel_device",
+            vaapi_device,
+            "-hwaccel_output_format",
+            "vaapi",
+        ]
+    args += ["-f", "concat", "-safe", "0", "-i", str(concat), "-map", "0:v:0"]
+    if has_audio:
+        args += ["-map", "0:a:0?"]
+    if encoder == "vaapi":
+        args += [
+            "-vf",
+            f"fps={fps_text},scale_vaapi=w={out_width}:h={out_height}:format=nv12",
+            "-c:v",
+            "h264_vaapi",
+            "-profile:v",
+            "high",
+            "-rc_mode",
+            "VBR",
+        ]
+    else:
+        args += [
+            "-vf",
+            f"fps={fps_text},scale={out_width}:{out_height}:flags=bicubic,format=yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            preset,
+            "-profile:v",
+            "high",
+            "-level:v",
+            level,
+            "-threads",
+            str(threads),
+            "-sc_threshold",
+            "0",
+        ]
+    args += [
+        "-b:v",
+        f"{video_kbps}k",
+        "-maxrate",
+        f"{max_kbps}k",
+        "-bufsize",
+        f"{2 * max_kbps}k",
+        "-g",
+        str(gop),
+        "-keyint_min",
+        str(gop),
+        "-flags",
+        "+cgop",
+    ]
+    if has_audio:
+        args += ["-c:a", "aac", "-b:a", f"{audio_kbps}k", "-ac", "2", "-ar", "48000"]
+    args += [
+        "-f",
+        "hls",
+        "-hls_time",
+        str(segment_seconds),
+        "-hls_playlist_type",
+        "vod",
+        "-hls_segment_type",
+        "fmp4",
+        "-hls_fmp4_init_filename",
+        "init.mp4",
+        "-hls_segment_filename",
+        "seg_%05d.m4s",
+        "-hls_flags",
+        "independent_segments",
+        "index.m3u8",
+    ]
+    return args
+
+
+def codecs_of(init_segment: Path, has_audio: bool) -> str:
+    """RFC 6381 codecs string for the master playlist (avc1.PPCCLL), read from the avcC box
+    of the init segment. ffprobe cannot report the level of an init segment without frames."""
+    data = init_segment.read_bytes()
+    at = data.find(b"avcC")
+    if at < 0 or len(data) < at + 8:
+        raise FfmpegError("init segment has no avcC box")
+    profile, compat, level = data[at + 5], data[at + 6], data[at + 7]
+    video = f"avc1.{profile:02x}{compat:02x}{level:02x}"
+    return f"{video},mp4a.40.2" if has_audio else video
+
+
+def peak_bandwidth(directory: Path, playlist: str) -> int:
+    """Peak bits per second over the segments, for BANDWIDTH in the master playlist."""
+    peak, duration = 0.0, None
+    for line in playlist.splitlines():
+        if line.startswith("#EXTINF:"):
+            duration = float(line[8:].split(",")[0])
+        elif line and not line.startswith("#") and duration:
+            size = (directory / line).stat().st_size
+            # At least a second: the last segment of a recording can be a few frames long.
+            peak = max(peak, size * 8 / max(duration, 1.0))
+            duration = None
+    return max(1, math.ceil(peak * 1.1))
+
+
+def thumbs_args(
+    *, concat: Path, interval_s: int, tile_w: int, tile_h: int, cols: int, rows: int
+) -> list[str]:
+    """Scrub-preview sprite sheets from keyframes only (fast on long matches)."""
+    return [
+        "-skip_frame",
+        "nokey",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-vf",
+        f"fps=1/{interval_s},scale={tile_w}:{tile_h},tile={cols}x{rows}",
+        "-fps_mode",
+        "vfr",
+        "-q:v",
+        "5",
+        "-start_number",
+        "1",
+        "sprite_%03d.jpg",
+    ]
+
+
+def poster_args(*, concat: Path, at_s: float) -> list[str]:
+    return [
+        "-ss",
+        f"{at_s:.2f}",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(concat),
+        "-map",
+        "0:v:0",
+        "-frames:v",
+        "1",
+        "-vf",
+        "scale=1280:-2",
+        "-q:v",
+        "3",
+        "poster.jpg",
+    ]
