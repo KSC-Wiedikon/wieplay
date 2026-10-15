@@ -1,0 +1,30 @@
+# Basketball tagging vocabulary (PLAN §9.3, Herren 1). A change of meaning creates a new
+# version; never edit a published version in place.
+#
+#   entry grammar:  [a]<number><code>[grade]      e.g. 23S3+  23S2-  11RO  7TO  5FT+
+#   a = them (the opponent); without it, us.  Grades: + made, - missed (shots only).
+#
+# points    what a made shot (grade +) adds to the score
+sport: basketball
+version: 1
+grades: ["+", "-"]
+zones: []
+skills:
+  - {code: S2, name_key: skill.two_pointer, category: shot, points: 2, graded: true,
+     lead_ms: 300, pre_ms: 5000, post_ms: 2000}
+  - {code: S3, name_key: skill.three_pointer, category: shot, points: 3, graded: true,
+     lead_ms: 300, pre_ms: 5000, post_ms: 2000}
+  - {code: FT, name_key: skill.free_throw, category: shot, points: 1, graded: true,
+     lead_ms: 200, pre_ms: 3000, post_ms: 1500}
+  - {code: RO, name_key: skill.offensive_rebound, category: rebound, lead_ms: 200,
+     pre_ms: 4000, post_ms: 2000}
+  - {code: RD, name_key: skill.defensive_rebound, category: rebound, lead_ms: 200,
+     pre_ms: 4000, post_ms: 2000}
+  - {code: AS, name_key: skill.assist, category: pass, lead_ms: 200, pre_ms: 4000, post_ms: 3000}
+  - {code: TO, name_key: skill.turnover, category: turnover, lead_ms: 200, pre_ms: 4000,
+     post_ms: 2000}
+  - {code: ST, name_key: skill.steal, category: defence, lead_ms: 200, pre_ms: 3000,
+     post_ms: 3000}
+  - {code: BL, name_key: skill.block, category: defence, lead_ms: 200, pre_ms: 3000,
+     post_ms: 2000}
+  - {code: F, name_key: skill.foul, category: foul, lead_ms: 200, pre_ms: 3000, post_ms: 2000}

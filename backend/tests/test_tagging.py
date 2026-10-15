@@ -11,7 +11,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
 from tests.fakes import FakeStore
-from tests.media_helpers import MEDIA_CAPS, create_match, run_pipeline, upload_all, worker_client
+from tests.media_helpers import (
+    HERREN1,
+    MEDIA_CAPS,
+    create_match,
+    run_pipeline,
+    upload_all,
+    worker_client,
+)
 
 
 @pytest.fixture
@@ -205,7 +212,9 @@ def test_the_taxonomy_table_is_seeded(club: dict[str, TestClient], db_engine: En
         ).all()
     assert [r.code for r in rows] == ["A", "B", "D", "E", "F", "R", "S"]
     assert dict(rows)["A"] == {"#": "self", "=": "other", "/": "other"}
-    assert club["coach"].get("/api/taxonomies/basketball").status_code == 404
+    basketball = club["coach"].get("/api/taxonomies/basketball").json()
+    assert [k["code"] for k in basketball["skills"]][:3] == ["S2", "S3", "FT"]
+    assert club["coach"].get("/api/taxonomies/handball").status_code == 404
 
 
 # --- After the review of the M2 backend ------------------------------------------------------
@@ -330,3 +339,47 @@ def test_roster_candidates_are_the_teams_players(
     assert set(people[0]) == {"member_id", "name", "number"}
     assert as_("vb-sport-admin").get(url).status_code == 200
     assert as_("player-h3").get(url).status_code == 403
+
+
+def test_basketball_quarters_and_score_from_made_shots(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    coach = club["coach"]  # also team manager of Herren 1
+    for mid in (107, 108):
+        coach.put(f"/api/teams/{HERREN1}/consent/{mid}", json={"status": "accepted"})
+    created = coach.post(
+        f"/api/teams/{HERREN1}/videos",
+        json={"kind": "match", "game_id": HERREN1 * 100 + 1,
+              "files": [{"name": "GOPR0001.MP4", "size": 1000, "type": "video/mp4"}]},
+    )  # fmt: skip
+    assert created.status_code == 201, created.text
+    video = upload_all(coach, store, created.json())
+    run_pipeline(worker_client(app, club["admin"], MEDIA_CAPS), MEDIA_CAPS, store)
+    bundle = coach.get(f"/api/videos/{video['id']}/tagging").json()
+    assert bundle["sport"] == "basketball" and bundle["can_tag"] is True
+    assert [(r["number"], r["name"]) for r in bundle["roster"]] == [
+        (5, "Lou Dunk"),
+        (23, "Mika Korb"),
+    ]
+
+    q1 = {"id": str(uuid.uuid4()), "no": 1, "start_ms": 0}
+    q2 = {"id": str(uuid.uuid4()), "no": 2, "start_ms": 600_000}
+    shots = [
+        tag("S3", 10_000, number=23, grade="+"),
+        tag("S2", 20_000, number=5, grade="-"),
+        tag("FT", 30_000, side="them", number=12, grade="+"),
+        tag("RO", 31_000, number=5),
+        tag("S2", 700_000, number=5, grade="+"),
+    ]
+    out = coach.post(
+        f"/api/videos/{video['id']}/changes",
+        json={"periods": [q1, q2], "events": shots},
+    )
+    assert out.status_code == 200, out.text
+    finals = {p["no"]: (p["final_us"], p["final_them"]) for p in out.json()["periods"]}
+    assert finals == {1: (3, 1), 2: (5, 1)}
+    url = f"/api/videos/{video['id']}/changes"
+    assert coach.post(url, json={"events": [tag("RO", 1, number=5, grade="+")]}).status_code == 422
+    assert (
+        coach.post(url, json={"events": [tag("S2", 1, number=5, zone_from=4)]}).status_code == 422
+    )

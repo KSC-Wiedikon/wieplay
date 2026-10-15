@@ -120,6 +120,8 @@ class TaggingOut(BaseModel):
     events: list[EventOut]
     # Official set scores of the game from the federation, as [us, them] per set.
     official_sets: list[list[int]] | None
+    # The game's official final result as [us, them] (both sports), when played.
+    official_final: list[int] | None
 
 
 class ChangesIn(BaseModel):
@@ -244,6 +246,17 @@ def _official_sets(db: Session, video: Video) -> list[list[int]] | None:
     return [list(s) for s in game.sets]
 
 
+def _official_final(db: Session, video: Video) -> list[int] | None:
+    if video.game_id is None:
+        return None
+    game = db.get(WdGame, video.game_id)
+    if game is None or game.home_score is None or game.away_score is None:
+        return None
+    if game.our_side == "away":
+        return [game.away_score, game.home_score]
+    return [game.home_score, game.away_score]
+
+
 @router.get("/taxonomies/{sport}")
 def get_taxonomy(sport: str, _: ViewerDep) -> dict[str, Any]:
     tax = _taxonomy(sport)
@@ -271,6 +284,7 @@ def get_tagging(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> TaggingOut
         segments=_segments(db, video),
         events=_events(db, video),
         official_sets=_official_sets(db, video),
+        official_final=_official_final(db, video),
     )
 
 

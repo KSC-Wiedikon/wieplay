@@ -160,13 +160,15 @@ def _member_for(db: Session, video: Video, side: str, number: int | None) -> int
     )
 
 
-def _check_attributes(tax: Taxonomy, attributes: dict[str, Any]) -> dict[str, Any]:
-    allowed = {"grade", "zone_from", "zone_to"}
+def _check_attributes(tax: Taxonomy, code: str, attributes: dict[str, Any]) -> dict[str, Any]:
+    allowed = {"grade", "zone_from", "zone_to"} if tax.zones else {"grade"}
     if set(attributes) - allowed:
         raise TaggingError(f"unknown attributes: {sorted(set(attributes) - allowed)}")
     grade = attributes.get("grade")
     if grade is not None and grade not in tax.grades:
         raise TaggingError(f"unknown grade {grade!r}")
+    if grade is not None and not tax.skills[code].graded:
+        raise TaggingError(f"{code} takes no grade")
     for key in ("zone_from", "zone_to"):
         zone = attributes.get(key)
         if zone is not None and (isinstance(zone, bool) or zone not in tax.zones):
@@ -213,7 +215,7 @@ def upsert_event(
         raise TaggingError(f"unknown skill {item.code!r}")
     if video.duration_ms is not None and item.t_ms > video.duration_ms + 1000:
         raise TaggingError("tag time beyond the end of the video")
-    attributes = _check_attributes(tax, item.attributes)
+    attributes = _check_attributes(tax, item.code, item.attributes)
     member_id = _member_for(db, video, item.side, item.number)
     with db.no_autoflush:  # one INSERT with the finished row, not a half-built one
         return _apply_event(db, video, tax, item, attributes, member_id, actor, now)
@@ -348,8 +350,11 @@ def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
 
 def rescore(db: Session, video: Video) -> None:
     """Score line from the rallies: per set, from its starting score; the rally winner
-    serves next (PLAN §6.6: scores live on rallies)."""
+    serves next (PLAN §6.6: scores live on rallies). Basketball: from the made shots."""
     db.flush()
+    if video.sport == "basketball":
+        _rescore_basketball(db, video)
+        return
     periods = list(
         db.scalars(
             select(Period)
@@ -476,3 +481,41 @@ def _link_events(db: Session, video: Video, rallies: list[Segment]) -> None:
         segment_id = rally.id if rally is not None else None
         if event.segment_id != segment_id:
             event.segment_id = segment_id
+
+
+def _rescore_basketball(db: Session, video: Video) -> None:
+    """Basketball keeps a running score across quarters: the first quarter's starting score
+    seeds it (a recording may start mid-game), every made shot adds its points, and each
+    quarter's final is the running score at its end."""
+    from nomal.core.taxonomy import load
+
+    tax = load("basketball")
+    periods = list(
+        db.scalars(
+            select(Period)
+            .where(Period.video_id == video.id, Period.deleted_at.is_(None))
+            .order_by(Period.start_ms, Period.no)
+        )
+    )
+    shots = db.execute(
+        select(Event.t_ms, Event.side, Event.code, Event.attributes)
+        .where(Event.video_id == video.id, Event.deleted_at.is_(None))
+        .order_by(Event.t_ms)
+    ).all()
+    us = periods[0].start_us if periods else 0
+    them = periods[0].start_them if periods else 0
+    at = 0
+    for n, period in enumerate(periods):
+        end = period.end_ms
+        if end is None and n + 1 < len(periods):
+            end = periods[n + 1].start_ms
+        while at < len(shots) and (end is None or shots[at][0] < end):
+            t_ms, side, code, attributes = shots[at]
+            points = tax.points(code, (attributes or {}).get("grade"))
+            if t_ms >= period.start_ms and points:
+                if side == "us":
+                    us += points
+                else:
+                    them += points
+            at += 1
+        period.final_us, period.final_them = us, them
