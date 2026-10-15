@@ -661,3 +661,37 @@ def test_deleted_videos_are_swept_again_after_the_lease_window(
     assert not [k for k in store.objects if video["id"] in k]
     with db_engine.connect() as conn:
         assert conn.execute(text("SELECT purged_at IS NOT NULL FROM video")).scalar() is True
+
+
+def test_housekeeping_applies_the_retention_rules(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, db_engine: Engine
+) -> None:
+    from nomal.core.retention import run_housekeeping
+
+    video = upload_all(club["coach"], store, create_match(club["coach"]).json())
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    run_pipeline(w, MEDIA_CAPS, store)
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE video SET retention_until = current_date - 1"))
+        conn.execute(
+            text(
+                "INSERT INTO login_nonce (jti, used_at) VALUES ('old', now() - interval '40 days')"
+            )
+        )
+        conn.execute(text("UPDATE user_session SET expires_at = now() - interval '31 days'"))
+        conn.execute(
+            text(
+                "INSERT INTO audit_log (at, action, details) "
+                "VALUES (now() - interval '400 days', 'ancient', '{}')"
+            )
+        )
+    with app.state.sessionmaker() as db:
+        done = run_housekeeping(db)
+    assert done.videos == 1 and done.nonces >= 1 and done.sessions >= 1 and done.audit == 1
+    with db_engine.connect() as conn:
+        assert conn.execute(text("SELECT status FROM video")).scalar() == "deleted"
+        actions = conn.execute(text("SELECT action FROM audit_log")).scalars().all()
+    assert "retention_deleted" in actions and "ancient" not in actions
+    [purge] = claim(w, MEDIA_CAPS)
+    assert purge["kind"] == "purge" and purge["params"]["raw_subdir"]
+    assert club["coach"].get(f"/api/videos/{video['id']}").status_code in (401, 404)

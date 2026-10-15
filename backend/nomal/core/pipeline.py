@@ -473,7 +473,7 @@ def purge_raw(db: Session, video: Video) -> Job | None:
     )
 
 
-def mark_deleted(db: Session, video: Video, actor: int) -> list[str]:
+def mark_deleted(db: Session, video: Video, actor: int | None) -> list[str]:
     """Soft-delete a video and queue removal of its NAS originals. Returns the bucket
     prefixes the caller deletes now; sweep_deleted deletes them again later."""
     video.status = "deleted"

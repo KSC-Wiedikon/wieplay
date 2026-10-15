@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -27,6 +28,7 @@ from nomal.api import (
 )
 from nomal.core.config import Settings, get_settings
 from nomal.core.db import make_engine, make_sessionmaker
+from nomal.core.retention import run_housekeeping
 from nomal.core.storage import ObjectStore, make_store
 from nomal.core.sync import BridgeClient, BridgeError, HttpBridgeClient, run_sync
 from nomal.core.taxonomy import seed as seed_taxonomies
@@ -161,6 +163,10 @@ def _sync_once(sessionmaker: sessionmaker[Session], factory: Callable[[], Bridge
         run_sync(session, factory())
 
 
+HOUSEKEEPING_EVERY = timedelta(hours=24)
+_last_housekeeping: list[datetime] = []
+
+
 def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -> None:
     with sessionmaker() as session:
         count = worker.reap(session)
@@ -169,6 +175,12 @@ def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -
         if store is not None:
             videos.sweep_deleted(session, store)
             library.sweep_exports(session, store)
+        now = datetime.now(UTC)
+        if not _last_housekeeping or now - _last_housekeeping[-1] >= HOUSEKEEPING_EVERY:
+            _last_housekeeping[:] = [now]
+            done = run_housekeeping(session, now)
+            if done.any():
+                log.info("housekeeping: %s", done)
 
 
 def _mount_web(app: FastAPI, dist: Path) -> None:
