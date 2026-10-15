@@ -7,8 +7,19 @@ export const keys = {
   team: (id: number) => ['teams', id] as const,
   teamGames: (id: number) => ['teams', id, 'games'] as const,
   teamTrainings: (id: number) => ['teams', id, 'trainings'] as const,
+  teamVideos: (id: number) => ['teams', id, 'videos'] as const,
+  teamFilming: (id: number, kind: string, on: string) => ['teams', id, 'filming', kind, on] as const,
+  upcomingFilming: (id: number) => ['teams', id, 'upcoming-filming'] as const,
+  teamConsent: (id: number) => ['teams', id, 'consent'] as const,
+  videoConfig: ['video-config'] as const,
+  video: (id: string) => ['videos', id] as const,
+  inbox: ['inbox'] as const,
+  myConsent: ['consent', 'me'] as const,
   adminTeams: ['admin', 'teams'] as const,
   sync: ['admin', 'sync'] as const,
+  workers: ['admin', 'workers'] as const,
+  jobs: (status: string | null) => ['admin', 'jobs', status] as const,
+  policies: ['admin', 'policies'] as const,
 }
 
 function shouldRetry(failureCount: number, error: Error): boolean {

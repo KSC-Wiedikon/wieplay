@@ -306,7 +306,7 @@ def upcoming_filming(
 ) -> list[UpcomingOut]:
     """Filming allowed / blocked for the team's next games and trainings (PLAN §5.3)."""
     access = visible_team(db, viewer, team_id)
-    today = datetime.now(UTC).date()
+    today = club_today()
     until = today + timedelta(days=UPCOMING_DAYS)
     items: list[tuple[date, Literal["match", "training"], int, str]] = []
     for g in db.scalars(

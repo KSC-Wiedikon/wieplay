@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { Link, NavLink, useNavigate } from 'react-router'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router'
 import { setLanguage } from '../i18n'
 import { cx } from '../lib/cx'
 import { useLogout } from '../lib/queries'
@@ -12,6 +12,8 @@ import { MoonIcon, SunIcon } from './icons'
 /** The user's name and, for admins, the admin link. */
 function Account({ me, className }: { me: Me; className: string }) {
   const { t } = useTranslation()
+  const { pathname } = useLocation()
+  const inAdmin = pathname.startsWith('/admin/')
   return (
     <div className={cx('items-center gap-1 sm:gap-2', className)}>
       <span className="text-sm text-muted sm:px-2">{me.member.name}</span>
@@ -21,7 +23,7 @@ function Account({ me, className }: { me: Me; className: string }) {
           className={({ isActive }) =>
             cx(
               'ml-auto inline-flex min-h-11 items-center rounded-xl px-3 text-sm font-semibold text-fg hover:bg-sunken sm:ml-0 sm:min-h-9',
-              isActive && 'bg-sunken',
+              (isActive || inAdmin) && 'bg-sunken',
             )
           }
         >

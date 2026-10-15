@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { formatDate, formatDateTime, formatTime, formatTimeRange, todayIso } from './format'
+import {
+  addDaysIso,
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatDuration,
+  formatSeconds,
+  formatTime,
+  formatTimeRange,
+  todayIso,
+} from './format'
 
 describe('formatDate', () => {
   it('formats API dates as dd.mm.yyyy', () => {
@@ -76,5 +86,39 @@ describe('todayIso', () => {
   it('uses the Zurich calendar day', () => {
     expect(todayIso(new Date('2026-10-15T21:59:00Z'))).toBe('2026-10-15')
     expect(todayIso(new Date('2026-10-15T22:30:00Z'))).toBe('2026-10-16')
+  })
+})
+
+describe('addDaysIso', () => {
+  it('moves across months and years', () => {
+    expect(addDaysIso('2026-10-15', -60)).toBe('2026-08-16')
+    expect(addDaysIso('2026-12-31', 1)).toBe('2027-01-01')
+    expect(addDaysIso('2026-03-29', 0)).toBe('2026-03-29')
+  })
+})
+
+describe('formatDuration', () => {
+  it('shows hours only when needed', () => {
+    expect(formatDuration(245_000)).toBe('4:05')
+    expect(formatDuration(5_530_000)).toBe('1:32:10')
+    expect(formatDuration(0)).toBe('0:00')
+    expect(formatDuration(null)).toBe('')
+  })
+})
+
+describe('formatBytes', () => {
+  it('uses decimal units', () => {
+    expect(formatBytes(512)).toBe('512 B')
+    expect(formatBytes(1_400_000_000)).toBe('1.4 GB')
+    expect(formatBytes(64 * 1024 * 1024)).toBe('67.1 MB')
+    expect(formatBytes(250_000_000_000)).toBe('250 GB')
+  })
+})
+
+describe('formatSeconds', () => {
+  it('rounds to seconds, minutes or hours and minutes', () => {
+    expect(formatSeconds(40.2)).toBe('40 s')
+    expect(formatSeconds(12 * 60 + 10)).toBe('12 min')
+    expect(formatSeconds(2 * 3600 + 5 * 60)).toBe('2 h 05 min')
   })
 })
