@@ -1,0 +1,42 @@
+# Secrets and local config: never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Media: footage never goes into git
+*.mp4
+*.mov
+*.mkv
+*.m4s
+*.m3u8
+*.MP4
+*.MOV
+
+# ML artefacts
+*.pt
+*.onnx
+*.parquet
+datasets/
+runs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+dist/
+
+# Editors, OS, tooling
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+.claude/
+.planning/
