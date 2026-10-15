@@ -5,7 +5,7 @@
 
 | | |
 |---|---|
-| Status | **Plan, revision 2** (15.10.2026). Nothing built yet. |
+| Status | **Plan, revision 3** (15.10.2026). Nothing built yet. |
 | Owner | Luca Canepa (sole developer) |
 | Repo | `KSC-Wiedikon/nomal` (AGPL-3.0, like Wiedisync; private for now) |
 | Live host (planned) | `nomal.kscw.ch` (prod), `nomal-dev.kscw.ch` (dev) |
@@ -51,13 +51,14 @@ watch clips, highlight reels and condensed matches without dead time, all behind
 existing Wiedisync login. Volleyball first; basketball is in the first batch of teams, so
 everything sport-specific is data (taxonomies), not code.
 
-**First teams (season 2026/27)**, about 100 matches in total:
+**First teams (season 2026/27)**: about 75 matches (H3, D1, Herren 1) plus DU23-1 trainings.
+The budget still assumes 100 videos per season.
 
 | Team in Wiedisync | Sport | League | Note |
 |---|---|---|---|
 | H3 | Volleyball | 2. Liga | |
 | D1 | Volleyball | 2. Liga | Not the basketball "Lions D1" |
-| DU23-1 | Volleyball | U23 | ⚠ under-18 question, §5.3 |
+| DU23-1 | Volleyball | U23 | **Trainings only** (decided): U23 opponents may be under 18, §5.3 |
 | Herren 1 | Basketball | 1. Liga regional A (`H1LRA`) | Called "H1" in conversation; Wiedisync also has a *volleyball* H1 (2. Liga), which is not in scope |
 
 ### Tiers
@@ -65,7 +66,7 @@ everything sport-specific is data (taxonomies), not code.
 | Tier | What | Runs where |
 |---|---|---|
 | **1 · MVP** | Upload a match (original file, or a YouTube link from the club's channel) · timestamp-synced manual tagging with keyboard shortcuts (event type + player number) · rally markers and **skip-dead-time playback from manual markers** · clips and per-player highlight reels · clip/reel export with ffmpeg · Wiedisync login | API + web on Hetzner; media work on the Lenovo server |
-| **2 · Automatic** | **Dead-time skipping** (rallies vs. timeouts, set breaks, warm-up) · **automatic scoring** (volleyball from the serving side, scoreboard OCR when the scoreboard is in frame; basketball later) · ball tracking (TrackNet-style) · player detection + tracking (YOLO + tracker) · court homography → serve placement. Coach corrections become training data. | CPU stages on the Lenovo server; GPU stages on a rented serverless GPU, queued like everything else |
+| **2 · Automatic** | **Dead-time skipping** (rallies vs. timeouts, set breaks, warm-up) · **automatic scoring** (volleyball from the serving side, scoreboard OCR when the scoreboard is in frame; basketball later) · ball tracking (TrackNet-style) · player detection + tracking (YOLO + tracker) · court homography → serve placement. Coach corrections become training data. | CPU stages on the Lenovo server; GPU stages on our own GPU at home first (RTX 4090 PC), an EU or Swiss provider later; queued like everything else |
 | **3 · Later / maybe** | Per-touch action classification and player attribution | Same GPU path, trained on tier 1 + 2 data (training on the Framework 16) |
 
 ### Non-goals (to stay finishable by one person in the evenings)
@@ -87,9 +88,9 @@ From the Q&A on 15.10.2026 (second round supersedes the first):
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube link** is accepted as a source **for the club's own uploads only**; the **original file is preferred** (YouTube re-encodes and may drop 50 fps) and can replace the YouTube source later. |
-| D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 matches per season in total. |
+| D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 videos per season in total. **DU23-1: trainings only** (decided 15.10.2026, §5.3). |
 | D3 | Delivery | Hetzner Object Storage. **HLS**: the authenticated API serves the playlist and every segment URL is signed with a **TTL of minutes** at the moment the player asks for it. No long-lived link per video anywhere. A copied link dies quickly; a 2 h match plays without interruption (§7.6). |
-| D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference on a rented serverless GPU** (per-second billing; budget assumes ~1.5 GPU-h per video on an L4). **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; checked) = local development and training only. The worker interface is backend-agnostic (queue → worker), so local, cloud and a future GPU box are interchangeable (§8). |
+| D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference starts internal** (decided 15.10.2026): on our own GPU at home, the RTX 4090 PC, with a researched plan to move to an **EU or Swiss provider** later (§8.6). US providers are out. **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; checked) = development and training. The worker interface is backend-agnostic (queue → worker), so internal, provider and a future GPU box are interchangeable (§8). |
 | D5 | Permissions | Team-scoped defaults accepted (§5.1). **Adults only**: a hard check against member birthdates; nothing under 18 is filmed or stored. |
 | D6 | OpenVolley | Not now. The data model stays open for importing points later (§6.6, §10.8). |
 | D7 | Repo | `KSC-Wiedikon/nomal`, AGPL-3.0 (created, private). |
@@ -124,13 +125,14 @@ flowchart LR
   OS[(Hetzner Object Storage<br/>renditions, staging, exports, analysis copies)]
 
   subgraph Home[Home LAN / tailnet]
-    LS[Lenovo server<br/>media worker + GPU dispatcher]
+    LS[Lenovo server<br/>media worker]
+    GP[GPU PC, RTX 4090<br/>internal GPU worker]
     NAS[(Synology NAS<br/>raw originals, datasets, models)]
-    FW[Framework 16, RTX 5070<br/>dev + training only]
+    FW[Framework 16, RTX 5070<br/>dev + training, fallback]
   end
 
-  subgraph GPU[Rented serverless GPU]
-    ML[nomal-ml container<br/>L4, billed per second]
+  subgraph Later[Later: EU or Swiss GPU provider]
+    ML[nomal-ml container<br/>billed per second/minute]
   end
 
   B -- "app + API (cookie)" --> T --> API
@@ -141,11 +143,13 @@ flowchart LR
   DX --- PG
   API -- "sync rosters/games (localhost)" --> DX
   LS -- "claim jobs (tailnet)" --> API
+  GP -- "claim GPU jobs (tailnet)" --> API
   LS <-- "signed PUT/GET" --> OS
   LS <--> NAS
-  LS -- "submit job spec, poll" --> ML
-  ML <-- "signed GET/PUT" --> OS
+  GP <--> NAS
   FW <--> NAS
+  LS -. "later: submit job spec, poll" .-> ML
+  ML -. "signed GET/PUT" .-> OS
 ```
 
 The rule that shapes everything: **Cloudflare only carries small things** (the SPA, JSON,
@@ -162,9 +166,9 @@ the Lenovo server and the GPU.
 | **Postgres `nomal`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All Nomal state incl. the job queue | Postgres 16 |
 | **Object storage** | Hetzner Object Storage, same region as the VPS, private bucket | HLS renditions, thumbnails, upload staging, exports, temporary analysis copies | S3 API |
 | **Media worker** | **Lenovo server** (always on; Ryzen 7 PRO 8700GE 8C/16T, 30 GB RAM, Radeon 780M with VAAPI H.264 encode, ~690 GB free) | Ingest (NAS inbox + browser uploads), transcode, thumbnails, audio, CPU analysis (whistles, motion, scoreboard OCR), analysis copies, clip/reel export, retention | `nomal-worker` container, ffmpeg. **CPU-capped** (it also runs the LAN's DNS and other services) |
-| **GPU dispatcher** | Same container on the Lenovo server | Claims GPU jobs from the queue, submits them to the configured GPU backend, enforces the GPU budget | Part of `nomal-worker` |
-| **GPU backend** | Rented serverless GPU (default), or any local CUDA machine | Runs `nomal-ml run <spec>`: reads inputs, writes Parquet + results | `nomal-ml` image (CUDA, PyTorch) |
-| **Framework 16** | At home | Development, model training/fine-tuning, local test runs of the GPU image | RTX 5070 Laptop GPU, 8 GB (Blackwell: needs a PyTorch build with CUDA 12.8 or later) |
+| **GPU worker (now)** | **RTX 4090 PC** at home (24 GB, Linux), when it is on | Pulls GPU jobs from the queue over the tailnet and runs `nomal-ml run <spec>` locally; gaming guard (§8.2) | `nomal-worker` + `nomal-ml` image (CUDA, PyTorch), NVIDIA Container Toolkit |
+| **GPU dispatcher (later)** | Same container on the Lenovo server | Hands GPU jobs to an EU or Swiss provider once that backend is switched on (§8.6); enforces the CHF cap | Part of `nomal-worker` |
+| **Framework 16** | At home | Development, model training/fine-tuning, local test runs of the GPU image; fallback GPU worker when docked and idle | RTX 5070 Laptop GPU, 8 GB (Blackwell: needs a PyTorch build with CUDA 12.8 or later) |
 | **NAS** | Synology at home (≈18 TB free) | Raw originals (master copies), ML datasets, model weights, weekly mirror of the bucket | NFS/SMB share `nomal` |
 | **Wiedisync bridge** | Inside Wiedisync's `kscw-endpoints` (Directus) | Mints the login token; serves roster/game sync to nomal-api | Small endpoints (§4) |
 
@@ -177,8 +181,8 @@ the Lenovo server and the GPU.
   Nomal stores Wiedisync IDs and a synced mirror (§6.2).
 - **Pull-based home worker**: the Lenovo server is behind NAT; it polls for work, nothing on
   the internet can reach it.
-- **GPU as a pluggable backend**: the queue does not know where a GPU job runs. A cloud
-  provider, the Framework 16 or a future box take the same job spec (§8.3).
+- **GPU as a pluggable backend**: the queue does not know where a GPU job runs. Our own GPU
+  now, an EU or Swiss provider later, or a future box take the same job spec (§8.3).
 - **Python everywhere except the browser**: API, workers and ML share one package.
 
 ---
@@ -328,12 +332,12 @@ Enforced in code, not just stated:
    competitions, opponents by jersey number only, data team-internal, deletion or trimming on
    request. This residual risk is written down in `docs/PRIVACY.md`.
 
-⚠ **DU23-1 plays in the U23 league.** Two problems: (a) its own roster may include players
-under 18 (not checked: production reads were not available while writing this; see §19, O1),
-and (b) its **opponents are U23 teams that very likely field under-18 players**, which Nomal
-cannot check and which conflicts with "nothing under 18 gets filmed". Recommendation: DU23-1
-**trainings only** (own players, all verified), no DU23-1 matches, unless you decide the
-opponent risk is acceptable.
+**DU23-1: trainings only** (decided 15.10.2026). Its opponents are U23 teams that very likely
+field under-18 players, which Nomal cannot check, so DU23-1 matches are not filmed for Nomal.
+Its trainings pass the same hard check as everyone else: every rostered person needs a
+birthdate and must be 18 or older on the day, otherwise the training is blocked too. Nomal
+enforces this with a per-team policy (`team_policy.matches_allowed = false`, §6.10): uploads
+linked to a game are refused for that team, and its upcoming games show *filming not allowed*.
 
 ### 5.4 Consent and information
 
@@ -341,8 +345,10 @@ Explicit **opt-in per player** (accepted default), recorded in Nomal (`consent`:
 version, accepted/withdrawn, how). New players see it on first login; the coach can record a
 paper consent. A team can be filmed when every current roster player has opted in.
 Withdrawal turns the player's tags into "#7", deletes their personal reels, and blocks
-filming of the team until resolved. The consent text names every processor, including the
-GPU provider and where it runs (§5.6).
+filming of the team until resolved. The consent text names the processors (§5.6) and describes
+GPU processing as "on club hardware, or at a provider in Switzerland or the EU named on the
+privacy page", so the planned move (§8.6) needs an updated privacy page and a notice to
+members, not a new consent round.
 
 The club's privacy policy on `kscw.ch` gets a Nomal section; Nomal has its own short privacy
 page (what, why, who sees it, how long, processors, contact, rights).
@@ -369,26 +375,17 @@ A nightly `retention` job enforces this and logs what it deleted.
 |---|---|---|---|
 | Hetzner (VPS, Object Storage) | Everything Nomal stores | Germany / EU | Adequate country; DPA with Hetzner |
 | Cloudflare | HTML, JSON, redirects (no video bytes) | Global edge | Already the club's provider |
-| GPU provider | Temporary analysis copies (video), no names, no IDs | Depends on provider | ⚠ see below |
+| GPU processing | Analysis copies (video), no names, no IDs | **Now: club hardware at home** (no third party). Later: an EU or Swiss provider | The move needs a DPA (§8.6) |
 | YouTube (Google) | Embedded playback of club-channel videos only | Google | Only on YouTube-sourced videos, via `youtube-nocookie.com` |
 
-⚠ **The GPU provider is a cross-border question.** Modal (the example given) is a US company.
-On its free Starter plan, jobs run in US regions; even with region pinning (Team plan, about
-USD 250/month, far beyond budget) inputs and outputs pass its US control plane, per its docs. I
-found no public Swiss-US Data Privacy Framework certification or downloadable DPA for Modal
-(search on 15.10.2026; ask them). Under the revDSG, disclosing personal data (video of
-identifiable players) to the US needs a DPF-certified recipient or contractual safeguards, plus
-transparency to the people concerned. Options:
-
-1. **EU-based serverless GPU** with per-second billing (e.g. Koyeb lists L4 at about USD 0.70/h;
-   check EU-region availability, billing granularity and DPA). Preferred if it holds up.
-2. **Modal** with a signed DPA + standard contractual clauses, named in the consent text.
-3. **A local GPU** for production runs: no transfer at all.
-
-The backend-agnostic interface (§8.3) makes this a configuration choice. Minimisation applies
-in every case: the GPU receives only a temporary, court-cropped analysis copy of the live
+**Decision (15.10.2026): GPU inference starts internal**, on club-controlled hardware at home,
+so no video leaves the club for processing. The later move (§8.6) goes to a **Swiss or EU
+provider only**, under a DPA. US providers are excluded: Modal, for example, is a US company;
+on its free plan jobs run in US regions, even region-pinned jobs (Team plan, about USD
+250/month) pass its US control plane per its docs, and no public Swiss-US Data Privacy
+Framework certification or DPA was found (15.10.2026). After the move the same minimisation
+applies: the provider receives only temporary, court-cropped analysis copies of the live
 segments, without audio unless a task needs it, with no names or IDs, deleted after the job.
-Decision: §19, O4.
 
 ### 5.7 Things Nomal never does
 
@@ -627,6 +624,8 @@ team_grant       lineage_id, member_id, grant 'analyst', granted_by, granted_at,
 consent          member_id, scope 'nomal', notice_version, status 'accepted'|'withdrawn',
                  via 'nomal'|'paper', recorded_by, at
 youtube_channel  channel_id, label, added_by        -- the club's own channels (allow-list)
+team_policy      lineage_id, matches_allowed bool, trainings_allowed bool, reason, set_by, set_at
+                 -- e.g. DU23-1: matches_allowed = false (§5.3)
 audit_log        id, at, actor_member_id, action, object_type, object_id, details jsonb
 ```
 
@@ -653,7 +652,7 @@ camera model as teams register theirs (menu path for 50 fps, shutter, file split
 | Check | Nomal shows *filming allowed / blocked* for the game (§5.3) | Adults only |
 
 ⚠ **Basketball (Herren 1)**: behind the baseline sees the near half well and the far half
-badly. Basketball is normally filmed elevated from the side at half court. See §19, O7.
+badly. Basketball is normally filmed elevated from the side at half court. See §19, O8.
 
 ### 7.2 Ways in
 
@@ -777,14 +776,14 @@ A reaper returns expired leases to the queue (`attempts+1`, back-off) or fails t
 
 | Worker | Caps | Notes |
 |---|---|---|
-| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas`, `gpu_dispatch` | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. |
-| **Framework 16** (`dev`) | Optional `gpu_local` for tests | Not a production worker. Runs the `nomal-ml` image locally for development and training. |
+| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists) | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. |
+| **RTX 4090 PC** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, runs when the PC is on. **Gaming guard**: stops claiming jobs while a game or other GPU-heavy process runs, outside a configurable window (default: idle or at night), or after `nomal-worker pause`. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so pausing or switching off loses at most one chunk. Optional later: the Lenovo server sends Wake-on-LAN at night when GPU jobs wait. |
+| **Framework 16** (`dev`) | `cuda`, `ml` (off by default) | Development and training. Can be switched on as a fallback GPU worker when docked and idle. |
 
 ### 8.3 The GPU interface (backend-agnostic)
 
-GPU work is **one job per video** (`ml_analyse`), not one per model, so a provider's container
-starts once and loads models once. The dispatcher on the Lenovo server claims it from the queue
-like any other job and hands it to a backend:
+GPU work is **one job per video** (`ml_analyse`), not one per model, so models load once. Which
+machine runs it is a backend choice; every backend runs the same image with the same spec:
 
 ```text
 GpuBackend
@@ -794,27 +793,29 @@ GpuBackend
 
 spec (JSON)
   job_id, image "ghcr.io/ksc-wiedikon/nomal-ml:<version>", tasks ["serve_side","ball","players"]
-  inputs   analysis copy + time map + calibration (signed GET, valid for the job's max runtime)
-  outputs  Parquet + result.json (signed PUT)
-  limits   gpu "L4", max_seconds, max_cost_chf
+  inputs   analysis copy + time map + calibration (NAS path, or signed GET for a provider)
+  outputs  Parquet + result.json (NAS path, or signed PUT for a provider)
+  limits   min_vram_gb 16, max_seconds, max_cost_chf
 
 container entrypoint:  nomal-ml run --spec spec.json   -> writes outputs, exits 0/1
 ```
 
 | Backend | How it runs the image | Use |
 |---|---|---|
-| `cloud-serverless` | A thin provider adapter (e.g. a Modal function or an EU provider's job API) that starts the image on an L4 with per-second billing | Production default (provider: §19, O4) |
-| `local-docker` | `docker run --gpus all … nomal-ml run` on a CUDA host over SSH | Framework 16 for tests; any future GPU box |
+| `local-agent` | A GPU host runs `nomal-worker` with `cuda` caps, **pulls** `ml_analyse` from the queue like any worker, and runs `nomal-ml run` locally; inputs and outputs on the NAS | **Production now** (RTX 4090 PC); Framework 16 for tests and as fallback |
+| `cloud-<provider>` | The Lenovo dispatcher claims the job and **pushes** it to a provider adapter that starts the image on a rented GPU; inputs and outputs are pre-signed object URLs | Later: an EU or Swiss provider (§8.6) |
 | `fake` | Returns canned outputs | CI |
 
-The container never calls Nomal's API: inputs and outputs are pre-signed object URLs, and the
-dispatcher relays progress and results over the tailnet. Swapping providers touches only the
-adapter. The analysis-copy input URLs are the only long-ish signed URLs in the system: they
-point at a temporary object no user ever sees, deleted when the job ends.
+The `nomal-ml` container never calls Nomal's API: inputs and outputs are URIs in the spec, and
+the agent or the dispatcher relays progress and results over the tailnet. Moving to a provider
+touches only the adapter. For a provider, the analysis-copy input URLs are the only long-ish
+signed URLs in the system: they point at a temporary object no user ever sees, deleted when the
+job ends.
 
-**Budget guard.** Before submitting, the dispatcher checks the season's `compute_usage` against
-the `budget` cap for the line; when it would be exceeded, the job waits in `waiting_budget` and
-admins are told. Every run records GPU, CPU and memory seconds and the estimated cost.
+**Budget guard.** Every run records GPU, CPU and memory seconds and an estimated cost in
+`compute_usage` (electricity for `local-agent`). For a provider backend, the dispatcher checks
+the season's spend against the `budget` cap before submitting; when the cap would be exceeded,
+the job waits in `waiting_budget` and admins are told.
 
 ### 8.4 Job kinds
 
@@ -825,7 +826,7 @@ admins are told. Every run records GPU, CPU and memory seconds and the estimated
 | `thumbs`, `audio` | `thumbs` / `audio` | Sprite + VTT; 16 kHz mono FLAC on NAS |
 | `cpu_analysis` | `cpu_analysis` | Whistle events, motion energy, scoreboard OCR (Parquet); dead-time proposals |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
-| `ml_analyse` | `gpu_dispatch` | Serve side, ball track, player tracks → score and event proposals |
+| `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
 | `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
 
@@ -833,7 +834,60 @@ admins are told. Every run records GPU, CPU and memory seconds and the estimated
 
 Admin page: queue (with age of the oldest queued job), workers, GPU spend this season vs. cap,
 recent failures with logs. Uptime Kuma (already at `status.kscw.ch`) gets push monitors for the
-worker heartbeat and for "a job has been queued > 24 h".
+worker heartbeats (Lenovo server, GPU PC) and for "a job has been queued > 24 h".
+
+### 8.6 Moving to an EU or Swiss GPU provider
+
+Decided 15.10.2026: GPU inference starts internal and moves to a Swiss or EU provider when that
+is worth it. The move is prepared now, so later it is an adapter plus a configuration change.
+
+**When to move** (any one of these):
+
+- GPU jobs regularly wait: the oldest GPU job is older than 7 days, or more than 20 % of a
+  season's matches waited longer than 48 hours.
+- The RTX 4090 PC fails, is repurposed or is sold.
+- Tier 3 needs more GPU time than nights and idle evenings provide.
+- Running it at home becomes a nuisance (noise, heat, the gaming guard pausing too often).
+
+**Must have**: a Swiss or EU company; processing and storage only in Switzerland or the EU/EEA,
+with no inputs routed through a non-European control plane; a DPA under revDSG/GDPR; runs a
+container image from a private registry; billed per second or minute without a monthly minimum
+(or an hourly instance that starts fast enough to be used per job); a GPU with at least 16 GB;
+an API or CLI to start a run and poll it. **Nice to have**: a Swiss data centre, ISO 27001,
+scale to zero, free egress, start-up credits.
+
+**Steps**:
+
+1. Shortlist from the research note (`docs/research/gpu-providers-eu-ch-2026-10.md`).
+2. Benchmark the S0 match on the top two, paid from the test-GPU line: wall time, GPU-hours,
+   CHF per video, start-up time. Outputs must match the internal run within tolerance.
+3. Sign the DPA; add the provider to `docs/PRIVACY.md` and the privacy page; tell members (the
+   consent text already covers "a provider in Switzerland or the EU named on the privacy page").
+4. Implement the `cloud-<provider>` adapter (submit, poll, cancel), analysis copies to object
+   storage, and the CHF cap in the budget guard.
+5. Run both backends in parallel on five matches and compare.
+6. Switch the default backend in config; keep `local-agent` as the fallback. An ADR records it.
+
+**Shortlist** (research note, 15.10.2026; prices excl. VAT, to verify):
+
+| # | Provider | Why | Season cost at 0.5 / 0.8 / 1.5 GPU-h per video | Main risks |
+|---|---|---|---|---|
+| 1 | **Infomaniak** (Geneva), L4 24 GB in Swiss data centres | Swiss company and law, FADP/GDPR DPA, CHF billing, free bandwidth, OpenStack | ≈ CHF 18 / 26 / 45 (L4 "from €0.29/h", to confirm) | GPU flavors on request; VMs, not jobs (needs the VM adapter); delete, don't stop, or the GPU keeps billing |
+| 2 | **OVHcloud AI Training** (France), L4 24 GB | Managed "run an image to completion" jobs, per-minute billing, mature certifications | ≈ CHF 45 / 68 / ⚠ 122 | Fits CHF 80 only up to ~0.9 h per video; processing in France; new-project GPU quota |
+| 3 | **Exoscale** (Lausanne), A30 24 GB in Geneva | Swiss, strongest certifications (ISO 27001/27017/27018, SOC 2, BSI C5), per-second billing | ≈ CHF ⚠ 82 / ⚠ 119 / ⚠ 204 | Over CHF 80 unless ≤ 0.5 h per video or the A30 is clearly faster; manual GPU screening |
+
+Fallbacks: Scaleway L4 (Paris, per minute, VM), SwissGPU (Ticino, very cheap, no API or DPA
+found), Seeweb (Italy, hourly, DPA unconfirmed), Verda V100 (Helsinki, cheapest, old GPU).
+
+**Adapters this implies**: `openstack-vm` (Infomaniak; also OVHcloud instances): create a
+server from a GPU flavor with cloud-init that pulls the image, runs `nomal-ml run`, uploads the
+outputs and deletes its own server with a scoped application credential; `ovh-job`
+(`ovhai job run`); `exo-vm` (Exoscale CLI/API). The image reads its spec from `NOMAL_SPEC_URL`
+(a signed GET), so a provider only has to pass one environment variable. **Cost safety**: the
+dispatcher also deletes any `nomal-job-*` server older than the job's maximum runtime, so a VM
+that fails to delete itself cannot bill for days.
+
+Questions to put to the providers before signing up: research note §4.
 
 ---
 
@@ -1059,8 +1113,9 @@ at home and the GPU sees only the live part of the match:
 | Container start, model load, decode overhead | GPU | ~3–5 min |
 | **Total** | | **≈ 0.4–0.6 L4-h**, design cap **0.8 L4-h** |
 
-Spike S0 (§17) measures the real number on one match before the GPU line of the budget is
-committed.
+Spike S0 (§17) measures the real number on the RTX 4090, which is expected to run these models
+noticeably faster than an L4, and on one shortlisted provider. The L4 figures matter for the
+later move (§8.6, §16.2).
 
 ---
 
@@ -1248,7 +1303,7 @@ nomal/
     PLAN.md                  this file
     adr/                     one file per decision change
     brand/                   logo assets (provided), generated icons
-    research/                competitor research (competitors-2026-10.md)
+    research/                competitor and GPU-provider research (2026-10)
     ARCHITECTURE.md          written in M0 from §3–§8, kept current
     PRIVACY.md               processing record, processors, retention, rights, residual risks
     FILMING_GUIDE.md         §7.1 for coaches, one page per camera model
@@ -1266,7 +1321,8 @@ nomal/
   scripts/brand/             icon generation
   deploy/
     hetzner/compose.yaml     nomal-api (prod + dev)
-    lenovo/compose.yaml      media worker + dispatcher
+    lenovo/compose.yaml      media worker (+ provider dispatcher later)
+    gpu/compose.yaml         internal GPU worker (local-agent, NVIDIA runtime)
     ml/Dockerfile            nomal-ml (CUDA) image
   .github/workflows/         lint, test, build images, release
 ```
@@ -1292,7 +1348,7 @@ nomal/
 | Database | `nomal_dev` | `nomal` |
 | Bucket | `…-nomal-dev` (lifecycle: 30 days) | `…-nomal` |
 | Workers | Same Lenovo worker, second agent with `--env dev`, lower priority | Primary |
-| GPU backend | `local-docker` on the Framework 16, or `fake` | `cloud-serverless` |
+| GPU backend | `local-agent` on the Framework 16, or `fake` | `local-agent` on the RTX 4090 PC (a provider later, §8.6) |
 | Local | `docker compose`: Postgres + MinIO + a fake bridge that issues dev tokens | — |
 
 Everything goes to dev first, as in Wiedisync.
@@ -1353,48 +1409,49 @@ cap. Errors: structured JSON logs; frontend errors to the club's Sentry (new pro
 ## 16. Budget
 
 Target: **~CHF 210 per season, all running costs.** Your breakdown: cloud GPU ~80, backup
-storage ~50, test GPU ~35, reserve (~45). Assumed rates: 1 USD ≈ CHF 0.80, 1 EUR ≈ CHF 0.94
-(check current rates). Prices from public pricing pages and third-party trackers on 15.10.2026;
-verify before ordering.
+storage ~50, test GPU ~35, reserve (~45). Assumed rates: 1 USD ≈ CHF 0.80, 1 EUR ≈ CHF 0.94,
+electricity ≈ CHF 0.30/kWh (check current rates). Prices from public pricing pages and
+third-party trackers on 15.10.2026; verify before ordering.
 
-### 16.1 Cloud GPU (100 videos)
+### 16.1 GPU now: internal
 
-Serverless providers bill GPU, CPU and memory per second. Modal's listed L4 price is about
-USD 0.80/h, plus about USD 0.047 per CPU core-hour and USD 0.008 per GiB-hour.
+Inference runs on the RTX 4090 PC (§8.2). The cost is electricity: about 0.45 kW under load ×
+30–80 GPU-hours per season (100 videos × 0.3–0.8 h; the 4090 is faster than an L4) ≈
+14–36 kWh ≈ **CHF 5–12 per season**. Not counted: wear on a PC that exists anyway.
 
-| Scenario | GPU-h | Est. cost per season | vs. CHF 80 |
+### 16.2 GPU later: an EU or Swiss provider
+
+The CHF 80 line becomes the budget for the move (§8.6): about **CHF 0.80 per video**, all-in.
+Season cost for 100 videos from the provider research (CHF, excl. VAT, including per-job
+start-up overhead; the same runtime is assumed on every GPU until S0 measures it):
+
+| Provider | 0.5 GPU-h/video | 0.8 GPU-h/video (design cap) | 1.5 GPU-h/video (your assumption) |
 |---|---|---|---|
-| Your assumption: 1.5 L4-h/video, GPU only | 150 | ≈ CHF 96 | ⚠ over |
-| 1.5 L4-h/video incl. 4 CPU cores + 16 GiB | 150 | ≈ CHF 134 | ⚠ over by ~CHF 54 |
-| Design cap: 0.8 L4-h/video incl. CPU/RAM (§10.9) | 80 | ≈ CHF 71 | ✓ |
-| Design estimate: 0.5 L4-h/video incl. CPU/RAM | 50 | ≈ CHF 45 | ✓ |
+| Infomaniak L4 (Swiss; price to confirm) | 18 | 26 | 45 |
+| OVHcloud AI Training L4 (France) | 45 | 68 | ⚠ 122 |
+| Scaleway L4 (France) | 49 | 71 | ⚠ 122 |
+| Exoscale A30, Geneva (Swiss) | ⚠ 82 | ⚠ 119 | ⚠ 204 |
 
-⚠ **At 1.5 L4-hours per video the GPU line exceeds CHF 80** (≈ CHF 96 for the GPU alone,
-≈ CHF 134 with the CPU and memory a real job needs). The plan keeps it under by running the
-dead-time, OCR and calibration stages on the Lenovo CPU and sending only live segments to the
-GPU (§10.9). Spike S0 measures the real number. The budget guard (§8.3) enforces the cap either
-way.
+So the 1.5 GPU-h assumption fits CHF 80 only at Infomaniak (or the cheap fallbacks). OVHcloud
+and Scaleway need the design target of ≤ 0.8 h; Exoscale needs ≤ 0.5 h or a GPU clearly faster
+than an L4. Swiss VAT (8.1 %) may come on top.
 
-Not counted, upside only: Modal's free Starter plan includes about USD 30 of compute per month
-(third-party sources; terms can change). At ~12 matches a month that would cover the whole run
-rate. Not counted either: a local GPU (no cloud cost; electricity only).
+### 16.3 Everything
 
-### 16.2 Everything
+| Line | Your budget | Now (internal GPU) | After the move | Note |
+|---|---|---|---|---|
+| GPU inference | 80 | **≈ 5–12** (electricity) | ≈ 18–68 at ≤ 0.8 h/video (Infomaniak to OVHcloud) · ⚠ up to 122 at 1.5 h on OVHcloud | §16.1–16.2 |
+| Hot storage (Hetzner Object Storage) | — | ⚠ **≈ 68–80** | ≈ 68–80 | **Not in your breakdown.** Base ~€5–6/month for 1 TB + 1 TB traffic; year 2 holds two seasons (~1.1 TB) unless past seasons' 1080p rendition is dropped (§5.5) |
+| Backup storage | 50 | ≈ 0–5 | ≈ 0–5 | DB rides Wiedisync's existing backups; rendition mirror and raw stay on the NAS. Proposal: **use this line for hot storage** |
+| Test GPU | 35 | 35 | 35 | Provider benchmarks (S0, §8.6) and training that doesn't fit 8 GB |
+| Other electricity | — | ≈ 5–10 | ≈ 5–10 | Lenovo server is on anyway; Framework 16 training |
+| VPS, egress, domains, YouTube API | — | ≈ 0 | ≈ 0 | Existing server; traffic within the included quota |
+| **Total** | **210** | **≈ CHF 115–140** | **≈ CHF 125–200** · ⚠ ≈ 230–250 at 1.5 h/video on OVHcloud | |
 
-| Line | Your budget | Plan estimate per season | Note |
-|---|---|---|---|
-| Cloud GPU inference | 80 | **45–71** (design) / ⚠ 134 (at 1.5 h incl. CPU/RAM) | §16.1 |
-| Hot storage (Hetzner Object Storage) | — | ⚠ **≈ 68–80** | **Not in your breakdown.** Base ~€5–6/month for 1 TB + 1 TB traffic; year 2 holds two seasons (~1.1 TB) unless the 1080p rendition of past seasons is dropped (§5.5) |
-| Backup storage | 50 | **≈ 0–5** | DB rides Wiedisync's existing backups; renditions mirror and raw stay on the NAS. Proposal: **move this line to hot storage** |
-| Test GPU (cloud experiments, training that doesn't fit 8 GB) | 35 | 35 (capped by the budget guard) | |
-| Electricity | — | ≈ 5–10 | Lenovo server is on anyway; Framework 16 training runs |
-| VPS, egress, domains, YouTube API | — | ≈ 0 | Existing server; traffic within included quota |
-| **Total** | **210** | **≈ CHF 155–200** with the design GPU target · ⚠ **≈ CHF 240–265** if 1.5 L4-h/video holds | |
-
-So: with hot storage taking the backup line, the plan fits CHF 210 **only if** the GPU stays
-near the design target. Levers if it doesn't: process only the matches coaches ask for, player
-detection at 10 fps, drop past seasons' 1080p rendition, or run production inference on a local
-GPU.
+Starting internal leaves roughly CHF 70–95 of the CHF 210 unused per season. Suggestion: keep it
+as the reserve for the move rather than spend it elsewhere. Levers if a provider costs more than
+planned: process only the matches coaches ask for, player detection at 10 fps, drop past
+seasons' 1080p rendition, or keep internal as the main backend.
 
 ---
 
@@ -1406,19 +1463,20 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
-| **S0** | Spike (before M1) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court. On a cloud L4: run a draft `ml_analyse` once and **measure GPU-hours per video**. Whistle detection on its audio. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured → GPU budget line confirmed |
+| **S0** | Spike (before M1) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court. On the RTX 4090 PC: run a draft `ml_analyse` and **measure GPU-hours per video**; one benchmark run on the top EU/Swiss provider (test-GPU line). Whistle detection on its audio. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured on the 4090 and one provider |
 | **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the Nomal brand; icons from `docs/brand/`; Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `nomal-dev.kscw.ch` with a Wiedisync dev account and see your Nomal-enabled teams and games |
 | **M1** | Video in, video out | Job queue + Lenovo media worker; NAS inbox + browser multipart upload (split files); ingest + transcode + thumbnails; HLS with per-segment signing; adult hard gate + *filming allowed/blocked*; consent; audit log; DU23 decision applied | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403; a blocked team cannot upload |
 | **M2** | Tagging + condensed playback | Volleyball taxonomy; roster snapshot; grammar + hotkeys; timeline + event table; rally key + rally/score from tags; **skip dead time (manual)** with timeout/set-break keys; set boundaries + starting score; rally list filters (player, action, outcome, set); outbox; revision triggers | A full match tagged in ≤ 1.5× its length; condensed playback works; pulling the network cable loses nothing |
 | **M3** | Clips, reels, export, comments | Virtual clips; smart per-player reels; highlight builder across matches; comments pinned to a moment with @mentions and audience; drill segments for trainings; ffmpeg export with watermark (incl. condensed match) | A player opens "my attacks this season" on a phone; a coach downloads a watermarked condensed match |
 | **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in Nomal without a spreadsheet |
 | **M4** | Launch | Basketball taxonomy + grammar for Herren 1; YouTube source (club channel); German UI; privacy page; filming/tagging guides; runbook; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
-| **M5** | Tier 2a: automatic dead time | CPU v0 (whistles + motion) on the Lenovo worker; rally review UI; analysis copies; GPU dispatcher + backends + budget guard; learned v1 once ~20 matches have manual rallies | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
+| **M5** | Tier 2a: automatic dead time | CPU v0 (whistles + motion) on the Lenovo worker; rally review UI; analysis copies; internal GPU worker on the RTX 4090 PC (`local-agent`, gaming guard) + GPU-hour ledger; learned v1 once ~20 matches have manual rallies | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
 | **M6** | Tier 2b: automatic scoring (VB) | Serve-side classifier from tier-1 serve tags; side-switch rules; official-set-score constraint; scoreboard region UI + OCR; score correction UI | ≥ 98 % correct rally winners with ≤ 5 % flagged on held-out matches |
 | **M7** | Tier 2c: ball | Ball-labelling tool; TrackNet fine-tune on the Framework 16; Parquet artifacts | Ball bar met on near court; far court measured |
 | **M8** | Tier 2d: players + court | YOLO + ByteTrack; calibration UI; serve placement charts | Serve zones agree ≥ 80 % with manual tags |
 | **M9** | Basketball tier 2 + tier 3 spike | Clock/score OCR for basketball dead time and scoring; event proposals from tracks + ball contacts; unidentified-athlete queue | Measured precision per skill; decide whether to continue |
 | **Later** | Pick by demand | Court-diagram clicks for attack/serve lines; setter distribution; telestration; trends and goals; DVW import/export; optional AI match summary (§12.2) | Each one when a coach asks for it |
+| **Move** | EU/Swiss GPU provider | Steps in §8.6: benchmark, DPA, adapter, parallel run, switch | When a trigger in §8.6 fires |
 
 ---
 
@@ -1430,9 +1488,10 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 | Tagging too slow for coaches | Nobody tags | Grammar, rally/score automation, measure in M2, recruit analysts, condensed mode first |
 | Different camera per team | Inconsistent input, some below 50 fps | Ingest normalises; `meets_standard` flag; per-camera page in the filming guide; tier 2 skips sub-standard videos |
 | Far-court ball tracking at 1080p | Tier 2 weak | Spike S0; 4K / higher mount; fast shutter |
-| GPU cost above plan | Budget broken | S0 measurement, CPU stages at home, live segments only, budget guard, local GPU fallback |
-| GPU provider outside Switzerland/EU | revDSG exposure | EU provider preferred; DPA/SCCs; minimised analysis copies; named in consent (§5.6) |
-| DU23-1 and U23 opponents | Breaks "nothing under 18" | Trainings only unless decided otherwise (§5.3) |
+| Internal GPU unavailable (gaming, off, broken) | ML backlog | Pull model, chunked checkpoints, night window, Framework 16 fallback, move to a provider (§8.6) |
+| GPU cost above plan after the move | Budget broken | S0 + provider benchmark, CPU stages at home, live segments only, budget guard, internal fallback |
+| Provider data protection after the move | revDSG exposure | Swiss/EU only, DPA, minimised analysis copies, privacy page updated (§5.6, §8.6) |
+| DU23-1 and U23 opponents | Breaks "nothing under 18" | Trainings only (decided); `team_policy.matches_allowed = false` enforced |
 | Lenovo server is also the LAN's DNS and runs other services | Transcodes hurt the LAN | Container CPU/memory caps, `nice`, VAAPI |
 | VPS shared with prod Directus | Nomal hurts Wiedisync | Container limits; video never touches the VPS |
 | iOS playback quirks | iPhone users can't watch | Test in M1; playlist-refresh fallback (§7.6) |
@@ -1447,17 +1506,17 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 
 ## 19. Open questions and flags
 
-| # | Question | Recommendation |
+| # | Question | Status / recommendation |
 |---|---|---|
-| **O1** ⚠ | **DU23-1**: does its roster include anyone under 18 or without a birthdate? And U23 opponents very likely include under-18s, which Nomal cannot check. | DU23-1 **trainings only**. Filming its matches would break "nothing under 18 gets filmed" for opponents. The roster check needs a production read (aggregate counts only). |
-| **O2** | Adult-league opponents (2. Liga, 1. Liga regional) can still field a 16- or 17-year-old. | Accept as documented residual risk with deletion on request, or have the coach confirm per upload "no under-18 player on court that I know of". |
-| **O3** | "H1 (basketball)" = basketball **Herren 1** (league H1LRA), not volleyball H1 (2. Liga)? | Assumed yes. |
-| **O4** ⚠ | GPU provider: Modal (US, no public DPF certification/DPA found, EU region only on a USD 250/month plan) vs. an EU per-second provider vs. local GPU. | Build the interface first (M5); run S0 on a cloud L4 with test footage; choose an **EU provider** if pricing and billing granularity hold, else Modal with DPA + SCCs named in the consent text. |
-| **O5** ⚠ | 1.5 L4-h/video exceeds the CHF 80 GPU line (≈ CHF 96 GPU-only, ≈ CHF 134 incl. CPU/RAM). | Design to ≤ 0.8 h (§10.9), confirm in S0. |
-| **O6** ⚠ | Hot storage (≈ CHF 68–80/season) is not in the budget breakdown. | Move the CHF 50 backup line to hot storage (backups cost ~0) and drop past seasons' 1080p rendition. |
-| **O7** | Basketball camera: behind the baseline films basketball poorly. | Elevated sideline at half court for Herren 1. |
-| **O8** | Club YouTube channel ID(s) for the allow-list. | Needed in M4. |
-| **O9** | Camera models per team. | Needed for S0 and the filming guide. |
-| **O10** | The existing RTX 4090 PC could run the `local-docker` backend at near-zero cost. | Not in your plan; keep as a budget fallback only if you want it. |
-| **O11** | Brand assets in `docs/brand/`. | Icons are generated in M0 once the SVGs are there. |
-| **O12** | Repo visibility. | Private now; flip to public when you're happy, like Wiedisync. |
+| O1 | DU23-1 and under-18 opponents | ✓ **Decided 15.10.2026: trainings only.** Its trainings still pass the hard birthdate check. |
+| O2 | Adult-league opponents (2. Liga, 1. Liga regional) can still field a 16- or 17-year-old. | Accept as documented residual risk with deletion on request, or have the coach confirm per upload "no under-18 player on court that I know of". |
+| O3 | "H1 (basketball)" = basketball **Herren 1** (league H1LRA), not volleyball H1 (2. Liga). | Assumed yes. |
+| O4 | GPU provider | ✓ **Decided 15.10.2026: start internal, move to an EU or Swiss provider later** (§8.6; research in `docs/research/gpu-providers-eu-ch-2026-10.md`). |
+| O5 | Internal GPU host | Assumed the **RTX 4090 PC** (24 GB, Linux), with the Framework 16 as fallback. Confirm the 4090 PC may run the worker (it is also a gaming PC). |
+| O6 ⚠ | After the move, 1.5 GPU-h/video stays within CHF 80 only at Infomaniak (≈ CHF 45, price to confirm); OVHcloud ≈ CHF 122, Exoscale ≈ CHF 204 (§16.2). | Design to ≤ 0.8 h (§10.9); measure in S0 on the 4090 and on Infomaniak or OVHcloud. |
+| O7 ⚠ | Hot storage (≈ CHF 68–80/season) is not in the budget breakdown. | Use the CHF 50 backup line for hot storage and drop past seasons' 1080p rendition. |
+| O8 | Basketball camera: behind the baseline films basketball poorly. | Elevated sideline at half court for Herren 1. |
+| O9 | Club YouTube channel ID(s) for the allow-list. | Needed in M4. |
+| O10 | Camera models per team. | Needed for S0 and the filming guide. |
+| O11 | Brand assets in `docs/brand/`. | Icons are generated in M0 once the SVGs are there. |
+| O12 | Repo visibility. | Private now; flip to public when you're happy, like Wiedisync. |
