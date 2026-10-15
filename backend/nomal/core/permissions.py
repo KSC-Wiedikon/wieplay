@@ -110,3 +110,11 @@ def can_delete_video(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bo
 def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
     """See the NAS inbox: anyone who may upload for at least one enabled team."""
     return any(can_upload(viewer, t) for t in teams)
+
+
+def can_tag(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Tag, mark rallies and sets, correct scores (§5.1): the team's coaches and team
+    managers (every season of the team) and sport admins. Analysts arrive with team grants."""
+    if not team.enabled:
+        return False
+    return team.sport in viewer.sport_admin or team.lineage_id in leads

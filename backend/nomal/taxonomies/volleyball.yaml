@@ -1,0 +1,64 @@
+# Volleyball tagging vocabulary, DataVolley conventions (PLAN §6.5, §9.3).
+# A change of meaning creates a new version; never edit a published version in place.
+#
+#   entry grammar:  [a]<number><skill>[grade][zone from][zone to]     e.g. 7A#  a12S=  5R+  3A#46
+#   a = them (the opponent); without it, us.
+#
+# lead_ms   the tag is placed this long before the first keystroke (reaction time)
+# pre_ms / post_ms   default clip window around the tag
+# ends_rally_on      grade → who wins the rally: self (the tagged side) or other
+sport: volleyball
+version: 1
+grades: ["#", "+", "!", "-", "/", "="]
+zones: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+skills:
+  - code: S
+    name_key: skill.serve
+    category: serve
+    starts_rally: true
+    lead_ms: 400
+    pre_ms: 2000
+    post_ms: 3000
+    ends_rally_on: {"#": self, "=": other}
+  - code: R
+    name_key: skill.reception
+    category: reception
+    lead_ms: 200
+    pre_ms: 2000
+    post_ms: 3000
+    ends_rally_on: {"=": other}
+  - code: E
+    name_key: skill.set
+    category: set
+    lead_ms: 200
+    pre_ms: 2000
+    post_ms: 2000
+    ends_rally_on: {"=": other}
+  - code: A
+    name_key: skill.attack
+    category: attack
+    lead_ms: 300
+    pre_ms: 3000
+    post_ms: 2000
+    ends_rally_on: {"#": self, "=": other, "/": other}
+  - code: B
+    name_key: skill.block
+    category: block
+    lead_ms: 200
+    pre_ms: 3000
+    post_ms: 2000
+    ends_rally_on: {"#": self, "=": other}
+  - code: D
+    name_key: skill.dig
+    category: dig
+    lead_ms: 200
+    pre_ms: 3000
+    post_ms: 2000
+    ends_rally_on: {"=": other}
+  - code: F
+    name_key: skill.freeball
+    category: freeball
+    lead_ms: 200
+    pre_ms: 2000
+    post_ms: 2000
+    ends_rally_on: {"=": other}

@@ -408,3 +408,190 @@ Index(
     Job.created_at,
     postgresql_where=Job.status == "queued",
 )
+
+
+# --- M2: tagging (PLAN §6.5 to §6.7) ------------------------------------------------------
+
+
+class TaxonomyEntry(Base):
+    """One skill of a sport's tagging vocabulary; seeded from nomal/taxonomies/*.yaml."""
+
+    __tablename__ = "taxonomy"
+
+    sport: Mapped[str] = mapped_column(String(16), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(8), primary_key=True)
+    name_key: Mapped[str] = mapped_column(String(64))
+    category: Mapped[str] = mapped_column(String(32))
+    hotkey: Mapped[str | None] = mapped_column(String(8))
+    default_pre_ms: Mapped[int] = mapped_column(Integer)
+    default_post_ms: Mapped[int] = mapped_column(Integer)
+    lead_ms: Mapped[int] = mapped_column(Integer)
+    attributes_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    starts_rally: Mapped[bool] = mapped_column(Boolean, default=False)
+    ends_rally_on: Mapped[dict[str, str]] = mapped_column(JSONB, default=dict)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class VideoRoster(Base):
+    """Who wore which number in this video: a snapshot, so later roster changes never
+    rewrite history (PLAN §6.4). Opponents by number only."""
+
+    __tablename__ = "video_roster"
+    __table_args__ = (UniqueConstraint("video_id", "side", "number"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    side: Mapped[str] = mapped_column(String(8))  # us | them
+    number: Mapped[int] = mapped_column(Integer)
+    member_id: Mapped[int | None] = mapped_column(Integer)  # us only
+    position: Mapped[str | None] = mapped_column(String(32))
+    is_libero: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
+
+class Period(Base):
+    """A set (volleyball) or quarter (basketball), with its starting score (PLAN §6.6)."""
+
+    __tablename__ = "period"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True)  # client-generated
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    no: Mapped[int] = mapped_column(Integer)
+    start_ms: Mapped[int] = mapped_column(BigInteger)
+    end_ms: Mapped[int | None] = mapped_column(BigInteger)
+    start_us: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    start_them: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    first_serve: Mapped[str | None] = mapped_column(String(8))  # us | them
+    our_court_side_at_start: Mapped[str | None] = mapped_column(String(8))  # near | far
+    side_switch_at_score: Mapped[int | None] = mapped_column(Integer)
+    final_us: Mapped[int | None] = mapped_column(Integer)  # computed from the rallies
+    final_them: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    review: Mapped[str] = mapped_column(String(16), default="unreviewed")
+    created_by: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Segment(Base):
+    """A rally, timeout, set break or other stretch of the video (PLAN §6.6)."""
+
+    __tablename__ = "segment"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True)  # client-generated
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    period_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    # rally | possession | timeout | set_break | warmup | stoppage | other_dead
+    kind: Mapped[str] = mapped_column(String(16))
+    start_ms: Mapped[int] = mapped_column(BigInteger)
+    end_ms: Mapped[int] = mapped_column(BigInteger)
+    serving: Mapped[str | None] = mapped_column(String(8))
+    serving_court: Mapped[str | None] = mapped_column(String(8))
+    won_by: Mapped[str | None] = mapped_column(String(8))
+    score_us_after: Mapped[int | None] = mapped_column(Integer)
+    score_them_after: Mapped[int | None] = mapped_column(Integer)
+    score_source: Mapped[str | None] = mapped_column(String(16))
+    score_confidence: Mapped[float | None] = mapped_column(Float)
+    score_conflict: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    import_system: Mapped[str | None] = mapped_column(String(32))
+    import_ref: Mapped[str | None] = mapped_column(String(128))
+    model_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    review: Mapped[str] = mapped_column(String(16), default="unreviewed")
+    created_by: Mapped[int | None] = mapped_column(Integer)
+    updated_by: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class Event(Base):
+    """A tag (PLAN §6.7). The client makes the id, so saving is an idempotent PUT."""
+
+    __tablename__ = "event"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True)
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    segment_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    sport: Mapped[str] = mapped_column(String(16))
+    taxonomy_version: Mapped[int] = mapped_column(Integer)
+    code: Mapped[str] = mapped_column(String(8))
+    t_ms: Mapped[int] = mapped_column(BigInteger)
+    frame: Mapped[int | None] = mapped_column(Integer)
+    time_precision: Mapped[str] = mapped_column(String(16), default="live")
+    side: Mapped[str] = mapped_column(String(8))  # us | them
+    number: Mapped[int | None] = mapped_column(Integer)
+    member_id: Mapped[int | None] = mapped_column(Integer)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    court_x: Mapped[float | None] = mapped_column(Float)
+    court_y: Mapped[float | None] = mapped_column(Float)
+    clip_pre_ms: Mapped[int | None] = mapped_column(Integer)
+    clip_post_ms: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    model_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    review: Mapped[str] = mapped_column(String(16), default="unreviewed")
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    track_ref: Mapped[str | None] = mapped_column(String(64))
+    created_by: Mapped[int | None] = mapped_column(Integer)
+    updated_by: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class EventRevision(Base):
+    """Written by a Postgres trigger on every change: no code path can skip it (PLAN §6.7)."""
+
+    __tablename__ = "event_revision"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("event.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    changed_by: Mapped[int | None] = mapped_column(Integer)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # create | update | delete | restore | confirm | reject
+    action: Mapped[str] = mapped_column(String(16))
+    before: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    after: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class SegmentRevision(Base):
+    __tablename__ = "segment_revision"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    segment_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("segment.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    changed_by: Mapped[int | None] = mapped_column(Integer)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    action: Mapped[str] = mapped_column(String(16))
+    before: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    after: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+Index("ix_event_video_t", Event.video_id, Event.t_ms)
+Index("ix_segment_video_start", Segment.video_id, Segment.start_ms)

@@ -1,7 +1,5 @@
 """Imports from YouTube and Twitch links (PLAN §7.2.2)."""
 
-# ruff: noqa: F811  (pytest fixtures imported from test_videos)
-
 from __future__ import annotations
 
 import threading
@@ -19,17 +17,14 @@ from nomal.api.dev_bridge import FixtureBridgeClient
 from nomal.core import batch, imports
 from nomal.worker import importer
 from tests.fakes import FakeStore
-from tests.test_videos import (  # noqa: F401  (fixtures)
+from tests.media_helpers import (
     DU23,
     H3,
     MEDIA_CAPS,
     THUMBS,
-    as_,
     claim,
-    club,
     game_id,
     ingest_result,
-    store,
     transcode_result,
     worker_client,
 )

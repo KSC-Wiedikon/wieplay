@@ -131,3 +131,42 @@ def login(client: TestClient, claims: Mapping[str, Any], next_path: str = "/") -
         "/api/auth/callback", params={"token": make_token(claims, state), "state": state}
     )
     assert response.status_code == 302, response.text
+
+
+# --- Video fixtures (M1/M2) ----------------------------------------------------------------
+from tests.fakes import FakeStore  # noqa: E402
+from tests.media_helpers import D1, DU23, H3, HERREN1, P  # noqa: E402
+
+
+@pytest.fixture
+def store(app: FastAPI) -> FakeStore:
+    fake = FakeStore()
+    app.state.store = fake
+    return fake
+
+
+@pytest.fixture
+def as_(app: FastAPI) -> Iterator[Any]:
+    clients: list[TestClient] = []
+
+    def make(persona: str) -> TestClient:
+        c = TestClient(app, follow_redirects=False)
+        c.__enter__()
+        clients.append(c)
+        login(c, P[persona])
+        return c
+
+    yield make
+    for c in clients:
+        c.__exit__(None, None, None)
+
+
+@pytest.fixture
+def club(as_: Any, store: FakeStore) -> dict[str, TestClient]:
+    """Teams synced and enabled."""
+    admin = as_("admin")
+    assert admin.post("/api/admin/sync").status_code == 200
+    for team in (H3, D1, DU23, HERREN1):
+        assert admin.put(f"/api/admin/teams/{team}", json={"enabled": True}).status_code == 200
+    assert admin.post("/api/admin/sync").status_code == 200
+    return {"admin": admin, "coach": as_("coach-h3")}
