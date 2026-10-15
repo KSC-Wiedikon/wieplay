@@ -1,4 +1,5 @@
-import { createBrowserRouter } from 'react-router'
+import { createBrowserRouter, type RouteObject } from 'react-router'
+import { PageSpinner } from './components/Spinner'
 import { AdminTeamsPage } from './pages/AdminTeamsPage'
 import { AppLayout } from './pages/AppLayout'
 import { HomePage } from './pages/HomePage'
@@ -6,14 +7,40 @@ import { NotFoundPage } from './pages/NotFoundPage'
 import { RouteError } from './pages/RouteError'
 import { TeamPage } from './pages/TeamPage'
 
-const routes = [
+// Pages most visits never open are loaded on demand (the player pulls in hls.js on its own).
+const routes: RouteObject[] = [
   {
     element: <AppLayout />,
     errorElement: <RouteError />,
+    hydrateFallbackElement: <PageSpinner />,
     children: [
       { index: true, element: <HomePage /> },
       { path: 'teams/:id', element: <TeamPage /> },
+      {
+        path: 'teams/:id/upload',
+        lazy: () => import('./pages/UploadPage').then((m) => ({ Component: m.UploadPage })),
+      },
+      {
+        path: 'videos/:id',
+        lazy: () => import('./pages/VideoPage').then((m) => ({ Component: m.VideoPage })),
+      },
+      {
+        path: 'consent',
+        lazy: () => import('./pages/ConsentPage').then((m) => ({ Component: m.ConsentPage })),
+      },
       { path: 'admin/teams', element: <AdminTeamsPage /> },
+      {
+        path: 'admin/policies',
+        lazy: () => import('./pages/AdminPoliciesPage').then((m) => ({ Component: m.AdminPoliciesPage })),
+      },
+      {
+        path: 'admin/workers',
+        lazy: () => import('./pages/AdminWorkersPage').then((m) => ({ Component: m.AdminWorkersPage })),
+      },
+      {
+        path: 'admin/jobs',
+        lazy: () => import('./pages/AdminJobsPage').then((m) => ({ Component: m.AdminJobsPage })),
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

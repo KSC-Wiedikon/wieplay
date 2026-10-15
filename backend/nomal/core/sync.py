@@ -44,6 +44,8 @@ class BridgeClient(Protocol):
 
     def snapshot(self, team_ids: Sequence[int]) -> Mapping[str, Any]: ...
 
+    def adult_check(self, team_id: int, on: date) -> Mapping[str, Any]: ...
+
 
 class HttpBridgeClient:
     """Calls the bridge in Wiedisync's kscw-endpoints over the local network."""
@@ -74,6 +76,9 @@ class HttpBridgeClient:
 
     def snapshot(self, team_ids: Sequence[int]) -> Mapping[str, Any]:
         return self._get("/sync", {"teams": ",".join(str(i) for i in team_ids)})
+
+    def adult_check(self, team_id: int, on: date) -> Mapping[str, Any]:
+        return self._get("/adult-check", {"team": str(team_id), "date": on.isoformat()})
 
 
 @dataclass(frozen=True)

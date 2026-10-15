@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react'
 import { Link } from 'react-router'
 import { cx } from '../lib/cx'
 
-type Variant = 'primary' | 'secondary' | 'ghost'
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ghostDanger'
 type Size = 'md' | 'icon'
 
 interface StyleProps {
@@ -20,6 +20,10 @@ const variants: Record<Variant, string> = {
   primary: 'bg-accent text-on-accent hover:brightness-95 active:brightness-90',
   secondary: 'border border-hairline bg-surface text-fg hover:bg-sunken',
   ghost: 'text-fg hover:bg-sunken',
+  // Page colour on the danger red: light text in light mode, navy in dark mode.
+  danger: 'bg-danger text-page hover:brightness-95 active:brightness-90',
+  // Quiet entry point to a destructive action (the confirm dialog then uses `danger`).
+  ghostDanger: 'text-danger hover:bg-sunken',
 }
 
 function classes({ variant = 'secondary', size = 'md' }: StyleProps, className?: string) {

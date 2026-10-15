@@ -28,6 +28,8 @@ jobs:
       NOMAL_TEST_DATABASE_URL: postgresql+psycopg://nomal:nomal@127.0.0.1:5432/nomal_test
     steps:
       - uses: actions/checkout@v4
+      - name: ffmpeg (the worker tests encode a tiny clip)
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.11.11"
@@ -60,3 +62,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t nomal-api:ci .
+      - run: docker build -f Dockerfile.worker -t nomal-worker:ci .

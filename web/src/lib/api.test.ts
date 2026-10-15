@@ -3,6 +3,7 @@ import { jsonResponse } from '../test/render'
 import {
   api,
   ApiError,
+  blockersOf,
   fetchMe,
   ForbiddenError,
   loginUrl,
@@ -88,6 +89,50 @@ describe('apiRequest', () => {
 
   it('NotFoundError is an ApiError', () => {
     expect(new NotFoundError('x')).toBeInstanceOf(ApiError)
+  })
+})
+
+describe('error bodies', () => {
+  it('keeps the parsed JSON body, so a 409 carries the filming blockers', async () => {
+    const blockers = [
+      { code: 'under_18', count: 2, detail: null },
+      { code: 'policy_matches', count: null, detail: 'U23 league' },
+    ]
+    mockFetch(jsonResponse(409, { detail: 'Filming is not allowed for this team on that day', blockers }))
+
+    const error = await api.createVideo(92, { kind: 'match', game_id: 1, files: [] }).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({ status: 409, detail: 'Filming is not allowed for this team on that day' })
+    expect((error as ApiError).body).toMatchObject({ blockers })
+    expect(blockersOf(error)).toEqual(blockers)
+  })
+
+  it('has no blockers for other errors or bodies without them', async () => {
+    mockFetch(jsonResponse(409, { detail: 'An inbox file is no longer available' }), jsonResponse(413, { detail: 'Too big' }))
+    expect(blockersOf(await api.video('v1').catch((e: unknown) => e))).toBeNull()
+    expect(blockersOf(await api.video('v1').catch((e: unknown) => e))).toBeNull()
+    expect(blockersOf(new Error('x'))).toBeNull()
+  })
+
+  it('skips malformed blockers and fills in missing fields', () => {
+    const error = new ApiError(409, 'blocked', { blockers: [{ code: 'no_roster' }, { count: 1 }, 'x'] })
+    expect(blockersOf(error)).toEqual([{ code: 'no_roster', count: null, detail: null }])
+  })
+
+  it('uses the first message of a validation error as the detail', async () => {
+    mockFetch(
+      jsonResponse(422, { detail: [{ loc: ['body', 'title'], msg: 'String should have at most 200 characters', type: 'x' }] }),
+    )
+    await expect(api.createVideo(92, { kind: 'training', recorded_on: '2026-10-10' })).rejects.toMatchObject({
+      status: 422,
+      detail: 'String should have at most 200 characters',
+    })
+  })
+
+  it('keeps a null body when the error is not JSON', async () => {
+    mockFetch(new Response('oops', { status: 500, statusText: 'Internal Server Error' }))
+    const error = await api.teams().catch((e: unknown) => e)
+    expect(error).toMatchObject({ status: 500, detail: 'Internal Server Error', body: null })
   })
 })
 

@@ -1,0 +1,22 @@
+# Nomal media worker image (Lenovo server): ffmpeg with VAAPI for the Radeon iGPU.
+#   docker build -f Dockerfile.worker -t nomal-worker:<tag> .
+# Runs `python -m nomal.worker`; settings come from NOMAL_WORKER_* (deploy/lenovo/).
+
+FROM python:3.12-slim-trixie
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg mesa-va-drivers \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=ghcr.io/astral-sh/uv:0.11.11 /uv /usr/local/bin/uv
+WORKDIR /app
+COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY backend/ ./
+RUN uv sync --frozen --no-dev && useradd --system --uid 10001 --create-home nomal
+ENV PATH="/app/.venv/bin:$PATH"
+USER nomal
+CMD ["python", "-m", "nomal.worker"]

@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from nomal.api.deps import DbDep, ViewerDep
 from nomal.core.models import TeamLineage, WdGame, WdTeam, WdTraining
-from nomal.core.permissions import TeamRef, Viewer, can_manage_nomal, visible_team_ids
+from nomal.core.permissions import (
+    TeamRef,
+    Viewer,
+    can_manage_nomal,
+    can_upload,
+    visible_team_ids,
+)
 
 router = APIRouter(prefix="/api", tags=["teams"])
 
@@ -29,6 +35,8 @@ class TeamOut(BaseModel):
 
 class TeamDetailOut(TeamOut):
     lineage_id: uuid.UUID
+    # Coach/team manager of this season's team or sport admin: upload videos, record consent.
+    can_upload: bool
 
 
 class MemberOut(BaseModel):
@@ -115,7 +123,12 @@ def list_teams(viewer: ViewerDep, db: DbDep) -> list[TeamOut]:
 @router.get("/teams/{team_id}", response_model=TeamDetailOut)
 def get_team(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamDetailOut:
     team = _get_visible_team(db, viewer, team_id)
-    return TeamDetailOut(**_team_out(team, viewer).model_dump(), lineage_id=team.lineage_id)
+    ref = TeamRef(team.id, team.sport, team.lineage_id, team.lineage.enabled)
+    return TeamDetailOut(
+        **_team_out(team, viewer).model_dump(),
+        lineage_id=team.lineage_id,
+        can_upload=can_upload(viewer, ref),
+    )
 
 
 @router.get("/teams/{team_id}/games", response_model=list[GameOut])

@@ -53,3 +53,46 @@ export function SyncIcon(props: IconProps) {
     </Icon>
   )
 }
+
+export function CheckIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 6 9 17l-5-5" />
+    </Icon>
+  )
+}
+
+export function AlertIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v4M12 16h.01" />
+    </Icon>
+  )
+}
+
+export function FilmIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5" />
+    </Icon>
+  )
+}
+
+export function UploadIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 3v12M7 8l5-5 5 5M5 21h14" />
+    </Icon>
+  )
+}
+
+export function CopyIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </Icon>
+  )
+}

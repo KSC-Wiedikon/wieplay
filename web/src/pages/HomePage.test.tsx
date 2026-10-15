@@ -61,6 +61,37 @@ describe('HomePage', () => {
     expect(screen.queryByRole('region', { name: 'Basketball' })).not.toBeInTheDocument()
   })
 
+  it('asks for consent when there is no answer, or one to an older notice', async () => {
+    const consent = (status: string | null, accepted_version: string | null) => ({
+      notice_version: '2027-01',
+      accepted_version,
+      status,
+      via: status ? 'nomal' : null,
+      at: status ? '2026-10-12T10:00:00Z' : null,
+    })
+    vi.stubGlobal('fetch', vi.fn(stubFetch({ '/api/teams': { body: [] }, '/api/me/consent': { body: consent(null, null) } })))
+    const first = renderRoute(<HomePage />)
+    expect(await screen.findByText(/Read how, and tell us whether you agree/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Read and answer' })).toHaveAttribute('href', '/consent')
+    first.unmount()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(stubFetch({ '/api/teams': { body: [] }, '/api/me/consent': { body: consent('accepted', '2026-10-draft') } })),
+    )
+    const second = renderRoute(<HomePage />)
+    expect(await screen.findByText('The information notice changed. Please read it and answer again.')).toBeInTheDocument()
+    second.unmount()
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(stubFetch({ '/api/teams': { body: [] }, '/api/me/consent': { body: consent('accepted', '2027-01') } })),
+    )
+    renderRoute(<HomePage />)
+    expect(await screen.findByText('None of your teams uses Nomal yet.')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Read and answer' })).not.toBeInTheDocument()
+  })
+
   it('shows the empty state', async () => {
     vi.stubGlobal('fetch', vi.fn(stubFetch({ '/api/teams': { body: [] } })))
     renderRoute(<HomePage />)

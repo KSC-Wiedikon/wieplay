@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from nomal.core.config import Settings
 from nomal.core.models import AuditLog, UserSession
 from nomal.core.permissions import Viewer, can_manage_nomal
+from nomal.core.storage import ObjectStore
+from nomal.core.sync import BridgeClient, BridgeError
 
 SESSION_COOKIE = "nomal_session"
 LAST_SEEN_EVERY = timedelta(minutes=5)
@@ -84,3 +86,29 @@ def audit(
             details=details,
         )
     )
+
+
+def get_store(request: Request) -> ObjectStore:
+    store: ObjectStore | None = request.app.state.store
+    if store is None:
+        raise HTTPException(503, "Video storage is not configured")
+    return store
+
+
+StoreDep = Annotated[ObjectStore, Depends(get_store)]
+
+
+def get_bridge(request: Request) -> BridgeClient | None:
+    try:
+        client: BridgeClient = request.app.state.bridge_client_factory()
+    except BridgeError:
+        return None
+    return client
+
+
+BridgeDep = Annotated[BridgeClient | None, Depends(get_bridge)]
+
+
+def session_key(request: Request) -> str:
+    """Stable per-session key (hash of the cookie) for caches and audit de-duplication."""
+    return hash_session_id(request.cookies.get(SESSION_COOKIE, ""))

@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { api, UnauthorizedError } from './api'
+import { api, ApiError, UnauthorizedError } from './api'
 import { keys } from './queryClient'
 import { useToast } from './toast'
-import type { AdminTeam } from './types'
+import type { AdminTeam, ConsentStatus, Job, Policy, PolicyUpdate, RosterConsent, Video, VideoKind, Worker } from './types'
 
 export function useMe() {
   return useQuery({ queryKey: keys.me, queryFn: ({ signal }) => api.me(signal), staleTime: 5 * 60_000 })
@@ -100,5 +100,198 @@ export function useRunSync() {
       ])
     },
     onError: () => toast.error(t('admin.sync.requestFailed')),
+  })
+}
+
+// Videos
+
+const BUSY: ReadonlySet<Video['status']> = new Set(['queued', 'processing'])
+
+export function useVideoConfig() {
+  return useQuery({ queryKey: keys.videoConfig, queryFn: ({ signal }) => api.videoConfig(signal), staleTime: 5 * 60_000 })
+}
+
+/** Refreshes every 10 s while a video of the team is being processed. */
+export function useTeamVideos(teamId: number) {
+  return useQuery({
+    queryKey: keys.teamVideos(teamId),
+    queryFn: ({ signal }) => api.teamVideos(teamId, signal),
+    refetchInterval: (query) => (query.state.data?.some((v) => BUSY.has(v.status)) ? 10_000 : false),
+  })
+}
+
+/** Refreshes every 5 s while the video is queued or processing. */
+export function useVideo(id: string) {
+  return useQuery({
+    queryKey: keys.video(id),
+    queryFn: ({ signal }) => api.video(id, signal),
+    refetchInterval: (query) => (query.state.data && BUSY.has(query.state.data.status) ? 5_000 : false),
+  })
+}
+
+export function useFilming(teamId: number, kind: VideoKind, on: string | null) {
+  return useQuery({
+    queryKey: keys.teamFilming(teamId, kind, on ?? ''),
+    queryFn: ({ signal }) => api.filming(teamId, kind, on ?? '', signal),
+    enabled: on !== null,
+    staleTime: 0,
+  })
+}
+
+export function useUpcomingFilming(teamId: number) {
+  return useQuery({ queryKey: keys.upcomingFilming(teamId), queryFn: ({ signal }) => api.upcomingFilming(teamId, signal) })
+}
+
+export function useInbox(enabled: boolean) {
+  return useQuery({ queryKey: keys.inbox, queryFn: ({ signal }) => api.inbox(signal), enabled })
+}
+
+export function useDeleteVideo() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (video: Video) => api.deleteVideo(video.id),
+    onSuccess: async (_data, video) => {
+      await client.invalidateQueries({ queryKey: keys.teamVideos(video.team_id) })
+    },
+  })
+}
+
+// Consent
+
+export function useMyConsent() {
+  return useQuery({ queryKey: keys.myConsent, queryFn: ({ signal }) => api.myConsent(signal) })
+}
+
+export function useSetMyConsent() {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: (status: ConsentStatus) => api.setMyConsent(status),
+    onSuccess: async (consent) => {
+      client.setQueryData(keys.myConsent, consent)
+      toast.success(consent.status === 'accepted' ? t('consent.savedAccepted') : t('consent.savedWithdrawn'))
+      // Filming checks depend on consent.
+      await client.invalidateQueries({ queryKey: keys.teams })
+    },
+    onError: () => toast.error(t('consent.saveFailed')),
+  })
+}
+
+export function useTeamConsent(teamId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.teamConsent(teamId),
+    queryFn: ({ signal }) => api.teamConsent(teamId, signal),
+    enabled,
+  })
+}
+
+export function useRecordPaperConsent(teamId: number) {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: ({ player, status }: { player: RosterConsent; status: ConsentStatus }) =>
+      api.recordPaperConsent(teamId, player.member_id, status),
+    onSuccess: async (updated) => {
+      client.setQueryData<RosterConsent[]>(keys.teamConsent(teamId), (list) =>
+        list?.map((row) => (row.member_id === updated.member_id ? updated : row)),
+      )
+      toast.success(t('teamConsent.saved', { name: updated.name }))
+      await client.invalidateQueries({ queryKey: keys.upcomingFilming(teamId) })
+    },
+    onError: (_error, { player }) => toast.error(t('teamConsent.saveFailed', { name: player.name })),
+  })
+}
+
+// Admin: workers, jobs, filming policies
+
+export function useWorkers() {
+  return useQuery({ queryKey: keys.workers, queryFn: ({ signal }) => api.workers(signal) })
+}
+
+export function useCreateWorker() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, caps }: { name: string; caps: string[] }) => api.createWorker(name, caps),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.workers })
+    },
+  })
+}
+
+function patchWorker(client: ReturnType<typeof useQueryClient>, updated: Worker) {
+  client.setQueryData<Worker[]>(keys.workers, (list) => list?.map((w) => (w.id === updated.id ? updated : w)))
+}
+
+export function useSetWorkerPaused() {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: ({ worker, paused }: { worker: Worker; paused: boolean }) => api.setWorkerPaused(worker.id, paused),
+    onSuccess: (updated) => patchWorker(client, updated),
+    onError: (_error, { worker }) => toast.error(t('admin.workers.saveFailed', { name: worker.name })),
+  })
+}
+
+export function useRevokeWorker() {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: (worker: Worker) => api.revokeWorker(worker.id),
+    onSuccess: async (_data, worker) => {
+      toast.success(t('admin.workers.revoked', { name: worker.name }))
+      await client.invalidateQueries({ queryKey: keys.workers })
+    },
+    onError: (_error, worker) => toast.error(t('admin.workers.saveFailed', { name: worker.name })),
+  })
+}
+
+/** Recent jobs; refreshes every 10 s. */
+export function useJobs(status: string | null) {
+  return useQuery({
+    queryKey: keys.jobs(status),
+    queryFn: ({ signal }) => api.jobs(status, signal),
+    refetchInterval: 10_000,
+  })
+}
+
+export function useRetryJob() {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: (job: Job) => api.retryJob(job.id),
+    onSuccess: async () => {
+      toast.success(t('admin.jobs.retried'))
+      await client.invalidateQueries({ queryKey: ['admin', 'jobs'] })
+    },
+    onError: (error) =>
+      toast.error(t('admin.jobs.retryFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') })),
+  })
+}
+
+export function usePolicies() {
+  return useQuery({ queryKey: keys.policies, queryFn: ({ signal }) => api.policies(signal) })
+}
+
+export function useSetPolicy() {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: ({ policy, update }: { policy: Policy; update: PolicyUpdate }) =>
+      api.setPolicy(policy.lineage_id, update),
+    onSuccess: async (updated) => {
+      client.setQueryData<Policy[]>(keys.policies, (list) =>
+        list?.map((p) => (p.lineage_id === updated.lineage_id ? updated : p)),
+      )
+      toast.success(t('admin.policies.saved', { team: updated.label }))
+      // Filming hints on team pages depend on the policy.
+      await client.invalidateQueries({ queryKey: keys.teams })
+    },
+    onError: (_error, { policy }) => toast.error(t('admin.saveFailed', { team: policy.label })),
   })
 }

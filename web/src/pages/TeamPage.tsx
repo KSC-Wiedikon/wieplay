@@ -13,6 +13,7 @@ import { useTeam, useTeamGames, useTeamTrainings } from '../lib/queries'
 import { sportOf, useSportAccent } from '../lib/sport'
 import type { Game, Training } from '../lib/types'
 import { NotFoundPage } from './NotFoundPage'
+import { ConsentSection, FilmingSection, VideosSection } from './TeamSections'
 
 export function TeamPage() {
   const { id } = useParams()
@@ -48,6 +49,9 @@ function TeamView({ teamId }: { teamId: number }) {
         <p className="text-muted">{[league, season].filter(Boolean).join(' · ')}</p>
       </div>
 
+      <VideosSection team={team.data} />
+      <FilmingSection teamId={teamId} />
+
       <Section title={t('team.upcomingGames')} query={games}>
         {(data) => <UpcomingGames games={splitGames(data, today).upcoming} />}
       </Section>
@@ -57,6 +61,8 @@ function TeamView({ teamId }: { teamId: number }) {
       <Section title={t('team.upcomingTrainings')} query={trainings}>
         {(data) => <Trainings trainings={upcomingTrainings(data, today)} />}
       </Section>
+
+      {team.data.can_upload && <ConsentSection teamId={teamId} />}
     </div>
   )
 }

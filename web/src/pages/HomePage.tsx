@@ -2,11 +2,13 @@ import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { SportBadge } from '../components/Badge'
+import { ButtonLink } from '../components/Button'
 import { Card } from '../components/Card'
 import { LoadError, Message } from '../components/Message'
 import { PageSpinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead, Tr } from '../components/Table'
-import { useTeams } from '../lib/queries'
+import { useMyConsent, useTeams } from '../lib/queries'
+import { consentOutdated } from '../lib/video'
 import { groupBySport } from '../lib/teams'
 import type { Team } from '../lib/types'
 
@@ -33,6 +35,7 @@ export function HomePage() {
     <div className="flex flex-col gap-6">
       <title>{`${t('home.title')} · nomal`}</title>
       <h1 className="text-2xl font-bold">{t('home.title')}</h1>
+      <ConsentBanner />
       {teams.isPending ? (
         <PageSpinner />
       ) : teams.isError ? (
@@ -52,6 +55,23 @@ export function HomePage() {
         ))
       )}
     </div>
+  )
+}
+
+/** Asks members who haven't answered the filming consent yet, or answered an older notice. */
+function ConsentBanner() {
+  const { t } = useTranslation()
+  const consent = useMyConsent()
+  if (!consent.data) return null
+  const outdated = consentOutdated(consent.data, consent.data.notice_version)
+  if (consent.data.status !== null && !outdated) return null
+  return (
+    <Card className="flex flex-col items-start gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm">{outdated ? t('consent.bannerChanged') : t('consent.banner')}</p>
+      <ButtonLink to="/consent" variant="primary">
+        {t('consent.bannerAction')}
+      </ButtonLink>
+    </Card>
   )
 }
 

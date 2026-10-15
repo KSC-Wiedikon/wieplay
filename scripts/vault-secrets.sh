@@ -18,7 +18,9 @@ host="${NOMAL_DEPLOY_HOST:-hetzner}"
 folder=services/nomal
 src="/root/nomal-secrets/$env.env"
 rbw unlocked >/dev/null 2>&1 || { echo "!! rbw is locked: run rbw unlock first" >&2; exit 1; }
-rbw sync
+# `rbw add` writes to the server itself; a sync that needs a fresh login is not fatal.
+sync() { rbw sync 2>/dev/null || echo "(rbw sync skipped: it wants the master password again)"; }
+sync
 
 # Value of one key in the VPS file. Dev's database password predates the generic key name.
 remote() { ssh "$host" "sudo grep -m1 -E '^($1)=' $src | cut -d= -f2-"; }
@@ -28,15 +30,14 @@ ssh "$host" "sudo test -f $src" || { echo "!! $src not found on $host" >&2; exit
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 chmod 700 "$work"
-# rbw add opens $EDITOR on a file: first line = password, the rest = notes.
-printf '#!/bin/sh\ncat "%s/content" > "$1"\n' "$work" > "$work/editor"
-chmod 700 "$work/editor"
 
-add() {   # add <name> [user]; reads the entry from $work/content
+add() {   # add <name> [user]; the entry comes from $work/content (line 1 = password)
   if rbw get --folder "$folder" "$1" >/dev/null 2>&1; then
     echo "= $1 exists in the vault, kept"
   else
-    EDITOR="$work/editor" VISUAL="$work/editor" rbw add --folder "$folder" "$1" ${2:+"$2"}
+    # Piped, rbw add reads the password from the first line and the notes from the rest
+    # (it opens an editor only on a terminal).
+    rbw add --folder "$folder" "$1" ${2:+"$2"} < "$work/content"
     echo "✓ $1 added"
   fi
 }
@@ -68,12 +69,20 @@ add "nomal-$env-db-role" "$role"
 } > "$work/content"
 add "nomal-$env-env"
 rm -f "$work/content"
-rbw sync
+sync
 
-# Compare digests, never values: vault copy vs. VPS file.
+# Compare digests, never values: vault copy vs. VPS file. rbw may still be rewriting its
+# local copy right after an add, so read with a few retries.
+vault_value() {
+  for _ in 1 2 3 4 5; do
+    rbw get --folder "$folder" "$1" 2>/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
 same() {   # same <entry> <key regex>
   local here there
-  here="$(rbw get --folder "$folder" "$1" | tr -d '\n' | sha256sum | cut -d' ' -f1)"
+  here="$(vault_value "$1" | tr -d '\n' | sha256sum | cut -d' ' -f1)"
   there="$(ssh "$host" "sudo grep -m1 -E '^($2)=' $src | cut -d= -f2- | tr -d '\n' | sha256sum | cut -d' ' -f1")"
   [ "$here" = "$there" ] || { echo "!! $1 in the vault differs from $src; file kept" >&2; exit 1; }
 }

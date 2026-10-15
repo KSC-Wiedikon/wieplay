@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { AdminShell } from '../components/AdminShell'
 import { SportBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
@@ -11,26 +12,18 @@ import { ForbiddenError } from '../lib/api'
 import { cx } from '../lib/cx'
 import { formatDateTime } from '../lib/format'
 import { useAdminTeams, useRunSync, useSetTeamEnabled, useSyncStatus } from '../lib/queries'
-import { useSession } from '../lib/session'
 import { groupBySport } from '../lib/teams'
 import type { AdminTeam, SyncStatus } from '../lib/types'
 
 export function AdminTeamsPage() {
   const { t } = useTranslation()
-  const me = useSession()
   return (
-    <div className="flex flex-col gap-8">
-      <title>{`${t('admin.title')} · nomal`}</title>
-      <h1 className="text-2xl font-bold">{t('admin.title')}</h1>
-      {me.is_admin ? (
-        <>
-          <SyncPanel />
-          <TeamsPanel />
-        </>
-      ) : (
-        <Message>{t('admin.forbidden')}</Message>
-      )}
-    </div>
+    <AdminShell title={t('admin.title')}>
+      <div className="flex flex-col gap-8">
+        <SyncPanel />
+        <TeamsPanel />
+      </div>
+    </AdminShell>
   )
 }
 

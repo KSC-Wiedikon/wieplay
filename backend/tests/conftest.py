@@ -77,6 +77,7 @@ def settings() -> Settings:
         bridge_public_keys={KID: PUBLIC_PEM},
         cookie_secure=False,
         sync_interval_minutes=0,
+        reaper_interval_seconds=0,
     )
 
 

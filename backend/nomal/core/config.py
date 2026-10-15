@@ -40,6 +40,26 @@ class Settings(BaseSettings):
     # Built web app (web/dist) to serve at "/"; None when Vite serves it in development.
     web_dist: str | None = None
 
+    # Object storage, S3 API (PLAN §7.5): Hetzner Object Storage on the VPS, SeaweedFS
+    # locally. Empty endpoint = video features off (the app still runs).
+    s3_endpoint: str = ""
+    s3_region: str = "us-east-1"
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_path_style: bool = False  # True for SeaweedFS/MinIO; Hetzner takes virtual-host style
+    # Signed segment URLs live this long (PLAN §5.2: 5 minutes, one segment each).
+    media_url_ttl_seconds: int = 300
+    # Browser uploads: S3 multipart, parts signed by the API (PLAN §7.2).
+    upload_part_bytes: int = 64 * 1024 * 1024
+    upload_part_url_ttl_seconds: int = 3600
+    max_file_bytes: int = 200 * 1024**3
+    max_files_per_video: int = 20
+
+    # Workers: leases and the reaper (PLAN §8.1).
+    job_lease_seconds: int = 300
+    reaper_interval_seconds: int = 60
+
     @model_validator(mode="after")
     def _check(self) -> Settings:
         if self.dev_bridge and self.env != "local":
@@ -54,6 +74,19 @@ class Settings(BaseSettings):
     @property
     def callback_url(self) -> str:
         return self.public_url.rstrip("/") + "/api/auth/callback"
+
+    @property
+    def video_enabled(self) -> bool:
+        return bool(self.s3_endpoint and self.s3_bucket)
+
+    @property
+    def storage_origin(self) -> str | None:
+        """Origin browsers fetch media and send upload parts to (for the CSP)."""
+        if not self.video_enabled:
+            return None
+        parts = urlsplit(self.s3_endpoint)
+        host = parts.netloc if self.s3_path_style else f"{self.s3_bucket}.{parts.netloc}"
+        return f"{parts.scheme}://{host}"
 
 
 @lru_cache

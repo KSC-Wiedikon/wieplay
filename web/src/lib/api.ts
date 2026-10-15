@@ -1,36 +1,95 @@
-import type { AdminTeam, Game, Me, SyncStatus, Team, TeamDetail, Training } from './types'
+import type {
+  AdminTeam,
+  Blocker,
+  Consent,
+  ConsentStatus,
+  FilmingCheck,
+  Game,
+  InboxFile,
+  Job,
+  Me,
+  PartUrl,
+  Policy,
+  PolicyUpdate,
+  RosterConsent,
+  SyncStatus,
+  Team,
+  TeamDetail,
+  Training,
+  UpcomingFilming,
+  UploadedPart,
+  Video,
+  VideoConfig,
+  VideoCreate,
+  VideoKind,
+  Worker,
+  WorkerCreated,
+} from './types'
 
 export class ApiError extends Error {
   readonly status: number
   readonly detail: string
+  /** The parsed JSON error body, or null when it wasn't JSON. */
+  readonly body: unknown
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, body: unknown = null) {
     super(detail)
     this.name = 'ApiError'
     this.status = status
     this.detail = detail
+    this.body = body
   }
 }
 
 export class UnauthorizedError extends ApiError {
-  constructor(detail: string) {
-    super(401, detail)
+  constructor(detail: string, body: unknown = null) {
+    super(401, detail, body)
     this.name = 'UnauthorizedError'
   }
 }
 
 export class ForbiddenError extends ApiError {
-  constructor(detail: string) {
-    super(403, detail)
+  constructor(detail: string, body: unknown = null) {
+    super(403, detail, body)
     this.name = 'ForbiddenError'
   }
 }
 
 export class NotFoundError extends ApiError {
-  constructor(detail: string) {
-    super(404, detail)
+  constructor(detail: string, body: unknown = null) {
+    super(404, detail, body)
     this.name = 'NotFoundError'
   }
+}
+
+function isBlocker(value: unknown): value is Blocker {
+  if (!value || typeof value !== 'object') return false
+  const b = value as Record<string, unknown>
+  return (
+    typeof b.code === 'string' &&
+    (b.count === null || b.count === undefined || typeof b.count === 'number') &&
+    (b.detail === null || b.detail === undefined || typeof b.detail === 'string')
+  )
+}
+
+/** The reasons from a 409 "filming not allowed" answer; null for any other error. */
+export function blockersOf(error: unknown): Blocker[] | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null
+  const body = error.body
+  if (!body || typeof body !== 'object' || !('blockers' in body) || !Array.isArray(body.blockers)) return null
+  return body.blockers.filter(isBlocker).map((b) => ({ code: b.code, count: b.count ?? null, detail: b.detail ?? null }))
+}
+
+/** FastAPI's detail: a string, or a list of validation errors (first message is used). */
+function detailOf(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || !('detail' in body)) return null
+  const { detail } = body
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const first: unknown = detail[0]
+    if (first && typeof first === 'object' && 'msg' in first && typeof first.msg === 'string') return first.msg
+  }
+  return null
 }
 
 let onUnauthorized: () => void = () => {}
@@ -47,24 +106,22 @@ interface RequestOptions {
 }
 
 async function errorFrom(res: Response): Promise<ApiError> {
-  let detail = res.statusText || `HTTP ${res.status}`
+  let body: unknown = null
   try {
-    const data: unknown = await res.json()
-    if (data && typeof data === 'object' && 'detail' in data && typeof data.detail === 'string') {
-      detail = data.detail
-    }
+    body = await res.json()
   } catch {
     // Body is not JSON; keep the status text.
   }
+  const detail = detailOf(body) ?? (res.statusText || `HTTP ${res.status}`)
   switch (res.status) {
     case 401:
-      return new UnauthorizedError(detail)
+      return new UnauthorizedError(detail, body)
     case 403:
-      return new ForbiddenError(detail)
+      return new ForbiddenError(detail, body)
     case 404:
-      return new NotFoundError(detail)
+      return new NotFoundError(detail, body)
     default:
-      return new ApiError(res.status, detail)
+      return new ApiError(res.status, detail, body)
   }
 }
 
@@ -122,4 +179,49 @@ export const api = {
     apiRequest<AdminTeam>(`/api/admin/teams/${id}`, { method: 'PUT', body: { enabled } }),
   syncStatus: (signal?: AbortSignal) => apiRequest<SyncStatus>('/api/admin/sync', { signal }),
   runSync: () => apiRequest<SyncStatus>('/api/admin/sync', { method: 'POST' }),
+
+  // Videos
+  videoConfig: (signal?: AbortSignal) => apiRequest<VideoConfig>('/api/video/config', { signal }),
+  teamVideos: (teamId: number, signal?: AbortSignal) =>
+    apiRequest<Video[]>(`/api/teams/${teamId}/videos`, { signal }),
+  video: (id: string, signal?: AbortSignal) => apiRequest<Video>(`/api/videos/${id}`, { signal }),
+  createVideo: (teamId: number, body: VideoCreate) =>
+    apiRequest<Video>(`/api/teams/${teamId}/videos`, { method: 'POST', body }),
+  deleteVideo: (id: string) => apiRequest<undefined>(`/api/videos/${id}`, { method: 'DELETE' }),
+  signParts: (videoId: string, fileId: string, parts: number[], signal?: AbortSignal) =>
+    apiRequest<PartUrl[]>(`/api/videos/${videoId}/files/${fileId}/parts`, { method: 'POST', body: { parts }, signal }),
+  uploadedParts: (videoId: string, fileId: string, signal?: AbortSignal) =>
+    apiRequest<UploadedPart[]>(`/api/videos/${videoId}/files/${fileId}/parts`, { signal }),
+  completeFile: (videoId: string, fileId: string, signal?: AbortSignal) =>
+    apiRequest<Video>(`/api/videos/${videoId}/files/${fileId}/complete`, { method: 'POST', signal }),
+  inbox: (signal?: AbortSignal) => apiRequest<InboxFile[]>('/api/inbox', { signal }),
+
+  // Filming rules
+  filming: (teamId: number, kind: VideoKind, on: string, signal?: AbortSignal) =>
+    apiRequest<FilmingCheck>(`/api/teams/${teamId}/filming?kind=${kind}&on=${encodeURIComponent(on)}`, { signal }),
+  upcomingFilming: (teamId: number, signal?: AbortSignal) =>
+    apiRequest<UpcomingFilming[]>(`/api/teams/${teamId}/upcoming-filming`, { signal }),
+
+  // Consent
+  myConsent: (signal?: AbortSignal) => apiRequest<Consent>('/api/me/consent', { signal }),
+  setMyConsent: (status: ConsentStatus) =>
+    apiRequest<Consent>('/api/me/consent', { method: 'PUT', body: { status } }),
+  teamConsent: (teamId: number, signal?: AbortSignal) =>
+    apiRequest<RosterConsent[]>(`/api/teams/${teamId}/consent`, { signal }),
+  recordPaperConsent: (teamId: number, memberId: number, status: ConsentStatus) =>
+    apiRequest<RosterConsent>(`/api/teams/${teamId}/consent/${memberId}`, { method: 'PUT', body: { status } }),
+
+  // Admin: workers, jobs, filming policies
+  workers: (signal?: AbortSignal) => apiRequest<Worker[]>('/api/admin/workers', { signal }),
+  createWorker: (name: string, caps: string[]) =>
+    apiRequest<WorkerCreated>('/api/admin/workers', { method: 'POST', body: { name, caps } }),
+  setWorkerPaused: (id: string, paused: boolean) =>
+    apiRequest<Worker>(`/api/admin/workers/${id}`, { method: 'PUT', body: { paused } }),
+  revokeWorker: (id: string) => apiRequest<undefined>(`/api/admin/workers/${id}`, { method: 'DELETE' }),
+  retryJob: (id: string) => apiRequest<Job>(`/api/admin/jobs/${id}/retry`, { method: 'POST' }),
+  jobs: (status: string | null, signal?: AbortSignal) =>
+    apiRequest<Job[]>(`/api/admin/jobs?limit=100${status ? `&status=${encodeURIComponent(status)}` : ''}`, { signal }),
+  policies: (signal?: AbortSignal) => apiRequest<Policy[]>('/api/admin/policies', { signal }),
+  setPolicy: (lineageId: string, body: PolicyUpdate) =>
+    apiRequest<Policy>(`/api/admin/policies/${lineageId}`, { method: 'PUT', body }),
 }

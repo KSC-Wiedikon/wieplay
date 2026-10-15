@@ -1525,6 +1525,28 @@ Still open for M0: one real login by a person (the "done when" check), and the p
 D1 2026/27 shares a lineage with D2 2025/26. That is correct: Swiss Volley team 1393 was promoted
 from 3. Liga and renamed (16 of 19 players stayed).
 
+**M1 (15.10.2026), on branch `m1-video`**: built and tested on the Lenovo server (ADR-002).
+- Backend: 49 tests, including real ffmpeg on a generated clip.
+- End-to-end run against local S3 (SeaweedFS), the real worker and a synthetic 3-minute
+  1080p50 match split into two camera files:
+  - upload of 457 MB in 64 MB parts, then ingest, 1080p50 + 540p25 HLS and thumbnails,
+    ready in 48 s;
+  - both renditions decode through the API's 302s;
+  - the same files through the NAS inbox.
+- In the worker image, VAAPI encodes about 5.8× real time.
+- On dev since 15.10.2026: the M1 API (video off until the bucket exists), the media worker
+  on the Lenovo server (VAAPI, reaching the API over the tailnet, data on local disk until
+  the NAS share exists), and the DU23-1 policy "trainings only".
+- **Wiedisync's adult check on real (dev) rosters, 15.10.2026**: H3, D1 and Herren 1 pass.
+  DU23-1 fails because 6 of its 15 rostered people are under 18. So DU23-1 trainings are
+  blocked too, as long as minors are on that roster.
+- Waiting on:
+  - the Hetzner bucket and its keys (budget line O7);
+  - the NAS shares `nomal/raw-*` and `nomal/inbox-*`;
+  - the worker deployment;
+  - the browser check on desktop, Android and an iPhone with a real 2-hour match (the
+    "done when").
+
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
 | **S0** | Spike (before M1) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court, run a draft `ml_analyse` and **measure GPU-hours per video**; one benchmark run on Infomaniak or OVHcloud (test-GPU line). Whistle detection on its audio. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured on the Framework 16 and one provider |

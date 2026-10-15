@@ -68,7 +68,17 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
 - **Components** (`src/components/`): `Button` (44 px tall on phones, 36 px from `sm`), `Card`
   (rounded-2xl, hairline border), `Table` (lists of records are always tables; hide secondary
   columns on phones with `hidden sm:table-cell`), `Badge`, `Spinner`, `Switch` and the toast
-  provider. No native `alert`/`confirm`/`prompt` (ESLint `no-alert`).
+  provider. No native `alert`/`confirm`/`prompt` (ESLint `no-alert`); ask with `ConfirmDialog`.
+- **Uploads** (`src/lib/upload.ts`): S3 multipart straight from the browser to the bucket. Parts
+  of all files share 4 parallel PUTs (XMLHttpRequest, for progress); part URLs are signed by the
+  API a few parts ahead, so none expires in a long queue; each part is retried with back-off, and
+  a 403 signs it again. An interrupted upload resumes on the video page: the user picks the same
+  files, and parts already stored are skipped. The bucket's CORS rules must allow `PUT` from the
+  app's origin.
+- **Playback** (`src/components/VideoPlayer.tsx`): HLS from `/api/media/{id}/master.m3u8` with
+  the hls.js light build, loaded only on the video page; native HLS where Media Source is missing
+  (older iPhones). Segments are 302 redirects to short-lived storage URLs, so the bucket's CORS
+  rules must also allow `GET` from the app's origin.
 - Text is English first, in sentence case. German strings are in `src/i18n/de.ts` (Swiss
   spelling, informal "du"); the type of `de` makes both files keep the same keys.
 
