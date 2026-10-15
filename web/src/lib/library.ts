@@ -3,7 +3,7 @@
 // demand) carry them, not the main bundle.
 
 import '../i18n/pages'
-import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, apiRequest } from './api'
 import { peopleOf, type Person } from './clips'
 import { useTagging, useTeamConsent, useTeams } from './queries'
@@ -18,12 +18,15 @@ import type {
   ExportIn,
   Piece,
   Reel,
+  ReelDetail,
   ReelIn,
   ReelItemIn,
   ReelQuery,
   Taxonomy,
+  Team,
   TeamDetail,
   VideoExport,
+  VideoPerson,
 } from './types'
 
 export const libraryApi = {
@@ -33,15 +36,20 @@ export const libraryApi = {
   deleteClip: (id: string) => apiRequest<undefined>(`/api/clips/${id}`, { method: 'DELETE' }),
 
   reels: (signal?: AbortSignal) => apiRequest<Reel[]>('/api/reels', { signal }),
+  reel: (id: string, signal?: AbortSignal) => apiRequest<ReelDetail>(`/api/reels/${id}`, { signal }),
   createReel: (body: ReelIn) => apiRequest<Reel>('/api/reels', { method: 'POST', body }),
   updateReel: (id: string, body: ReelIn) => apiRequest<Reel>(`/api/reels/${id}`, { method: 'PUT', body }),
   deleteReel: (id: string) => apiRequest<undefined>(`/api/reels/${id}`, { method: 'DELETE' }),
   reelItems: (id: string, signal?: AbortSignal) => apiRequest<Piece[]>(`/api/reels/${id}/items`, { signal }),
+  /** 1..100 items at the end of my manual reel. 409: a smart reel; 413: over 500 items. */
+  appendReelItems: (id: string, items: ReelItemIn[]) =>
+    apiRequest<ReelDetail>(`/api/reels/${id}/items`, { method: 'POST', body: { items } }),
   previewReel: (query: ReelQuery, signal?: AbortSignal) =>
     apiRequest<Piece[]>('/api/reels/preview', { method: 'POST', body: query, signal }),
   condensed: (videoId: string, signal?: AbortSignal) => apiRequest<Piece[]>(`/api/videos/${videoId}/condensed`, { signal }),
 
   comments: (videoId: string, signal?: AbortSignal) => apiRequest<Comment[]>(`/api/videos/${videoId}/comments`, { signal }),
+  videoPeople: (videoId: string, signal?: AbortSignal) => apiRequest<VideoPerson[]>(`/api/videos/${videoId}/people`, { signal }),
   addComment: (videoId: string, body: CommentIn) =>
     apiRequest<Comment>(`/api/videos/${videoId}/comments`, { method: 'POST', body }),
   editComment: (id: string, body: string) => apiRequest<Comment>(`/api/comments/${id}`, { method: 'PATCH', body: { body } }),
@@ -116,6 +124,17 @@ export function useReels() {
   return useQuery({ queryKey: keys.reels, queryFn: ({ signal }) => libraryApi.reels(signal) })
 }
 
+/** A reel, with how many moments the viewer may watch and how long they last. */
+export function useReel(id: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.reel(id),
+    queryFn: ({ signal }) => libraryApi.reel(id, signal),
+    enabled,
+    // A smart reel grows as tagging continues: counted fresh when opened.
+    staleTime: 0,
+  })
+}
+
 export function useReelItems(id: string, enabled = true) {
   return useQuery({
     queryKey: keys.reelItems(id),
@@ -159,24 +178,19 @@ export function useDeleteReel() {
 }
 
 /**
- * Adds a moment to one of my manual reels (its items are read and saved again with the new
- * one at the end), or starts a new private reel with it.
+ * Adds a moment at the end of one of my manual reels, or starts a new private reel with it.
+ * The server appends under a lock and checks only the new item, so two adds never lose one
+ * and an old item whose video went away doesn't block it.
  */
 export function useAddToReel() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: async ({ reel, title, item }: { reel: Reel | null; title: string; item: ReelItemIn }) => {
+    mutationFn: async ({ reel, title, item }: { reel: Reel | null; title: string; item: ReelItemIn }): Promise<Reel> => {
       if (!reel) return libraryApi.createReel({ title, kind: 'manual', items: [item], visibility: 'private' })
-      const items = (await libraryApi.reelItems(reel.id)).map(pieceToItem)
-      return libraryApi.updateReel(reel.id, {
-        title: reel.title,
-        kind: 'manual',
-        items: [...items, item],
-        visibility: reel.visibility,
-        lineage_id: reel.lineage_id,
-      })
+      return (await libraryApi.appendReelItems(reel.id, [item])).reel
     },
-    onSuccess: async () => {
+    // After a refusal too: the reel may be gone, or no longer take items.
+    onSettled: async () => {
       await client.invalidateQueries({ queryKey: keys.reels })
     },
   })
@@ -186,6 +200,11 @@ export function useAddToReel() {
 
 export function useComments(videoId: string) {
   return useQuery({ queryKey: keys.comments(videoId), queryFn: ({ signal }) => libraryApi.comments(videoId, signal) })
+}
+
+/** Who a comment on this video can mention or be addressed to (the team's people, any season). */
+export function useVideoPeople(videoId: string) {
+  return useQuery({ queryKey: keys.videoPeople(videoId), queryFn: ({ signal }) => libraryApi.videoPeople(videoId, signal) })
 }
 
 export function useAddComment(videoId: string) {
@@ -286,16 +305,8 @@ export function useTeamPeople(team: TeamDetail | undefined): { people: Person[];
 }
 
 /** The team row (newest season) of a lineage, among the teams I see; for editing a saved reel. */
-export function useLineageTeam(lineageId: string | null): { team: TeamDetail | undefined; pending: boolean } {
+export function useLineageTeam(lineageId: string | null): { team: Team | undefined; pending: boolean } {
   const teams = useTeams()
-  const details = useQueries({
-    queries: (lineageId ? (teams.data ?? []) : []).map((team) => ({
-      queryKey: keys.team(team.id),
-      queryFn: ({ signal }: { signal: AbortSignal }) => api.team(team.id, signal),
-    })),
-  })
-  const found = details
-    .flatMap((d) => (d.data && d.data.lineage_id === lineageId ? [d.data] : []))
-    .sort(compareTeams)[0]
-  return { team: found, pending: lineageId !== null && (teams.isPending || (!found && details.some((d) => d.isPending))) }
+  const team = (teams.data ?? []).filter((t) => t.lineage_id === lineageId).sort(compareTeams)[0]
+  return { team, pending: lineageId !== null && teams.isPending }
 }

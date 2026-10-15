@@ -56,6 +56,9 @@ function video(files: VideoFile[], status: Video['status'] = 'uploading'): Video
     created_by: 1,
     can_delete: true,
     can_upload: true,
+    can_tag: true,
+    can_share: true,
+    can_export: true,
     files,
   }
 }

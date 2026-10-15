@@ -12,11 +12,23 @@ export interface Team {
   rel: string[]
   /** The same team across seasons (D1 2026/27 was D2 in 2025/26). */
   lineage_id: string
+  /** Coaches and team managers (any season of the team) and sport admins: tag, share, download. */
+  can_tag: boolean
+  can_share: boolean
+  can_export: boolean
 }
 
 export interface TeamDetail extends Team {
   /** Coach or team manager of this season's team, or sport admin. */
   can_upload: boolean
+}
+
+/** A season of a team's lineage that the user can see (GET /api/teams/{id}/seasons, newest first). */
+export interface Season {
+  team_id: number
+  name: string
+  /** 'yyyy/yy' */
+  season: string
 }
 
 export interface Me {
@@ -143,6 +155,12 @@ export interface Video {
   created_by: number
   can_delete: boolean
   can_upload: boolean
+  /** Coaches and team managers (any season of the team) and sport admins. */
+  can_tag: boolean
+  /** Share clips and reels with the team. */
+  can_share: boolean
+  /** Download watermarked MP4s. */
+  can_export: boolean
   files: VideoFile[]
 }
 
@@ -506,6 +524,7 @@ export interface Clip {
   note: string | null
   event_id: string | null
   owner: number
+  owner_name: string | null
   mine: boolean
   visibility: Visibility
   created_at: string
@@ -553,6 +572,13 @@ export interface Reel {
   updated_at: string
 }
 
+/** GET /api/reels/{id}: the reel with the moments the viewer may watch, counted. */
+export interface ReelDetail {
+  reel: Reel
+  item_count: number
+  total_ms: number
+}
+
 export interface ReelItemIn {
   video_id: string
   start_ms: number
@@ -589,6 +615,19 @@ export interface Piece {
   side: Side | null
   number: number | null
   member_id: number | null
+  player_name: string | null
+  /** The score after the rally the moment belongs to, when it is tagged. */
+  score_us: number | null
+  score_them: number | null
+}
+
+/** Someone of the video's team in any season: who a comment can mention or be addressed to. */
+export interface VideoPerson {
+  member_id: number
+  name: string
+  number: number | null
+  /** player, coach, captain, team_responsible, … */
+  roles: string[]
 }
 
 export type Audience = 'team' | 'coaches' | 'person'
@@ -607,6 +646,7 @@ export interface Comment {
   mentions: number[]
   audience: Audience
   recipient: number | null
+  recipient_name: string | null
   created_at: string
   edited_at: string | null
   mine: boolean

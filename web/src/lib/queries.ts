@@ -17,6 +17,11 @@ export function useTeam(id: number) {
   return useQuery({ queryKey: keys.team(id), queryFn: ({ signal }) => api.team(id, signal) })
 }
 
+/** The seasons of the team's lineage I can see, newest first. */
+export function useTeamSeasons(id: number, enabled = true) {
+  return useQuery({ queryKey: keys.teamSeasons(id), queryFn: ({ signal }) => api.teamSeasons(id, signal), enabled })
+}
+
 export function useTeamGames(id: number) {
   return useQuery({ queryKey: keys.teamGames(id), queryFn: ({ signal }) => api.teamGames(id, signal) })
 }

@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../lib/api'
@@ -19,6 +20,15 @@ interface AddToReelDialogProps {
 
 const NEW = 'new'
 
+function addError(t: TFunction, error: unknown, title: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 404) return t('reels.add.gone')
+    if (error.status === 409) return t('reels.add.smart', { title })
+    if (error.status === 413) return t('reels.add.full', { title })
+  }
+  return t('reels.add.failed', { detail: error instanceof ApiError ? error.detail : t('common.error') })
+}
+
 /** Puts a clip or a tagged moment at the end of one of my reels from clips, or starts a new one. */
 export function AddToReelDialog({ item, suggestedTitle, onClose }: AddToReelDialogProps) {
   const { t } = useTranslation()
@@ -39,7 +49,8 @@ function AddForm({ item, suggestedTitle, onClose }: { item: ReelItemIn; suggeste
   const [choice, setChoice] = useState<string | null>(null)
   const [title, setTitle] = useState(suggestedTitle)
   const [error, setError] = useState<string | null>(null)
-  const picked = choice ?? mine[0]?.id ?? NEW
+  // A reel that went away meanwhile (deleted, or now a highlight reel) is no longer a choice.
+  const picked = choice !== null && (choice === NEW || mine.some((r) => r.id === choice)) ? choice : (mine[0]?.id ?? NEW)
 
   const submit = () => {
     const reel = mine.find((r) => r.id === picked) ?? null
@@ -55,7 +66,7 @@ function AddForm({ item, suggestedTitle, onClose }: { item: ReelItemIn; suggeste
           toast.success(t('reels.add.added', { title: saved.title }))
           onClose()
         },
-        onError: (e) => setError(t('reels.add.failed', { detail: e instanceof ApiError ? e.detail : t('common.error') })),
+        onError: (e) => setError(addError(t, e, name)),
       },
     )
   }

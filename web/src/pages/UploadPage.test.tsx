@@ -18,6 +18,9 @@ const team: TeamDetail = {
   rel: ['coach'],
   lineage_id: '6f1c0a52-2a43-4c11-9a43-111111111111',
   can_upload: true,
+  can_tag: true,
+  can_share: true,
+  can_export: true,
 }
 
 const gameDate = addDaysIso(todayIso(), -3)
@@ -50,6 +53,9 @@ const created: Video = {
   created_by: 7,
   can_delete: true,
   can_upload: true,
+  can_tag: true,
+  can_share: true,
+  can_export: true,
   files: [{ id: FILE_ID, part_no: 1, name: 'GX010042.MP4', size: 25, part_size: PART_SIZE, part_count: 3, uploaded: false }],
 }
 

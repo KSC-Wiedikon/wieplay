@@ -39,6 +39,9 @@ const video: Video = {
   created_by: 7,
   can_delete: true,
   can_upload: true,
+  can_tag: true,
+  can_share: true,
+  can_export: true,
   files: [],
 }
 

@@ -24,6 +24,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
     watch: 'Anschauen',
     watchFor: '{{title}} anschauen',
     nowPlaying: 'Läuft: {{title}}',
+    by: 'von {{name}}',
     queuePosition: '{{n}} von {{total}}',
     stop: 'Stopp',
     columns: {
@@ -109,7 +110,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
     post: 'Kommentar senden',
     posting: 'Sendet…',
     posted: 'Kommentar gesendet.',
-    noPeople: 'Noch niemand zum Erwähnen oder Anschreiben: Dieses Video hat noch kein Kader.',
+    noPeople: 'Noch niemand zum Erwähnen oder Anschreiben: Das Team hat in Nomal noch keine Mitglieder.',
     suggestions: 'Personen zum Erwähnen',
     goTo: 'Zu {{time}}',
     general: 'Ganzes Video',
@@ -236,6 +237,9 @@ export const libraryDe: Messages<typeof libraryEn> = {
       save: 'Hinzufügen',
       added: 'Zu {{title}} hinzugefügt.',
       failed: 'Konnte nicht hinzugefügt werden: {{detail}}',
+      gone: 'Dieses Reel gibt es nicht mehr. Wähl ein anderes.',
+      smart: '{{title}} ist ein Highlight-Reel: Es wählt seine Szenen selbst. Wähl ein anderes Reel.',
+      full: '{{title}} ist voll: Ein Reel hat höchstens 500 Szenen.',
     },
   },
   highlights: {

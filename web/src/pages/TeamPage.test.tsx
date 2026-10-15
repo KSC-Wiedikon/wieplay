@@ -13,6 +13,9 @@ const team = (patch: Partial<TeamDetail> = {}): TeamDetail => ({
   rel: ['player'],
   lineage_id: '6f1c0a52-2a43-4c11-9a43-111111111111',
   can_upload: false,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
   ...patch,
 })
 
@@ -44,6 +47,9 @@ const video = (patch: Partial<Video>): Video => ({
   created_by: 7,
   can_delete: false,
   can_upload: false,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
   files: [],
   ...patch,
 })

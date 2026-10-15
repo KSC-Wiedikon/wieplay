@@ -10,11 +10,9 @@ import { Mark, Wordmark } from './Brand'
 import { Button } from './Button'
 import { MoonIcon, SunIcon } from './icons'
 
-const LEAD_RELS = ['coach', 'team_responsible']
-
-/** Downloads are for coaches, team managers and sport admins (PLAN §5.1). */
+/** Downloads are for coaches, team managers and sport admins (PLAN §5.1): the server says per team. */
 function downloads(me: Me): boolean {
-  return me.sport_admin.length > 0 || me.teams.some((team) => team.rel.some((r) => LEAD_RELS.includes(r)))
+  return me.teams.some((team) => team.can_export)
 }
 
 const linkClass = (active: boolean) =>

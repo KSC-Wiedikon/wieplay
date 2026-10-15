@@ -16,6 +16,7 @@ import type {
   RosterCandidate,
   RosterEntry,
   RosterEntryIn,
+  Season,
   SyncStatus,
   Tagging,
   Taxonomy,
@@ -174,6 +175,7 @@ export const api = {
   logout: () => apiRequest<undefined>('/api/auth/logout', { method: 'POST' }),
   teams: (signal?: AbortSignal) => apiRequest<Team[]>('/api/teams', { signal }),
   team: (id: number, signal?: AbortSignal) => apiRequest<TeamDetail>(`/api/teams/${id}`, { signal }),
+  teamSeasons: (id: number, signal?: AbortSignal) => apiRequest<Season[]>(`/api/teams/${id}/seasons`, { signal }),
   teamGames: (id: number, signal?: AbortSignal) =>
     apiRequest<Game[]>(`/api/teams/${id}/games`, { signal }),
   adminTeams: (signal?: AbortSignal) => apiRequest<AdminTeam[]>('/api/admin/teams', { signal }),

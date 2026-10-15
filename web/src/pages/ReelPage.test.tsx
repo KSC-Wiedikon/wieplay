@@ -33,6 +33,9 @@ const piece = (patch: Partial<Piece>): Piece => ({
   side: 'us',
   number: 7,
   member_id: 107,
+  player_name: 'Luca Brunner',
+  score_us: 1,
+  score_them: 0,
   ...patch,
 })
 
@@ -77,7 +80,7 @@ describe('ReelPage', () => {
   function show(r: Reel, items: Piece[], exportStatus = 403) {
     const fetch = vi.fn(
       stubFetch({
-        '/api/reels': { body: [r] },
+        [`/api/reels/${r.id}`]: { body: { reel: r, item_count: items.length, total_ms: items.reduce((sum, p) => sum + p.end_ms - p.start_ms, 0) } },
         [`/api/reels/${r.id}/items`]: { body: items },
         'POST /api/exports': { status: exportStatus, body: { detail: 'Only coaches and sport admins download videos' } },
       }),
@@ -89,11 +92,18 @@ describe('ReelPage', () => {
 
   it('plays the reel’s moments and says when a download is not allowed', async () => {
     window.localStorage.setItem('nomal-export-rules', '1')
-    const fetch = show(reel({}), [piece({}), piece({ video_id: '00000000-0000-4000-8000-0000000000b3', start_ms: 1_000, end_ms: 4_000, caption: 'Luca from zone 4', video_title: 'KSCW H3 – VBC Züri', recorded_on: '2026-10-04' })])
+    const fetch = show(reel({}), [
+      piece({}),
+      piece({ video_id: '00000000-0000-4000-8000-0000000000b3', start_ms: 1_000, end_ms: 4_000, caption: 'Luca from zone 4', video_title: 'KSCW H3 – VBC Züri', recorded_on: '2026-10-04', score_us: 24, score_them: 22 }),
+    ])
     expect(await screen.findByRole('heading', { name: 'H3 kills' })).toBeInTheDocument()
     expect(await screen.findByText('2 moments · 0:08')).toBeInTheDocument()
     const moments = screen.getByRole('table', { name: 'Moments' })
-    expect(within(moments).getAllByRole('row').slice(1).map((r) => within(r).getByRole('button').textContent)).toEqual(['#7 · A · #', 'Luca from zone 4'])
+    const rows = within(moments).getAllByRole('row').slice(1)
+    expect(rows.map((r) => within(r).getByRole('button').textContent)).toEqual(['#7 Luca Brunner · A · #', 'Luca from zone 4'])
+    // Under each: the player when the label doesn't name them, and the score after the rally.
+    expect(within(rows[0] as HTMLElement).getByText('1:0')).toBeInTheDocument()
+    expect(within(rows[1] as HTMLElement).getByText(/^Luca Brunner · 24:22/)).toBeInTheDocument()
     expect(screen.getByText('1 of 2')).toBeInTheDocument()
     // Not mine: no edit, no delete.
     expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument()
@@ -108,6 +118,14 @@ describe('ReelPage', () => {
   it('says when there is nothing to play, and when the reel is gone', async () => {
     show(reel({ mine: true }), [])
     expect(await screen.findByText(/Nothing to play/)).toBeInTheDocument()
+    expect(screen.getByText('0 moments · 0:00')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Edit' })).toHaveAttribute('href', '/reels/00000000-0000-4000-8000-00000000e001/edit')
+    expect(screen.queryByRole('button', { name: 'Download as MP4' })).not.toBeInTheDocument()
+  })
+
+  it('says a reel that is gone or not mine to see is not there', async () => {
+    vi.stubGlobal('fetch', vi.fn(stubFetch({})))
+    renderRoute(<ReelPage />, { path: '/reels/:id', url: '/reels/00000000-0000-4000-8000-00000000e009' })
+    expect(await screen.findByText("This reel doesn't exist or you don't have access to it.")).toBeInTheDocument()
   })
 })

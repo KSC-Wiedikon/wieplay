@@ -18,6 +18,9 @@ const team = (
   league: '2L',
   rel,
   lineage_id: `lineage-${name}`,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
   ...more,
 })
 

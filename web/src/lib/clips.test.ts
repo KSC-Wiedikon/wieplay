@@ -14,6 +14,7 @@ const clip = (patch: Partial<Clip>): Clip => ({
   note: null,
   event_id: null,
   owner: 7,
+  owner_name: 'Coach Test',
   mine: true,
   visibility: 'private',
   created_at: '2026-10-12T19:00:00Z',

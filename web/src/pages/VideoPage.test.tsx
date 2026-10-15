@@ -16,6 +16,9 @@ const team: TeamDetail = {
   rel: ['player'],
   lineage_id: '6f1c0a52-2a43-4c11-9a43-111111111111',
   can_upload: false,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
 }
 
 const video = (patch: Partial<Video>): Video => ({
@@ -49,6 +52,9 @@ const video = (patch: Partial<Video>): Video => ({
   created_by: 7,
   can_delete: false,
   can_upload: false,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
   files: [],
   ...patch,
 })
@@ -139,6 +145,9 @@ describe('VideoPage', () => {
       video({
         status: 'uploading',
         can_upload: true,
+        can_tag: true,
+        can_share: true,
+        can_export: true,
         files: [
           { id: 'f1', part_no: 1, name: 'GX010042.MP4', size: 25, part_size: 10, part_count: 3, uploaded: true },
           { id: 'f2', part_no: 2, name: 'GX020042.MP4', size: 15, part_size: 10, part_count: 2, uploaded: false },

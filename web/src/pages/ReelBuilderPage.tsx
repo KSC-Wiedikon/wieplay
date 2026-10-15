@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -11,11 +10,11 @@ import { LoadError, Message } from '../components/Message'
 import { ReelPlayer } from '../components/ReelPlayer'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
-import { api, ApiError } from '../lib/api'
+import { ApiError } from '../lib/api'
 import { cx } from '../lib/cx'
 import { formatDate, formatDuration } from '../lib/format'
 import { skillByCode } from '../lib/grammar'
-import { gradeLabel, pieceLabel, skillLabel } from '../lib/labels'
+import { gradeLabel, pieceFacts, pieceLabel, skillLabel } from '../lib/labels'
 import {
   pieceToItem,
   useLineageTeam,
@@ -27,21 +26,14 @@ import {
   useTaxonomy,
   useTeamPeople,
 } from '../lib/library'
-import { useMe, useTeam, useTeams } from '../lib/queries'
-import { keys } from '../lib/queryClient'
+import { useMe, useTeam, useTeams, useTeamSeasons } from '../lib/queries'
 import { reelTimeline } from '../lib/reelPlayer'
 import { compareTeams } from '../lib/teams'
 import { useToast } from '../lib/toast'
-import type { Clip, Me, Piece, Reel, ReelIn, ReelQuery, Side, Taxonomy, Team, TeamDetail, VideoKind, Visibility } from '../lib/types'
+import type { Clip, Piece, Reel, ReelIn, ReelQuery, Side, Taxonomy, VideoKind, Visibility } from '../lib/types'
 import { isUuid } from '../lib/video'
 
-const LEAD_RELS = ['coach', 'team_responsible']
 const LIMIT = 200
-
-/** Who may share with a team (PLAN §5.1): its coaches and team managers, and sport admins. */
-function canShareWith(me: Me | null | undefined, team: Pick<Team, 'sport' | 'rel'>): boolean {
-  return (me?.sport_admin.includes(team.sport) ?? false) || team.rel.some((r) => LEAD_RELS.includes(r))
-}
 
 /** A query settles 300 ms after the last change before it is previewed. */
 function useSettled(query: ReelQuery | null): ReelQuery | null {
@@ -162,6 +154,7 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   const chosenId = teamId ?? me.data?.teams[0]?.id ?? sorted[0]?.id ?? null
   const team = useTeam(chosenId ?? 0)
   const detail = chosenId !== null && team.data?.id === chosenId ? team.data : undefined
+  const seasons = useTeamSeasons(chosenId ?? 0, chosenId !== null)
   const [season, setSeason] = useState<string | null>(initial.season)
   const [member, setMember] = useState<number | null>(initial.member)
   const [side, setSide] = useState<Side | null>(initial.side)
@@ -213,6 +206,10 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   if (teams.isPending || (chosenId !== null && team.isPending)) return <PageSpinner />
   if (chosenId === null) return <Message>{t('reels.builder.noTeams')}</Message>
   if (team.isError || !detail) return <LoadError onRetry={() => void team.refetch()} />
+  // The team's seasons I can see, newest first; its own and a saved reel's season are always there.
+  const seasonChoices = [
+    ...new Set([...(seasons.data ?? []).map((s) => s.season), detail.season, ...(effectiveSeason ? [effectiveSeason] : [])]),
+  ].sort((a, b) => b.localeCompare(a))
 
   return (
     <div className="flex flex-col gap-6">
@@ -247,8 +244,11 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
             </Field>
             <Field label={t('reels.builder.season')} htmlFor={`${id}-season`}>
               <Select id={`${id}-season`} value={effectiveSeason ?? ''} onChange={(e) => setSeason(e.target.value)}>
-                <option value={detail.season}>{detail.season}</option>
-                {effectiveSeason && effectiveSeason !== detail.season && <option value={effectiveSeason}>{effectiveSeason}</option>}
+                {seasonChoices.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
                 <option value="">{t('reels.builder.allSeasons')}</option>
               </Select>
             </Field>
@@ -311,7 +311,7 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
       <SaveForm
         reel={reel}
         suggested={suggested}
-        canShare={canShareWith(me.data, detail)}
+        canShare={detail.can_share}
         teamLabel={`${detail.name} ${detail.season}`}
         build={(title, visibility) => ({ title, kind: 'smart', query: query ?? {}, visibility, lineage_id: detail.lineage_id })}
       />
@@ -369,7 +369,7 @@ interface SaveFormProps {
   canShare: boolean
   teamLabel: string | null
   /** The reel to save, with the form's title and visibility. */
-  build: (title: string, visibility: Visibility) => ReelIn | Promise<ReelIn>
+  build: (title: string, visibility: Visibility) => ReelIn
   children?: ReactNode
   disabled?: boolean
 }
@@ -384,28 +384,23 @@ function SaveForm({ reel, suggested, canShare, teamLabel, build, children, disab
   const [visibility, setVisibility] = useState<Visibility>(reel?.visibility ?? 'private')
   const [error, setError] = useState<string | null>(null)
 
-  const submit = async () => {
+  const submit = () => {
     const name = (title.trim() || suggested).slice(0, 200)
     if (!name) {
       setError(t('reels.builder.titleMissing'))
       return
     }
     setError(null)
-    try {
-      const body = await build(name, visibility)
-      save.mutate(
-        { id: reel?.id, body },
-        {
-          onSuccess: (saved) => {
-            toast.success(t('reels.builder.saved'))
-            void navigate(`/reels/${saved.id}`)
-          },
-          onError: (e) => setError(saveError(t, e)),
+    save.mutate(
+      { id: reel?.id, body: build(name, visibility) },
+      {
+        onSuccess: (saved) => {
+          toast.success(t('reels.builder.saved'))
+          void navigate(`/reels/${saved.id}`)
         },
-      )
-    } catch (e) {
-      setError(saveError(t, e))
-    }
+        onError: (e) => setError(saveError(t, e)),
+      },
+    )
   }
 
   return (
@@ -417,7 +412,7 @@ function SaveForm({ reel, suggested, canShare, teamLabel, build, children, disab
         className="flex flex-col gap-4 rounded-2xl border border-hairline bg-surface p-4"
         onSubmit={(e) => {
           e.preventDefault()
-          void submit()
+          submit()
         }}
       >
         <Field label={t('reels.builder.titleLabel')} htmlFor={`${id}-name`}>
@@ -467,6 +462,9 @@ function clipPiece(clip: Clip): Piece {
     side: null,
     number: null,
     member_id: null,
+    player_name: null,
+    score_us: null,
+    score_them: null,
   }
 }
 
@@ -480,12 +478,10 @@ function ManualBuilder({ reel }: { reel: Reel | null }) {
 function ManualForm({ reel, initial }: { reel: Reel | null; initial: Piece[] }) {
   const { t } = useTranslation()
   const id = useId()
-  const client = useQueryClient()
-  const me = useMe()
   const teams = useTeams()
   const clips = useMyClips()
   const [pieces, setPieces] = useState<Piece[]>(initial)
-  const targets = useMemo(() => [...(teams.data ?? [])].filter((team) => canShareWith(me.data, team)).sort(compareTeams), [teams.data, me.data])
+  const targets = useMemo(() => (teams.data ?? []).filter((team) => team.can_share).sort(compareTeams), [teams.data])
   const [shareTeam, setShareTeam] = useState<number | null>(null)
   const shareId = shareTeam ?? targets[0]?.id ?? null
   const share = targets.find((team) => team.id === shareId)
@@ -497,9 +493,6 @@ function ManualForm({ reel, initial }: { reel: Reel | null; initial: Piece[] }) 
       if (item) next.splice(index + by, 0, item)
       return next
     })
-
-  const lineageOf = async (teamId: number): Promise<string> =>
-    (await client.fetchQuery<TeamDetail>({ queryKey: keys.team(teamId), queryFn: ({ signal }) => api.team(teamId, signal) })).lineage_id
 
   return (
     <div className="flex flex-col gap-6">
@@ -536,42 +529,45 @@ function ManualForm({ reel, initial }: { reel: Reel | null; initial: Piece[] }) 
                 </tr>
               </THead>
               <TBody>
-                {pieces.map((piece, index) => (
-                  <tr key={`${piece.video_id}-${piece.start_ms}-${index}`}>
-                    <Td className="text-muted tabular-nums">{index + 1}</Td>
-                    <Td tight className="min-w-40">
-                      <TextInput
-                        aria-label={t('reels.builder.captionFor', { n: index + 1 })}
-                        value={piece.caption ?? ''}
-                        placeholder={pieceLabel(t, { ...piece, caption: null }, null)}
-                        maxLength={200}
-                        onChange={(e) => setPieces((list) => list.map((p, i) => (i === index ? { ...p, caption: e.target.value || null } : p)))}
-                      />
-                      <span className="block px-1 pt-1 text-xs text-muted tabular-nums sm:hidden">
-                        {[piece.video_title, piece.recorded_on ? formatDate(piece.recorded_on) : null, formatDuration(piece.end_ms - piece.start_ms)]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </span>
-                    </Td>
-                    <Td className="hidden sm:table-cell">
-                      {piece.video_title}
-                      <span className="block text-xs text-muted tabular-nums">
-                        {[piece.recorded_on ? formatDate(piece.recorded_on) : null, formatDuration(piece.end_ms - piece.start_ms)].filter(Boolean).join(' · ')}
-                      </span>
-                    </Td>
-                    <Td tight className="text-right whitespace-nowrap">
-                      <Button variant="ghost" size="icon" disabled={index === 0} aria-label={t('reels.builder.moveUp', { n: index + 1 })} onClick={() => move(index, -1)}>
-                        <ChevronUpIcon className="size-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" disabled={index === pieces.length - 1} aria-label={t('reels.builder.moveDown', { n: index + 1 })} onClick={() => move(index, 1)}>
-                        <ChevronDownIcon className="size-4" />
-                      </Button>
-                      <Button variant="ghostDanger" size="icon" aria-label={t('reels.builder.remove', { n: index + 1 })} onClick={() => setPieces((list) => list.filter((_, i) => i !== index))}>
-                        <TrashIcon className="size-4" />
-                      </Button>
-                    </Td>
-                  </tr>
-                ))}
+                {pieces.map((piece, index) => {
+                  const facts = pieceFacts(piece)
+                  return (
+                    <tr key={`${piece.video_id}-${piece.start_ms}-${index}`}>
+                      <Td className="text-muted tabular-nums">{index + 1}</Td>
+                      <Td tight className="min-w-40">
+                        <TextInput
+                          aria-label={t('reels.builder.captionFor', { n: index + 1 })}
+                          value={piece.caption ?? ''}
+                          placeholder={pieceLabel(t, { ...piece, caption: null }, null)}
+                          maxLength={200}
+                          onChange={(e) => setPieces((list) => list.map((p, i) => (i === index ? { ...p, caption: e.target.value || null } : p)))}
+                        />
+                        <span className="block px-1 pt-1 text-xs text-muted tabular-nums sm:hidden">
+                          {[facts, piece.video_title, piece.recorded_on ? formatDate(piece.recorded_on) : null, formatDuration(piece.end_ms - piece.start_ms)]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </span>
+                      </Td>
+                      <Td className="hidden sm:table-cell">
+                        {piece.video_title}
+                        <span className="block text-xs text-muted tabular-nums">
+                          {[facts, piece.recorded_on ? formatDate(piece.recorded_on) : null, formatDuration(piece.end_ms - piece.start_ms)].filter(Boolean).join(' · ')}
+                        </span>
+                      </Td>
+                      <Td tight className="text-right whitespace-nowrap">
+                        <Button variant="ghost" size="icon" disabled={index === 0} aria-label={t('reels.builder.moveUp', { n: index + 1 })} onClick={() => move(index, -1)}>
+                          <ChevronUpIcon className="size-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" disabled={index === pieces.length - 1} aria-label={t('reels.builder.moveDown', { n: index + 1 })} onClick={() => move(index, 1)}>
+                          <ChevronDownIcon className="size-4" />
+                        </Button>
+                        <Button variant="ghostDanger" size="icon" aria-label={t('reels.builder.remove', { n: index + 1 })} onClick={() => setPieces((list) => list.filter((_, i) => i !== index))}>
+                          <TrashIcon className="size-4" />
+                        </Button>
+                      </Td>
+                    </tr>
+                  )
+                })}
               </TBody>
             </Table>
           </Card>
@@ -615,7 +611,7 @@ function ManualForm({ reel, initial }: { reel: Reel | null; initial: Piece[] }) 
         canShare={share !== undefined}
         teamLabel={share ? `${share.name} ${share.season}` : null}
         disabled={pieces.length === 0}
-        build={async (title, visibility) => ({
+        build={(title, visibility) => ({
           title,
           kind: 'manual',
           items: pieces.map(pieceToItem),
@@ -624,8 +620,8 @@ function ManualForm({ reel, initial }: { reel: Reel | null; initial: Piece[] }) 
           lineage_id:
             visibility === 'team' && shareTeam === null && reel?.lineage_id
               ? reel.lineage_id
-              : visibility === 'team' && shareId !== null
-                ? await lineageOf(shareId)
+              : visibility === 'team' && share
+                ? share.lineage_id
                 : (reel?.lineage_id ?? null),
         })}
       >

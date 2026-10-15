@@ -142,6 +142,7 @@ export function ClipsSection({ clips, canManage, canExport, playingId, onPlay, o
                         {`${range} · ${formatDuration(clip.end_ms - clip.start_ms)}`}
                         {clip.visibility === 'team' && ` · ${t('clips.visibility.team')}`}
                       </span>
+                      {!clip.mine && clip.owner_name && <span className="block px-1 text-xs text-muted">{t('clips.by', { name: clip.owner_name })}</span>}
                       {clip.note && <span className="block px-1 pb-1 text-xs wrap-break-word text-muted">{clip.note}</span>}
                     </Td>
                     <Td className="hidden whitespace-nowrap text-muted tabular-nums sm:table-cell">

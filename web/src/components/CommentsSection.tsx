@@ -7,7 +7,7 @@ import { cx } from '../lib/cx'
 import { formatDateTime } from '../lib/format'
 import { newId } from '../lib/id'
 import { formatClock } from '../lib/labels'
-import { useAddComment, useComments, useDeleteComment, useEditComment } from '../lib/library'
+import { useAddComment, useComments, useDeleteComment, useEditComment, useVideoPeople } from '../lib/library'
 import { insertMention, matchPeople, mentionAt, mentionedIds, splitMentions, type MentionQuery } from '../lib/mentions'
 import { usePlayhead, type Playhead } from '../lib/playhead'
 import { useToast } from '../lib/toast'
@@ -25,26 +25,29 @@ const textarea =
 
 interface CommentsSectionProps {
   videoId: string
-  /** The team's people from the video's roster: who can be mentioned or addressed. */
-  people: readonly Person[]
   meId: number
   playhead: Playhead
   onSeek: (t_ms: number) => void
 }
 
-/** Comments on a video, pinned to a moment, to the team, its coaches or one person (PLAN §6.8). */
-export function CommentsSection({ videoId, people, meId, playhead, onSeek }: CommentsSectionProps) {
+/**
+ * Comments on a video, pinned to a moment, to the team, its coaches or one person (PLAN §6.8).
+ * Who can be mentioned or addressed comes from the API: the team's people in any season.
+ */
+export function CommentsSection({ videoId, meId, playhead, onSeek }: CommentsSectionProps) {
   const { t } = useTranslation()
   const id = useId()
   const comments = useComments(videoId)
   const sorted = useMemo(() => sortComments(comments.data ?? []), [comments.data])
+  const people = useVideoPeople(videoId)
+  const everyone: readonly Person[] = people.data ?? []
 
   return (
     <section aria-labelledby={`${id}-title`} className="flex flex-col gap-3">
       <h2 id={`${id}-title`} className="text-lg font-semibold">
         {t('comments.title')}
       </h2>
-      <Composer videoId={videoId} people={people.filter((p) => p.member_id !== meId)} playhead={playhead} />
+      <Composer videoId={videoId} people={everyone.filter((p) => p.member_id !== meId)} loaded={people.isSuccess} playhead={playhead} />
       {comments.isPending ? (
         <Spinner />
       ) : comments.isError ? (
@@ -54,7 +57,7 @@ export function CommentsSection({ videoId, people, meId, playhead, onSeek }: Com
       ) : (
         <ol className="flex flex-col divide-y divide-hairline rounded-2xl border border-hairline bg-surface" aria-label={t('comments.title')}>
           {sorted.map((comment) => (
-            <CommentItem key={comment.id} comment={comment} videoId={videoId} people={people} onSeek={onSeek} />
+            <CommentItem key={comment.id} comment={comment} videoId={videoId} people={everyone} onSeek={onSeek} />
           ))}
         </ol>
       )}
@@ -62,7 +65,7 @@ export function CommentsSection({ videoId, people, meId, playhead, onSeek }: Com
   )
 }
 
-function Composer({ videoId, people, playhead }: { videoId: string; people: readonly Person[]; playhead: Playhead }) {
+function Composer({ videoId, people, loaded, playhead }: { videoId: string; people: readonly Person[]; loaded: boolean; playhead: Playhead }) {
   const { t } = useTranslation()
   const id = useId()
   const toast = useToast()
@@ -158,7 +161,7 @@ function Composer({ videoId, people, playhead }: { videoId: string; people: read
           {add.isPending ? t('comments.posting') : t('comments.post')}
         </Button>
       </div>
-      {people.length === 0 && <p className="text-xs text-muted">{t('comments.noPeople')}</p>}
+      {loaded && people.length === 0 && <p className="text-xs text-muted">{t('comments.noPeople')}</p>}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -296,7 +299,6 @@ function CommentItem({ comment, videoId, people, onSeek }: { comment: Comment; v
   const remove = useDeleteComment(videoId)
   const [editing, setEditing] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
-  const nameOf = (memberId: number | null) => people.find((p) => p.member_id === memberId)?.name ?? t('comments.someone')
   const mentioned = people.filter((p) => comment.mentions.includes(p.member_id))
   const parts = splitMentions(comment.body, mentioned)
   const author = comment.author_name ?? t('comments.unknownAuthor')
@@ -318,7 +320,7 @@ function CommentItem({ comment, videoId, people, onSeek }: { comment: Comment; v
           <span className="text-xs text-muted">{t('comments.general')}</span>
         )}
         {comment.audience === 'coaches' && <Badge>{t('comments.forCoaches')}</Badge>}
-        {comment.audience === 'person' && <Badge>{t('comments.toPerson', { name: nameOf(comment.recipient) })}</Badge>}
+        {comment.audience === 'person' && <Badge>{t('comments.toPerson', { name: comment.recipient_name ?? t('comments.someone') })}</Badge>}
         <span className="text-xs text-muted tabular-nums">
           {formatDateTime(comment.created_at)}
           {comment.edited_at && ` · ${t('comments.edited')}`}

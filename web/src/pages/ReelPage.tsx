@@ -8,9 +8,9 @@ import { ExportButton } from '../components/ExportButton'
 import { LoadError, Message } from '../components/Message'
 import { ReelPlayer } from '../components/ReelPlayer'
 import { PageSpinner, Spinner } from '../components/Spinner'
+import { NotFoundError } from '../lib/api'
 import { formatDuration } from '../lib/format'
-import { useDeleteReel, useReelItems, useReels } from '../lib/library'
-import { reelTimeline } from '../lib/reelPlayer'
+import { useDeleteReel, useReel, useReelItems } from '../lib/library'
 import { useToast } from '../lib/toast'
 import { isUuid } from '../lib/video'
 
@@ -20,17 +20,19 @@ export function ReelPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const toast = useToast()
-  const reels = useReels()
   const reelId = isUuid(id) ? id : ''
-  const reel = reels.data?.find((r) => r.id === reelId)
-  const items = useReelItems(reelId, reel !== undefined)
+  const detail = useReel(reelId, reelId !== '')
+  const items = useReelItems(reelId, reelId !== '')
   const remove = useDeleteReel()
   const [confirm, setConfirm] = useState(false)
 
-  if (reels.isPending) return <PageSpinner />
-  if (reels.isError) return <LoadError onRetry={() => void reels.refetch()} />
-  if (!reel) return <Message action={<ButtonLink to="/reels">{t('reels.back')}</ButtonLink>}>{t('reels.notFound')}</Message>
+  const notFound = <Message action={<ButtonLink to="/reels">{t('reels.back')}</ButtonLink>}>{t('reels.notFound')}</Message>
+  if (!reelId) return notFound
+  if (detail.isPending) return <PageSpinner />
+  // Missing and not readable look the same on purpose.
+  if (detail.isError) return detail.error instanceof NotFoundError ? notFound : <LoadError onRetry={() => void detail.refetch()} />
 
+  const { reel, item_count, total_ms } = detail.data
   const pieces = items.data ?? []
   return (
     <div className="flex flex-col gap-6">
@@ -43,14 +45,10 @@ export function ReelPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Badge>{t(`reels.kind.${reel.kind}`)}</Badge>
           <Badge tone={reel.visibility === 'team' ? 'accent' : 'neutral'}>{t(`reels.shared.${reel.visibility}`)}</Badge>
-          {items.data && (
-            <span className="text-sm text-muted tabular-nums">
-              {`${t('reels.count', { count: pieces.length })} · ${formatDuration(reelTimeline(pieces).total_ms)}`}
-            </span>
-          )}
+          <span className="text-sm text-muted tabular-nums">{`${t('reels.count', { count: item_count })} · ${formatDuration(total_ms)}`}</span>
         </div>
         <div className="flex flex-wrap gap-2">
-          {pieces.length > 0 && <ExportButton request={{ kind: 'reel', reel_id: reel.id }} />}
+          {item_count > 0 && <ExportButton request={{ kind: 'reel', reel_id: reel.id }} />}
           {reel.mine && (
             <>
               <ButtonLink to={`/reels/${reel.id}/edit`}>{t('reels.edit')}</ButtonLink>

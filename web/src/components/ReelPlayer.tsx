@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
 import { formatDate, formatDuration } from '../lib/format'
 import { skillByCode } from '../lib/grammar'
-import { formatClock, pieceLabel } from '../lib/labels'
+import { formatClock, pieceFacts, pieceLabel } from '../lib/labels'
 import { useTagging } from '../lib/queries'
 import { scoreBefore } from '../lib/rallies'
 import { ReelEngine } from '../lib/reelEngine'
@@ -27,7 +27,8 @@ interface ReelPlayerProps {
 /**
  * Plays a reel's pieces one after another across videos (PLAN §7.7): two players, one on
  * screen and one loading the next video. Below: where we are, the caption, the score at that
- * moment (from the video's tags), and the list of moments to jump to.
+ * moment (from the video's tags), and the list of moments to jump to, each with its player and
+ * the score after its rally.
  */
 export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPlayerProps) {
   const { t } = useTranslation()
@@ -44,14 +45,10 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
   const timeline = useMemo(() => reelTimeline(pieces), [pieces])
   const elapsed = piece ? elapsedIn(pieces, state.index, Math.max(state.t_ms, piece.start_ms)) : 0
 
-  // The current video's tags: names, skill names and the score at this moment.
+  // The current video's tags: skill names and the score at this moment.
   const tagging = useTagging(piece?.video_id ?? '', piece !== undefined)
-  const names = useMemo(
-    () => new Map((tagging.data?.roster ?? []).flatMap((r) => (r.member_id !== null && r.name ? [[r.member_id, r.name] as const] : []))),
-    [tagging.data],
-  )
   const taxonomy = tagging.data?.taxonomy ?? fallback
-  const label = (p: Piece) => pieceLabel(t, p, taxonomy && p.code ? skillByCode(taxonomy, p.code) : null, names)
+  const label = (p: Piece) => pieceLabel(t, p, taxonomy && p.code ? skillByCode(taxonomy, p.code) : null)
   const event = piece?.event_id ? tagging.data?.events.find((e) => e.id === piece.event_id) : undefined
   const at = event?.t_ms ?? state.t_ms
   const score = tagging.data ? scoreBefore(at, tagging.data.periods, tagging.data.segments) : null
@@ -164,6 +161,8 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
             <TBody>
               {pieces.map((p, index) => {
                 const current = index === state.index
+                const facts = pieceFacts(p)
+                const where = [p.recorded_on ? formatDate(p.recorded_on) : null, p.video_title].filter(Boolean).join(' · ')
                 return (
                   <Tr
                     key={index}
@@ -185,8 +184,9 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
                       >
                         {label(p)}
                       </button>
-                      <span className="block px-1 pb-1 text-xs text-muted sm:hidden">
-                        {[p.recorded_on ? formatDate(p.recorded_on) : null, p.video_title].filter(Boolean).join(' · ')}
+                      <span className={cx('block px-1 pb-1 text-xs text-muted tabular-nums', !facts && 'sm:hidden')}>
+                        {facts}
+                        <span className="sm:hidden">{facts && where ? ` · ${where}` : where}</span>
                       </span>
                     </Td>
                     <Td className="hidden whitespace-nowrap tabular-nums sm:table-cell">

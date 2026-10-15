@@ -86,20 +86,24 @@ export function formatClock(ms: number | null | undefined, { tenths = true } = {
   return tenths ? `${base}.${tenth}` : base
 }
 
+interface PieceText {
+  caption: string | null
+  code: string | null
+  grade: string | null
+  side: Side | null
+  number: number | null
+  player_name: string | null
+  video_title: string | null
+}
+
 /**
  * What a reel piece shows: its caption, else the tag it came from ("#7 Luca Brunner · Attack ·
- * # Kill"), else the video's title. Names come from `names` (member id → name), when known.
+ * # Kill"), else the video's title.
  */
-export function pieceLabel(
-  t: TFunction,
-  piece: { caption: string | null; code: string | null; grade: string | null; side: Side | null; number: number | null; member_id: number | null; video_title: string | null },
-  skill: Pick<TaxonomySkill, 'name_key' | 'code' | 'category'> | null,
-  names: ReadonlyMap<number, string> = new Map(),
-): string {
+export function pieceLabel(t: TFunction, piece: PieceText, skill: Pick<TaxonomySkill, 'name_key' | 'code' | 'category'> | null): string {
   if (piece.caption) return piece.caption
   if (!piece.code) return piece.video_title ?? ''
   const side = piece.side ?? 'us'
-  const name = piece.member_id !== null ? names.get(piece.member_id) : undefined
   const player =
     side === 'them'
       ? piece.number === null
@@ -107,10 +111,20 @@ export function pieceLabel(
         : t('tagging.themNumber', { number: piece.number })
       : piece.number === null
         ? t('tagging.us')
-        : name
-          ? `#${piece.number} ${name}`
+        : piece.player_name
+          ? `#${piece.number} ${piece.player_name}`
           : `#${piece.number}`
   const meaning = skill && piece.grade ? gradeLabel(t, skill, piece.grade) : ''
   const grade = piece.grade && meaning !== piece.grade ? `${piece.grade} ${meaning}`.trim() : (piece.grade ?? '')
   return [player, skillLabel(t, skill, piece.code), grade].filter(Boolean).join(' · ')
+}
+
+/**
+ * The line under a piece's label: the player when the label doesn't name them (a captioned
+ * piece) and the score after the rally, e.g. "Alex Muster · 1:0". Empty when neither is known.
+ */
+export function pieceFacts(piece: PieceText & { score_us: number | null; score_them: number | null }): string {
+  const shown = !piece.caption && piece.code !== null && piece.side !== 'them' && piece.number !== null
+  const score = piece.score_us !== null && piece.score_them !== null ? `${piece.score_us}:${piece.score_them}` : null
+  return [shown ? null : piece.player_name, score].filter(Boolean).join(' · ')
 }

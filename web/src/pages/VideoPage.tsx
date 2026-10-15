@@ -23,7 +23,7 @@ import { UploadProgress } from '../components/UploadProgress'
 import { VideoStatusBadge } from '../components/VideoBadges'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { ApiError, blockersOf } from '../lib/api'
-import { byStart, clipRange, draftOf, nextInQueue, peopleOf, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
+import { byStart, clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
 import { commentMoments } from '../lib/comments'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
 import { formatClock } from '../lib/labels'
@@ -280,10 +280,6 @@ function Ready({ video }: { video: Video }) {
   const tagCount = data?.events.length ?? 0
   const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
   const drills = useMemo(() => byStart((data?.segments ?? []).filter((s) => s.kind === 'drill')), [data?.segments])
-  const people = useMemo(() => peopleOf(data?.roster ?? []), [data?.roster])
-  // Sharing with the team and downloads: coaches, team managers, sport admins (PLAN §5.1).
-  const canShare = (data?.can_tag ?? false) || video.can_upload
-  const canExport = video.can_upload || video.can_delete
   const duration = video.duration_ms ?? playhead.getState().duration_ms
 
   const seekTo = (t_ms: number) => {
@@ -381,7 +377,7 @@ function Ready({ video }: { video: Video }) {
             element={element}
             playhead={playhead}
             suspended={current !== null}
-            action={canExport ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
+            action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
           />
         </div>
       )}
@@ -398,7 +394,7 @@ function Ready({ video }: { video: Video }) {
         <ClipsSection
           clips={clips}
           canManage={video.can_delete}
-          canExport={canExport}
+          canExport={video.can_export}
           playingId={current?.key ?? null}
           onPlay={(list, index, all) => {
             const items = list.map(clipItem)
@@ -409,11 +405,11 @@ function Ready({ video }: { video: Video }) {
         />
       </div>
       <div className="mt-3">
-        <CommentsSection videoId={video.id} people={people} meId={me.data?.member.id ?? 0} playhead={playhead} onSeek={seekTo} />
+        <CommentsSection videoId={video.id} meId={me.data?.member.id ?? 0} playhead={playhead} onSeek={seekTo} />
       </div>
       <ClipDialog
         draft={draft}
-        canShare={canShare}
+        canShare={video.can_share}
         duration_ms={video.duration_ms}
         onClose={() => setDraft(null)}
         onSaved={(clip) => {

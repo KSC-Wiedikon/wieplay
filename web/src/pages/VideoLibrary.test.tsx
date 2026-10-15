@@ -2,7 +2,7 @@
 
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Clip, Comment, Reel, Tagging, Video } from '../lib/types'
+import type { Clip, Comment, Reel, Tagging, Video, VideoPerson } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
 import { bundle, rally } from '../test/tagging'
 import { VideoPage } from './VideoPage'
@@ -39,6 +39,9 @@ const video = (patch: Partial<Video> = {}): Video => ({
   created_by: 7,
   can_delete: false,
   can_upload: false,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
   files: [],
   ...patch,
 })
@@ -54,6 +57,7 @@ const clip = (patch: Partial<Clip>): Clip => ({
   note: null,
   event_id: null,
   owner: 107,
+  owner_name: 'Luca Brunner',
   mine: true,
   visibility: 'private',
   created_at: '2026-10-12T19:00:00Z',
@@ -72,6 +76,7 @@ const comment = (patch: Partial<Comment>): Comment => ({
   mentions: [],
   audience: 'team',
   recipient: null,
+  recipient_name: null,
   created_at: '2026-10-12T19:05:00Z',
   edited_at: null,
   mine: false,
@@ -80,6 +85,14 @@ const comment = (patch: Partial<Comment>): Comment => ({
 })
 
 const me = { member: { id: 107, uuid: 'u', name: 'Luca Brunner' }, roles: [], is_admin: false, sport_admin: [], teams: [] }
+
+/** Who comments can name: the team's people in any season, the coach too (sorted by number). */
+const people: VideoPerson[] = [
+  { member_id: 103, name: 'Mia Keller', number: 3, roles: ['player'] },
+  { member_id: 107, name: 'Luca Brunner', number: 7, roles: ['player'] },
+  { member_id: 111, name: 'Noah Meier', number: 11, roles: ['captain', 'player'] },
+  { member_id: 7, name: 'Coach Test', number: null, roles: ['coach'] },
+]
 
 interface Options {
   video?: Video
@@ -105,6 +118,7 @@ function show({ video: v = video(), tagging = bundle({ can_tag: false }), clips 
       [`/api/videos/${ID}/tagging`]: { body: tagging },
       [`/api/videos/${ID}/clips`]: { body: clips },
       [`/api/videos/${ID}/comments`]: { body: comments },
+      [`/api/videos/${ID}/people`]: { body: people },
       '/api/reels': { body: reels },
       ...routes,
   })
@@ -139,7 +153,7 @@ function at(seconds: number) {
   fireEvent(player(), new Event('timeupdate'))
 }
 
-/** The roster (who can be mentioned) comes with the video's tagging data. */
+/** Who can be mentioned comes from GET /api/videos/{id}/people. */
 async function peopleLoaded() {
   await waitFor(() => expect(screen.queryByText(/No one to mention/)).not.toBeInTheDocument())
 }
@@ -189,7 +203,7 @@ describe('clips on the video page', () => {
   })
 
   it('offers coaches to share with the team, and explains a refusal', async () => {
-    const { fetch } = show({ video: video({ can_upload: true, can_delete: true }), tagging: bundle({ can_tag: true }), putClip: 403 })
+    const { fetch } = show({ video: video({ can_delete: true, can_tag: true, can_share: true, can_export: true }), tagging: bundle({ can_tag: true }), putClip: 403 })
     await screen.findByRole('heading', { name: 'Clips' })
     at(12)
     fireEvent.click(screen.getByRole('button', { name: 'Clip in' }))
@@ -206,7 +220,7 @@ describe('clips on the video page', () => {
   })
 
   it('edits my clips, and deletes them after confirming; others’ team clips only coaches delete', async () => {
-    const theirs = clip({ id: TEAMS, title: 'Kill by Mia', owner: 7, mine: false, visibility: 'team', start_ms: 40_000, end_ms: 45_000 })
+    const theirs = clip({ id: TEAMS, title: 'Kill by Mia', owner: 103, owner_name: 'Mia Keller', mine: false, visibility: 'team', start_ms: 40_000, end_ms: 45_000 })
     const { fetch } = show({
       clips: [clip({ note: 'Arm high' }), theirs],
       routes: {
@@ -216,6 +230,9 @@ describe('clips on the video page', () => {
     })
     const table = await screen.findByRole('table', { name: 'Clips' })
     expect(within(table).getByText('Arm high')).toBeInTheDocument()
+    // Whose a team clip is, unless it is mine.
+    expect(within(table).getByText('by Mia Keller')).toBeInTheDocument()
+    expect(within(table).queryByText('by Luca Brunner')).not.toBeInTheDocument()
     expect(within(table).queryByRole('button', { name: 'Edit Kill by Mia' })).not.toBeInTheDocument()
     expect(within(table).queryByRole('button', { name: 'Delete Kill by Mia' })).not.toBeInTheDocument()
 
@@ -306,10 +323,7 @@ describe('clips on the video page', () => {
       clips: [clip({})],
       reels: [reel, { ...reel, id: '00000000-0000-4000-8000-00000000e002', title: 'Smart one', kind: 'smart' }],
       routes: {
-        [`/api/reels/${reel.id}/items`]: {
-          body: [{ video_id: ID, start_ms: 1_000, end_ms: 4_000, event_id: null, clip_id: null, caption: 'First', video_title: 't', recorded_on: '2026-10-11', code: null, grade: null, side: null, number: null, member_id: null }],
-        },
-        [`PUT /api/reels/${reel.id}`]: { body: reel },
+        [`POST /api/reels/${reel.id}/items`]: { body: { reel, item_count: 2, total_ms: 10_000 } },
         'POST /api/reels': { status: 201, body: { ...reel, title: 'My attack' } },
       },
     })
@@ -321,18 +335,12 @@ describe('clips on the video page', () => {
     expect(within(dialog).queryByLabelText('Smart one')).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
     await screen.findByText('Added to Approach work.')
-    expect(sent(fetch, 'PUT', `/api/reels/${reel.id}`)).toEqual([
-      {
-        title: 'Approach work',
-        kind: 'manual',
-        visibility: 'private',
-        lineage_id: null,
-        items: [
-          { video_id: ID, start_ms: 1_000, end_ms: 4_000, event_id: null, clip_id: null, caption: 'First' },
-          { video_id: ID, start_ms: 15_000, end_ms: 22_000, clip_id: MINE, caption: 'My attack' },
-        ],
-      },
+    // Only the new item goes up; the reel's other items are neither read nor sent again.
+    expect(sent(fetch, 'POST', `/api/reels/${reel.id}/items`)).toEqual([
+      { items: [{ video_id: ID, start_ms: 15_000, end_ms: 22_000, clip_id: MINE, caption: 'My attack' }] },
     ])
+    expect(fetch).not.toHaveBeenCalledWith(`/api/reels/${reel.id}/items`, expect.objectContaining({ method: 'GET' }))
+    expect(sent(fetch, 'PUT', `/api/reels/${reel.id}`)).toEqual([])
 
     fireEvent.click(within(table).getByRole('button', { name: 'Add My attack to a reel' }))
     dialog = screen.getByRole('dialog', { name: 'Add to reel' })
@@ -349,12 +357,41 @@ describe('clips on the video page', () => {
   })
 })
 
+describe('add to reel refusals', () => {
+  const reel: Reel = {
+    id: '00000000-0000-4000-8000-00000000e001',
+    title: 'Approach work',
+    kind: 'manual',
+    query: null,
+    visibility: 'private',
+    lineage_id: null,
+    owner: 107,
+    mine: true,
+    created_at: '2026-10-12T10:00:00Z',
+    updated_at: '2026-10-12T10:00:00Z',
+  }
+
+  it.each([
+    [413, 'A reel holds at most 500 items', 'Approach work is full: a reel holds at most 500 moments.'],
+    [409, 'A smart reel takes no items', 'Approach work is a highlight reel: it picks its moments itself. Pick another reel.'],
+    [404, 'Reel not found', 'This reel no longer exists. Pick another one.'],
+  ])('says so when the reel answers %i', async (status, detail, message) => {
+    show({ clips: [clip({})], reels: [reel], routes: { [`POST /api/reels/${reel.id}/items`]: { status, body: { detail } } } })
+    const table = await screen.findByRole('table', { name: 'Clips' })
+    fireEvent.click(within(table).getByRole('button', { name: 'Add My attack to a reel' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add to reel' })
+    expect(await within(dialog).findByLabelText('Approach work')).toBeChecked()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(message)
+  })
+})
+
 describe('comments', () => {
   const comments = [
     comment({ id: '00000000-0000-4000-8000-00000000d002', t_ms: 46_000, body: 'Rotation 2 needs work.', audience: 'coaches', created_at: '2026-10-12T19:07:00Z' }),
     comment({ id: '00000000-0000-4000-8000-00000000d003', t_ms: 18_000, body: 'Great kill @Luca Brunner, arm high.', mentions: [107] }),
     comment({}),
-    comment({ id: '00000000-0000-4000-8000-00000000d004', t_ms: 60_000, author: 107, author_name: 'Luca Brunner', body: 'Thanks', audience: 'person', recipient: 103, mine: true, can_delete: true }),
+    comment({ id: '00000000-0000-4000-8000-00000000d004', t_ms: 60_000, author: 107, author_name: 'Luca Brunner', body: 'Thanks', audience: 'person', recipient: 103, recipient_name: 'Mia Keller', mine: true, can_delete: true }),
   ]
 
   it('lists them by moment; a click on the time goes there', async () => {
@@ -379,7 +416,7 @@ describe('comments', () => {
     expect(within(list).getAllByRole('button', { name: 'Delete comment' })).toHaveLength(1)
   })
 
-  it('posts at the current time to one person, with a mention picked from the roster', async () => {
+  it('posts at the current time to one person, with a mention picked from the team’s people', async () => {
     const { fetch } = show({
       routes: { [`POST /api/videos/${ID}/comments`]: { status: 201, body: ({ body }: { body: unknown }) => comment({ ...(body as Partial<Comment>), mine: true }) } },
     })
@@ -399,8 +436,8 @@ describe('comments', () => {
     fireEvent.change(screen.getByLabelText('Who sees it'), { target: { value: 'person' } })
     expect(post).toBeDisabled()
     const to = screen.getByLabelText('To')
-    // I can't write to myself: Luca is the one logged in.
-    expect(within(to).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose…', '#3 Mia Keller', '#11 Noah Meier'])
+    // I can't write to myself: Luca is the one logged in. The coach is there too.
+    expect(within(to).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose…', '#3 Mia Keller', '#11 Noah Meier', 'Coach Test'])
     fireEvent.change(to, { target: { value: '103' } })
     fireEvent.click(post)
 
@@ -470,7 +507,7 @@ describe('comments', () => {
 })
 
 describe('downloads', () => {
-  const coach = () => video({ can_upload: true, can_delete: true })
+  const coach = () => video({ can_upload: true, can_delete: true, can_tag: true, can_share: true, can_export: true })
   const tagged = () => bundle({ can_tag: true, segments: [rally({ start_ms: 10_000, end_ms: 20_000 })] })
 
   it('lets coaches download a clip and the rallies, explaining the rules once', async () => {
@@ -509,6 +546,22 @@ describe('downloads', () => {
     await screen.findByRole('table', { name: 'Clips' })
     await screen.findByRole('switch', { name: 'Skip dead time' })
     expect(screen.queryByRole('button', { name: /Download/ })).not.toBeInTheDocument()
+  })
+
+  it('follows the server: an admin who leads no team deletes, but neither downloads nor shares', async () => {
+    show({
+      video: video({ can_delete: true }),
+      tagging: tagged(),
+      clips: [clip({ id: TEAMS, title: 'Kill by Mia', owner: 103, owner_name: 'Mia Keller', mine: false, visibility: 'team' })],
+    })
+    const table = await screen.findByRole('table', { name: 'Clips' })
+    await screen.findByRole('switch', { name: 'Skip dead time' })
+    expect(within(table).getByRole('button', { name: 'Delete Kill by Mia' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Download/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clip in' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save clip' }))
+    const dialog = screen.getByRole('dialog', { name: 'Save clip' })
+    expect(within(dialog).queryByLabelText('The whole team')).not.toBeInTheDocument()
   })
 })
 

@@ -23,6 +23,7 @@ export const libraryEn = {
     watch: 'Watch',
     watchFor: 'Watch {{title}}',
     nowPlaying: 'Playing {{title}}',
+    by: 'by {{name}}',
     queuePosition: '{{n}} of {{total}}',
     stop: 'Stop',
     columns: {
@@ -108,7 +109,7 @@ export const libraryEn = {
     post: 'Post comment',
     posting: 'Posting…',
     posted: 'Comment posted.',
-    noPeople: 'No one to mention or address yet: this video has no roster.',
+    noPeople: 'No one to mention or address yet: the team has no members in Nomal.',
     suggestions: 'People to mention',
     goTo: 'Go to {{time}}',
     general: 'Whole video',
@@ -235,6 +236,9 @@ export const libraryEn = {
       save: 'Add',
       added: 'Added to {{title}}.',
       failed: "Couldn't add it: {{detail}}",
+      gone: 'This reel no longer exists. Pick another one.',
+      smart: '{{title}} is a highlight reel: it picks its moments itself. Pick another reel.',
+      full: '{{title}} is full: a reel holds at most 500 moments.',
     },
   },
   highlights: {
