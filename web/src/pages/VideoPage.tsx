@@ -3,12 +3,13 @@ import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router'
 import { Badge } from '../components/Badge'
-import { Button } from '../components/Button'
+import { Button, ButtonLink } from '../components/Button'
 import { Card } from '../components/Card'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { AlertIcon, CheckIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
 import { ProgressBar } from '../components/ProgressBar'
+import { RallyPanel } from '../components/RallyPanel'
 import { PageSpinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { UploadProgress } from '../components/UploadProgress'
@@ -16,7 +17,8 @@ import { VideoStatusBadge } from '../components/VideoBadges'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { ApiError, blockersOf } from '../lib/api'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
-import { useDeleteVideo, useVideo, useVideoConfig } from '../lib/queries'
+import { Playhead } from '../lib/playhead'
+import { useDeleteVideo, useTagging, useVideo, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
 import { useToast } from '../lib/toast'
@@ -198,12 +200,39 @@ function Problem({ video }: { video: Video }) {
 
 function Ready({ video }: { video: Video }) {
   const { t } = useTranslation()
+  const tagging = useTagging(video.id, true)
+  const [element, setElement] = useState<HTMLVideoElement | null>(null)
+  const [playhead] = useState(() => new Playhead())
+  useEffect(() => {
+    playhead.attach(element)
+    return () => playhead.detach()
+  }, [playhead, element])
+
   const { resolution, fps } = videoFacts(video)
   const facts = [formatDuration(video.duration_ms), resolution, fps ? t('video.fps', { fps }) : null].filter(Boolean)
+  const data = tagging.data
+  const rallyCount = data?.segments.filter((s) => s.kind === 'rally').length ?? 0
+  const tagCount = data?.events.length ?? 0
+  const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
   return (
     <div className="flex flex-col gap-3">
-      <VideoPlayer video={video} />
+      <VideoPlayer video={video} videoRef={setElement} />
       {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
+      {showSummary && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-semibold tabular-nums">
+            {`${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
+          </p>
+          {data.can_tag && (
+            // Tagging is a keyboard task: desktop only (PLAN §9.1).
+            <div className="hidden lg:block">
+              <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
+                {t('tagging.tagThis')}
+              </ButtonLink>
+            </div>
+          )}
+        </div>
+      )}
       {video.meets_standard === false && (
         <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
           <p className="flex flex-wrap items-center gap-2 font-semibold">
@@ -214,6 +243,11 @@ function Ready({ video }: { video: Video }) {
             ))}
           </p>
           <p className="text-muted">{t('video.belowStandardNote')}</p>
+        </div>
+      )}
+      {data && rallyCount > 0 && (
+        <div className="mt-3">
+          <RallyPanel tagging={data} duration_ms={video.duration_ms} element={element} playhead={playhead} />
         </div>
       )}
     </div>

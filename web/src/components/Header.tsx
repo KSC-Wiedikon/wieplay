@@ -5,6 +5,7 @@ import { cx } from '../lib/cx'
 import { useLogout } from '../lib/queries'
 import { toggleTheme, useTheme } from '../lib/theme'
 import type { Me } from '../lib/types'
+import { useWidePage } from '../lib/useWidePage'
 import { Mark, Wordmark } from './Brand'
 import { Button } from './Button'
 import { MoonIcon, SunIcon } from './icons'
@@ -40,10 +41,11 @@ export function Header({ me }: { me: Me }) {
   const logout = useLogout()
   const navigate = useNavigate()
   const otherLanguage = i18n.language === 'de' ? 'en' : 'de'
+  const wide = useWidePage()
 
   return (
     <header className="border-b border-hairline bg-surface">
-      <div className="mx-auto flex max-w-5xl items-center gap-1 px-4 py-2 sm:gap-2">
+      <div className={cx('mx-auto flex items-center gap-1 px-4 py-2 sm:gap-2', wide ? 'max-w-[110rem]' : 'max-w-5xl')}>
         <Link
           to="/"
           aria-label={t('header.home')}

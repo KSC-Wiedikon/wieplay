@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-import type { TeamDetail, Video } from '../lib/types'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Tagging, TeamDetail, Video } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
+import { bundle, period, rally, tag } from '../test/tagging'
 import { VideoPage } from './VideoPage'
 
 const ID = '00000000-0000-4000-8000-000000000001'
@@ -209,5 +210,103 @@ describe('VideoPage', () => {
     show(video({ status: 'refused', source: 'import', error: "The video's channel is not on the import allow-list" }))
     expect(await screen.findByText('Not imported')).toBeInTheDocument()
     expect(screen.getByText(/channel or the filming rules did not allow it/)).toBeInTheDocument()
+  })
+
+  describe('rallies and skip dead time', () => {
+    const set1 = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })
+    const r2 = rally({ start_ms: 60_000, end_ms: 70_000, won_by: 'them', period_id: set1.id, score_us_after: 1, score_them_after: 1 })
+    const tagged = (patch: Partial<Tagging> = {}): Tagging =>
+      bundle({
+        can_tag: false,
+        periods: [set1],
+        segments: [r1, r2],
+        events: [
+          tag({ t_ms: 15_000, code: 'A', number: 7, attributes: { grade: '#' } }),
+          tag({ t_ms: 65_000, code: 'A', number: 3, member_id: 103, attributes: { grade: '=' } }),
+        ],
+        ...patch,
+      })
+
+    function play(player: HTMLVideoElement) {
+      Object.defineProperty(player, 'paused', { configurable: true, get: () => false })
+      fireEvent(player, new Event('play'))
+    }
+
+    beforeEach(() => {
+      window.localStorage.clear()
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+    })
+
+    it('plays only the rallies, with 2 s before and 1.5 s after, until switched off', async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
+      const toggle = await screen.findByRole('switch', { name: 'Skip dead time' })
+      expect(toggle).toHaveAttribute('aria-checked', 'true')
+      expect(screen.getByText('2 tags · 2 rallies')).toBeInTheDocument()
+      expect(screen.getByText('Plays only the rallies: 0:27 of 1:32:10.')).toBeInTheDocument()
+
+      const player = document.querySelector('video') as HTMLVideoElement
+      player.currentTime = 0
+      play(player)
+      expect(player.currentTime).toBe(8)
+
+      player.currentTime = 21.4
+      fireEvent(player, new Event('timeupdate'))
+      expect(player.currentTime).toBe(21.4)
+      player.currentTime = 30
+      fireEvent(player, new Event('timeupdate'))
+      expect(player.currentTime).toBe(58)
+
+      fireEvent.click(toggle)
+      expect(toggle).toHaveAttribute('aria-checked', 'false')
+      expect(screen.getByText('Plays the whole video.')).toBeInTheDocument()
+      player.currentTime = 30
+      fireEvent(player, new Event('timeupdate'))
+      expect(player.currentTime).toBe(30)
+      expect(window.localStorage.getItem('nomal-skip-dead-time')).toBe('off')
+    })
+
+    it('lists the rallies with set and score; a click plays from 2 s before', async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
+      const list = await screen.findByRole('table', { name: 'Rallies' })
+      const rows = within(list).getAllByRole('row').slice(1)
+      expect(rows.map((r) => r.textContent)).toEqual(['110:101:0Us', '211:001:1Them'])
+
+      const player = document.querySelector('video') as HTMLVideoElement
+      fireEvent.click(within(list).getByRole('button', { name: 'Play rally 2' }))
+      expect(player.currentTime).toBe(58)
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalled()
+    })
+
+    it('narrows the rallies to those with matching tags, and plays only those', async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
+      const list = await screen.findByRole('table', { name: 'Rallies' })
+      fireEvent.change(screen.getByLabelText('Player'), { target: { value: 'us:3' } })
+      expect(within(list).getAllByRole('row').slice(1)).toHaveLength(1)
+      expect(within(list).getByRole('button', { name: 'Play rally 2' })).toBeInTheDocument()
+
+      const player = document.querySelector('video') as HTMLVideoElement
+      player.currentTime = 0
+      play(player)
+      expect(player.currentTime).toBe(58)
+
+      fireEvent.change(screen.getByLabelText('Grade'), { target: { value: '#' } })
+      expect(screen.getByText('No rallies match the filters.')).toBeInTheDocument()
+    })
+
+    it('offers tagging to coaches', async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged({ can_tag: true, segments: [], events: [] }) } })
+      expect(await screen.findByRole('link', { name: 'Tag this video' })).toHaveAttribute('href', `/videos/${ID}/tag`)
+      expect(screen.getByText('0 tags · 0 rallies')).toBeInTheDocument()
+      // No rallies: the player plays as before.
+      expect(screen.queryByRole('switch', { name: 'Skip dead time' })).not.toBeInTheDocument()
+    })
+
+    it('shows nothing extra when the tagging data is missing', async () => {
+      show(video({}))
+      await screen.findByRole('heading', { level: 1 })
+      await waitFor(() => expect(screen.queryByText(/tags ·/)).not.toBeInTheDocument())
+      expect(screen.queryByRole('link', { name: 'Tag this video' })).not.toBeInTheDocument()
+    })
   })
 })

@@ -79,6 +79,24 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
   the hls.js light build, loaded only on the video page; native HLS where Media Source is missing
   (older iPhones). Segments are 302 redirects to short-lived storage URLs, so the bucket's CORS
   rules must also allow `GET` from the app's origin.
+- **Skip dead time** (`src/components/RallyPanel.tsx`, `src/lib/condensed.ts`): on the video
+  page, when a video has rallies, everyone who can watch it can play only the rallies (2 s
+  before, 1.5 s after, overlapping windows merged), jump through a rally list with the score,
+  and narrow it by player, skill, grade and set.
+- **Tagging workspace** (`/videos/:id/tag`, `src/pages/tag/`, loaded on demand, desktop only):
+  - `src/lib/grammar.ts` parses entries like `7A#`, `a12S=`, `3A#46` for the live preview.
+  - `src/pages/tag/controller.ts` is the keyboard (PLAN §9.2) as plain TypeScript, so fast
+    typing never sees stale React state; `?` in the app lists every key.
+  - `src/lib/taggingStore.ts` shows the server's data with the queued changes on top, keeps
+    undo/redo of this page's own changes, and holds the rally being played (the API needs an
+    end time, so a rally is sent when it ends; the server links tags to rallies by time).
+  - `src/lib/outbox.ts` is the IndexedDB outbox (PLAN §9.6): every change is stored first,
+    coalesced per id, sent in batches to `POST /api/videos/{id}/changes` after 1 s, retried
+    with back-off, replayed after a reload. Each change names the server version it was based
+    on (`base_version`); changes the server reports as `stale` are dropped and shown. A 422 is
+    narrowed down to the one bad change by splitting the batch.
+  - `src/lib/rallies.ts` mirrors the server's scoring for the moments when changes are still
+    queued; after each sync the server's scores are shown.
 - Text is English first, in sentence case. German strings are in `src/i18n/de.ts` (Swiss
   spelling, informal "du"); the type of `de` makes both files keep the same keys.
 

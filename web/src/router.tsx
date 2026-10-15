@@ -24,6 +24,12 @@ const routes: RouteObject[] = [
         path: 'videos/:id',
         lazy: () => import('./pages/VideoPage').then((m) => ({ Component: m.VideoPage })),
       },
+      {
+        // The tagging workspace uses the full width of the window.
+        path: 'videos/:id/tag',
+        handle: { wide: true },
+        lazy: () => import('./pages/TagPage').then((m) => ({ Component: m.TagPage })),
+      },
       { path: 'admin/teams', element: <AdminTeamsPage /> },
       {
         path: 'admin/policies',

@@ -1,6 +1,9 @@
 import type {
   AdminTeam,
   Blocker,
+  ChangesIn,
+  ChangesOut,
+  EventRevision,
   FilmingCheck,
   Game,
   ImportChannel,
@@ -10,7 +13,12 @@ import type {
   PartUrl,
   Policy,
   PolicyUpdate,
+  RosterCandidate,
+  RosterEntry,
+  RosterEntryIn,
   SyncStatus,
+  Tagging,
+  Taxonomy,
   Team,
   TeamDetail,
   UpcomingFilming,
@@ -189,6 +197,20 @@ export const api = {
   completeFile: (videoId: string, fileId: string, signal?: AbortSignal) =>
     apiRequest<Video>(`/api/videos/${videoId}/files/${fileId}/complete`, { method: 'POST', signal }),
   inbox: (signal?: AbortSignal) => apiRequest<InboxFile[]>('/api/inbox', { signal }),
+
+  // Tagging (M2)
+  tagging: (videoId: string, signal?: AbortSignal) =>
+    apiRequest<Tagging>(`/api/videos/${videoId}/tagging`, { signal }),
+  postChanges: (videoId: string, body: ChangesIn, signal?: AbortSignal) =>
+    apiRequest<ChangesOut>(`/api/videos/${videoId}/changes`, { method: 'POST', body, signal }),
+  putRoster: (videoId: string, entries: RosterEntryIn[]) =>
+    apiRequest<RosterEntry[]>(`/api/videos/${videoId}/roster`, { method: 'PUT', body: { entries } }),
+  rosterCandidates: (videoId: string, signal?: AbortSignal) =>
+    apiRequest<RosterCandidate[]>(`/api/videos/${videoId}/roster/candidates`, { signal }),
+  eventRevisions: (eventId: string, signal?: AbortSignal) =>
+    apiRequest<EventRevision[]>(`/api/events/${eventId}/revisions`, { signal }),
+  taxonomy: (sport: string, signal?: AbortSignal) =>
+    apiRequest<Taxonomy>(`/api/taxonomies/${encodeURIComponent(sport)}`, { signal }),
 
   // Filming rules
   filming: (teamId: number, on: string, signal?: AbortSignal) =>

@@ -268,3 +268,212 @@ export interface ImportChannel {
   label: string
   added_at: string
 }
+
+// Tagging (M2, docs/PLAN.md §6.5–§6.7, §9).
+
+export type Side = 'us' | 'them'
+export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
+export type TimePrecision = 'live' | 'adjusted' | 'frame'
+export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
+
+export interface TaxonomySkill {
+  /** One letter for volleyball (S R E A B D F). */
+  code: string
+  /** i18n key, e.g. 'skill.serve'. */
+  name_key: string
+  category: string
+  /** The tag is placed this long before the first keystroke. */
+  lead_ms: number
+  pre_ms: number
+  post_ms: number
+  starts_rally: boolean
+  /** Grade → who wins the rally: the tagged side ('self') or the other one. */
+  ends_rally_on: Record<string, 'self' | 'other'>
+}
+
+export interface Taxonomy {
+  sport: string
+  version: number
+  grades: string[]
+  zones: number[]
+  skills: TaxonomySkill[]
+}
+
+export interface RosterEntry {
+  side: Side
+  number: number
+  member_id: number | null
+  position: string | null
+  is_libero: boolean
+  name: string | null
+}
+
+export interface Period {
+  id: string
+  /** Set (volleyball) or quarter. */
+  no: number
+  start_ms: number
+  end_ms: number | null
+  start_us: number
+  start_them: number
+  first_serve: Side | null
+  our_court_side_at_start: 'near' | 'far' | null
+  side_switch_at_score: number | null
+  /** Computed by the server from the rallies. */
+  final_us: number | null
+  final_them: number | null
+  version: number
+  /** Null while live. Deleted sets only come back in a /changes answer that touched them. */
+  deleted_at: string | null
+}
+
+export interface Segment {
+  id: string
+  kind: SegmentKind
+  start_ms: number
+  end_ms: number
+  /** Computed by the server: the set this segment is in. */
+  period_id: string | null
+  serving: Side | null
+  won_by: Side | null
+  score_us_after: number | null
+  score_them_after: number | null
+  score_source: string | null
+  source: string
+  review: Review
+  version: number
+  /** Null while live. Deleted segments only come back in a /changes answer that touched them. */
+  deleted_at: string | null
+}
+
+export interface TagAttributes {
+  grade?: string
+  zone_from?: number
+  zone_to?: number
+}
+
+/** A tag (`event` in the API; named Tag here so it doesn't shadow the DOM's Event). */
+export interface Tag {
+  id: string
+  code: string
+  t_ms: number
+  frame: number | null
+  time_precision: TimePrecision
+  side: Side
+  number: number | null
+  /** Derived by the server from the roster snapshot. */
+  member_id: number | null
+  attributes: TagAttributes
+  /** Derived by the server: the rally the tag falls in, by time. */
+  segment_id: string | null
+  clip_pre_ms: number | null
+  clip_post_ms: number | null
+  note: string | null
+  source: string
+  review: Review
+  version: number
+  updated_at: string
+  /** Null while live; set on a stale change's answer when the server has the tag deleted. */
+  deleted_at: string | null
+}
+
+export interface Tagging {
+  /** Coaches and team managers of the team, and sport admins, on a ready video. */
+  can_tag: boolean
+  sport: string
+  taxonomy: Taxonomy | null
+  roster: RosterEntry[]
+  periods: Period[]
+  segments: Segment[]
+  events: Tag[]
+  /** Federation set scores as [us, them]; null when unknown. */
+  official_sets: [number, number][] | null
+}
+
+/**
+ * Every change names the server version it was based on: 0 for a new item, else the version
+ * last received. A change based on an older version than the server's is skipped (`stale`).
+ */
+interface ChangeBase {
+  id: string
+  base_version: number
+  deleted?: boolean
+}
+
+export interface EventIn extends ChangeBase {
+  code: string
+  t_ms: number
+  frame?: number | null
+  time_precision: TimePrecision
+  side: Side
+  number?: number | null
+  attributes: TagAttributes
+  /** Ignored by the server (it links tags to rallies itself); always sent as null. */
+  segment_id?: null
+  clip_pre_ms?: number | null
+  clip_post_ms?: number | null
+  note?: string | null
+  review?: Review
+}
+
+/** Who served is always derived by the server. */
+export interface SegmentIn extends ChangeBase {
+  kind: SegmentKind
+  start_ms: number
+  end_ms: number
+  won_by?: Side | null
+  review?: Review
+}
+
+export interface PeriodIn extends ChangeBase {
+  no: number
+  start_ms: number
+  end_ms?: number | null
+  start_us: number
+  start_them: number
+  first_serve?: Side | null
+  our_court_side_at_start?: 'near' | 'far' | null
+  side_switch_at_score?: number | null
+}
+
+export interface ChangesIn {
+  events: EventIn[]
+  segments: SegmentIn[]
+  periods: PeriodIn[]
+}
+
+export interface ChangesOut {
+  /** The events that were sent, with their new version (the server's state for stale ones). */
+  events: Tag[]
+  /** All live segments of the video, rescored, plus the deleted ones this batch touched. */
+  segments: Segment[]
+  /** All live periods of the video, plus the deleted ones this batch touched. */
+  periods: Period[]
+  /** Ids of changes skipped because the server had a newer version. */
+  stale: string[]
+}
+
+export interface RosterEntryIn {
+  side: Side
+  number: number
+  member_id?: number | null
+  position?: string | null
+  is_libero: boolean
+}
+
+/** Someone who can go on the video's roster: a player of the team in any season. */
+export interface RosterCandidate {
+  member_id: number
+  name: string
+  number: number | null
+  /** Only 'accepted' can be added. */
+  consent: 'accepted' | 'withdrawn' | null
+}
+
+export interface EventRevision {
+  version: number
+  action: string
+  changed_by: number | null
+  changed_at: string
+  after: Record<string, unknown>
+}

@@ -11,6 +11,8 @@ export const keys = {
   upcomingFilming: (id: number) => ['teams', id, 'upcoming-filming'] as const,
   videoConfig: ['video-config'] as const,
   video: (id: string) => ['videos', id] as const,
+  tagging: (id: string) => ['videos', id, 'tagging'] as const,
+  rosterCandidates: (id: string) => ['videos', id, 'roster-candidates'] as const,
   inbox: ['inbox'] as const,
   adminTeams: ['admin', 'teams'] as const,
   sync: ['admin', 'sync'] as const,

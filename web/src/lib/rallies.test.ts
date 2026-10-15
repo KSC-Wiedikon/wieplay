@@ -1,0 +1,134 @@
+import { describe, expect, it } from 'vitest'
+import { period, rally, tag, volleyball } from '../test/tagging'
+import {
+  addPoint,
+  periodAt,
+  proposeByKey,
+  proposeByTag,
+  rallyStartForServe,
+  rescore,
+  scoreBefore,
+  serveCodes,
+  winnerFromTags,
+} from './rallies'
+
+const S = serveCodes(volleyball)
+
+describe('periodAt', () => {
+  const one = period({ no: 1, start_ms: 60_000, end_ms: 1_500_000 })
+  const two = period({ no: 2, start_ms: 1_600_000 })
+
+  it('finds the set a moment is in', () => {
+    expect(periodAt([one, two], 100_000)?.no).toBe(1)
+    expect(periodAt([one, two], 2_000_000)?.no).toBe(2)
+  })
+
+  it('has no set before the first one and in the break between sets', () => {
+    expect(periodAt([one, two], 10_000)).toBeNull()
+    expect(periodAt([one, two], 1_550_000)).toBeNull()
+  })
+
+  it('takes the later set when an earlier one was never ended', () => {
+    const open = period({ no: 1, start_ms: 0 })
+    expect(periodAt([open, two], 1_700_000)?.no).toBe(2)
+  })
+})
+
+describe('rescore (same rules as the server)', () => {
+  it('counts the score per set from its starting score', () => {
+    const set = period({ no: 1, start_ms: 0, first_serve: 'us', start_us: 2, start_them: 1 })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us' })
+    const r2 = rally({ start_ms: 30_000, end_ms: 40_000, won_by: 'them' })
+    const r3 = rally({ start_ms: 50_000, end_ms: 60_000, won_by: null })
+    const out = rescore([set], [r3, r1, r2], [], S)
+    const [a, b, c] = out.segments
+    expect(a).toMatchObject({ period_id: set.id, serving: 'us', score_us_after: 3, score_them_after: 1, score_source: 'tags' })
+    expect(b).toMatchObject({ serving: 'us', score_us_after: 3, score_them_after: 2 })
+    // The winner of the previous rally serves; no winner, no score.
+    expect(c).toMatchObject({ serving: 'them', score_us_after: null, score_them_after: null, score_source: null })
+    expect(out.periods[0]).toMatchObject({ final_us: 3, final_them: 2 })
+  })
+
+  it('takes the server from a serve tag in the rally first', () => {
+    const set = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us' })
+    const serve = tag({ code: 'S', side: 'them', t_ms: 9_000 }) // up to 2 s before the rally
+    const out = rescore([set], [r1], [serve], S)
+    expect(out.segments[0]?.serving).toBe('them')
+  })
+
+  it('leaves rallies outside any set without a score', () => {
+    const set = period({ no: 1, start_ms: 100_000 })
+    const before = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', score_us_after: 5, score_them_after: 5 })
+    const out = rescore([set], [before], [], S)
+    expect(out.segments[0]).toMatchObject({ period_id: null, score_us_after: null, score_them_after: null })
+    expect(out.periods[0]).toMatchObject({ final_us: null, final_them: null })
+  })
+
+  it("doesn't touch timeouts and doesn't change its inputs", () => {
+    const set = period({ no: 1, start_ms: 0 })
+    const timeout = rally({ kind: 'timeout', start_ms: 5_000, end_ms: 35_000 })
+    const r1 = rally({ start_ms: 40_000, end_ms: 50_000, won_by: 'us' })
+    const out = rescore([set], [timeout, r1], [], S)
+    expect(out.segments.find((s) => s.id === timeout.id)).toEqual(timeout)
+    expect(r1.score_us_after).toBeNull()
+  })
+})
+
+describe('score and proposals', () => {
+  const set = period({ no: 1, start_ms: 0, first_serve: 'them' })
+  const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', period_id: set.id, score_us_after: 1, score_them_after: 0 })
+  const r2 = rally({ start_ms: 30_000, end_ms: 40_000, won_by: 'us', period_id: set.id, score_us_after: 2, score_them_after: 0 })
+
+  it('knows the score and the server before a moment', () => {
+    expect(scoreBefore(5_000, [set], [r1, r2])).toMatchObject({ us: 0, them: 0, serving: 'them' })
+    expect(scoreBefore(35_000, [set], [r1, r2])).toMatchObject({ us: 1, them: 0, serving: 'us' })
+    expect(scoreBefore(50_000, [set], [r1, r2])).toMatchObject({ us: 2, them: 0, serving: 'us' })
+    expect(scoreBefore(50_000, [set], [r1, r2], r2.id)).toMatchObject({ us: 1, them: 0 })
+  })
+
+  it('counts a won rally that has no server score yet', () => {
+    const local = rally({ start_ms: 45_000, end_ms: 48_000, won_by: 'them' })
+    expect(scoreBefore(50_000, [set], [r1, r2, local])).toMatchObject({ us: 2, them: 1, serving: 'them' })
+  })
+
+  it('adds the point', () => {
+    expect(addPoint({ us: 14, them: 12 }, 'us')).toEqual({ us: 15, them: 12 })
+    expect(addPoint({ us: 14, them: 12 }, 'them')).toEqual({ us: 14, them: 13 })
+    expect(addPoint({ us: 14, them: 12 }, null)).toEqual({ us: 14, them: 12 })
+  })
+
+  it('opens a rally 2 s before the serve, not before the video', () => {
+    expect(rallyStartForServe(12_400)).toBe(10_400)
+    expect(rallyStartForServe(1_000)).toBe(0)
+  })
+
+  it('proposes the end and winner from a rally-ending tag', () => {
+    const open = { id: 'r', start_ms: 60_000 }
+    const kill = { t_ms: 66_000, code: 'A', side: 'us' as const, attributes: { grade: '#' } }
+    expect(proposeByTag(open, kill, volleyball)).toEqual({ rally: open, end_ms: 67_500, winner: 'us', reason: 'tag' })
+    const error = { t_ms: 61_000, code: 'S', side: 'them' as const, attributes: { grade: '=' } }
+    expect(proposeByTag(open, error, volleyball)?.winner).toBe('us')
+  })
+
+  it("doesn't propose without an open rally or for a tag that doesn't end it", () => {
+    const kill = { t_ms: 66_000, code: 'A', side: 'us' as const, attributes: { grade: '#' } }
+    expect(proposeByTag(null, kill, volleyball)).toBeNull()
+    expect(proposeByTag({ id: 'r', start_ms: 0 }, { ...kill, attributes: { grade: '+' } }, volleyball)).toBeNull()
+  })
+
+  it('presets the winner of R from the last rally-ending tag in the rally', () => {
+    const open = { id: 'r', start_ms: 60_000 }
+    const tags = [
+      tag({ t_ms: 50_000, code: 'A', side: 'them', attributes: { grade: '#' } }), // previous rally
+      tag({ t_ms: 62_000, code: 'R', side: 'us', attributes: { grade: '+' } }),
+      tag({ t_ms: 65_000, code: 'A', side: 'us', attributes: { grade: '/' } }), // blocked: them
+    ]
+    expect(proposeByKey(open, 68_000, tags, volleyball)).toEqual({ rally: open, end_ms: 68_000, winner: 'them', reason: 'key' })
+    expect(winnerFromTags(tags.slice(0, 2), volleyball, 60_000, 68_000)).toBeNull()
+  })
+
+  it('never ends a rally before it starts', () => {
+    expect(proposeByKey({ id: 'r', start_ms: 60_000 }, 59_000, [], volleyball).end_ms).toBe(60_001)
+  })
+})
