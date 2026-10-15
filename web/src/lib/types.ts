@@ -295,7 +295,7 @@ export type TimePrecision = 'live' | 'adjusted' | 'frame'
 export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
 
 export interface TaxonomySkill {
-  /** One letter for volleyball (S R E A B D F). */
+  /** One letter for volleyball (S R E A B D F); one or two characters for basketball (S2 S3 FT RO … F). */
   code: string
   /** i18n key, e.g. 'skill.serve'. */
   name_key: string
@@ -305,8 +305,12 @@ export interface TaxonomySkill {
   pre_ms: number
   post_ms: number
   starts_rally: boolean
-  /** Grade → who wins the rally: the tagged side ('self') or the other one. */
+  /** Grade → who wins the rally: the tagged side ('self') or the other one. Empty for basketball. */
   ends_rally_on: Record<string, 'self' | 'other'>
+  /** What the skill adds to the score when made (grade `+`): basketball shots 2, 3, 1; else 0. */
+  points: number
+  /** Whether the skill takes a grade at all (volleyball: every skill; basketball: shots only). */
+  graded: boolean
 }
 
 export interface Taxonomy {
@@ -328,7 +332,7 @@ export interface RosterEntry {
 
 export interface Period {
   id: string
-  /** Set (volleyball) or quarter. */
+  /** Set (volleyball) or quarter (basketball: 1–4, then overtimes from 5). */
   no: number
   start_ms: number
   end_ms: number | null
@@ -337,7 +341,7 @@ export interface Period {
   first_serve: Side | null
   our_court_side_at_start: 'near' | 'far' | null
   side_switch_at_score: number | null
-  /** Computed by the server from the rallies. */
+  /** Computed by the server: from the rallies (volleyball), the running score at its end (basketball). */
   final_us: number | null
   final_them: number | null
   version: number
@@ -406,6 +410,8 @@ export interface Tagging {
   events: Tag[]
   /** Federation set scores as [us, them]; null when unknown. */
   official_sets: [number, number][] | null
+  /** The game's official final result as [us, them] (both sports); null when not played or unknown. */
+  official_final: [number, number] | null
 }
 
 /**

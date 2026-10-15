@@ -11,7 +11,7 @@ import { TagFilters } from '../../components/TagFilters'
 import { filterTags, isFiltered, lastAtOrBefore, NO_FILTER, type TagFilter } from '../../lib/condensed'
 import { cx } from '../../lib/cx'
 import { formatEntry, skillByCode } from '../../lib/grammar'
-import { formatClock, gradeLabel, playerLabel, sideLabel, skillLabel } from '../../lib/labels'
+import { formatClock, gradeLabel, periodLabel, playerLabel, sideLabel, skillLabel } from '../../lib/labels'
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import type { ReelItemIn, RosterEntry, Side, Tag, TagAttributes, Taxonomy } from '../../lib/types'
@@ -56,6 +56,9 @@ export function EventTable() {
   const currentId = usePlayhead(playhead, (s) => lastAtOrBefore(shown, s.t_ms)?.id ?? null)
   const container = useRef<HTMLDivElement>(null)
   const pointerInside = useRef(false)
+  // Basketball has quarters and no zones.
+  const basketball = taxonomy.sport === 'basketball'
+  const zones = taxonomy.zones.length > 0
 
   // Follow the playhead, unless the mouse is in the table (someone is reading or clicking).
   useEffect(() => {
@@ -90,12 +93,12 @@ export function EventTable() {
               <THead className="sticky top-0 z-10 bg-surface">
                 <tr>
                   <Th>{t('tagging.table.time')}</Th>
-                  <Th>{t('tagging.filters.set')}</Th>
+                  <Th>{basketball ? t('tagging.basketball.quarter') : t('tagging.filters.set')}</Th>
                   <Th>{t('tagging.table.entry')}</Th>
                   <Th>{t('tagging.filters.player')}</Th>
                   <Th>{t('tagging.filters.skill')}</Th>
                   <Th>{t('tagging.filters.grade')}</Th>
-                  <Th>{t('tagging.table.zones')}</Th>
+                  {zones && <Th>{t('tagging.table.zones')}</Th>}
                   <Th className="text-right">
                     <span className="sr-only">{t('tagging.table.actions')}</span>
                   </Th>
@@ -127,6 +130,7 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
   const entry = formatEntry(tag)
   const set = periodAt(view.periods, tag.t_ms)
   const { zone_from: from, zone_to: to } = tag.attributes
+  const basketball = taxonomy.sport === 'basketball'
 
   return (
     <Tr
@@ -146,7 +150,7 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
           {formatClock(tag.t_ms)}
         </button>
       </Td>
-      <Td className="tabular-nums">{set?.no ?? '–'}</Td>
+      <Td className="tabular-nums">{set ? (basketball ? periodLabel(t, taxonomy.sport, set.no) : set.no) : '–'}</Td>
       <Td className="font-mono font-bold whitespace-nowrap">
         {entry}
         {tag.time_precision === 'frame' && (
@@ -158,7 +162,9 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
       <Td>{playerLabel(t, tag.side, tag.number, view.roster, tag.member_id)}</Td>
       <Td>{skillLabel(t, skill, tag.code)}</Td>
       <Td>{tag.attributes.grade ? `${tag.attributes.grade} ${gradeLabel(t, skill, tag.attributes.grade)}` : '–'}</Td>
-      <Td className="tabular-nums">{from !== undefined ? (to !== undefined ? `${from} → ${to}` : String(from)) : '–'}</Td>
+      {taxonomy.zones.length > 0 && (
+        <Td className="tabular-nums">{from !== undefined ? (to !== undefined ? `${from} → ${to}` : String(from)) : '–'}</Td>
+      )}
       <Td tight className="text-right whitespace-nowrap">
         <Button variant="ghost" size="icon" aria-label={t('tagging.table.edit', { entry })} onClick={() => controller.edit(tag.id)}>
           <PencilIcon className="size-4" />
@@ -186,6 +192,7 @@ function EditRow({ tag }: { tag: Tag }) {
   const [error, setError] = useState(false)
   const first = useRef<HTMLSelectElement>(null)
   const entry = formatEntry(tag)
+  const graded = skillByCode(taxonomy, code)?.graded ?? true
 
   useEffect(() => first.current?.focus(), [])
 
@@ -196,7 +203,8 @@ function EditRow({ tag }: { tag: Tag }) {
       return
     }
     const attributes: TagAttributes = {}
-    if (grade) attributes.grade = grade
+    // A skill that takes no grade (basketball: all but shots) is saved without one.
+    if (grade && graded) attributes.grade = grade
     if (from) attributes.zone_from = Number(from)
     if (to && from) attributes.zone_to = Number(to)
     controller.updateTag(tag.id, { side, number: trimmed === '' ? null : Number(trimmed), code, attributes })
@@ -248,7 +256,7 @@ function EditRow({ tag }: { tag: Tag }) {
         </Select>
       </Td>
       <Td tight>
-        <Select inline value={grade} onChange={(e) => setGrade(e.target.value)} aria-label={t('tagging.filters.grade')}>
+        <Select inline value={graded ? grade : ''} disabled={!graded} onChange={(e) => setGrade(e.target.value)} aria-label={t('tagging.filters.grade')}>
           <option value="">–</option>
           {taxonomy.grades.map((g) => (
             <option key={g} value={g}>
@@ -257,24 +265,26 @@ function EditRow({ tag }: { tag: Tag }) {
           ))}
         </Select>
       </Td>
-      <Td tight className="whitespace-nowrap">
-        <Select inline value={from} onChange={(e) => setFrom(e.target.value)} aria-label={t('tagging.table.zoneFrom')}>
-          <option value="">–</option>
-          {zones.map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </Select>{' '}
-        <Select inline value={to} disabled={!from} onChange={(e) => setTo(e.target.value)} aria-label={t('tagging.table.zoneTo')}>
-          <option value="">–</option>
-          {zones.map((z) => (
-            <option key={z} value={z}>
-              {z}
-            </option>
-          ))}
-        </Select>
-      </Td>
+      {zones.length > 0 && (
+        <Td tight className="whitespace-nowrap">
+          <Select inline value={from} onChange={(e) => setFrom(e.target.value)} aria-label={t('tagging.table.zoneFrom')}>
+            <option value="">–</option>
+            {zones.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </Select>{' '}
+          <Select inline value={to} disabled={!from} onChange={(e) => setTo(e.target.value)} aria-label={t('tagging.table.zoneTo')}>
+            <option value="">–</option>
+            {zones.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </Select>
+        </Td>
+      )}
       <Td tight className="text-right whitespace-nowrap">
         <Button variant="primary" onClick={save} aria-label={t('tagging.table.saveEdit', { entry })}>
           {t('common.save')}

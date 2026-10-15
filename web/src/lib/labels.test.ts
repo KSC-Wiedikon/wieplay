@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import i18n from '../i18n'
 import '../i18n/pages'
-import { pieceFacts, pieceLabel } from './labels'
+import { gradeLabel, periodLabel, pieceFacts, pieceLabel, segmentKindLabel, skillLabel } from './labels'
 import type { Piece } from './types'
-import { volleyball } from '../test/tagging'
+import { basketball, volleyball } from '../test/tagging'
 
 const t = i18n.getFixedT('en')
 const attack = volleyball.skills.find((s) => s.code === 'A') ?? null
@@ -51,5 +51,40 @@ describe('pieceFacts', () => {
   it('is empty when neither is known', () => {
     expect(pieceFacts(piece({ score_us: null, score_them: null }))).toBe('')
     expect(pieceFacts(piece({ code: null, event_id: null, member_id: null, player_name: null, score_us: null, score_them: null }))).toBe('')
+  })
+})
+
+describe('basketball labels', () => {
+  const de = i18n.getFixedT('de')
+  const skill = (code: string) => basketball.skills.find((s) => s.code === code) ?? null
+
+  it('names every basketball skill in English and German', () => {
+    expect(basketball.skills.map((s) => skillLabel(t, s))).toEqual([
+      'Two-pointer', 'Three-pointer', 'Free throw', 'Offensive rebound', 'Defensive rebound', 'Assist', 'Turnover', 'Steal', 'Block', 'Foul',
+    ])
+    expect(basketball.skills.map((s) => skillLabel(de, s))).toEqual([
+      'Zweier', 'Dreier', 'Freiwurf', 'Offensivrebound', 'Defensivrebound', 'Assist', 'Ballverlust', 'Steal', 'Block', 'Foul',
+    ])
+  })
+
+  it('says made or missed for shots', () => {
+    expect(gradeLabel(t, skill('S3'), '+')).toBe('Made')
+    expect(gradeLabel(t, skill('FT'), '-')).toBe('Missed')
+    expect(gradeLabel(de, skill('S2'), '+')).toBe('Getroffen')
+    expect(gradeLabel(de, skill('S2'), '-')).toBe('Verfehlt')
+    expect(gradeLabel(t, skill('RO'), '+')).toBe('+')
+  })
+
+  it('counts quarters, then overtimes', () => {
+    expect([1, 4, 5, 6].map((no) => periodLabel(t, 'basketball', no))).toEqual(['Q1', 'Q4', 'OT', 'OT2'])
+    expect([1, 5, 6].map((no) => periodLabel(de, 'basketball', no))).toEqual(['1. Viertel', 'Verlängerung', '2. Verlängerung'])
+    expect(periodLabel(t, 'volleyball', 2)).toBe('Set 2')
+  })
+
+  it('calls a break between quarters a quarter break', () => {
+    expect(segmentKindLabel(t, 'set_break', 'basketball')).toBe('Quarter break')
+    expect(segmentKindLabel(t, 'set_break', 'volleyball')).toBe('Set break')
+    expect(segmentKindLabel(t, 'timeout', 'basketball')).toBe('Timeout')
+    expect(skillLabel(t, volleyball.skills[0])).toBe('Serve')
   })
 })

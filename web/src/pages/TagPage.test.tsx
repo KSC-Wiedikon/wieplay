@@ -3,10 +3,10 @@ import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { rescore, serveCodes } from '../lib/rallies'
+import { rescoreFor } from '../lib/rallies'
 import type { ChangesIn, ChangesOut, Period, RosterCandidate, Segment, Tag, Tagging, Video } from '../lib/types'
 import { jsonResponse, renderRoute, stubFetch } from '../test/render'
-import { bundle, period, tag, volleyball } from '../test/tagging'
+import { basketballBundle, bundle, period, tag } from '../test/tagging'
 import { TagPage } from './TagPage'
 
 const ID = '00000000-0000-4000-8000-0000000000b1'
@@ -45,7 +45,7 @@ const video: Video = {
   files: [],
 }
 
-/** A tiny in-memory API for /changes, scoring like the real one. Deleted rows are kept with deleted_at. */
+/** A tiny in-memory API for /changes, scoring like the real one (per sport). Deleted rows are kept with deleted_at. */
 function fakeServer(initial: Tagging) {
   const events = new Map(initial.events.map((e) => [e.id, e]))
   const segments = new Map(initial.segments.map((s) => [s.id, s]))
@@ -74,7 +74,7 @@ function fakeServer(initial: Tagging) {
       events.set(e.id, row)
       return row
     })
-    const scored = rescore(live(periods), live(segments), live(events), serveCodes(volleyball))
+    const scored = rescoreFor(initial.taxonomy, live(periods), live(segments), live(events))
     for (const s of scored.segments) segments.set(s.id, s)
     for (const p of scored.periods) periods.set(p.id, p)
     const touched = new Set([...input.segments.map((s) => s.id), ...input.periods.map((p) => p.id)])
@@ -620,5 +620,185 @@ describe('TagPage', () => {
     await ready()
     expect(screen.queryByRole('region', { name: 'Drills' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Drill/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('TagPage, basketball', () => {
+  const herren1: Partial<Video> = { sport: 'basketball', team_name: 'Herren 1', title: 'KSCW Herren 1 – BC Bären Kleinbasel' }
+  const q1 = () => period({ no: 1, start_ms: 0, final_us: 0, final_them: 0 })
+  const showGame = (data: Tagging = basketballBundle({ periods: [q1()] })) => show(data, { videoPatch: herren1 })
+  const state = () => screen.getByRole('region', { name: 'Match state' })
+  const at = (player: HTMLVideoElement, seconds: number) => {
+    player.currentTime = seconds
+    fireEvent(player, new Event('timeupdate'))
+  }
+
+  it('keeps the running score from made shots: 23S3+ then a4S2+ is 3:2', async () => {
+    const { server } = showGame()
+    const player = await ready()
+    expect(state()).toHaveTextContent(/Q1\s*0:0/)
+
+    at(player, 12.5)
+    type('23S')
+    expect(screen.getByText(/Next: the code \(S2 S3 FT RO RD AS TO ST BL F\)/)).toBeInTheDocument()
+    type('3')
+    expect(screen.getByText(/#23 David Frei · Three-pointer/)).toBeInTheDocument()
+    expect(screen.getByText('Next: + made or - missed, or Enter')).toBeInTheDocument()
+    type('+')
+    expect(screen.getByText(/#23 David Frei · Three-pointer · \+ Made/)).toBeInTheDocument()
+    keys('Enter')
+    expect(screen.getByText('Saved 23S3+.')).toBeInTheDocument()
+    expect(state()).toHaveTextContent(/Q1\s*3:0/)
+
+    at(player, 20)
+    type('a4S2+')
+    keys('Enter')
+    at(player, 25)
+    type('5FT-')
+    keys('Enter')
+    expect(state()).toHaveTextContent(/Q1\s*3:2/)
+    const table = screen.getByRole('table', { name: 'Tags' })
+    expect(within(table).getByText('a4S2+')).toBeInTheDocument()
+    expect(within(table).getAllByText('+ Made')).toHaveLength(2)
+    expect(within(table).getByText('- Missed')).toBeInTheDocument()
+    expect(within(table).queryByRole('columnheader', { name: 'Zones' })).not.toBeInTheDocument()
+    expect(within(table).getAllByRole('columnheader')[1]).toHaveTextContent('Quarter')
+
+    await waitFor(() => expect(server.posts.length).toBeGreaterThan(0), { timeout: 3000 })
+    await screen.findByText('All changes saved')
+    const sent = server.posts.flatMap((p) => p.events)
+    expect(sent.map((e) => [e.code, e.side, e.number, e.t_ms, e.attributes])).toEqual([
+      ['S3', 'us', 23, 12_200, { grade: '+' }],
+      ['S2', 'them', 4, 19_700, { grade: '+' }],
+      ['FT', 'us', 5, 24_800, { grade: '-' }],
+    ])
+    expect(server.posts.flatMap((p) => p.segments)).toEqual([])
+    // After the sync: the server's quarter final, and the same score at the playhead.
+    expect(screen.getByRole('button', { name: 'Edit Q1' })).toHaveTextContent('3:2')
+    expect(state()).toHaveTextContent(/Q1\s*3:2/)
+    expect(state()).not.toHaveTextContent(/Serve|Rally/)
+  })
+
+  it('has no rallies, serve or zones: R does nothing, there is no dead time to skip', async () => {
+    showGame()
+    const player = await ready()
+    at(player, 30)
+    keys('r')
+    expect(screen.queryByText(/Rally started/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('switch', { name: 'Skip dead time' })).not.toBeInTheDocument()
+    expect(screen.getByText('Type to tag, e.g. 23S3+')).toBeInTheDocument()
+
+    keys('b')
+    expect(screen.getByText('Quarter break added. Adjust it below the timeline.')).toBeInTheDocument()
+    const panel = screen.getByRole('region', { name: 'Quarter break' })
+    expect(within(panel).queryByRole('option', { name: 'Rally' })).not.toBeInTheDocument()
+    expect(within(panel).getByText('2:30.0')).toBeInTheDocument() // 2 minutes from 0:30
+  })
+
+  it("explains entries it can't save", async () => {
+    showGame()
+    await ready()
+    type('11RO+')
+    expect(screen.getByText('RO takes no grade')).toBeInTheDocument()
+    keys('Enter')
+    expect(screen.getByText("Can't save 11RO+: RO takes no grade.")).toBeInTheDocument()
+    keys('Escape')
+    type('23S')
+    keys('Enter')
+    expect(screen.getByText("Can't save 23S: The code is missing or not finished.")).toBeInTheDocument()
+    keys('Escape')
+    type('7X')
+    expect(screen.getByText('X is not a skill')).toBeInTheDocument()
+    keys('Escape')
+    type('23S3+4')
+    expect(screen.getByText('Expected: number, code, grade')).toBeInTheDocument()
+  })
+
+  it('adds quarters: a starting score for the first one only, no first serve', async () => {
+    const { server } = showGame(basketballBundle())
+    const player = await ready()
+    expect(screen.getByText(/No quarters yet/)).toBeInTheDocument()
+    expect(state()).toHaveTextContent('No quarter')
+
+    at(player, 5)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Q1 at 0:05' }))
+    let form = screen.getByRole('form', { name: 'New Q1' })
+    expect(within(form).queryByText('First serve')).not.toBeInTheDocument()
+    fireEvent.change(within(form).getByLabelText('Starting score Us'), { target: { value: '12' } })
+    fireEvent.change(within(form).getByLabelText('Starting score Them'), { target: { value: '9' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save quarter' }))
+    expect(state()).toHaveTextContent(/Q1\s*12:9/)
+
+    at(player, 700)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Q2 at 11:40' }))
+    form = screen.getByRole('form', { name: 'New Q2' })
+    expect(within(form).queryByLabelText('Starting score Us')).not.toBeInTheDocument()
+    fireEvent.click(within(form).getByRole('button', { name: 'Save quarter' }))
+    expect(state()).toHaveTextContent(/Q2\s*12:9/)
+
+    await waitFor(() => expect(server.posts.length).toBeGreaterThan(0), { timeout: 3000 })
+    await screen.findByText('All changes saved')
+    const sent = server.posts.flatMap((p) => p.periods)
+    expect(sent).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ no: 1, start_ms: 5_000, end_ms: 700_000, start_us: 12, start_them: 9, first_serve: null }),
+        expect.objectContaining({ no: 2, start_ms: 700_000, end_ms: null }),
+      ]),
+    )
+  })
+
+  it('compares the last quarter with the official final', async () => {
+    const quarters = (q4: [number, number]) => [
+      period({ no: 1, start_ms: 0, end_ms: 600_000, final_us: 20, final_them: 18 }),
+      period({ no: 2, start_ms: 700_000, end_ms: 1_300_000, final_us: 41, final_them: 40 }),
+      period({ no: 3, start_ms: 2_200_000, end_ms: 2_800_000, final_us: 60, final_them: 58 }),
+      period({ no: 4, start_ms: 2_900_000, end_ms: 3_500_000, final_us: q4[0], final_them: q4[1] }),
+    ]
+    const { unmount } = showGame(basketballBundle({ periods: quarters([78, 75]), official_final: [80, 75] }))
+    await ready()
+    const bar = screen.getByRole('region', { name: 'Quarters' })
+    expect(within(bar).getAllByRole('button', { name: /^Edit Q\d$/ })).toHaveLength(4)
+    expect(within(bar).getByText('Official final 80:75')).toBeInTheDocument()
+    expect(within(bar).getAllByText(/Official final/)).toHaveLength(1)
+    unmount()
+
+    showGame(basketballBundle({ periods: [...quarters([80, 75]), period({ no: 5, start_ms: 3_600_000, final_us: 80, final_them: 75 })], official_final: [80, 75] }))
+    await ready()
+    // The overtime is running: not compared yet.
+    expect(screen.getByRole('button', { name: 'Edit OT' })).toBeInTheDocument()
+    expect(screen.queryByText(/Official final/)).not.toBeInTheDocument()
+  })
+
+  it('edits a tag in the table: a skill that takes no grade loses it', async () => {
+    const shot = tag({ id: '00000000-0000-4000-8000-00000000d001', t_ms: 15_000, code: 'S3', number: 23, member_id: 223, attributes: { grade: '+' }, version: 2 })
+    const { server } = showGame(basketballBundle({ periods: [q1()], events: [shot] }))
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit 23S3+' }))
+    const row = screen.getByRole('button', { name: 'Save 23S3+' }).closest('tr') as HTMLElement
+    expect(within(row).queryByLabelText('Zone from')).not.toBeInTheDocument()
+    expect(within(row).getByRole('option', { name: '+ Made' })).toBeInTheDocument()
+    fireEvent.change(within(row).getByLabelText('Skill'), { target: { value: 'RO' } })
+    expect(within(row).getByLabelText('Grade')).toBeDisabled()
+    fireEvent.click(within(row).getByRole('button', { name: 'Save 23S3+' }))
+    expect(within(screen.getByRole('table', { name: 'Tags' })).getByText('23RO')).toBeInTheDocument()
+
+    await waitFor(() => expect(server.posts).toHaveLength(1), { timeout: 3000 })
+    expect(server.posts[0]?.events).toEqual([expect.objectContaining({ id: shot.id, code: 'RO', attributes: {}, base_version: 2 })])
+  })
+
+  it('shows the basketball grammar and codes with ?', async () => {
+    showGame()
+    await ready()
+    keys('?')
+    const dialog = screen.getByRole('dialog', { name: 'Keys' })
+    expect(within(dialog).getByText('[a] number · code · [grade]')).toBeInTheDocument()
+    expect(within(dialog).getByText('23S3+')).toBeInTheDocument()
+    expect(within(dialog).getByText('our #23 three-pointer, made')).toBeInTheDocument()
+    expect(within(dialog).getByRole('rowheader', { name: 'S3 Three-pointer' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('rowheader', { name: 'RO Offensive rebound' })).toBeInTheDocument()
+    expect(within(dialog).getAllByText('Made')).toHaveLength(3)
+    expect(within(dialog).queryByText('Kill')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/Start a rally/)).not.toBeInTheDocument()
+    expect(within(dialog).getByText('Quarter break here (2 min, adjustable)')).toBeInTheDocument()
   })
 })

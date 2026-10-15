@@ -4,6 +4,9 @@
 // (backend/nomal/core/tagging.py: rescore). While changes are still in the outbox, the
 // workspace shows the same computation done locally, marked as provisional; after each sync
 // the server's values replace it.
+//
+// Basketball has no rallies: its score is a running total of the made shots across the
+// quarters (backend: _rescore_basketball), done here the same way.
 
 import { rallyWinner, skillByCode } from './grammar'
 import type { Period, Segment, Side, Tag, Taxonomy } from './types'
@@ -100,6 +103,51 @@ export function rescore(
   return { periods: finished, segments: [...out.values()].sort(byStart) }
 }
 
+/** What a tag adds to its side's score: a made shot's points (basketball), else 0. Same as the server. */
+export function shotPoints(taxonomy: Taxonomy, code: string, grade: string | null | undefined): number {
+  return grade === '+' ? (skillByCode(taxonomy, code)?.points ?? 0) : 0
+}
+
+/**
+ * Basketball's rescore, done locally: a running score across the quarters, seeded by the first
+ * quarter's starting score (a recording may start mid-game); every made shot inside a quarter
+ * adds its points, and a quarter's final is the running score at its end. Shots before the first
+ * quarter, between quarters and after the last one count nothing. Returns new periods.
+ */
+export function rescoreShots(periods: readonly Period[], tags: readonly Tag[], taxonomy: Taxonomy): Period[] {
+  const ordered = sortedPeriods(periods)
+  const shots = [...tags].sort((a, b) => a.t_ms - b.t_ms)
+  let us = ordered[0]?.start_us ?? 0
+  let them = ordered[0]?.start_them ?? 0
+  let at = 0
+  return ordered.map((period, n) => {
+    // A quarter left open ends where the next one starts.
+    const end = period.end_ms ?? ordered[n + 1]?.start_ms ?? null
+    for (; at < shots.length; at += 1) {
+      const shot = shots[at] as Tag
+      if (end !== null && shot.t_ms >= end) break
+      const points = shotPoints(taxonomy, shot.code, shot.attributes.grade)
+      if (shot.t_ms < period.start_ms || !points) continue
+      if (shot.side === 'us') us += points
+      else them += points
+    }
+    return { ...period, final_us: us, final_them: them }
+  })
+}
+
+/** The server's rescore for the taxonomy's sport (rallies, or basketball's made shots). */
+export function rescoreFor(
+  taxonomy: Taxonomy | null,
+  periods: readonly Period[],
+  segments: readonly Segment[],
+  tags: readonly Tag[],
+): { periods: Period[]; segments: Segment[] } {
+  if (taxonomy?.sport === 'basketball') {
+    return { periods: rescoreShots(periods, tags, taxonomy), segments: [...segments].sort(byStart) }
+  }
+  return rescore(periods, segments, tags, serveCodes(taxonomy))
+}
+
 export interface ScoreState {
   period: Period | null
   us: number
@@ -138,6 +186,33 @@ export function scoreBefore(
     }
   }
   return { period, us, them, serving }
+}
+
+/**
+ * Basketball's score at a moment: the previous quarter's final (the server's, once synced) plus
+ * the made shots of the quarter up to then. `period` is the quarter the score counts in, the last
+ * one started by then (it may have ended: a break shows the score at its end). Before the first
+ * quarter there is no score.
+ */
+export function shotScoreAt(t_ms: number, periods: readonly Period[], tags: readonly Tag[], taxonomy: Taxonomy): ScoreState {
+  const ordered = sortedPeriods(periods)
+  const n = ordered.findLastIndex((p) => p.start_ms <= t_ms)
+  const period = ordered[n]
+  if (!period) return { period: null, us: 0, them: 0, serving: null }
+  let before = n > 0 ? (ordered[n - 1] as Period) : null
+  if (before && (before.final_us === null || before.final_them === null)) {
+    before = rescoreShots(ordered, tags, taxonomy)[n - 1] as Period
+  }
+  let us = before ? (before.final_us ?? 0) : period.start_us
+  let them = before ? (before.final_them ?? 0) : period.start_them
+  const end = Math.min(t_ms + 1, period.end_ms ?? Infinity)
+  for (const tag of tags) {
+    if (tag.t_ms < period.start_ms || tag.t_ms >= end) continue
+    const points = shotPoints(taxonomy, tag.code, tag.attributes.grade)
+    if (tag.side === 'us') us += points
+    else them += points
+  }
+  return { period, us, them, serving: null }
 }
 
 /** The score after a rally won by `winner`, from the score before it. */

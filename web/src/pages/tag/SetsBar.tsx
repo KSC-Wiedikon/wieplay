@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '../../components/Badge'
@@ -5,22 +6,77 @@ import { Button } from '../../components/Button'
 import { Select, TextInput } from '../../components/Field'
 import { AlertIcon, CheckIcon } from '../../components/icons'
 import { cx } from '../../lib/cx'
-import { formatClock, sideLabel } from '../../lib/labels'
+import { formatClock, periodLabel, sideLabel } from '../../lib/labels'
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import { newId, periodToIn } from '../../lib/taggingStore'
 import type { Period, PeriodIn, Side } from '../../lib/types'
 import { useView, useWorkspace } from './context'
 
-/** The sets: add one at the playhead, end it, and compare its final score with the official one. */
+/** The bar's words: sets (volleyball) or quarters and overtimes (basketball). */
+function periodTexts(t: TFunction, sport: string) {
+  const name = (no: number) => periodLabel(t, sport, no)
+  if (sport !== 'basketball') {
+    return {
+      title: t('tagging.sets.title'),
+      none: t('tagging.sets.none'),
+      name,
+      add: (no: number, time: string) => t('tagging.sets.add', { no, time }),
+      end: (no: number, time: string) => t('tagging.sets.end', { no, time }),
+      edit: (no: number) => t('tagging.sets.edit', { no }),
+      newTitle: (no: number) => t('tagging.sets.newTitle', { no }),
+      remove: (no: number) => t('tagging.sets.delete', { no }),
+      official: (us: number, them: number) => t('tagging.sets.official', { us, them }),
+      matches: t('tagging.sets.matches'),
+      mismatch: (us: number, them: number) => t('tagging.sets.mismatch', { us, them }),
+      number: t('tagging.sets.number'),
+      startScore: t('tagging.sets.startScore'),
+      save: t('tagging.sets.save'),
+      duplicate: (no: number) => t('tagging.sets.errors.duplicate', { no }),
+      order: t('tagging.sets.errors.order'),
+    }
+  }
+  return {
+    title: t('tagging.basketball.quarters.title'),
+    none: t('tagging.basketball.quarters.none'),
+    name,
+    add: (no: number, time: string) => t('tagging.basketball.quarters.add', { period: name(no), time }),
+    end: (no: number, time: string) => t('tagging.basketball.quarters.end', { period: name(no), time }),
+    edit: (no: number) => t('tagging.basketball.quarters.edit', { period: name(no) }),
+    newTitle: (no: number) => t('tagging.basketball.quarters.newTitle', { period: name(no) }),
+    remove: (no: number) => t('tagging.basketball.quarters.delete', { period: name(no) }),
+    official: (us: number, them: number) => t('tagging.basketball.quarters.official', { us, them }),
+    matches: t('tagging.basketball.quarters.matches'),
+    mismatch: (us: number, them: number) => t('tagging.basketball.quarters.mismatch', { us, them }),
+    number: t('tagging.basketball.quarter'),
+    startScore: t('tagging.basketball.quarters.startScore'),
+    save: t('tagging.basketball.quarters.save'),
+    duplicate: (no: number) => t('tagging.basketball.quarters.errors.duplicate', { period: name(no) }),
+    order: t('tagging.basketball.quarters.errors.order'),
+  }
+}
+
+type Texts = ReturnType<typeof periodTexts>
+
+/**
+ * The sets (basketball: quarters): add one at the playhead, end it, and compare its final score
+ * with the official one. A basketball game has one official result, the final: it is compared
+ * with the last quarter once that is the fourth or later and has ended.
+ */
 export function SetsBar() {
   const { t } = useTranslation()
-  const { playhead, controller, bundle } = useWorkspace()
+  const { playhead, controller, bundle, taxonomy } = useWorkspace()
   const view = useView()
   const seconds = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 1000))
   const now = seconds * 1000
   const [form, setForm] = useState<PeriodIn | null>(null)
-  const official = bundle.official_sets
+  const texts = periodTexts(t, taxonomy.sport)
+  const basketball = taxonomy.sport === 'basketball'
+  const last = view.periods.at(-1)
+  const officialOf = (p: Period): [number, number] | null => {
+    if (!basketball) return bundle.official_sets?.[p.no - 1] ?? null
+    return p.id === last?.id && p.no >= 4 ? bundle.official_final : null
+  }
 
   const running = periodAt(view.periods, now)
   const nextNo = Math.min(9, Math.max(0, ...view.periods.map((p) => p.no)) + 1)
@@ -32,20 +88,18 @@ export function SetsBar() {
     <section aria-labelledby="sets-title" className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <h2 id="sets-title" className="mr-1 font-semibold">
-          {t('tagging.sets.title')}
+          {texts.title}
         </h2>
-        {view.periods.length === 0 && <p className="text-sm text-muted">{t('tagging.sets.none')}</p>}
+        {view.periods.length === 0 && <p className="text-sm text-muted">{texts.none}</p>}
         <ul className="contents">
           {view.periods.map((p) => (
             <li key={p.id}>
-              <SetChip period={p} official={official?.[p.no - 1] ?? null} current={running?.id === p.id} onEdit={() => setForm(periodToIn(p))} />
+              <SetChip period={p} official={officialOf(p)} current={running?.id === p.id} texts={texts} onEdit={() => setForm(periodToIn(p))} />
             </li>
           ))}
         </ul>
         {running && running.end_ms === null && now > running.start_ms && (
-          <Button onClick={() => controller.endPeriod(running.id)}>
-            {t('tagging.sets.end', { no: running.no, time: formatClock(now, { tenths: false }) })}
-          </Button>
+          <Button onClick={() => controller.endPeriod(running.id)}>{texts.end(running.no, formatClock(now, { tenths: false }))}</Button>
         )}
         {canAdd && (
           <Button
@@ -53,7 +107,7 @@ export function SetsBar() {
               setForm({ id: newId(), base_version: 0, no: nextNo, start_ms: now, end_ms: null, start_us: 0, start_them: 0, first_serve: null })
             }
           >
-            {t('tagging.sets.add', { no: nextNo, time: formatClock(now, { tenths: false }) })}
+            {texts.add(nextNo, formatClock(now, { tenths: false }))}
           </Button>
         )}
       </div>
@@ -63,6 +117,8 @@ export function SetsBar() {
           initial={form}
           isNew={!view.periods.some((p) => p.id === form.id)}
           periods={view.periods}
+          texts={texts}
+          basketball={basketball}
           onCancel={() => setForm(null)}
           onSave={(period) => {
             controller.savePeriod(period)
@@ -78,7 +134,19 @@ export function SetsBar() {
   )
 }
 
-function SetChip({ period, official, current, onEdit }: { period: Period; official: [number, number] | null; current: boolean; onEdit: () => void }) {
+function SetChip({
+  period,
+  official,
+  current,
+  texts,
+  onEdit,
+}: {
+  period: Period
+  official: [number, number] | null
+  current: boolean
+  texts: Texts
+  onEdit: () => void
+}) {
   const { t } = useTranslation()
   const hasFinal = period.final_us !== null && period.final_them !== null
   // A running set is not compared yet.
@@ -87,21 +155,21 @@ function SetChip({ period, official, current, onEdit }: { period: Period; offici
   const range = `${formatClock(period.start_ms, { tenths: false })}–${period.end_ms === null ? t('tagging.sets.running') : formatClock(period.end_ms, { tenths: false })}`
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
-      <Button onClick={onEdit} className={cx(current && 'ring-2 ring-accent')} aria-label={t('tagging.sets.edit', { no: period.no })}>
-        <span className="font-bold">{t('tagging.setNo', { no: period.no })}</span>
+      <Button onClick={onEdit} className={cx(current && 'ring-2 ring-accent')} aria-label={texts.edit(period.no)}>
+        <span className="font-bold">{texts.name(period.no)}</span>
         <span className="font-normal text-muted tabular-nums">{range}</span>
         {hasFinal && <span className="tabular-nums">{`${period.final_us}:${period.final_them}`}</span>}
       </Button>
       {official && hasFinal && period.end_ms !== null && !mismatch && (
-        <span className="inline-flex items-center gap-1 text-xs text-muted" title={t('tagging.sets.official', { us: official[0], them: official[1] })}>
+        <span className="inline-flex items-center gap-1 text-xs text-muted" title={texts.official(official[0], official[1])}>
           <CheckIcon className="size-4" />
-          <span className="sr-only">{t('tagging.sets.matches')}</span>
+          <span className="sr-only">{texts.matches}</span>
         </span>
       )}
       {mismatch && official && (
         <Badge tone="danger" className="gap-1">
           <AlertIcon className="size-3.5" />
-          {t('tagging.sets.mismatch', { us: official[0], them: official[1] })}
+          {texts.mismatch(official[0], official[1])}
         </Badge>
       )}
     </span>
@@ -112,12 +180,15 @@ interface SetFormProps {
   initial: PeriodIn
   isNew: boolean
   periods: readonly Period[]
+  texts: Texts
+  /** No first serve; a starting score only for the first quarter (the score runs on from there). */
+  basketball: boolean
   onSave: (period: PeriodIn) => void
   onCancel: () => void
   onDelete: () => void
 }
 
-function SetForm({ initial, isNew, periods, onSave, onCancel, onDelete }: SetFormProps) {
+function SetForm({ initial, isNew, periods, texts, basketball, onSave, onCancel, onDelete }: SetFormProps) {
   const { t } = useTranslation()
   const id = useId()
   const { playhead } = useWorkspace()
@@ -127,13 +198,17 @@ function SetForm({ initial, isNew, periods, onSave, onCancel, onDelete }: SetFor
   const here = () => playhead.getState().t_ms
   const score = (text: string) => Math.min(99, Math.max(0, Number.parseInt(text, 10) || 0))
 
+  // The server seeds basketball's running score with the first quarter's starting score only.
+  const first = !periods.some((p) => p.id !== value.id && (p.start_ms < value.start_ms || (p.start_ms === value.start_ms && p.no < value.no)))
+  const startScore = !basketball || first
+
   const save = () => {
     if (periods.some((p) => p.no === value.no && p.id !== value.id)) {
-      setError(t('tagging.sets.errors.duplicate', { no: value.no }))
+      setError(texts.duplicate(value.no))
       return
     }
     if (value.end_ms != null && value.end_ms <= value.start_ms) {
-      setError(t('tagging.sets.errors.order'))
+      setError(texts.order)
       return
     }
     onSave(value)
@@ -142,7 +217,7 @@ function SetForm({ initial, isNew, periods, onSave, onCancel, onDelete }: SetFor
   return (
     <form
       className="flex flex-col gap-3 rounded-2xl border border-hairline bg-surface p-4"
-      aria-label={isNew ? t('tagging.sets.newTitle', { no: value.no }) : t('tagging.sets.edit', { no: value.no })}
+      aria-label={isNew ? texts.newTitle(value.no) : texts.edit(value.no)}
       onSubmit={(e) => {
         e.preventDefault()
         save()
@@ -150,11 +225,11 @@ function SetForm({ initial, isNew, periods, onSave, onCancel, onDelete }: SetFor
     >
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${id}-no`}>
-          {t('tagging.sets.number')}
+          {texts.number}
           <Select id={`${id}-no`} inline value={value.no} onChange={(e) => set({ no: Number(e.target.value) })}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
               <option key={n} value={n}>
-                {n}
+                {basketball ? texts.name(n) : n}
               </option>
             ))}
           </Select>
@@ -178,42 +253,47 @@ function SetForm({ initial, isNew, periods, onSave, onCancel, onDelete }: SetFor
             )}
           </span>
         </div>
-        <fieldset className="flex flex-col gap-1 text-sm">
-          <legend className="mb-1 font-semibold">{t('tagging.sets.startScore')}</legend>
-          <span className="flex items-center gap-1">
-            <TextInput
+        {startScore && (
+          <fieldset className="flex flex-col gap-1 text-sm">
+            <legend className="mb-1 font-semibold">{texts.startScore}</legend>
+            <span className="flex items-center gap-1">
+              <TextInput
+                inline
+                className="w-14 tabular-nums"
+                inputMode="numeric"
+                aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'us') })}
+                value={value.start_us}
+                onChange={(e) => set({ start_us: score(e.target.value) })}
+              />
+              <span aria-hidden="true">:</span>
+              <TextInput
+                inline
+                className="w-14 tabular-nums"
+                inputMode="numeric"
+                aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'them') })}
+                value={value.start_them}
+                onChange={(e) => set({ start_them: score(e.target.value) })}
+              />
+            </span>
+          </fieldset>
+        )}
+        {!basketball && (
+          <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${id}-serve`}>
+            {t('tagging.sets.firstServe')}
+            <Select
+              id={`${id}-serve`}
               inline
-              className="w-14 tabular-nums"
-              inputMode="numeric"
-              aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'us') })}
-              value={value.start_us}
-              onChange={(e) => set({ start_us: score(e.target.value) })}
-            />
-            <span aria-hidden="true">:</span>
-            <TextInput
-              inline
-              className="w-14 tabular-nums"
-              inputMode="numeric"
-              aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'them') })}
-              value={value.start_them}
-              onChange={(e) => set({ start_them: score(e.target.value) })}
-            />
-          </span>
-        </fieldset>
-        <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${id}-serve`}>
-          {t('tagging.sets.firstServe')}
-          <Select
-            id={`${id}-serve`}
-            inline
-            value={value.first_serve ?? ''}
-            onChange={(e) => set({ first_serve: e.target.value === '' ? null : (e.target.value as Side) })}
-          >
-            <option value="">{t('tagging.sets.unknown')}</option>
-            <option value="us">{t('tagging.us')}</option>
-            <option value="them">{t('tagging.them')}</option>
-          </Select>
-        </label>
+              value={value.first_serve ?? ''}
+              onChange={(e) => set({ first_serve: e.target.value === '' ? null : (e.target.value as Side) })}
+            >
+              <option value="">{t('tagging.sets.unknown')}</option>
+              <option value="us">{t('tagging.us')}</option>
+              <option value="them">{t('tagging.them')}</option>
+            </Select>
+          </label>
+        )}
       </div>
+      {basketball && first && <p className="text-xs text-muted">{t('tagging.basketball.quarters.startScoreHint')}</p>}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -221,12 +301,12 @@ function SetForm({ initial, isNew, periods, onSave, onCancel, onDelete }: SetFor
       )}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary">
-          {t('tagging.sets.save')}
+          {texts.save}
         </Button>
         <Button onClick={onCancel}>{t('common.cancel')}</Button>
         {!isNew && (
           <Button variant="ghostDanger" onClick={onDelete} className="ml-auto">
-            {t('tagging.sets.delete', { no: value.no })}
+            {texts.remove(value.no)}
           </Button>
         )}
       </div>

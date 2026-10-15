@@ -4,9 +4,9 @@ import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
 import { formatDate, formatDuration } from '../lib/format'
 import { skillByCode } from '../lib/grammar'
-import { formatClock, pieceFacts, pieceLabel } from '../lib/labels'
+import { formatClock, periodLabel, pieceFacts, pieceLabel } from '../lib/labels'
 import { useTagging } from '../lib/queries'
-import { scoreBefore } from '../lib/rallies'
+import { scoreBefore, shotScoreAt } from '../lib/rallies'
 import { ReelEngine } from '../lib/reelEngine'
 import { elapsedIn, locate, reelTimeline } from '../lib/reelPlayer'
 import type { Piece, Taxonomy } from '../lib/types'
@@ -51,7 +51,13 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
   const label = (p: Piece) => pieceLabel(t, p, taxonomy && p.code ? skillByCode(taxonomy, p.code) : null)
   const event = piece?.event_id ? tagging.data?.events.find((e) => e.id === piece.event_id) : undefined
   const at = event?.t_ms ?? state.t_ms
-  const score = tagging.data ? scoreBefore(at, tagging.data.periods, tagging.data.segments) : null
+  const data = tagging.data
+  // Basketball counts the made shots (its tags); volleyball the rallies.
+  const score = !data
+    ? null
+    : data.sport === 'basketball' && data.taxonomy
+      ? shotScoreAt(at, data.periods, data.events, data.taxonomy)
+      : scoreBefore(at, data.periods, data.segments)
 
   const list = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -137,7 +143,7 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
             {[
               piece.video_title,
               piece.recorded_on ? formatDate(piece.recorded_on) : null,
-              score?.period ? `${t('tagging.setNo', { no: score.period.no })} · ${score.us}:${score.them}` : null,
+              score?.period && data ? `${periodLabel(t, data.sport, score.period.no)} · ${score.us}:${score.them}` : null,
               t('reels.player.inVideo', { time: formatClock(at, { tenths: false }) }),
             ]
               .filter(Boolean)

@@ -1,10 +1,24 @@
 // Display helpers for tagging: skill and grade names from the taxonomy's i18n keys, clock times.
 
 import type { TFunction } from 'i18next'
-import type { RosterEntry, Side, TaxonomySkill } from './types'
+import type { RosterEntry, SegmentKind, Side, TaxonomySkill } from './types'
 
-const SKILLS = ['serve', 'reception', 'set', 'attack', 'block', 'dig', 'freeball'] as const
+/** Volleyball's skills; their names double as the categories that have grade meanings. */
+const VOLLEYBALL = ['serve', 'reception', 'set', 'attack', 'block', 'dig', 'freeball'] as const
+const SKILLS = [
+  ...VOLLEYBALL,
+  'two_pointer',
+  'three_pointer',
+  'free_throw',
+  'offensive_rebound',
+  'defensive_rebound',
+  'assist',
+  'turnover',
+  'steal',
+  'foul',
+] as const
 type SkillName = (typeof SKILLS)[number]
+type GradedCategory = (typeof VOLLEYBALL)[number]
 
 /** Grade symbols as i18n key parts (`#` can't be part of a key on its own). */
 export const GRADE_KEYS = { '#': 'hash', '+': 'plus', '!': 'excl', '-': 'minus', '/': 'slash', '=': 'equal' } as const
@@ -18,6 +32,10 @@ function isGrade(value: string): value is GradeSymbol {
   return value in GRADE_KEYS
 }
 
+function isGradedCategory(value: string): value is GradedCategory {
+  return (VOLLEYBALL as readonly string[]).includes(value)
+}
+
 /** "Attack" for name_key 'skill.attack'; the code when the key is unknown. */
 export function skillLabel(t: TFunction, skill: Pick<TaxonomySkill, 'name_key' | 'code'> | null | undefined, code = ''): string {
   if (!skill) return code
@@ -25,11 +43,25 @@ export function skillLabel(t: TFunction, skill: Pick<TaxonomySkill, 'name_key' |
   return isSkillName(name) ? t(`skill.${name}`) : skill.code
 }
 
-/** What a grade means for a skill, e.g. attack # = "Kill". The symbol when unknown. */
+/** What a grade means for a skill, e.g. attack # = "Kill", a shot + = "Made". The symbol when unknown. */
 export function gradeLabel(t: TFunction, skill: Pick<TaxonomySkill, 'category'> | null | undefined, grade: string | null | undefined): string {
   if (!grade) return ''
-  if (!skill || !isGrade(grade) || !isSkillName(skill.category)) return grade
+  if (skill?.category === 'shot' && (grade === '+' || grade === '-')) return t(`grade.shot.${GRADE_KEYS[grade]}`)
+  if (!skill || !isGrade(grade) || !isGradedCategory(skill.category)) return grade
   return t(`grade.${skill.category}.${GRADE_KEYS[grade]}`)
+}
+
+/** "Set 2" (volleyball); "Q2", "OT", "OT2" (basketball: four quarters, then overtimes). */
+export function periodLabel(t: TFunction, sport: string, no: number): string {
+  if (sport !== 'basketball') return t('tagging.setNo', { no })
+  if (no <= 4) return t('tagging.basketball.quarterNo', { no })
+  return no === 5 ? t('tagging.basketball.overtime') : t('tagging.basketball.overtimeNo', { n: no - 4 })
+}
+
+/** "Timeout", "Set break"; basketball's breaks are between quarters. */
+export function segmentKindLabel(t: TFunction, kind: SegmentKind, sport: string): string {
+  if (sport === 'basketball' && kind === 'set_break') return t('tagging.basketball.quarterBreak')
+  return t(`tagging.segment.kind.${kind}`)
 }
 
 export function sideLabel(t: TFunction, side: Side | null | undefined): string {

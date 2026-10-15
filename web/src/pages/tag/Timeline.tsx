@@ -5,7 +5,7 @@ import { Select } from '../../components/Field'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
-import { formatClock } from '../../lib/labels'
+import { formatClock, segmentKindLabel } from '../../lib/labels'
 import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
 import type { Segment, SegmentKind, Side, Tag } from '../../lib/types'
@@ -166,7 +166,7 @@ function tickStep(span: number): number {
 
 function Zoom({ duration, span }: { duration: number; span: number }) {
   const { t } = useTranslation()
-  const { playhead, controller } = useWorkspace()
+  const { playhead, controller, taxonomy } = useWorkspace()
   const view = useView()
   const ui = useUi()
   const now = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 50) * 50)
@@ -224,7 +224,7 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
             ? s.score_us_after !== null && s.score_them_after !== null
               ? `${s.score_us_after}:${s.score_them_after}`
               : ''
-            : t(`tagging.segment.kind.${s.kind}`)}
+            : segmentKindLabel(t, s.kind, taxonomy.sport)}
         </div>
       ))}
       {open && now > open.start_ms && (
@@ -261,11 +261,17 @@ function TagMarker({ tag, left, selected, onClick }: { tag: Tag; left: string; s
 
 function Legend() {
   const { t } = useTranslation()
+  const { controller, taxonomy } = useWorkspace()
   const items: [string, string][] = [
-    ['bg-accent', t('tagging.timeline.legend.rally')],
-    ['bg-sunken ring-1 ring-hairline', t('tagging.timeline.legend.dead')],
+    // Basketball marks no rallies (M4), so there is no dead time between them either.
+    ...(controller.playsRallies
+      ? ([
+          ['bg-accent', t('tagging.timeline.legend.rally')],
+          ['bg-sunken ring-1 ring-hairline', t('tagging.timeline.legend.dead')],
+        ] as [string, string][])
+      : []),
     ['bg-danger/60', t('tagging.segment.kind.timeout')],
-    ['bg-muted/70', t('tagging.segment.kind.set_break')],
+    ['bg-muted/70', segmentKindLabel(t, 'set_break', taxonomy.sport)],
     ['bg-fg', t('tagging.timeline.legend.tagUs')],
     ['bg-muted', t('tagging.timeline.legend.tagThem')],
     ['bg-link rotate-45 scale-75', t('tagging.timeline.legend.comment')],
@@ -288,11 +294,14 @@ const KINDS: SegmentKind[] = ['rally', 'timeout', 'set_break', 'warmup', 'stoppa
 export function SegmentPanel({ id }: { id: string }) {
   const { t } = useTranslation()
   const htmlId = useId()
-  const { controller, playhead } = useWorkspace()
+  const { controller, playhead, taxonomy } = useWorkspace()
   const view = useView()
   const [error, setError] = useState(false)
   const segment = view.segments.find((s) => s.id === id)
   if (!segment) return null
+  // Basketball marks no rallies: a break can't become one (one that is a rally already stays).
+  const kinds = controller.playsRallies || segment.kind === 'rally' ? KINDS : KINDS.filter((k) => k !== 'rally')
+  const kindLabel = (kind: SegmentKind) => segmentKindLabel(t, kind, taxonomy.sport)
 
   const update = (patch: Parameters<typeof controller.updateSegment>[1]) => setError(!controller.updateSegment(segment.id, patch))
   const here = () => playhead.getState().t_ms
@@ -304,7 +313,7 @@ export function SegmentPanel({ id }: { id: string }) {
     <section aria-labelledby={`${htmlId}-title`} className="flex flex-col gap-3 rounded-2xl border border-hairline bg-surface p-4">
       <div className="flex items-center justify-between gap-2">
         <h2 id={`${htmlId}-title`} className="font-semibold">
-          {t('tagging.segment.title', { kind: t(`tagging.segment.kind.${segment.kind}`) })}
+          {t('tagging.segment.title', { kind: kindLabel(segment.kind) })}
         </h2>
         <Button variant="ghost" onClick={() => controller.selectSegment(null)}>
           {t('common.close')}
@@ -314,9 +323,9 @@ export function SegmentPanel({ id }: { id: string }) {
         <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${htmlId}-kind`}>
           {t('tagging.segment.kindLabel')}
           <Select id={`${htmlId}-kind`} inline value={segment.kind} onChange={(e) => update({ kind: e.target.value as SegmentKind })}>
-            {KINDS.map((k) => (
+            {kinds.map((k) => (
               <option key={k} value={k}>
-                {t(`tagging.segment.kind.${k}`)}
+                {kindLabel(k)}
               </option>
             ))}
           </Select>

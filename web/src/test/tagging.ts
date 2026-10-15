@@ -1,4 +1,5 @@
-// Tagging fixtures: the volleyball taxonomy as the API serves it (backend/nomal/taxonomies/volleyball.yaml).
+// Tagging fixtures: the volleyball and basketball taxonomies as the API serves them
+// (backend/nomal/taxonomies/volleyball.yaml, basketball.yaml).
 
 import type { Period, RosterEntry, Segment, Tag, Tagging, Taxonomy } from '../lib/types'
 
@@ -8,15 +9,44 @@ export const volleyball: Taxonomy = {
   grades: ['#', '+', '!', '-', '/', '='],
   zones: [1, 2, 3, 4, 5, 6, 7, 8, 9],
   skills: [
-    { code: 'S', name_key: 'skill.serve', category: 'serve', lead_ms: 400, pre_ms: 2000, post_ms: 3000, starts_rally: true, ends_rally_on: { '#': 'self', '=': 'other' } },
-    { code: 'R', name_key: 'skill.reception', category: 'reception', lead_ms: 200, pre_ms: 2000, post_ms: 3000, starts_rally: false, ends_rally_on: { '=': 'other' } },
-    { code: 'E', name_key: 'skill.set', category: 'set', lead_ms: 200, pre_ms: 2000, post_ms: 2000, starts_rally: false, ends_rally_on: { '=': 'other' } },
-    { code: 'A', name_key: 'skill.attack', category: 'attack', lead_ms: 300, pre_ms: 3000, post_ms: 2000, starts_rally: false, ends_rally_on: { '#': 'self', '=': 'other', '/': 'other' } },
-    { code: 'B', name_key: 'skill.block', category: 'block', lead_ms: 200, pre_ms: 3000, post_ms: 2000, starts_rally: false, ends_rally_on: { '#': 'self', '=': 'other' } },
-    { code: 'D', name_key: 'skill.dig', category: 'dig', lead_ms: 200, pre_ms: 3000, post_ms: 2000, starts_rally: false, ends_rally_on: { '=': 'other' } },
-    { code: 'F', name_key: 'skill.freeball', category: 'freeball', lead_ms: 200, pre_ms: 2000, post_ms: 2000, starts_rally: false, ends_rally_on: { '=': 'other' } },
+    { code: 'S', name_key: 'skill.serve', category: 'serve', lead_ms: 400, pre_ms: 2000, post_ms: 3000, starts_rally: true, ends_rally_on: { '#': 'self', '=': 'other' }, points: 0, graded: true },
+    { code: 'R', name_key: 'skill.reception', category: 'reception', lead_ms: 200, pre_ms: 2000, post_ms: 3000, starts_rally: false, ends_rally_on: { '=': 'other' }, points: 0, graded: true },
+    { code: 'E', name_key: 'skill.set', category: 'set', lead_ms: 200, pre_ms: 2000, post_ms: 2000, starts_rally: false, ends_rally_on: { '=': 'other' }, points: 0, graded: true },
+    { code: 'A', name_key: 'skill.attack', category: 'attack', lead_ms: 300, pre_ms: 3000, post_ms: 2000, starts_rally: false, ends_rally_on: { '#': 'self', '=': 'other', '/': 'other' }, points: 0, graded: true },
+    { code: 'B', name_key: 'skill.block', category: 'block', lead_ms: 200, pre_ms: 3000, post_ms: 2000, starts_rally: false, ends_rally_on: { '#': 'self', '=': 'other' }, points: 0, graded: true },
+    { code: 'D', name_key: 'skill.dig', category: 'dig', lead_ms: 200, pre_ms: 3000, post_ms: 2000, starts_rally: false, ends_rally_on: { '=': 'other' }, points: 0, graded: true },
+    { code: 'F', name_key: 'skill.freeball', category: 'freeball', lead_ms: 200, pre_ms: 2000, post_ms: 2000, starts_rally: false, ends_rally_on: { '=': 'other' }, points: 0, graded: true },
   ],
 }
+
+const shot = { category: 'shot', lead_ms: 300, pre_ms: 5000, post_ms: 2000, starts_rally: false, ends_rally_on: {}, graded: true }
+const play = { lead_ms: 200, pre_ms: 4000, post_ms: 2000, starts_rally: false, ends_rally_on: {}, points: 0, graded: false }
+
+export const basketball: Taxonomy = {
+  sport: 'basketball',
+  version: 1,
+  grades: ['+', '-'],
+  zones: [],
+  skills: [
+    { ...shot, code: 'S2', name_key: 'skill.two_pointer', points: 2 },
+    { ...shot, code: 'S3', name_key: 'skill.three_pointer', points: 3 },
+    { ...shot, code: 'FT', name_key: 'skill.free_throw', lead_ms: 200, pre_ms: 3000, post_ms: 1500, points: 1 },
+    { ...play, code: 'RO', name_key: 'skill.offensive_rebound', category: 'rebound' },
+    { ...play, code: 'RD', name_key: 'skill.defensive_rebound', category: 'rebound' },
+    { ...play, code: 'AS', name_key: 'skill.assist', category: 'pass', post_ms: 3000 },
+    { ...play, code: 'TO', name_key: 'skill.turnover', category: 'turnover' },
+    { ...play, code: 'ST', name_key: 'skill.steal', category: 'defence', pre_ms: 3000, post_ms: 3000 },
+    { ...play, code: 'BL', name_key: 'skill.block', category: 'defence', pre_ms: 3000 },
+    { ...play, code: 'F', name_key: 'skill.foul', category: 'foul', pre_ms: 3000 },
+  ],
+}
+
+export const basketballRoster: RosterEntry[] = [
+  { side: 'us', number: 5, member_id: 205, position: 'guard', is_libero: false, name: 'Marco Rossi' },
+  { side: 'us', number: 11, member_id: 211, position: 'forward', is_libero: false, name: 'Jan Weber' },
+  { side: 'us', number: 23, member_id: 223, position: 'center', is_libero: false, name: 'David Frei' },
+  { side: 'them', number: 4, member_id: null, position: null, is_libero: false, name: null },
+]
 
 export const roster: RosterEntry[] = [
   { side: 'us', number: 3, member_id: 103, position: 'setter', is_libero: false, name: 'Mia Keller' },
@@ -99,6 +129,12 @@ export function bundle(patch: Partial<Tagging> = {}): Tagging {
     segments: [],
     events: [],
     official_sets: null,
+    official_final: null,
     ...patch,
   }
+}
+
+/** A basketball game's bundle (Herren 1): no sets, quarters; no zones, no rallies. */
+export function basketballBundle(patch: Partial<Tagging> = {}): Tagging {
+  return bundle({ sport: 'basketball', taxonomy: basketball, roster: basketballRoster, ...patch })
 }

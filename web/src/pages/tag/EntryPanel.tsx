@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { cx } from '../../lib/cx'
-import { parseEntry, type ParsedEntry } from '../../lib/grammar'
-import { formatClock, gradeLabel, playerLabel, sideLabel, skillLabel } from '../../lib/labels'
+import { parseEntry, type EntryError, type ParsedEntry } from '../../lib/grammar'
+import { formatClock, gradeLabel, playerLabel, segmentKindLabel, sideLabel, skillLabel } from '../../lib/labels'
 import { addPoint, scoreBefore } from '../../lib/rallies'
 import type { RosterEntry, Taxonomy } from '../../lib/types'
 import { useUi, useView, useWorkspace } from './context'
@@ -28,13 +28,14 @@ function previewParts(t: TFunction, parsed: ParsedEntry, roster: readonly Roster
 }
 
 function nextHint(t: TFunction, parsed: ParsedEntry, taxonomy: Taxonomy): string {
+  const basketball = taxonomy.sport === 'basketball'
   switch (parsed.expects) {
     case 'number':
       return t('tagging.entry.next.number')
     case 'skill':
-      return t('tagging.entry.next.skill', { skills: taxonomy.skills.map((s) => s.code).join(' ') })
+      return t(basketball ? 'tagging.basketball.next.skill' : 'tagging.entry.next.skill', { skills: taxonomy.skills.map((s) => s.code).join(' ') })
     case 'grade':
-      return t('tagging.entry.next.grade', { grades: taxonomy.grades.join(' ') })
+      return basketball ? t('tagging.basketball.next.grade') : t('tagging.entry.next.grade', { grades: taxonomy.grades.join(' ') })
     case 'zone':
       return t('tagging.entry.next.zone')
     default:
@@ -42,7 +43,15 @@ function nextHint(t: TFunction, parsed: ParsedEntry, taxonomy: Taxonomy): string
   }
 }
 
-function noticeText(t: TFunction, notice: Notice): string {
+/** Why an entry can't be saved; basketball's codes have no letters-only or zone wording. */
+function errorText(t: TFunction, error: EntryError | 'incomplete', code: string, taxonomy: Taxonomy): string {
+  if (taxonomy.sport === 'basketball' && (error === 'unexpected' || error === 'skillMissing' || error === 'incomplete')) {
+    return t(`tagging.basketball.errors.${error}`)
+  }
+  return t(`tagging.entry.errors.${error}`, { code })
+}
+
+function noticeText(t: TFunction, notice: Notice, taxonomy: Taxonomy): string {
   const p = notice.params ?? {}
   switch (notice.key) {
     case 'saved':
@@ -50,14 +59,14 @@ function noticeText(t: TFunction, notice: Notice): string {
     case 'invalid':
       return t('tagging.notice.invalid', {
         entry: p.entry,
-        reason: t(`tagging.entry.errors.${String(p.reason) as 'incomplete'}`, { code: String(p.code ?? '') }),
+        reason: errorText(t, String(p.reason) as EntryError | 'incomplete', String(p.code ?? ''), taxonomy),
       })
     case 'rallyStarted':
       return t('tagging.notice.rallyStarted', { time: formatClock(Number(p.time)) })
     case 'rallyEnded':
       return p.score ? t('tagging.notice.rallyEndedScore', { score: p.score }) : t('tagging.notice.rallyEnded')
     case 'segmentAdded':
-      return t('tagging.notice.segmentAdded', { kind: t(`tagging.segment.kind.${String(p.kind) as 'timeout'}`) })
+      return t('tagging.notice.segmentAdded', { kind: segmentKindLabel(t, String(p.kind) as 'timeout', taxonomy.sport) })
     case 'clipIn':
     case 'clipOut':
       return t(`tagging.notice.${notice.key}`, { time: formatClock(Number(p.time)) })
@@ -95,7 +104,9 @@ export function EntryPanel() {
               <span className="ml-0.5 inline-block h-7 w-0.5 bg-fg motion-safe:animate-pulse" />
             </>
           ) : (
-            <span className="text-base font-normal">{t('tagging.entry.placeholder')}</span>
+            <span className="text-base font-normal">
+              {taxonomy.sport === 'basketball' ? t('tagging.basketball.placeholder') : t('tagging.entry.placeholder')}
+            </span>
           )}
         </div>
         {entry && (
@@ -116,7 +127,7 @@ export function EntryPanel() {
             <p className="flex flex-wrap items-center gap-2">
               {parsed.unknownNumber && <Badge tone="danger">{t('tagging.entry.unknownNumber')}</Badge>}
               {parsed.error ? (
-                <span className="text-danger">{t(`tagging.entry.errors.${parsed.error}`, { code: parsed.skillCode ?? '' })}</span>
+                <span className="text-danger">{errorText(t, parsed.error, parsed.skillCode ?? '', taxonomy)}</span>
               ) : (
                 <span className="text-muted">{nextHint(t, parsed, taxonomy)}</span>
               )}
@@ -129,7 +140,7 @@ export function EntryPanel() {
 
       {ui.proposal && <Proposal />}
 
-      <NoticeLine notice={ui.notice} onUndo={() => store.getView().canUndo && controller.undo()} />
+      <NoticeLine notice={ui.notice} taxonomy={taxonomy} onUndo={() => store.getView().canUndo && controller.undo()} />
 
       <ul className="flex flex-wrap gap-x-3 gap-y-1 border-t border-hairline pt-2 text-xs text-muted" aria-label={t('tagging.entry.skills')}>
         {taxonomy.skills.map((s) => (
@@ -145,13 +156,13 @@ export function EntryPanel() {
   )
 }
 
-function NoticeLine({ notice, onUndo }: { notice: Notice | null; onUndo: () => void }) {
+function NoticeLine({ notice, taxonomy, onUndo }: { notice: Notice | null; taxonomy: Taxonomy; onUndo: () => void }) {
   const { t } = useTranslation()
   return (
     <div role="status" className="flex min-h-6 items-center justify-between gap-2 text-sm">
       {notice && (
         <>
-          <span className={cx(notice.tone === 'error' ? 'text-danger' : 'text-muted')}>{noticeText(t, notice)}</span>
+          <span className={cx(notice.tone === 'error' ? 'text-danger' : 'text-muted')}>{noticeText(t, notice, taxonomy)}</span>
           {notice.undo && (
             <Button variant="ghost" onClick={onUndo}>
               {t('tagging.notice.undo')}

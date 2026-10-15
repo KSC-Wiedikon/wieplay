@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { bundle, period, rally, tag, volleyball } from '../test/tagging'
+import { basketball, bundle, period, rally, tag, volleyball } from '../test/tagging'
 import { Outbox, type OutboxItem } from './outbox'
 import { eventToIn, mergeView, TaggingStore } from './taggingStore'
 import type { ChangesIn, ChangesOut, Tag } from './types'
@@ -45,6 +45,20 @@ describe('mergeView', () => {
     const items = [{ kind: 'segment', id: r.id, key: r.id, videoId: VIDEO, seq: 1, queuedAt: 0, payload: { id: r.id, base_version: 0, kind: 'rally', start_ms: 1000, end_ms: 5000, won_by: 'us' } }] as OutboxItem[]
     const view = mergeView(base, items, [], volleyball)
     expect(view.segments[0]).toMatchObject({ score_us_after: 1, score_them_after: 0, period_id: set.id })
+  })
+
+  it('scores queued basketball shots locally, a running score across quarters', () => {
+    const q1 = period({ no: 1, start_ms: 0, end_ms: 600_000, final_us: 0, final_them: 0 })
+    const q2 = period({ no: 2, start_ms: 700_000, final_us: 0, final_them: 0 })
+    const base = { events: new Map(), segments: new Map(), periods: new Map([[q1.id, q1], [q2.id, q2]]) }
+    const made = (id: string, t_ms: number, code: string, side: 'us' | 'them') =>
+      ({ kind: 'event', id, key: id, videoId: VIDEO, seq: t_ms, queuedAt: 0, payload: { id, base_version: 0, code, t_ms, time_precision: 'live', side, number: 23, attributes: { grade: '+' } } }) as OutboxItem
+    const view = mergeView(base, [made('e1', 10_000, 'S3', 'us'), made('e2', 20_000, 'S2', 'them'), made('e3', 710_000, 'FT', 'us')], [], basketball)
+    expect(view.provisional).toBe(true)
+    expect(view.periods.map((p) => [p.no, p.final_us, p.final_them])).toEqual([
+      [1, 3, 2],
+      [2, 4, 2],
+    ])
   })
 })
 

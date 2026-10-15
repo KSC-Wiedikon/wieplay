@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '../../components/Modal'
 import { gradeLabel, skillLabel } from '../../lib/labels'
@@ -15,11 +16,36 @@ function Keys({ keys }: { keys: string[] }) {
   )
 }
 
-/** The `?` overlay: every key, the entry grammar and what each grade means per skill. */
+/** Entry examples per sport: the entry and what it means. */
+function examplesFor(t: TFunction, basketball: boolean): [string, string][] {
+  if (basketball) {
+    return [
+      ['23S3+', t('tagging.basketball.keys.examples.three')],
+      ['a4S2-', t('tagging.basketball.keys.examples.two')],
+      ['11RO', t('tagging.basketball.keys.examples.rebound')],
+      ['5FT+', t('tagging.basketball.keys.examples.freeThrow')],
+    ]
+  }
+  return (
+    [
+      ['7A#', 'kill'],
+      ['a12S=', 'serveError'],
+      ['5R+', 'reception'],
+      ['3A#46', 'zones'],
+    ] as const
+  ).map(([example, key]) => [example, t(`tagging.keys.examples.${key}`)])
+}
+
+/**
+ * The `?` overlay: every key, the entry grammar and what each grade means per skill. Basketball
+ * has no rally keys and its own grammar and codes.
+ */
 export function Cheatsheet() {
   const { t } = useTranslation()
   const { controller, taxonomy } = useWorkspace()
   const ui = useUi()
+  const basketball = taxonomy.sport === 'basketball'
+  const examples = examplesFor(t, basketball)
 
   const groups: { title: string; rows: [string[], string][] }[] = [
     {
@@ -28,9 +54,9 @@ export function Cheatsheet() {
         [['Space'], t('tagging.keys.space')],
         [['←', '→'], t('tagging.keys.arrows')],
         [['Shift + ←', 'Shift + →'], t('tagging.keys.shiftArrows')],
-        [['Ctrl + ←', 'Ctrl + →'], t('tagging.keys.ctrlArrows')],
+        ...(basketball ? [] : [[['Ctrl + ←', 'Ctrl + →'], t('tagging.keys.ctrlArrows')] as [string[], string]]),
         [[',', '.'], t('tagging.keys.speed')],
-        [['Shift + D'], t('tagging.keys.skip')],
+        ...(basketball ? [] : [[['Shift + D'], t('tagging.keys.skip')] as [string[], string]]),
       ],
     },
     {
@@ -44,15 +70,23 @@ export function Cheatsheet() {
         [['Ctrl + Z', 'Ctrl + Shift + Z'], t('tagging.keys.undo')],
       ],
     },
-    {
-      title: t('tagging.keys.groups.rallies'),
-      rows: [
-        [['R'], t('tagging.keys.r')],
-        [['U', 'T', 'Enter', 'Esc'], t('tagging.keys.winner')],
-        [['T'], t('tagging.keys.t')],
-        [['B'], t('tagging.keys.b')],
-      ],
-    },
+    basketball
+      ? {
+          title: t('tagging.basketball.keys.breaks'),
+          rows: [
+            [['T'], t('tagging.keys.t')],
+            [['B'], t('tagging.basketball.keys.b')],
+          ],
+        }
+      : {
+          title: t('tagging.keys.groups.rallies'),
+          rows: [
+            [['R'], t('tagging.keys.r')],
+            [['U', 'T', 'Enter', 'Esc'], t('tagging.keys.winner')],
+            [['T'], t('tagging.keys.t')],
+            [['B'], t('tagging.keys.b')],
+          ],
+        },
     {
       title: t('tagging.keys.groups.selected'),
       rows: [
@@ -92,18 +126,11 @@ export function Cheatsheet() {
         <div className="flex flex-col gap-5">
           <section className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold text-muted">{t('tagging.keys.grammarTitle')}</h3>
-            <p className="font-mono text-sm font-bold">{t('tagging.keys.grammar')}</p>
+            <p className="font-mono text-sm font-bold">{basketball ? t('tagging.basketball.keys.grammar') : t('tagging.keys.grammar')}</p>
             <ul className="flex flex-col gap-1 text-sm">
-              {(
-                [
-                  ['7A#', 'kill'],
-                  ['a12S=', 'serveError'],
-                  ['5R+', 'reception'],
-                  ['3A#46', 'zones'],
-                ] as const
-              ).map(([example, key]) => (
+              {examples.map(([example, meaning]) => (
                 <li key={example}>
-                  <span className="font-mono font-bold">{example}</span> {t(`tagging.keys.examples.${key}`)}
+                  <span className="font-mono font-bold">{example}</span> {meaning}
                 </li>
               ))}
             </ul>
@@ -130,9 +157,10 @@ export function Cheatsheet() {
                       <th scope="row" className="py-1 pr-2 font-semibold whitespace-nowrap">
                         <span className="font-mono">{s.code}</span> {skillLabel(t, s)}
                       </th>
+                      {/* A skill without grades (basketball: all but shots) is entered as it is. */}
                       {taxonomy.grades.map((g) => (
                         <td key={g} className="px-1 py-1 align-top">
-                          {gradeLabel(t, s, g)}
+                          {s.graded ? gradeLabel(t, s, g) : '–'}
                         </td>
                       ))}
                     </tr>

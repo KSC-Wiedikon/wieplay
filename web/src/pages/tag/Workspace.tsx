@@ -16,11 +16,11 @@ import { playWindows } from '../../lib/condensed'
 import { cx } from '../../lib/cx'
 import { formatDate } from '../../lib/format'
 import { formatEntry } from '../../lib/grammar'
-import { formatClock, playerLabel, sideLabel } from '../../lib/labels'
+import { formatClock, periodLabel, playerLabel, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { Outbox, type OutboxItem } from '../../lib/outbox'
 import { Playhead, usePlayhead } from '../../lib/playhead'
 import { keys } from '../../lib/queryClient'
-import { ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes } from '../../lib/rallies'
+import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
 import { TaggingStore } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
@@ -270,10 +270,13 @@ function Transport() {
           <span aria-hidden="true">+</span>
         </Button>
       </div>
-      <label className="flex cursor-pointer items-center gap-1 text-sm font-semibold">
-        <Switch checked={ui.skip} onChange={(on) => controller.toggleSkip(on)} label={t('tagging.condensed.skip')} />
-        <span aria-hidden="true">{t('tagging.condensed.skip')}</span>
-      </label>
+      {/* Dead time is what lies between rallies; basketball marks none (yet). */}
+      {controller.playsRallies && (
+        <label className="flex cursor-pointer items-center gap-1 text-sm font-semibold">
+          <Switch checked={ui.skip} onChange={(on) => controller.toggleSkip(on)} label={t('tagging.condensed.skip')} />
+          <span aria-hidden="true">{t('tagging.condensed.skip')}</span>
+        </label>
+      )}
       <div className="ml-auto flex items-center gap-1">
         <Button variant="ghost" size="icon" disabled={!view.canUndo} onClick={controller.undo} aria-label={t('tagging.transport.undo')} title={t('tagging.transport.undo')}>
           <UndoIcon />
@@ -339,20 +342,20 @@ function SyncStatus() {
   )
 }
 
-function describe(t: TFunction, item: OutboxItem): string {
+function describe(t: TFunction, item: OutboxItem, sport: string): string {
   if (item.kind === 'event') return formatEntry({ ...item.payload, number: item.payload.number ?? null })
-  if (item.kind === 'segment') return t(`tagging.segment.kind.${item.payload.kind}`)
-  return t('tagging.setNo', { no: item.payload.no })
+  if (item.kind === 'segment') return segmentKindLabel(t, item.payload.kind, sport)
+  return periodLabel(t, sport, item.payload.no)
 }
 
 /** Changes the server refused or that someone else overtook; and a warning without IndexedDB. */
 function SyncNotes() {
   const { t } = useTranslation()
-  const { outbox } = useWorkspace()
+  const { outbox, taxonomy } = useWorkspace()
   const sync = useSync()
   const notes = [
-    ...sync.rejected.map((r) => t('tagging.sync.rejected', { entry: describe(t, r.item), detail: r.detail })),
-    ...sync.stale.map((item) => t('tagging.sync.stale', { entry: describe(t, item) })),
+    ...sync.rejected.map((r) => t('tagging.sync.rejected', { entry: describe(t, r.item, taxonomy.sport), detail: r.detail })),
+    ...sync.stale.map((item) => t('tagging.sync.stale', { entry: describe(t, item, taxonomy.sport) })),
   ]
   if (notes.length === 0 && sync.persistent) return null
   return (
@@ -379,8 +382,14 @@ function SyncNotes() {
   )
 }
 
-/** Set, score and server at the playhead (PLAN §9.1: "Set 2 · 14:12 · serve: us"). */
+/** The match state at the playhead, per sport. */
 function StatePanel() {
+  const { taxonomy } = useWorkspace()
+  return taxonomy.sport === 'basketball' ? <QuarterState /> : <SetState />
+}
+
+/** Set, score and server at the playhead (PLAN §9.1: "Set 2 · 14:12 · serve: us"). */
+function SetState() {
   const { t } = useTranslation()
   const { playhead, taxonomy } = useWorkspace()
   const view = useView()
@@ -405,6 +414,27 @@ function StatePanel() {
       </p>
       <p className="text-sm text-muted tabular-nums">
         {open ? t('tagging.state.rallyOpen', { time: formatClock(open.start_ms) }) : t('tagging.state.noRally')}
+      </p>
+      {view.provisional && <p className="text-xs text-muted">{t('tagging.state.provisional')}</p>}
+    </section>
+  )
+}
+
+/** Basketball: the quarter and the running score at the playhead ("Q2 · 38:35"); no serve, no rallies. */
+function QuarterState() {
+  const { t } = useTranslation()
+  const { playhead, taxonomy } = useWorkspace()
+  const view = useView()
+  const tenths = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 100))
+  const t_ms = tenths * 100
+  const state = shotScoreAt(t_ms, view.periods, view.events, taxonomy)
+  const running = periodAt(view.periods, t_ms)
+
+  return (
+    <section aria-label={t('tagging.state.title')} className="flex flex-col gap-1 rounded-2xl border border-hairline bg-surface px-4 py-3">
+      <p className="flex flex-wrap items-baseline gap-x-3 text-lg font-bold tabular-nums">
+        <span>{running ? periodLabel(t, taxonomy.sport, running.no) : t('tagging.basketball.noQuarter')}</span>
+        {state.period && <span className="text-2xl">{`${state.us}:${state.them}`}</span>}
       </p>
       {view.provisional && <p className="text-xs text-muted">{t('tagging.state.provisional')}</p>}
     </section>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { roster, volleyball } from '../test/tagging'
+import { basketball, basketballRoster, roster, volleyball } from '../test/tagging'
 import { formatEntry, isEntryChar, parseEntry, rallyWinner, skillByCode, toggleSide } from './grammar'
 
 const parse = (text: string) => parseEntry(text, volleyball, roster)
@@ -167,5 +167,112 @@ describe('rallyWinner', () => {
     expect(rallyWinner(skill('R'), '#', 'us')).toBeNull()
     expect(rallyWinner(skill('A'), null, 'us')).toBeNull()
     expect(rallyWinner(null, '#', 'us')).toBeNull()
+  })
+})
+
+describe('parseEntry, basketball', () => {
+  const shoot = (text: string) => parseEntry(text, basketball, basketballRoster)
+
+  it('reads a made three-pointer', () => {
+    const p = shoot('23S3+')
+    expect(p).toMatchObject({ side: 'us', number: 23, skillCode: 'S3', grade: '+', zoneFrom: null, zoneTo: null, expects: 'none' })
+    expect(p.skill).toMatchObject({ code: 'S3', points: 3, graded: true })
+    expect(p.player?.name).toBe('David Frei')
+    expect(p.error).toBeNull()
+    expect(p.complete).toBe(true)
+  })
+
+  it('reads a missed two-pointer and a made free throw', () => {
+    expect(shoot('23S2-')).toMatchObject({ skillCode: 'S2', grade: '-', complete: true })
+    expect(shoot('5FT+')).toMatchObject({ number: 5, skillCode: 'FT', grade: '+', complete: true, expects: 'none' })
+  })
+
+  it('reads the opponent with the a prefix', () => {
+    const p = shoot('a4S2+')
+    expect(p).toMatchObject({ side: 'them', number: 4, skillCode: 'S2', grade: '+', complete: true })
+    expect(p.player?.side).toBe('them')
+    expect(shoot('A4S2+')).toMatchObject({ side: 'them', number: 4, skillCode: 'S2' })
+    expect(shoot('aS2-')).toMatchObject({ side: 'them', number: null, skillCode: 'S2', complete: true })
+  })
+
+  it('reads codes case-insensitively', () => {
+    expect(shoot('23s3+')).toMatchObject({ skillCode: 'S3', complete: true })
+    expect(shoot('11ro')).toMatchObject({ skillCode: 'RO', complete: true })
+    expect(shoot('7as')).toMatchObject({ side: 'us', number: 7, skillCode: 'AS', complete: true })
+  })
+
+  it('takes a shot without a grade, and waits for one', () => {
+    expect(shoot('23S3')).toMatchObject({ skillCode: 'S3', grade: null, complete: true, expects: 'grade' })
+  })
+
+  it('reads skills that take no grade', () => {
+    for (const [text, code] of [['11RO', 'RO'], ['11RD', 'RD'], ['7TO', 'TO'], ['5AS', 'AS'], ['23ST', 'ST'], ['23BL', 'BL'], ['5F', 'F']] as const) {
+      expect(shoot(text)).toMatchObject({ skillCode: code, grade: null, error: null, complete: true, expects: 'none' })
+    }
+  })
+
+  it('takes the longest code: 5F is a foul, 5FT a free throw', () => {
+    expect(shoot('5F').skill?.code).toBe('F')
+    expect(shoot('5FT').skill?.code).toBe('FT')
+    expect(shoot('5FT')).toMatchObject({ expects: 'grade', complete: true })
+  })
+
+  it('waits while only the start of a code is typed', () => {
+    const p = shoot('23S')
+    expect(p).toMatchObject({ number: 23, skill: null, skillCode: 'S', error: null, complete: false, expects: 'skill' })
+    expect(shoot('11R')).toMatchObject({ skill: null, error: null, complete: false, expects: 'skill' })
+    expect(shoot('a4s')).toMatchObject({ side: 'them', error: null, complete: false, expects: 'skill' })
+  })
+
+  it('rejects a grade on a skill that takes none', () => {
+    expect(shoot('11RO+')).toMatchObject({ skillCode: 'RO', grade: null, error: 'noGrade', complete: false })
+    expect(shoot('5F-')).toMatchObject({ error: 'noGrade', complete: false })
+  })
+
+  it('has no zones', () => {
+    expect(shoot('23S3+4')).toMatchObject({ zoneFrom: null, error: 'unexpected', complete: false })
+    expect(shoot('23S34')).toMatchObject({ error: 'unexpected', complete: false })
+    expect(shoot('11RO4')).toMatchObject({ error: 'unexpected', complete: false })
+  })
+
+  it('rejects anything after the grade', () => {
+    expect(shoot('23S3++')).toMatchObject({ error: 'unexpected', complete: false })
+    expect(shoot('23S3+x')).toMatchObject({ error: 'unexpected', complete: false })
+  })
+
+  it('flags codes that are not skills', () => {
+    expect(shoot('7X')).toMatchObject({ skillCode: 'X', skill: null, error: 'unknownSkill', complete: false })
+    expect(shoot('23S4')).toMatchObject({ skillCode: 'S4', error: 'unknownSkill', complete: false })
+    expect(shoot('7XY+')).toMatchObject({ skillCode: 'XY', error: 'unknownSkill', complete: false })
+  })
+
+  it('rejects volleyball grades', () => {
+    expect(shoot('23S3#')).toMatchObject({ error: 'unexpected', complete: false })
+    expect(isEntryChar('#', basketball)).toBe(false)
+    for (const key of ['2', 'S', 'f', '+', '-']) expect(isEntryChar(key, basketball)).toBe(true)
+  })
+
+  it('gives a useful partial result while typing', () => {
+    expect(shoot('2')).toMatchObject({ number: 2, expects: 'skill', complete: false })
+    const typed = ['23', '23S', '23S3', '23S3+'].map((text) => shoot(text).expects)
+    expect(typed).toEqual(['skill', 'skill', 'grade', 'none'])
+  })
+
+  it('round-trips through formatEntry', () => {
+    for (const text of ['23S3+', 'a4S2+', '23S2-', '11RO', '7TO', '5FT+', 'a4F', 'aS3-']) {
+      const p = shoot(text)
+      const attributes = p.grade ? { grade: p.grade } : {}
+      expect(formatEntry({ side: p.side, number: p.number, code: p.skill?.code ?? '', attributes })).toBe(text)
+    }
+  })
+
+  it('never ends a rally', () => {
+    for (const s of basketball.skills) {
+      expect(rallyWinner(s, '+', 'us')).toBeNull()
+      expect(rallyWinner(s, '-', 'them')).toBeNull()
+    }
+    // A taxonomy served without the field.
+    const bare = { ...(skillByCode(basketball, 'S3') as object), ends_rally_on: undefined } as unknown as Parameters<typeof rallyWinner>[0]
+    expect(rallyWinner(bare, '+', 'us')).toBeNull()
   })
 })

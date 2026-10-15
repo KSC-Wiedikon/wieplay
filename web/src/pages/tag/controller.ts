@@ -12,6 +12,8 @@ import type { Change } from '../../lib/outbox'
 
 export const RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const
 export const SEGMENT_LENGTH_MS: Partial<Record<SegmentKind, number>> = { timeout: 30_000, set_break: 180_000 }
+/** Basketball's break between quarters (B): 2 minutes, editable like any break. */
+export const QUARTER_BREAK_MS = 120_000
 const MAX_CLIP_MS = 60_000
 
 export type NoticeKey =
@@ -125,6 +127,11 @@ export class TagController {
 
   setFps = (fps: number): void => {
     if (fps > 0) this.fps = fps
+  }
+
+  /** Volleyball is played in rallies (R, the point, skip dead time); basketball's score comes from its shots. */
+  get playsRallies(): boolean {
+    return this.taxonomy.sport !== 'basketball'
   }
 
   private set(patch: Partial<UiState>): void {
@@ -332,11 +339,12 @@ export class TagController {
     this.set({ proposal: null, notice: this.notify('rallyKept') })
   }
 
-  /** T / B: a timeout or set break at the playhead (30 s / 3 min, editable afterwards). */
+  /** T / B: a timeout or set break at the playhead (30 s / 3 min, a quarter break 2 min; editable afterwards). */
   addSegment = (kind: SegmentKind): void => {
     const start_ms = this.now()
     const end = this.duration()
-    let end_ms = start_ms + (SEGMENT_LENGTH_MS[kind] ?? 10_000)
+    const length = kind === 'set_break' && !this.playsRallies ? QUARTER_BREAK_MS : (SEGMENT_LENGTH_MS[kind] ?? 10_000)
+    let end_ms = start_ms + length
     if (end !== null) end_ms = Math.min(end_ms, end)
     if (end_ms <= start_ms) {
       this.set({ notice: this.notify('cannotAdd', undefined, { tone: 'error' }) })
@@ -628,10 +636,12 @@ export class TagController {
     }
     switch (key.toLowerCase()) {
       case 'd':
-        if (!shiftKey) return false
+        if (!shiftKey || !this.playsRallies) return false
         this.toggleSkip()
         return true
       case 'r':
+        // Basketball: no rallies to mark (its score comes from the made shots).
+        if (!this.playsRallies) return false
         this.rallyKey()
         return true
       case 't':

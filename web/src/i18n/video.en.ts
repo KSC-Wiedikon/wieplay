@@ -90,6 +90,7 @@ export const videoEn = {
         unexpected: 'Expected: number, skill, grade, zones',
         skillMissing: 'The skill letter comes right after the number',
         incomplete: 'The skill letter is missing',
+        noGrade: '{{code}} takes no grade',
       },
     },
     proposal: {
@@ -298,6 +299,56 @@ export const videoEn = {
       },
       gradesTitle: 'Grades per skill',
     },
+    // Basketball (M4): quarters instead of sets, a running score from the made shots, no
+    // serve and no rallies to mark. Strings that are the same for both sports stay above.
+    basketball: {
+      quarterNo: 'Q{{no}}',
+      overtime: 'OT',
+      overtimeNo: 'OT{{n}}',
+      quarter: 'Quarter',
+      noQuarter: 'No quarter',
+      quarterBreak: 'Quarter break',
+      placeholder: 'Type to tag, e.g. 23S3+',
+      next: {
+        skill: 'Next: the code ({{skills}})',
+        grade: 'Next: + made or - missed, or Enter',
+      },
+      errors: {
+        unexpected: 'Expected: number, code, grade',
+        skillMissing: 'The code comes right after the number',
+        incomplete: 'The code is missing or not finished',
+      },
+      quarters: {
+        title: 'Quarters',
+        none: 'No quarters yet. Add Q1 at the tip-off; the score counts from there.',
+        add: 'Add {{period}} at {{time}}',
+        end: 'End {{period}} at {{time}}',
+        edit: 'Edit {{period}}',
+        newTitle: 'New {{period}}',
+        delete: 'Delete {{period}}',
+        official: 'Official final {{us}}:{{them}}',
+        matches: 'Matches the official final',
+        mismatch: 'Official final {{us}}:{{them}}',
+        startScore: 'Score at the start',
+        startScoreHint: 'Only the first quarter has one: the score when the recording starts. After that, made shots count.',
+        save: 'Save quarter',
+        errors: {
+          duplicate: '{{period}} exists already.',
+          order: 'A quarter ends after it starts.',
+        },
+      },
+      keys: {
+        breaks: 'Breaks',
+        b: 'Quarter break here (2 min, adjustable)',
+        grammar: '[a] number · code · [grade]',
+        examples: {
+          three: 'our #23 three-pointer, made',
+          two: 'their #4 two-pointer, missed',
+          rebound: 'our #11 offensive rebound',
+          freeThrow: 'our #5 free throw, made',
+        },
+      },
+    },
   },
   skill: {
     serve: 'Serve',
@@ -307,6 +358,15 @@ export const videoEn = {
     block: 'Block',
     dig: 'Dig',
     freeball: 'Freeball',
+    two_pointer: 'Two-pointer',
+    three_pointer: 'Three-pointer',
+    free_throw: 'Free throw',
+    offensive_rebound: 'Offensive rebound',
+    defensive_rebound: 'Defensive rebound',
+    assist: 'Assist',
+    turnover: 'Turnover',
+    steal: 'Steal',
+    foul: 'Foul',
   },
   // What each grade means per skill (DataVolley conventions).
   grade: {
@@ -317,5 +377,7 @@ export const videoEn = {
     block: { hash: 'Point', plus: 'Good', excl: 'Back to the attacker', minus: 'Poor', slash: 'Invasion', equal: 'Error or touch out' },
     dig: { hash: 'Perfect', plus: 'Good', excl: 'OK', minus: 'Poor', slash: 'Overpass', equal: 'Error' },
     freeball: { hash: 'Perfect', plus: 'Good', excl: 'OK', minus: 'Poor', slash: 'Overpass', equal: 'Error' },
+    // Basketball: only shots are graded.
+    shot: { plus: 'Made', minus: 'Missed' },
   },
 }

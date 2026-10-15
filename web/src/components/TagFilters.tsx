@@ -3,7 +3,7 @@ import { useId, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isFiltered, playerKey, type TagFilter } from '../lib/condensed'
 import { skillByCode } from '../lib/grammar'
-import { gradeLabel, playerLabel, skillLabel } from '../lib/labels'
+import { gradeLabel, periodLabel, playerLabel, skillLabel } from '../lib/labels'
 import type { Period, RosterEntry, Tag, Taxonomy } from '../lib/types'
 import { Button } from './Button'
 import { Select } from './Field'
@@ -17,10 +17,11 @@ interface TagFiltersProps {
   roster: readonly RosterEntry[]
 }
 
-/** Player, skill, grade and set; each "All" by default. Players are those with tags. */
+/** Player, skill, grade and set (basketball: quarter); each "All" by default. Players are those with tags. */
 export function TagFilters({ filter, onChange, taxonomy, tags, periods, roster }: TagFiltersProps) {
   const { t } = useTranslation()
   const id = useId()
+  const sport = taxonomy?.sport ?? 'volleyball'
 
   const players = useMemo(() => {
     const seen = new Map<string, { side: Tag['side']; number: number | null }>()
@@ -75,12 +76,12 @@ export function TagFilters({ filter, onChange, taxonomy, tags, periods, roster }
       )}
       {periods.length > 0 && (
         <label className="flex flex-col gap-1 text-xs font-semibold" htmlFor={`${id}-set`}>
-          {t('tagging.filters.set')}
+          {sport === 'basketball' ? t('tagging.basketball.quarter') : t('tagging.filters.set')}
           <Select id={`${id}-set`} inline value={filter.set ?? ''} onChange={(e) => set({ set: value(e.target.value) })}>
             <option value="">{t('tagging.filters.all')}</option>
             {periods.map((p) => (
               <option key={p.id} value={p.id}>
-                {t('tagging.setNo', { no: p.no })}
+                {periodLabel(t, sport, p.no)}
               </option>
             ))}
           </Select>

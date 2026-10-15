@@ -1,17 +1,21 @@
-// The tag entry grammar (docs/PLAN.md §9.3), volleyball, DataVolley-flavoured:
+// The tag entry grammar (docs/PLAN.md §9.3), for both sports:
 //
-//   [a]<number><skill>[grade][zone_from][zone_to]     7A#  a12S=  5R+  3A#46
+//   volleyball, DataVolley-flavoured:  [a]<number><skill>[grade][zone_from][zone_to]   7A#  a12S=  5R+  3A#46
+//   basketball:                        [a]<number><code>[grade]                         23S3+  a4S2-  11RO  5FT+
 //
-// `a` (or `A`) as the first character means the opponent ("them"); without it, us. The skill
-// letter is case-insensitive and must be one of the taxonomy's codes. Grade, zones and even the
-// number are optional, so a half-typed entry still parses into something the live preview can
-// show. Pure functions only: the workspace and the event table share them.
+// `a` (or `A`) as the first character means the opponent ("them"); without it, us. The skill code
+// is case-insensitive and must be one of the taxonomy's codes: one letter in volleyball, one or
+// two characters in basketball (S2 S3 FT RO …), where the longest code wins (5F is a foul, 5FT a
+// free throw). Only skills that take a grade get one, and zones only where the sport has them.
+// Grade, zones and even the number are optional, so a half-typed entry still parses into
+// something the live preview can show. Pure functions only: the workspace and the event table
+// share them.
 
 import type { RosterEntry, Side, Taxonomy, TaxonomySkill } from './types'
 
 /** Why an entry can't be saved yet. */
 export type EntryError =
-  /** A letter that is not a skill of the taxonomy. */
+  /** Letters that are not a skill code of the taxonomy (nor the start of one). */
   | 'unknownSkill'
   /** More than two digits for the number. */
   | 'numberTooLong'
@@ -21,13 +25,15 @@ export type EntryError =
   | 'unexpected'
   /** A grade or zone typed before the skill letter. */
   | 'skillMissing'
+  /** A grade after a skill that takes none (basketball: only shots are graded). */
+  | 'noGrade'
 
 export interface ParsedEntry {
   text: string
   side: Side
   number: number | null
   skill: TaxonomySkill | null
-  /** The skill letter as typed, upper case (also when it is not a known skill). */
+  /** The skill code as typed, upper case (also when it is not a known skill, or only its start). */
   skillCode: string | null
   grade: string | null
   zoneFrom: number | null
@@ -52,6 +58,22 @@ const LETTER = /^[a-z]$/i
 export function skillByCode(taxonomy: Taxonomy, code: string): TaxonomySkill | null {
   const upper = code.toUpperCase()
   return taxonomy.skills.find((s) => s.code.toUpperCase() === upper) ?? null
+}
+
+/**
+ * The skill whose code starts `rest` (case-insensitive); the longest one when several do (F and
+ * FT). `partial` when there is none but `rest` is the start of a longer code (23S, on its way to
+ * 23S3).
+ */
+function matchSkill(taxonomy: Taxonomy, rest: string): { skill: TaxonomySkill | null; partial: boolean } {
+  const upper = rest.toUpperCase()
+  let skill: TaxonomySkill | null = null
+  for (const s of taxonomy.skills) {
+    const code = s.code.toUpperCase()
+    if (upper.startsWith(code) && code.length > (skill?.code.length ?? 0)) skill = s
+  }
+  const partial = skill === null && taxonomy.skills.some((s) => s.code.length > upper.length && s.code.toUpperCase().startsWith(upper))
+  return { skill, partial }
 }
 
 export function rosterEntry(roster: readonly RosterEntry[], side: Side, number: number | null): RosterEntry | null {
@@ -103,21 +125,43 @@ export function parseEntry(text: string, taxonomy: Taxonomy, roster: readonly Ro
     result.expects = 'skill'
     return result
   }
-  result.skillCode = letter.toUpperCase()
-  result.skill = skillByCode(taxonomy, letter)
-  if (!result.skill) result.error ??= 'unknownSkill'
-  i += 1
-  result.expects = 'grade'
+  const rest = chars.slice(i).join('')
+  const { skill, partial } = matchSkill(taxonomy, rest)
+  if (partial) {
+    // Only the start of a code so far: not an error yet.
+    result.skillCode = rest.toUpperCase()
+    result.expects = 'skill'
+    return result
+  }
+  result.skill = skill
+  if (skill) {
+    result.skillCode = skill.code.toUpperCase()
+  } else {
+    // As many characters as the longest code has, for the message (volleyball: the one letter).
+    const longest = Math.max(1, ...taxonomy.skills.map((s) => s.code.length))
+    result.skillCode = (/^[a-z][a-z0-9]*/i.exec(rest)?.[0] ?? letter).slice(0, longest).toUpperCase()
+    result.error ??= 'unknownSkill'
+  }
+  i += result.skillCode.length
+  // An unknown skill is read on as if it took a grade (it can't be saved anyway).
+  const graded = skill?.graded ?? true
+  const hasZones = taxonomy.zones.length > 0
+  result.expects = graded ? 'grade' : 'none'
 
-  if (i < chars.length && taxonomy.grades.includes(chars[i] as string)) {
+  if (graded && i < chars.length && taxonomy.grades.includes(chars[i] as string)) {
     result.grade = chars[i] as string
     i += 1
   }
-  if (i < chars.length || result.grade) result.expects = 'zone'
+  if (hasZones && (i < chars.length || result.grade)) result.expects = 'zone'
+  else if (result.grade) result.expects = 'none'
 
   while (i < chars.length) {
     const c = chars[i] as string
-    if (DIGIT.test(c) && result.zoneTo === null) {
+    if (!graded && taxonomy.grades.includes(c)) {
+      result.error ??= 'noGrade'
+      break
+    }
+    if (hasZones && DIGIT.test(c) && result.zoneTo === null) {
       const zone = Number(c)
       if (!taxonomy.zones.includes(zone)) result.error ??= 'invalidZone'
       if (result.zoneFrom === null) result.zoneFrom = zone
@@ -151,7 +195,7 @@ export function isEntryChar(key: string, taxonomy: Taxonomy): boolean {
   return key.length === 1 && (DIGIT.test(key) || LETTER.test(key) || taxonomy.grades.includes(key))
 }
 
-/** The entry text for a tag, e.g. `a12S=` or `3A#46`. */
+/** The entry text for a tag, e.g. `a12S=`, `3A#46` or `23S3+`. */
 export function formatEntry(tag: {
   side: Side
   number: number | null
@@ -162,10 +206,13 @@ export function formatEntry(tag: {
   return `${tag.side === 'them' ? 'a' : ''}${tag.number ?? ''}${tag.code}${grade ?? ''}${from ?? ''}${to ?? ''}`
 }
 
-/** Who wins the rally when this tag ends it (a kill, an ace, an error); null when it doesn't. */
+/**
+ * Who wins the rally when this tag ends it (a kill, an ace, an error); null when it doesn't, and
+ * always for a sport without rallies (basketball: no ends_rally_on).
+ */
 export function rallyWinner(skill: TaxonomySkill | null, grade: string | null | undefined, side: Side): Side | null {
   if (!skill || !grade) return null
-  const outcome = skill.ends_rally_on[grade]
+  const outcome = skill.ends_rally_on?.[grade]
   if (!outcome) return null
   return outcome === 'self' ? side : otherSide(side)
 }

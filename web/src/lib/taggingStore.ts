@@ -1,9 +1,9 @@
 // The tagging workspace's data: the server's bundle with the outbox's queued changes on top
 // (docs/PLAN.md §9.6), undo and redo over this page's own changes, and the rally being played
-// (which exists only here until it ends: the API needs an end time).
+// (which exists only here until it ends: the API needs an end time; basketball has none).
 
 import type { Change, ChangeKind, Outbox, OutboxItem } from './outbox'
-import { byStart, rescore, serveCodes, sortedPeriods, type OpenRally } from './rallies'
+import { byStart, rescoreFor, sortedPeriods, type OpenRally } from './rallies'
 import { readStorage, writeStorage } from './storage'
 import type {
   ChangesOut,
@@ -179,7 +179,7 @@ export function mergeView(
   if (!provisional) {
     return { events: tags, segments: [...segments.values()].sort(byStart), periods: sortedPeriods([...periods.values()]), provisional }
   }
-  const scored = rescore([...periods.values()], [...segments.values()], tags, serveCodes(taxonomy))
+  const scored = rescoreFor(taxonomy, [...periods.values()], [...segments.values()], tags)
   return { events: tags, segments: scored.segments, periods: scored.periods, provisional }
 }
 

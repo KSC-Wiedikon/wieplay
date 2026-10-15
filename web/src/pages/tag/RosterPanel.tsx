@@ -86,9 +86,11 @@ function RosterEditor({ onClose }: { onClose: () => void }) {
   const id = useId()
   const client = useQueryClient()
   const toast = useToast()
-  const { video, store } = useWorkspace()
+  const { video, store, taxonomy } = useWorkspace()
   const view = useView()
   const candidates = useRosterCandidates(video.id)
+  // Liberos are volleyball's.
+  const liberos = taxonomy.sport !== 'basketball'
   const [rows, setRows] = useState<Row[]>(() =>
     view.roster
       .filter((r) => r.side === 'us')
@@ -194,7 +196,7 @@ function RosterEditor({ onClose }: { onClose: () => void }) {
             <tr>
               <Th className="w-20">{t('tagging.roster.number')}</Th>
               <Th>{t('tagging.roster.name')}</Th>
-              <Th>{t('tagging.roster.libero')}</Th>
+              {liberos && <Th>{t('tagging.roster.libero')}</Th>}
               <Th>
                 <span className="sr-only">{t('tagging.table.actions')}</span>
               </Th>
@@ -215,17 +217,19 @@ function RosterEditor({ onClose }: { onClose: () => void }) {
                   />
                 </Td>
                 <Td className={cx(!row.name && 'text-muted')}>{row.name ?? t('tagging.roster.noName')}</Td>
-                <Td tight>
-                  <label className="inline-flex min-h-11 items-center gap-2 sm:min-h-9">
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-current"
-                      checked={row.is_libero}
-                      onChange={(e) => patch(row.key, { is_libero: e.target.checked })}
-                    />
-                    <span className="sr-only">{t('tagging.roster.liberoOf', { name: row.name ?? `#${row.number}` })}</span>
-                  </label>
-                </Td>
+                {liberos && (
+                  <Td tight>
+                    <label className="inline-flex min-h-11 items-center gap-2 sm:min-h-9">
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-current"
+                        checked={row.is_libero}
+                        onChange={(e) => patch(row.key, { is_libero: e.target.checked })}
+                      />
+                      <span className="sr-only">{t('tagging.roster.liberoOf', { name: row.name ?? `#${row.number}` })}</span>
+                    </label>
+                  </Td>
+                )}
                 <Td tight className="text-right">
                   <Button
                     variant="ghostDanger"

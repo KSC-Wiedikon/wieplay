@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { period, rally, tag, volleyball } from '../test/tagging'
+import { basketball, period, rally, tag, volleyball } from '../test/tagging'
 import {
   addPoint,
   periodAt,
@@ -7,8 +7,12 @@ import {
   proposeByTag,
   rallyStartForServe,
   rescore,
+  rescoreFor,
+  rescoreShots,
   scoreBefore,
   serveCodes,
+  shotPoints,
+  shotScoreAt,
   winnerFromTags,
 } from './rallies'
 
@@ -130,5 +134,77 @@ describe('score and proposals', () => {
 
   it('never ends a rally before it starts', () => {
     expect(proposeByKey({ id: 'r', start_ms: 60_000 }, 59_000, [], volleyball).end_ms).toBe(60_001)
+  })
+})
+
+describe('basketball score (same rules as the server)', () => {
+  const shot = (t_ms: number, code: string, grade: string | null, side: 'us' | 'them' = 'us') =>
+    tag({ t_ms, code, side, number: side === 'us' ? 23 : 4, member_id: null, attributes: grade ? { grade } : {} })
+
+  it('counts made shots only, by their points', () => {
+    expect(shotPoints(basketball, 'S3', '+')).toBe(3)
+    expect(shotPoints(basketball, 'S2', '+')).toBe(2)
+    expect(shotPoints(basketball, 'FT', '+')).toBe(1)
+    expect(shotPoints(basketball, 'S3', '-')).toBe(0)
+    expect(shotPoints(basketball, 'S3', null)).toBe(0)
+    expect(shotPoints(basketball, 'RO', '+')).toBe(0)
+    expect(shotPoints(basketball, 'XX', '+')).toBe(0)
+  })
+
+  it('keeps a running score across quarters, seeded by the first one', () => {
+    const q1 = period({ no: 1, start_ms: 0, end_ms: 600_000, start_us: 10, start_them: 12 })
+    const q2 = period({ no: 2, start_ms: 720_000, start_us: 0, start_them: 0 }) // its own start score is not used
+    const tags = [
+      shot(-1, 'S2', '+'), // never happens, but before any quarter
+      shot(10_000, 'S3', '+'),
+      shot(20_000, 'S2', '-'),
+      shot(30_000, 'S2', '+', 'them'),
+      shot(40_000, 'RO', null),
+      shot(650_000, 'S2', '+'), // in the break: not counted
+      shot(730_000, 'FT', '+'),
+      shot(740_000, 'FT', '-', 'them'),
+    ]
+    const [one, two] = rescoreShots([q2, q1], tags, basketball)
+    expect(one).toMatchObject({ id: q1.id, final_us: 13, final_them: 14 })
+    expect(two).toMatchObject({ id: q2.id, final_us: 14, final_them: 14 })
+    expect(q1.final_us).toBeNull() // inputs unchanged
+  })
+
+  it('ends a quarter left open where the next one starts', () => {
+    const q1 = period({ no: 1, start_ms: 0 })
+    const q2 = period({ no: 2, start_ms: 100_000 })
+    const [one, two] = rescoreShots([q1, q2], [shot(50_000, 'S2', '+'), shot(150_000, 'S3', '+', 'them')], basketball)
+    expect(one).toMatchObject({ final_us: 2, final_them: 0 })
+    expect(two).toMatchObject({ final_us: 2, final_them: 3 })
+  })
+
+  it('gives every quarter a final, also without shots, and leaves segments alone', () => {
+    const q1 = period({ no: 1, start_ms: 0, start_us: 4, start_them: 2 })
+    const timeout = rally({ kind: 'timeout', start_ms: 5_000, end_ms: 35_000 })
+    const out = rescoreFor(basketball, [q1], [timeout], [])
+    expect(out.periods[0]).toMatchObject({ final_us: 4, final_them: 2 })
+    expect(out.segments).toEqual([timeout])
+    // Volleyball still scores by rallies.
+    expect(rescoreFor(volleyball, [q1], [], []).periods[0]).toMatchObject({ final_us: null, final_them: null })
+  })
+
+  it('knows the score at a moment: the last quarter final plus the shots since', () => {
+    const q1 = period({ no: 1, start_ms: 0, end_ms: 600_000, start_us: 2, start_them: 0, final_us: 20, final_them: 18 })
+    const q2 = period({ no: 2, start_ms: 720_000, final_us: 25, final_them: 18 })
+    const tags = [shot(10_000, 'S3', '+'), shot(730_000, 'S2', '+'), shot(800_000, 'S3', '+'), shot(810_000, 'S2', '+', 'them')]
+    expect(shotScoreAt(-1, [q1, q2], tags, basketball)).toMatchObject({ period: null, us: 0, them: 0 })
+    expect(shotScoreAt(5_000, [q1, q2], tags, basketball)).toMatchObject({ period: q1, us: 2, them: 0 })
+    expect(shotScoreAt(10_000, [q1, q2], tags, basketball)).toMatchObject({ us: 5, them: 0 })
+    // Between quarters: the score of the one before (the server's final).
+    expect(shotScoreAt(700_000, [q1, q2], tags, basketball)).toMatchObject({ period: q1, us: 5, them: 0 })
+    expect(shotScoreAt(735_000, [q1, q2], tags, basketball)).toMatchObject({ period: q2, us: 22, them: 18 })
+    expect(shotScoreAt(900_000, [q1, q2], tags, basketball)).toMatchObject({ us: 25, them: 20, serving: null })
+  })
+
+  it('counts the quarter before itself when it has no final yet', () => {
+    const q1 = period({ no: 1, start_ms: 0, end_ms: 600_000, start_us: 2, start_them: 0 })
+    const q2 = period({ no: 2, start_ms: 720_000 })
+    const tags = [shot(10_000, 'S3', '+'), shot(730_000, 'S2', '+', 'them')]
+    expect(shotScoreAt(740_000, [q1, q2], tags, basketball)).toMatchObject({ period: q2, us: 5, them: 2 })
   })
 })

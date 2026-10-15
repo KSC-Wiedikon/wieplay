@@ -340,7 +340,10 @@ function Ready({ video }: { video: Video }) {
       {showSummary && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm font-semibold tabular-nums">
-            {`${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
+            {/* Basketball marks no rallies. */}
+            {data.sport === 'basketball'
+              ? t('tagging.tagCount', { count: tagCount })
+              : `${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
           </p>
           {data.can_tag && (
             // Tagging is a keyboard task: desktop only (PLAN §9.1).
