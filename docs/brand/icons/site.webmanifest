@@ -1,0 +1,34 @@
+{
+  "name": "nomal",
+  "short_name": "nomal",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#13203A",
+  "background_color": "#EEF1F5",
+  "icons": [
+    {
+      "src": "/icons/vb/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/vb/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/vb/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/vb/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
