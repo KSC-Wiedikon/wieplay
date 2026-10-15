@@ -1,8 +1,9 @@
 // Renders favicons and app icons from the brand SVGs in docs/brand/.
 //
 //   docs/brand/nomal-icon-{vb,bb}.svg  →  docs/brand/icons/{vb,bb}/
-//     favicon.svg, favicon.ico (16/32/48), icon-192.png, icon-512.png,
-//     icon-maskable-192.png, icon-maskable-512.png, apple-touch-icon.png (180)
+//     favicon.svg, favicon.ico (16/32/48): the ball alone, which stays readable in a tab
+//     icon-192.png, icon-512.png, icon-maskable-192.png, icon-maskable-512.png,
+//     apple-touch-icon.png (180): the full icon
 //   docs/brand/nomal-mark-{vb,bb}.svg  →  docs/brand/icons/{vb,bb}/mark-on-dark.svg
 //   docs/brand/icons/site.webmanifest  (default variant: vb)
 //
@@ -27,6 +28,20 @@ const fullBleed = (svg) => svg.replace(/(<rect\b[^>]*?)\s+rx="[^"]*"/, '$1');
 
 // The mark's trail dots are navy and vanish on a navy background; light dots for dark UI.
 const markOnDark = (svg) => svg.replace(`<g fill="${NAVY}">`, `<g fill="${LIGHT}">`);
+
+// At 16–48 px the trail of dots is a few pixels wide, so the favicon is the ball alone,
+// taken from the icon (radius 10 plus its outline) and centred on a transparent square.
+function ballOnly(iconSvg, sport) {
+  // The ball is the group whose first child is the radius-10 circle (the outer group also
+  // has a translate/scale transform, so match on the circle, not on the transform alone).
+  const ball = iconSvg.match(/<g transform="translate\([^)]*\) scale\([^)]*\)">\s*(<circle r="10"[\s\S]*?)<\/g>/);
+  if (!ball) throw new Error(`ball group not found in nomal-icon-${sport}.svg`);
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-11 -11 22 22" width="512" height="512">\n` +
+    `  <title>Nomal – ${sport === 'bb' ? 'basketball' : 'volleyball'} favicon</title>\n` +
+    `  ${ball[1].trimEnd()}\n</svg>\n`
+  );
+}
 
 async function render(page, svg, size) {
   await page.setViewportSize({ width: size, height: size });
@@ -68,9 +83,10 @@ try {
     const out = path.join(brand, 'icons', sport);
     await mkdir(out, { recursive: true });
 
-    await writeFile(path.join(out, 'favicon.svg'), icon);
+    const favicon = ballOnly(icon, sport);
+    await writeFile(path.join(out, 'favicon.svg'), favicon);
     const small = [];
-    for (const size of [16, 32, 48]) small.push({ size, data: await render(page, icon, size) });
+    for (const size of [16, 32, 48]) small.push({ size, data: await render(page, favicon, size) });
     await writeFile(path.join(out, 'favicon.ico'), ico(small));
     for (const size of [192, 512]) {
       await writeFile(path.join(out, `icon-${size}.png`), await render(page, icon, size));

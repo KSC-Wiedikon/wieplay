@@ -1299,7 +1299,9 @@ Contrast (WCAG 2.x), computed for these exact values:
 Generated on 15.10.2026 by `scripts/brand/build-icons.mjs` (headless Chromium; see
 `scripts/brand/README.md`) into `docs/brand/icons/{vb,bb}/`:
 
-- `favicon.svg` and `favicon.ico` (16/32/48).
+- `favicon.svg` and `favicon.ico` (16/32/48): **the ball alone** (approved 15.10.2026). The
+  trail of dots is only a few pixels at tab size and turned the full icon into a white square
+  with a speck.
 - `icon-192.png` and `icon-512.png`.
 - `icon-maskable-192.png`, `icon-maskable-512.png` and `apple-touch-icon.png` (180), full
   bleed; the artwork already sits inside the maskable safe zone.
@@ -1308,12 +1310,9 @@ Generated on 15.10.2026 by `scripts/brand/build-icons.mjs` (headless Chromium; s
 The page swaps the favicon link for basketball. Generated files are committed, so builds don't
 need the toolchain.
 
-- **Dark backgrounds**: the mark's trail dots are navy and disappear on navy, so the script
-  also writes `mark-on-dark.svg` with the dots in `light` (#EEF1F5). This is a derived variant;
-  the owner should review it.
-- **16 px**: at the smallest favicon size the dots and the ball are a few pixels, and the tab
-  icon reads as a white square with a speck. A ball-only small favicon would read better; that
-  is the owner's design call.
+**Dark backgrounds**: the mark's trail dots are navy and disappear on navy, so the script also
+writes `mark-on-dark.svg` with the dots in `light` (#EEF1F5) (approved 15.10.2026). Use it on
+the navy app bar and in dark mode.
 
 ### 13.4 Behaviour conventions
 
@@ -1551,5 +1550,5 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 | O8 | Basketball camera: side of the court at the half-court line, as high as possible (§7.1). Where in Herren 1's halls is there a gallery or a high spot on the long side? | Check the home hall first; away halls vary. |
 | O9 | YouTube sources | ✓ **Decided 15.10.2026: the club's channel and members' own channels**, on a coach-confirmed allow-list. Channel IDs are added as members propose them. |
 | O10 | Camera models | ✓ **Not needed**: Nomal reads the specs from each file. |
-| O11 | Brand | ✓ Assets in `docs/brand/`, icons generated. Open: approve the derived `mark-on-dark.svg`, and decide whether to use a ball-only favicon at 16 px (§13.3). |
+| O11 | Brand | ✓ **Done 15.10.2026**: assets in `docs/brand/`, icons generated, `mark-on-dark.svg` and the ball-only favicon approved (§13.3). |
 | O12 | Repo visibility | Private now; flip to public when you're happy, like Wiedisync. |

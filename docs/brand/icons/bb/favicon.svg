@@ -1,18 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <title>Nomal – basketball app icon</title>
-  <rect width="512" height="512" rx="118" fill="#FFFFFF"/>
-  <g transform="translate(64 64) scale(3.84)">
-    <g fill="#13203A">
-      <circle cx="12" cy="82" r="3"/>
-      <circle cx="22" cy="52" r="3.6"/>
-      <circle cx="35" cy="29" r="4.2"/>
-      <circle cx="51" cy="18" r="4.8"/>
-      <circle cx="65" cy="25" r="5.4"/>
-    </g>
-    <g transform="translate(76 63) scale(1.7)">
-      <circle r="10" fill="#F26B1D"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-11 -11 22 22" width="512" height="512">
+  <title>Nomal – basketball favicon</title>
+  <circle r="10" fill="#F26B1D"/>
       <path d="M0 -10 V10 M-10 0 H10 M-7.07 -7.07 Q-2.5 0 -7.07 7.07 M7.07 -7.07 Q2.5 0 7.07 7.07" fill="none" stroke="#13203A" stroke-width="1.2" stroke-linecap="round"/>
       <circle r="10" fill="none" stroke="#13203A" stroke-width="1.4"/>
-    </g>
-  </g>
 </svg>
