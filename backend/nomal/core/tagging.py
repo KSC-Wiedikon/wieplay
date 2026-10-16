@@ -106,6 +106,13 @@ class TaggingError(ValueError):
     pass
 
 
+def stands() -> Any:
+    """Segments that count as what happened: everything but a model's proposal nobody has
+    accepted yet (PLAN §10: nothing a model made is shown as fact until it is reviewed).
+    Stats and condensed playback use only these; the tagging page shows all of them."""
+    return ~((Segment.source == "model") & Segment.review.in_(("unreviewed", "rejected")))
+
+
 IN_USE = "this id is already in use"
 
 

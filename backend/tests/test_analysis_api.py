@@ -495,3 +495,18 @@ def test_training_waits_for_the_debounce(
         db.commit()
     r = analyser.post("/api/worker/claim", json={"caps": ANALYSE_CAPS, "wait": False})
     assert r.json()["jobs"] == []
+
+
+def test_open_proposals_are_not_facts_yet(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    """Condensed playback and the stats use a proposal once a coach accepted it."""
+    job = claim_kind(analyser, "analyse")
+    complete(analyser, job, payload(job, [(10_000, 20_000), (40_000, 52_000)]))
+    url = f"/api/videos/{ready['id']}"
+    assert club["coach"].get(f"{url}/condensed").json() == []
+    by_start = {s["start_ms"]: s for s in segments(club["coach"], ready)}
+    change(club["coach"], ready, edit(by_start[10_000], review="confirmed", won_by="us"))
+    pieces = club["coach"].get(f"{url}/condensed").json()
+    assert len(pieces) == 1 and pieces[0]["start_ms"] < 10_000 < pieces[0]["end_ms"]
+    assert club["coach"].get(f"{url}/stats").status_code == 200

@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from nomal.api.access import visible_team
 from nomal.api.deps import DbDep, ViewerDep
 from nomal.api.tagging import _readable
-from nomal.core import stats
+from nomal.core import stats, tagging
 from nomal.core.models import (
     Event,
     Period,
@@ -186,6 +186,7 @@ def _rallies(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[st
             Segment.video_id.in_(video_ids),
             Segment.kind == "rally",
             Segment.deleted_at.is_(None),
+            tagging.stands(),
         )
         .order_by(Segment.start_ms)
     )
