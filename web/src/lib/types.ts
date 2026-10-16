@@ -456,6 +456,16 @@ export interface Tag {
   note: string | null
   source: string
   review: Review
+  // A suggested action (source "model", PLAN §10.4a); absent from servers before it.
+  /** How sure the model is (0..1). */
+  confidence?: number | null
+  model_run_id?: string | null
+  /** The ball at the contact, normalised image coordinates (0..1). */
+  ball_x?: number | null
+  ball_y?: number | null
+  /** The floor below it in metres, with a calibrated court only. */
+  court_x?: number | null
+  court_y?: number | null
   version: number
   updated_at: string
   /** Null while live; set on a stale change's answer when the server has the tag deleted. */
@@ -477,6 +487,8 @@ export interface Tagging {
   official_final: [number, number] | null
   /** See Video.rallies_reviewed_at. */
   rallies_reviewed_at?: string | null
+  /** A coach marked the video's actions complete and right (Nomal learns from them). */
+  actions_reviewed_at?: string | null
   /** The match's first serve (start of set 1, else the end of the warm-up): "Start at first serve". */
   first_serve_ms?: number | null
 }
@@ -663,6 +675,37 @@ export interface Scoring {
 }
 
 /** GET /api/videos/{id}/analysis (and POST …/scoring) */
+/** The suggested actions against the coach's tags, in the rallies the coach tagged (±0.3 s). */
+export interface ActionsVsCoach {
+  coach: number
+  suggested: number
+  matched: number
+  precision: number
+  recall: number
+  f1: number
+  skill_accuracy: number | null
+  side_accuracy: number | null
+  action_f1: number
+  labels_complete: boolean
+}
+
+/** The suggested actions of a video (PLAN §10.4a). */
+export interface ActionsState {
+  status: AnalysisStatus
+  run_id: string | null
+  created_at: string | null
+  /** v0 rules, v1 learned. */
+  finder: string | null
+  suggestions: { unreviewed: number; confirmed: number; corrected: number; rejected: number }
+  counts: Record<string, number>
+  proposed: number
+  rallies: number
+  coach_rallies: number
+  vs_coach: ActionsVsCoach | null
+  reviewed_at: string | null
+  model: { finder: string; run_id: string | null; trained_at: string | null; games: number; summary: Record<string, unknown> }
+}
+
 export interface Analysis {
   status: AnalysisStatus
   model_run: ModelRun | null
@@ -670,6 +713,8 @@ export interface Analysis {
   metrics_vs_human: MetricsVsHuman | null
   /** Absent from servers before the automatic scoring; null until it ran. */
   scoring?: Scoring | null
+  /** Absent from servers before the suggested actions; null for basketball. */
+  actions?: ActionsState | null
 }
 
 // Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).

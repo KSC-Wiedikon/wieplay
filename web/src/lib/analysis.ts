@@ -20,12 +20,12 @@ export function proposalTotal(counts: ProposalCounts): number {
   return counts.unreviewed + counts.confirmed + counts.corrected + counts.rejected
 }
 
-/** Refreshes every 5 s while the analysis is queued or running. */
+/** Refreshes every 5 s while the analysis (or the suggested actions) is queued or running. */
 export function analysisQuery(videoId: string) {
   return queryOptions({
     queryKey: keys.analysis(videoId),
     queryFn: ({ signal }) => api.analysis(videoId, signal),
-    refetchInterval: (query) => (isBusy(query.state.data) ? 5_000 : false),
+    refetchInterval: (query) => (isBusy(query.state.data) || isBusy(query.state.data?.actions) ? 5_000 : false),
   })
 }
 
@@ -102,6 +102,42 @@ export function useSetRalliesReviewed(videoId: string) {
         client.invalidateQueries({ queryKey: keys.video(videoId), exact: true }),
         client.invalidateQueries({ queryKey: keys.analysis(videoId) }),
       ])
+    },
+  })
+}
+
+/** The server refuses "actions reviewed" while suggestions are open: 409 {"detail": {"open_suggestions": n}}. */
+export function openSuggestions(error: unknown): number | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null
+  const body = error.body
+  if (!body || typeof body !== 'object' || !('detail' in body)) return null
+  const detail = body.detail
+  if (!detail || typeof detail !== 'object' || !('open_suggestions' in detail)) return null
+  return typeof detail.open_suggestions === 'number' ? detail.open_suggestions : null
+}
+
+/**
+ * Marks the video's actions reviewed (or not): its tags then teach Nomal's action proposer.
+ * Shown at once in the tagging data.
+ */
+export function useSetActionsReviewed(videoId: string) {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: (reviewed: boolean) => api.setActionsReviewed(videoId, reviewed),
+    onSuccess: (out, reviewed) => {
+      const at = out && 'actions_reviewed_at' in out ? (out.actions_reviewed_at ?? null) : null
+      client.setQueryData<Tagging>(keys.tagging(videoId), (b) => (b ? { ...b, actions_reviewed_at: at } : b))
+      toast.success(reviewed ? t('actions.reviewedOn') : t('actions.reviewedOff'))
+    },
+    onError: (error) => {
+      const open = openSuggestions(error)
+      if (open !== null) toast.error(t('actions.openSuggestions', { count: open }))
+      else toast.error(t('actions.reviewedFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') }))
+    },
+    onSettled: async () => {
+      await client.invalidateQueries({ queryKey: keys.analysis(videoId) })
     },
   })
 }

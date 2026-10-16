@@ -5,9 +5,10 @@ import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Select, TextInput } from '../../components/Field'
 import { AddToReelDialog } from '../../components/AddToReelDialog'
-import { PencilIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { CheckIcon, PencilIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { Table, TBody, Td, Th, THead, Tr } from '../../components/Table'
 import { TagFilters } from '../../components/TagFilters'
+import { isModelTag, isSuggestedTag, suggestedCount } from '../../lib/actions'
 import { filterTags, isFiltered, lastAtOrBefore, NO_FILTER, type TagFilter } from '../../lib/condensed'
 import { cx } from '../../lib/cx'
 import { formatEntry, skillByCode } from '../../lib/grammar'
@@ -15,7 +16,8 @@ import { formatClock, gradeLabel, periodLabel, playerLabel, sideLabel, skillLabe
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import type { ReelItemIn, RosterEntry, Side, Tag, TagAttributes, Taxonomy } from '../../lib/types'
-import { useUi, useView, useWorkspace } from './context'
+import { ActionChip } from './ActionReviewPanel'
+import { useActionReview, useUi, useView, useWorkspace } from './context'
 
 /** Keeps a row visible inside the scrolling box without scrolling the page. */
 function reveal(container: HTMLElement | null, id: string | null): void {
@@ -56,6 +58,9 @@ export function EventTable() {
   const currentId = usePlayhead(playhead, (s) => lastAtOrBefore(shown, s.t_ms)?.id ?? null)
   const container = useRef<HTMLDivElement>(null)
   const pointerInside = useRef(false)
+  const suggested = useMemo(() => suggestedCount(view.events), [view.events])
+  const actionReview = useActionReview()
+  const selected = actionReview.active ? actionReview.currentId : ui.selectedId
   // Basketball has quarters and no zones.
   const basketball = taxonomy.sport === 'basketball'
   const zones = taxonomy.zones.length > 0
@@ -64,7 +69,7 @@ export function EventTable() {
   useEffect(() => {
     if (!pointerInside.current) reveal(container.current, currentId)
   }, [currentId])
-  useEffect(() => reveal(container.current, ui.selectedId), [ui.selectedId])
+  useEffect(() => reveal(container.current, selected), [selected])
 
   return (
     <section aria-labelledby="tags-title" className="flex flex-col gap-2">
@@ -76,6 +81,7 @@ export function EventTable() {
           {isFiltered(filter)
             ? t('tagging.table.count', { shown: shown.length, total: view.events.length })
             : t('tagging.tagCount', { count: view.events.length })}
+          {suggested > 0 && ` · ${t('actions.table.count', { count: suggested })}`}
         </p>
       </div>
       <TagFilters filter={filter} onChange={setFilter} taxonomy={taxonomy} tags={view.events} periods={view.periods} roster={view.roster} />
@@ -109,7 +115,7 @@ export function EventTable() {
                   tag.id === ui.editingId ? (
                     <EditRow key={tag.id} tag={tag} />
                   ) : (
-                    <Row key={tag.id} tag={tag} current={tag.id === currentId} selected={tag.id === ui.selectedId} onAddToReel={setAdding} />
+                    <Row key={tag.id} tag={tag} current={tag.id === currentId} selected={tag.id === selected} onAddToReel={setAdding} />
                   ),
                 )}
               </TBody>
@@ -124,8 +130,12 @@ export function EventTable() {
 
 function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boolean; selected: boolean; onAddToReel: (tag: Tag) => void }) {
   const { t } = useTranslation()
-  const { controller, taxonomy } = useWorkspace()
+  const { controller, taxonomy, actions } = useWorkspace()
+  const actionReview = useActionReview()
   const view = useView()
+  const open = isSuggestedTag(tag)
+  // In the actions queue a suggestion goes on screen there; elsewhere a row seeks to its tag.
+  const pick = () => (actionReview.active && isModelTag(tag) ? actions.select(tag.id) : controller.select(tag.id, { seek: true }))
   const skill = skillByCode(taxonomy, tag.code)
   const entry = formatEntry(tag)
   const set = periodAt(view.periods, tag.t_ms)
@@ -135,15 +145,16 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
   return (
     <Tr
       data-tag={tag.id}
-      onActivate={() => controller.select(tag.id, { seek: true })}
+      data-action-suggestion={open ? 'open' : undefined}
+      onActivate={pick}
       aria-current={current ? 'true' : undefined}
       aria-selected={selected}
-      className={cx(current && 'bg-accent-soft', selected && 'outline-2 -outline-offset-2 outline-accent')}
+      className={cx(current && 'bg-accent-soft', selected && 'outline-2 -outline-offset-2 outline-accent', open && 'text-muted italic')}
     >
       <Td tight>
         <button
           type="button"
-          onClick={() => controller.select(tag.id, { seek: true })}
+          onClick={pick}
           aria-label={t('tagging.table.go', { entry, time: formatClock(tag.t_ms) })}
           className="min-h-9 cursor-pointer rounded-lg px-1 font-mono text-sm link tabular-nums"
         >
@@ -158,6 +169,7 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
             {t('tagging.table.frameShort')}
           </span>
         )}
+        <ActionChip tag={tag} className="ml-2 not-italic" />
       </Td>
       <Td>{playerLabel(t, tag.side, tag.number, view.roster, tag.member_id)}</Td>
       <Td>{skillLabel(t, skill, tag.code)}</Td>
@@ -166,6 +178,11 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
         <Td className="tabular-nums">{from !== undefined ? (to !== undefined ? `${from} → ${to}` : String(from)) : '–'}</Td>
       )}
       <Td tight className="text-right whitespace-nowrap">
+        {open && (
+          <Button variant="ghost" size="icon" aria-label={t('actions.table.accept', { entry })} title={t('actions.accept')} onClick={() => controller.updateTag(tag.id, { review: 'confirmed' })}>
+            <CheckIcon className="size-4" />
+          </Button>
+        )}
         <Button variant="ghost" size="icon" aria-label={t('tagging.table.edit', { entry })} onClick={() => controller.edit(tag.id)}>
           <PencilIcon className="size-4" />
         </Button>

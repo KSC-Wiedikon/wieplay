@@ -101,6 +101,8 @@ export interface VideoStats {
   team_filters: Record<string, RallyFilter>
   match: BoxScore
   sets: SetBox[]
+  /** Suggested actions nobody has answered yet: not counted (absent from older servers). */
+  suggested?: number
 }
 
 export interface MatchLine {
@@ -124,6 +126,8 @@ export interface TeamStats {
   columns: StatColumn[]
   season_box: BoxScore
   matches: MatchLine[]
+  /** Suggested actions nobody has answered yet, over the matches: not counted. */
+  suggested?: number
 }
 
 export type CsvLanguage = 'en' | 'de'

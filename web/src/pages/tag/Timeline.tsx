@@ -4,6 +4,7 @@ import { Button } from '../../components/Button'
 import { Select } from '../../components/Field'
 import { SparkleIcon } from '../../components/icons'
 import { SuggestionChip } from '../../components/SuggestionChip'
+import { isSuggestedTag } from '../../lib/actions'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
@@ -22,7 +23,7 @@ import {
   scoreAfter,
 } from '../../lib/suggestions'
 import type { Segment, SegmentKind, Side, Tag } from '../../lib/types'
-import { useReview, useUi, useView, useWorkspace } from './context'
+import { useActionReview, useReview, useUi, useView, useWorkspace } from './context'
 
 const SPANS = [30_000, 60_000, 120_000, 300_000] as const
 
@@ -158,7 +159,9 @@ function Overview({ duration, span }: { duration: number; span: number }) {
         {view.events.map((e) => (
           <div
             key={e.id}
-            className={cx('absolute bottom-0 h-2 w-px', e.side === 'us' ? 'bg-fg' : 'bg-muted')}
+            data-action-suggestion={isSuggestedTag(e) ? 'open' : undefined}
+            // A suggested action: shorter and in the accent colour, until a coach accepts it.
+            className={cx('absolute bottom-0 w-px', isSuggestedTag(e) ? 'h-1 bg-accent' : cx('h-2', e.side === 'us' ? 'bg-fg' : 'bg-muted'))}
             style={{ left: pct(e.t_ms) }}
           />
         ))}
@@ -223,7 +226,7 @@ function tickStep(span: number): number {
 
 function Zoom({ duration, span }: { duration: number; span: number }) {
   const { t } = useTranslation()
-  const { playhead, controller, taxonomy, review } = useWorkspace()
+  const { playhead, controller, taxonomy, review, actions } = useWorkspace()
   const view = useView()
   const ui = useUi()
   const reviewState = useReview()
@@ -235,6 +238,7 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
   const segments = view.segments.filter((s) => s.end_ms > from && s.start_ms < to)
   const sets = view.periods.filter((p) => p.start_ms >= from && p.start_ms <= to)
   const tags = view.events.filter((e) => e.t_ms >= from && e.t_ms <= to)
+  const actionReview = useActionReview()
   const step = tickStep(span)
   const ticks: number[] = []
   for (let tick = Math.ceil(Math.max(0, from) / step) * step; tick <= Math.min(to, duration); tick += step) ticks.push(tick)
@@ -253,7 +257,9 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
   }
   const pickTag = (tag: Tag) => (event: MouseEvent) => {
     event.stopPropagation()
-    controller.select(tag.id, { seek: true })
+    // In the actions queue a suggestion goes on screen there.
+    if (actionReview.active && tag.source === 'model') actions.select(tag.id)
+    else controller.select(tag.id, { seek: true })
   }
 
   return (
@@ -325,7 +331,13 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
         />
       )}
       {tags.map((tag) => (
-        <TagMarker key={tag.id} tag={tag} left={x(tag.t_ms)} selected={tag.id === ui.selectedId} onClick={pickTag(tag)} />
+        <TagMarker
+          key={tag.id}
+          tag={tag}
+          left={x(tag.t_ms)}
+          selected={tag.id === (actionReview.active ? actionReview.currentId : ui.selectedId)}
+          onClick={pickTag(tag)}
+        />
       ))}
       <div className="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-danger" />
     </div>
@@ -333,14 +345,23 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
 }
 
 function TagMarker({ tag, left, selected, onClick }: { tag: Tag; left: string; selected: boolean; onClick: (e: MouseEvent) => void }) {
+  const { t } = useTranslation()
   const row: Record<Side, string> = { us: 'top-13', them: 'top-[4.25rem]' }
+  const suggested = isSuggestedTag(tag)
   return (
     <div
       onClick={onClick}
+      data-action-suggestion={suggested ? 'open' : undefined}
+      title={suggested ? t('tagging.markers.suggested', { label: formatEntry(tag) }) : undefined}
       className={cx(
         'absolute -translate-x-1/2 rounded px-1 font-mono text-[11px] leading-4 font-bold whitespace-nowrap',
         row[tag.side],
-        tag.side === 'us' ? 'bg-fg text-page' : 'bg-surface text-fg ring-1 ring-hairline',
+        // A suggested action: dashed and light, until a coach accepts it.
+        suggested
+          ? 'border border-dashed border-accent bg-accent-soft font-semibold text-on-accent-soft italic'
+          : tag.side === 'us'
+            ? 'bg-fg text-page'
+            : 'bg-surface text-fg ring-1 ring-hairline',
         selected && 'ring-2 ring-accent',
       )}
       style={{ left }}
@@ -356,6 +377,7 @@ function Legend() {
   const view = useView()
   const suggested = view.segments.some((s) => s.source === 'model' && s.kind === 'rally')
   const gapSuggested = view.segments.some(isGapSuggestion)
+  const actionSuggested = view.events.some(isSuggestedTag)
   // Warm-up, stoppage and other breaks only once there are some.
   const more = GAP_KINDS.filter((k) => k !== 'timeout' && k !== 'set_break' && view.segments.some((s) => s.kind === k))
   const items: [string, string][] = [
@@ -374,6 +396,7 @@ function Legend() {
     ...(view.periods.length > 0 ? [['rounded-none border-l-2 border-fg', t('tagging.timeline.legend.setStart')] as [string, string]] : []),
     ['bg-fg', t('tagging.timeline.legend.tagUs')],
     ['bg-muted', t('tagging.timeline.legend.tagThem')],
+    ...(actionSuggested ? [['border border-dashed border-accent bg-accent-soft', t('actions.legend')] as [string, string]] : []),
     ['bg-link rotate-45 scale-75', t('tagging.timeline.legend.comment')],
   ]
   return (

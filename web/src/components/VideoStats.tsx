@@ -19,7 +19,7 @@ import {
 } from '../lib/stats'
 import type { Tagging, Video } from '../lib/types'
 import { buttonClasses } from './buttonStyles'
-import { ChartIcon, DownloadIcon } from './icons'
+import { ChartIcon, DownloadIcon, SparkleIcon } from './icons'
 import { EmptyState, LoadError } from './Message'
 import { SectionHeader } from './PageHeader'
 import { Spinner } from './Spinner'
@@ -58,6 +58,7 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
           ) : null
         }
       />
+      {(stats.data?.suggested ?? 0) > 0 && <SuggestedHint count={stats.data?.suggested ?? 0} />}
       {stats.isPending ? (
         <Spinner />
       ) : stats.isError ? (
@@ -70,6 +71,17 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
         <Numbers data={stats.data} video={video} tagging={tagging} onPlay={onPlay} />
       )}
     </section>
+  )
+}
+
+/** Nomal's suggested actions are not in the numbers until a coach accepts them (PLAN §10.4a). */
+export function SuggestedHint({ count }: { count: number }) {
+  const { t } = useTranslation()
+  return (
+    <p data-suggested-hint className="flex items-center gap-1.5 text-sm text-muted">
+      <SparkleIcon className="size-4 shrink-0" />
+      {t('actions.statsHint', { count })}
+    </p>
   )
 }
 

@@ -230,6 +230,13 @@ export const api = {
       method: 'POST',
       body: { reviewed },
     }),
+  // Suggested actions (PLAN §10.4a): suggest again, and "actions reviewed" (Nomal retrains)
+  suggestActions: (videoId: string) => apiRequest<Analysis>(`/api/videos/${videoId}/actions`, { method: 'POST' }),
+  setActionsReviewed: (videoId: string, reviewed: boolean) =>
+    apiRequest<{ actions_reviewed_at?: string | null } | undefined>(`/api/videos/${videoId}/actions-reviewed`, {
+      method: 'POST',
+      body: { reviewed },
+    }),
 
   // Filming rules
   filming: (teamId: number, on: string, signal?: AbortSignal) =>
