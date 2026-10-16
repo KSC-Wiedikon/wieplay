@@ -16,7 +16,10 @@ function wideScreen(): boolean {
   return typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1024px)').matches
 }
 
-/** /videos/:id/tag — the tagging workspace (PLAN §9.1), desktop only. */
+/**
+ * /videos/:id/tag — the tagging workspace (PLAN §9.1), desktop only; `?mode=review` opens the
+ * review of Nomal's suggestions (PLAN §10.1), which smaller screens get on their own.
+ */
 export function TagPage() {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -31,18 +34,18 @@ function TagLoader({ videoId }: { videoId: string }) {
   const [desktop] = useState(wideScreen)
   const video = useVideo(videoId)
   const ready = video.data?.status === 'ready'
-  // For the checks below only (who may tag, vocabulary); the workspace loads its data fresh.
-  const tagging = useTagging(videoId, ready && desktop)
+  // For the checks below only (who may tag, vocabulary, anything to review); the workspace
+  // loads its data fresh.
+  const tagging = useTagging(videoId, ready)
   useSportAccent(video.data ? sportOf(video.data.sport) : 'vb')
 
   const back = <ButtonLink to={`/videos/${videoId}`}>{t('tagging.back')}</ButtonLink>
-  if (!desktop) {
-    return (
-      <Message action={back}>
-        <span>{t('tagging.phone')}</span>
-      </Message>
-    )
-  }
+  const phone = (
+    <Message action={back}>
+      <span>{t('tagging.phone')}</span>
+    </Message>
+  )
+  if (!desktop && (video.isError || (video.data && !ready) || tagging.isError)) return phone
   if (video.isPending) return <PageSpinner />
   if (video.isError) {
     if (video.error instanceof ApiError && [403, 404, 422].includes(video.error.status)) {
@@ -59,5 +62,10 @@ function TagLoader({ videoId }: { videoId: string }) {
   const bundle = tagging.data
   if (!bundle.taxonomy) return <Message action={back}>{t('tagging.noTaxonomy')}</Message>
   if (!bundle.can_tag) return <Message action={back}>{t('tagging.forbidden')}</Message>
+  // Tagging is a keyboard task; reviewing Nomal's suggestions works by touch too (tablets).
+  if (!desktop) {
+    if (!bundle.segments.some((s) => s.source === 'model')) return phone
+    return <Workspace video={video.data} taxonomy={bundle.taxonomy} narrow />
+  }
   return <Workspace video={video.data} taxonomy={bundle.taxonomy} />
 }

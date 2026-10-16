@@ -114,6 +114,8 @@ function segmentFromIn(p: SegmentIn, prev: Segment | undefined): Segment {
     score_source: prev?.score_source ?? null,
     source: prev?.source ?? 'manual',
     review: p.review ?? prev?.review ?? 'unreviewed',
+    confidence: prev?.confidence ?? null,
+    model_run_id: prev?.model_run_id ?? null,
     version: prev?.version ?? 0,
     deleted_at: null,
   }
@@ -141,6 +143,11 @@ interface Base {
   events: Map<string, Tag>
   segments: Map<string, Segment>
   periods: Map<string, Period>
+  /**
+   * Segments the server answered as deleted (a rejected proposal): undoing the delete brings
+   * them back with their source and confidence, not as a new manual rally.
+   */
+  goneSegments?: Map<string, Segment>
 }
 
 export interface MergedData {
@@ -167,7 +174,7 @@ export function mergeView(
       else events.set(item.id, eventFromIn(item.payload, base.events.get(item.id), roster))
     } else if (item.kind === 'segment') {
       if (item.payload.deleted) segments.delete(item.id)
-      else segments.set(item.id, segmentFromIn(item.payload, base.segments.get(item.id)))
+      else segments.set(item.id, segmentFromIn(item.payload, base.segments.get(item.id) ?? base.goneSegments?.get(item.id)))
     } else if (item.payload.deleted) {
       periods.delete(item.id)
     } else {
@@ -191,6 +198,8 @@ export interface TaggingView extends MergedData {
 }
 
 interface Step {
+  /** Tells undo steps apart (the review keeps where it was per step). */
+  id: number
   changes: { before: Change | null; after: Change }[]
   openRally?: { before: OpenRally | null; after: OpenRally | null }
 }
@@ -224,6 +233,8 @@ export class TaggingStore {
   private openRally: OpenRally | null
   private undoStack: Step[] = []
   private redoStack: Step[] = []
+  private stepSeq = 0
+  private readonly goneSegments = new Map<string, Segment>()
   private view: TaggingView
   private readonly listeners = new Set<() => void>()
   private outbox: Outbox | null = null
@@ -261,14 +272,21 @@ export class TaggingStore {
     return () => this.listeners.delete(listener)
   }
 
-  /** Applies changes now (optimistically) and queues them; one undo step. */
-  commit(changes: readonly Change[], openRally?: OpenRally | null): void {
-    const step: Step = { changes: changes.map((after) => ({ before: this.current(after), after })) }
+  /** Applies changes now (optimistically) and queues them; one undo step, whose id is returned. */
+  commit(changes: readonly Change[], openRally?: OpenRally | null): number {
+    this.stepSeq += 1
+    const step: Step = { id: this.stepSeq, changes: changes.map((after) => ({ before: this.current(after), after })) }
     if (openRally !== undefined) step.openRally = { before: this.openRally, after: openRally }
     this.undoStack.push(step)
     if (this.undoStack.length > MAX_UNDO) this.undoStack.shift()
     this.redoStack = []
     this.apply(step.changes.map((c) => c.after), openRally)
+    return step.id
+  }
+
+  /** The id of the step undo() would take back, or null. */
+  topStep(): number | null {
+    return this.undoStack.at(-1)?.id ?? null
   }
 
   undo(): boolean {
@@ -314,6 +332,7 @@ export class TaggingStore {
       events: this.live('event', bundle.events),
       segments: this.live('segment', bundle.segments),
       periods: this.live('period', bundle.periods),
+      goneSegments: this.goneSegments,
     }
   }
 
@@ -329,9 +348,11 @@ export class TaggingStore {
     if (item.deleted_at) {
       map.delete(item.id)
       this.deletedVersions.set(key, item.version)
+      if (kind === 'segment') this.goneSegments.set(item.id, item as unknown as Segment)
     } else {
       map.set(item.id, item)
       this.deletedVersions.delete(key)
+      if (kind === 'segment') this.goneSegments.delete(item.id)
     }
   }
 

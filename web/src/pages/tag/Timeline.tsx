@@ -2,18 +2,32 @@ import { useId, useMemo, useState, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
 import { Select } from '../../components/Field'
+import { SparkleIcon } from '../../components/icons'
+import { SuggestionChip } from '../../components/SuggestionChip'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
 import { formatClock, segmentKindLabel } from '../../lib/labels'
 import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
+import { formatPercent, isReviewedSuggestion, isSuggestion } from '../../lib/suggestions'
 import type { Segment, SegmentKind, Side, Tag } from '../../lib/types'
-import { useUi, useView, useWorkspace } from './context'
+import { useReview, useUi, useView, useWorkspace } from './context'
 
 const SPANS = [30_000, 60_000, 120_000, 300_000] as const
 
-function segmentClass(kind: SegmentKind): string {
+/** Nomal's open suggestions are outlined (dashed), not filled: they are not rallies yet. */
+function segmentClass(segment: Pick<Segment, 'kind' | 'source' | 'review'>): string {
+  if (isSuggestion(segment)) return 'border-2 border-dashed border-accent bg-accent-soft'
+  return kindClass(segment.kind)
+}
+
+function suggestionState(segment: Segment): string | undefined {
+  if (isSuggestion(segment)) return 'open'
+  return isReviewedSuggestion(segment) ? segment.review : undefined
+}
+
+function kindClass(kind: SegmentKind): string {
   switch (kind) {
     case 'rally':
     case 'possession':
@@ -94,7 +108,8 @@ function Overview({ duration, span }: { duration: number; span: number }) {
         {view.segments.map((s) => (
           <div
             key={s.id}
-            className={cx('absolute top-2 bottom-3 min-w-px rounded-sm', segmentClass(s.kind))}
+            data-suggestion={suggestionState(s)}
+            className={cx('absolute top-2 bottom-3 min-w-px rounded-sm', isSuggestion(s) ? 'border border-dashed border-accent bg-accent-soft' : kindClass(s.kind))}
             style={{ left: pct(s.start_ms), width: pct(s.end_ms - s.start_ms) }}
           />
         ))}
@@ -166,9 +181,11 @@ function tickStep(span: number): number {
 
 function Zoom({ duration, span }: { duration: number; span: number }) {
   const { t } = useTranslation()
-  const { playhead, controller, taxonomy } = useWorkspace()
+  const { playhead, controller, taxonomy, review } = useWorkspace()
   const view = useView()
   const ui = useUi()
+  const reviewState = useReview()
+  const selectedId = reviewState.active ? reviewState.currentId : ui.segmentId
   const now = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 50) * 50)
   const from = now - span / 2
   const to = now + span / 2
@@ -182,7 +199,12 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
 
   const pickSegment = (segment: Segment) => (event: MouseEvent) => {
     event.stopPropagation()
-    controller.selectSegment(segment.id)
+    // While reviewing, a click on a suggestion (or a part split off) puts it on screen.
+    if (reviewState.active && review.items().some((s) => s.id === segment.id)) {
+      if (segment.id !== reviewState.currentId) review.select(segment.id)
+    } else {
+      controller.selectSegment(segment.id)
+    }
     const f = fraction(event as MouseEvent<HTMLElement>)
     if (f !== null) controller.seek(segment.start_ms + f * (segment.end_ms - segment.start_ms))
   }
@@ -208,25 +230,33 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
       ))}
       {from < 0 && <div className="absolute inset-y-0 left-0 bg-page" style={{ width: x(0) }} />}
       {to > duration && <div className="absolute inset-y-0 right-0 bg-page" style={{ left: x(duration) }} />}
-      {segments.map((s) => (
-        <div
-          key={s.id}
-          onClick={pickSegment(s)}
-          className={cx(
-            'absolute top-5 h-7 overflow-hidden rounded-md px-1 text-xs leading-7 font-semibold whitespace-nowrap',
-            segmentClass(s.kind),
-            s.kind === 'rally' || s.kind === 'possession' ? 'text-on-accent' : 'text-fg',
-            ui.segmentId === s.id && 'ring-2 ring-fg',
-          )}
-          style={{ left: x(Math.max(s.start_ms, from)), width: `${((Math.min(s.end_ms, to) - Math.max(s.start_ms, from)) / span) * 100}%` }}
-        >
-          {s.kind === 'rally'
-            ? s.score_us_after !== null && s.score_them_after !== null
-              ? `${s.score_us_after}:${s.score_them_after}`
-              : ''
-            : segmentKindLabel(t, s.kind, taxonomy.sport)}
-        </div>
-      ))}
+      {segments.map((s) => {
+        const open = isSuggestion(s)
+        return (
+          <div
+            key={s.id}
+            onClick={pickSegment(s)}
+            data-suggestion={suggestionState(s)}
+            className={cx(
+              'absolute top-5 flex h-7 items-center gap-0.5 overflow-hidden rounded-md px-1 text-xs font-semibold whitespace-nowrap',
+              segmentClass(s),
+              open ? 'text-on-accent-soft' : s.kind === 'rally' || s.kind === 'possession' ? 'text-on-accent' : 'text-fg',
+              selectedId === s.id && 'ring-2 ring-fg',
+            )}
+            style={{ left: x(Math.max(s.start_ms, from)), width: `${((Math.min(s.end_ms, to) - Math.max(s.start_ms, from)) / span) * 100}%` }}
+          >
+            {/* A suggestion that was accepted or corrected keeps a small marker. */}
+            {s.source === 'model' && s.kind === 'rally' && <SparkleIcon className="size-3 shrink-0" />}
+            {open
+              ? formatPercent(s.confidence)
+              : s.kind === 'rally'
+                ? s.score_us_after !== null && s.score_them_after !== null
+                  ? `${s.score_us_after}:${s.score_them_after}`
+                  : ''
+                : segmentKindLabel(t, s.kind, taxonomy.sport)}
+          </div>
+        )
+      })}
       {open && now > open.start_ms && (
         <div
           className="absolute top-5 h-7 rounded-md border-2 border-dashed border-accent"
@@ -262,11 +292,14 @@ function TagMarker({ tag, left, selected, onClick }: { tag: Tag; left: string; s
 function Legend() {
   const { t } = useTranslation()
   const { controller, taxonomy } = useWorkspace()
+  const view = useView()
+  const suggested = view.segments.some((s) => s.source === 'model')
   const items: [string, string][] = [
     // Basketball marks no rallies (M4), so there is no dead time between them either.
     ...(controller.playsRallies
       ? ([
           ['bg-accent', t('tagging.timeline.legend.rally')],
+          ...(suggested ? [['border border-dashed border-accent bg-accent-soft', t('tagging.suggestions.legend')]] : []),
           ['bg-sunken ring-1 ring-hairline', t('tagging.timeline.legend.dead')],
         ] as [string, string][])
       : []),
@@ -312,12 +345,20 @@ export function SegmentPanel({ id }: { id: string }) {
   return (
     <section aria-labelledby={`${htmlId}-title`} className="flex flex-col gap-3 rounded-card border border-hairline bg-surface shadow-card p-4">
       <div className="flex items-center justify-between gap-2">
-        <h2 id={`${htmlId}-title`} className="font-semibold">
+        <h2 id={`${htmlId}-title`} className="flex flex-wrap items-center gap-2 font-semibold">
           {t('tagging.segment.title', { kind: kindLabel(segment.kind) })}
+          <SuggestionChip segment={segment} />
         </h2>
-        <Button variant="ghost" onClick={() => controller.selectSegment(null)}>
-          {t('common.close')}
-        </Button>
+        <span className="flex flex-wrap gap-2">
+          {isSuggestion(segment) && (
+            <Button variant="primary" onClick={() => controller.acceptSegment(segment.id)}>
+              {t('tagging.suggestions.accept')}
+            </Button>
+          )}
+          <Button variant="ghost" onClick={() => controller.selectSegment(null)}>
+            {t('common.close')}
+          </Button>
+        </span>
       </div>
       <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${htmlId}-kind`}>
@@ -361,7 +402,7 @@ export function SegmentPanel({ id }: { id: string }) {
           </label>
         )}
         <Button variant="ghostDanger" onClick={() => controller.deleteSegment(segment.id)} className="ml-auto">
-          {t('tagging.segment.delete')}
+          {segment.source === 'model' ? t('tagging.suggestions.reject') : t('tagging.segment.delete')}
         </Button>
       </div>
       {error && (

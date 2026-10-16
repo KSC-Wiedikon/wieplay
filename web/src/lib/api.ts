@@ -1,5 +1,6 @@
 import type {
   AdminTeam,
+  Analysis,
   Blocker,
   ChangesIn,
   ChangesOut,
@@ -90,6 +91,10 @@ function detailOf(body: unknown): string | null {
   if (!body || typeof body !== 'object' || !('detail' in body)) return null
   const { detail } = body
   if (typeof detail === 'string') return detail
+  // {"message": …, …more fields}: e.g. 409 "suggestions still open" with their count.
+  if (detail && typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string') {
+    return detail.message
+  }
   if (Array.isArray(detail)) {
     const first: unknown = detail[0]
     if (first && typeof first === 'object' && 'msg' in first && typeof first.msg === 'string') return first.msg
@@ -213,6 +218,16 @@ export const api = {
     apiRequest<EventRevision[]>(`/api/events/${eventId}/revisions`, { signal }),
   taxonomy: (sport: string, signal?: AbortSignal) =>
     apiRequest<Taxonomy>(`/api/taxonomies/${encodeURIComponent(sport)}`, { signal }),
+
+  // Automatic analysis (PLAN §10.1): rally proposals, and "rallies reviewed" (Nomal retrains)
+  analysis: (videoId: string, signal?: AbortSignal) =>
+    apiRequest<Analysis>(`/api/videos/${videoId}/analysis`, { signal }),
+  analyse: (videoId: string) => apiRequest<unknown>(`/api/videos/${videoId}/analyse`, { method: 'POST' }),
+  setRalliesReviewed: (videoId: string, reviewed: boolean) =>
+    apiRequest<{ rallies_reviewed_at?: string | null } | undefined>(`/api/videos/${videoId}/rallies-reviewed`, {
+      method: 'POST',
+      body: { reviewed },
+    }),
 
   // Filming rules
   filming: (teamId: number, on: string, signal?: AbortSignal) =>

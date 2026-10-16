@@ -1,6 +1,6 @@
 import '../i18n/pages'
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Badge } from '../components/Badge'
@@ -12,6 +12,7 @@ import { ClipBar, ClipsSection } from '../components/ClipsSection'
 import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ExportButton } from '../components/ExportButton'
+import { AnalysisStatus } from '../components/AnalysisStatus'
 import { AlertIcon, CheckIcon, ChevronRightIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
 import { MomentsStrip } from '../components/MomentsStrip'
@@ -34,6 +35,7 @@ import { Playhead } from '../lib/playhead'
 import { useDeleteVideo, useMe, useTagging, useVideo, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
+import { isSuggestion } from '../lib/suggestions'
 import type { StatPlay } from '../lib/stats'
 import { useRangePlayback } from '../lib/useRangePlayback'
 import { useToast } from '../lib/toast'
@@ -285,7 +287,12 @@ function Ready({ video }: { video: Video }) {
 
   const { resolution, fps } = videoFacts(video)
   const facts = [formatDuration(video.duration_ms), resolution, fps ? t('video.fps', { fps }) : null].filter(Boolean)
-  const data = tagging.data
+  // Nomal's suggestions are not rallies until a coach reviews them (PLAN §10): the rally list,
+  // skipping dead time and the counts leave them out.
+  const data = useMemo(
+    () => (tagging.data ? { ...tagging.data, segments: tagging.data.segments.filter((s) => !isSuggestion(s)) } : undefined),
+    [tagging.data],
+  )
   const rallyCount = data?.segments.filter((s) => s.kind === 'rally').length ?? 0
   const tagCount = data?.events.length ?? 0
   const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
@@ -387,6 +394,9 @@ function Ready({ video }: { video: Video }) {
                 </div>
               )}
             </div>
+          )}
+          {data?.can_tag && video.sport === 'volleyball' && (
+            <AnalysisStatus video={video} rallies={rallyCount} reviewHref={`/videos/${video.id}/tag?mode=review`} />
           )}
           {video.meets_standard === false && (
             <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">

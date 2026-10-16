@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Tagging, TeamDetail, Video } from '../lib/types'
+import type { Analysis, Tagging, TeamDetail, Video } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
 import { boxScore, statRow, teamLine, videoStats } from '../test/stats'
 import { bundle, period, rally, tag } from '../test/tagging'
@@ -318,6 +318,122 @@ describe('VideoPage', () => {
       await screen.findByRole('heading', { level: 1 })
       await waitFor(() => expect(screen.queryByText(/tags ·/)).not.toBeInTheDocument())
       expect(screen.queryByRole('link', { name: 'Tag this video' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('automatic rallies', () => {
+    const set1 = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })
+    const open = rally({ start_ms: 40_000, end_ms: 48_000, source: 'model', confidence: 0.81 })
+    const accepted = rally({ start_ms: 60_000, end_ms: 70_000, source: 'model', review: 'confirmed', confidence: 0.93 })
+    const counts = (patch: Partial<Analysis['proposals']> = {}) => ({ unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0, ...patch })
+    const analysis = (patch: Partial<Analysis> = {}): Analysis => ({ status: 'done', model_run: null, proposals: counts(), metrics_vs_human: null, ...patch })
+
+    function showAnalysis(state: { analysis: Analysis }, { canTag = true, segments = [r1, open, accepted], reviewedAt = null as string | null } = {}) {
+      const posts: { path: string; body: unknown }[] = []
+      const current = { video: video({ can_tag: canTag, rallies_reviewed_at: reviewedAt }) }
+      const view = show(current.video, 200, {
+        [`/api/videos/${ID}`]: { body: () => current.video },
+        [`/api/videos/${ID}/tagging`]: { body: bundle({ can_tag: canTag, periods: [set1], segments, events: [] }) },
+        [`/api/videos/${ID}/analysis`]: { body: () => state.analysis },
+        [`POST /api/videos/${ID}/analyse`]: {
+          status: 202,
+          body: ({ path, body }: { path: string; body: unknown }) => {
+            posts.push({ path, body })
+            state.analysis = { ...state.analysis, status: 'queued' }
+            return {}
+          },
+        },
+        [`POST /api/videos/${ID}/rallies-reviewed`]: {
+          body: ({ path, body }: { path: string; body: unknown }) => {
+            posts.push({ path, body })
+            const at = (body as { reviewed: boolean }).reviewed ? '2026-10-16T19:12:00Z' : null
+            current.video = { ...current.video, rallies_reviewed_at: at }
+            return { rallies_reviewed_at: at }
+          },
+        },
+      })
+      return { ...view, posts }
+    }
+
+    it("keeps open suggestions out of the rallies and links coaches to their review", async () => {
+      showAnalysis({ analysis: analysis({ proposals: counts({ unreviewed: 1, confirmed: 1, rejected: 1 }) }) })
+      expect(await screen.findByText('Nomal suggested 3 rallies.')).toBeInTheDocument()
+      expect(screen.getByText('1 still to review.')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Review suggestions (1)' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
+      // Nothing is shown as fact until it is reviewed (PLAN §10): the accepted one is a rally, the open one not.
+      expect(screen.getByText('0 tags · 2 rallies')).toBeInTheDocument()
+      const list = screen.getByRole('table', { name: 'Rallies' })
+      expect(within(list).getAllByRole('row').slice(1)).toHaveLength(2)
+      // Marking the rallies reviewed now accepts the open suggestion: asked first.
+      const reviewed = screen.getByRole('switch', { name: 'Rallies reviewed' })
+      expect(reviewed).toHaveAccessibleDescription(/the open suggestion is then accepted as it is/)
+      fireEvent.click(reviewed)
+      const dialog = screen.getByRole('alertdialog', { name: 'Mark the rallies reviewed?' })
+      expect(dialog).toHaveTextContent('The suggestion still open is accepted as it is')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      expect(reviewed).toHaveAttribute('aria-checked', 'false')
+    })
+
+    it('analyses on request, and shows the analysis queued, running and failed', async () => {
+      const state = { analysis: analysis({ status: 'none' }) }
+      const { posts, queryClient } = showAnalysis(state, { segments: [r1] })
+      expect(await screen.findByText('Nomal has not analysed this video yet.')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Analyse' }))
+      expect(await screen.findByText('Analysis queued.')).toBeInTheDocument()
+      expect(posts).toEqual([{ path: `/api/videos/${ID}/analyse`, body: undefined }])
+      expect(screen.getByText('This takes a few minutes. The page updates by itself.')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Analyse' })).not.toBeInTheDocument()
+
+      state.analysis = analysis({ status: 'running' })
+      await queryClient.invalidateQueries()
+      expect(await screen.findByText('Nomal is finding the rallies…')).toBeInTheDocument()
+
+      state.analysis = analysis({ status: 'failed' })
+      await queryClient.invalidateQueries()
+      expect(await screen.findByText('The analysis failed.')).toBeInTheDocument()
+      fireEvent.click(within(screen.getByRole('region', { name: 'Automatic rallies' })).getByRole('button', { name: 'Try again' }))
+      await waitFor(() => expect(posts).toHaveLength(2))
+    })
+
+    it("tells how well the suggestions matched the coach's own rallies", async () => {
+      showAnalysis(
+        { analysis: analysis({ metrics_vs_human: { f1_1s: 0.94, precision: 0.95, recall: 0.93, iou: 0.88, rallies_human: 185, rallies_model: 181 } }) },
+        { segments: [r1] },
+      )
+      expect(await screen.findByText('Nomal compared its rally finder with your rallies.')).toBeInTheDocument()
+      expect(screen.getByText('Suggestions matched your rallies: F1 94% at ±1 s')).toBeInTheDocument()
+      expect(screen.getByText('Precision 95%, recall 93%. Nomal: 181 rallies, you: 185.')).toBeInTheDocument()
+    })
+
+    it('asks to mark the rallies reviewed once every suggestion is answered, and can take it back', async () => {
+      const { posts } = showAnalysis({ analysis: analysis({ proposals: counts({ confirmed: 1, rejected: 1 }) }) }, { segments: [r1, accepted] })
+      expect(await screen.findByText('Every suggestion is reviewed.')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Mark rallies reviewed' }))
+      const reviewed = await screen.findByRole('switch', { name: 'Rallies reviewed' })
+      expect(reviewed).toHaveAttribute('aria-checked', 'true')
+      expect(await screen.findByText('Rallies marked reviewed. Nomal learns from this game.')).toBeInTheDocument()
+      expect(posts).toEqual([{ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: true } }])
+      await waitFor(() => expect(reviewed).toHaveAccessibleDescription('Marked reviewed on 16.10.2026 21:12. Nomal learns from this game.'))
+
+      fireEvent.click(reviewed)
+      await waitFor(() => expect(posts.at(-1)).toEqual({ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: false } }))
+      expect(await screen.findByText('Every suggestion is reviewed.')).toBeInTheDocument()
+    })
+
+    it('lets a coach mark a game tagged by hand reviewed (training data without suggestions)', async () => {
+      const { posts } = showAnalysis({ analysis: analysis({ status: 'none' }) }, { segments: [r1] })
+      const reviewed = await screen.findByRole('switch', { name: 'Rallies reviewed' })
+      expect(reviewed).toHaveAccessibleDescription(/Nomal learns from reviewed games/)
+      fireEvent.click(reviewed)
+      await waitFor(() => expect(posts).toEqual([{ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: true } }]))
+    })
+
+    it('shows players neither the analysis nor open suggestions', async () => {
+      showAnalysis({ analysis: analysis({ proposals: counts({ unreviewed: 1 }) }) }, { canTag: false })
+      expect(await screen.findByRole('table', { name: 'Rallies' })).toBeInTheDocument()
+      expect(screen.queryByText(/Nomal suggested/)).not.toBeInTheDocument()
+      expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row').slice(1)).toHaveLength(2)
     })
   })
 

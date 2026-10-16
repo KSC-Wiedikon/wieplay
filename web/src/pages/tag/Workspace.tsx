@@ -1,15 +1,18 @@
 import { useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
+import { AnalysisStatus } from '../../components/AnalysisStatus'
 import { Button, ButtonLink } from '../../components/Button'
 import { ClipDialog } from '../../components/ClipDialog'
 import { AlertIcon, CheckIcon, KeyboardIcon, PauseIcon, PlayIcon, RedoIcon, UndoIcon } from '../../components/icons'
 import { LoadError } from '../../components/Message'
 import { PageSpinner } from '../../components/Spinner'
+import { Segmented } from '../../components/Segmented'
 import { Switch } from '../../components/Switch'
 import { VideoPlayer } from '../../components/VideoPlayer'
+import { analysisQuery, isBusy, useAnalysis } from '../../lib/analysis'
 import { api } from '../../lib/api'
 import type { ClipDraft } from '../../lib/clips'
 import { playWindows } from '../../lib/condensed'
@@ -21,14 +24,19 @@ import { Outbox, type OutboxItem } from '../../lib/outbox'
 import { Playhead, usePlayhead } from '../../lib/playhead'
 import { keys } from '../../lib/queryClient'
 import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
+import { reviewProgress, suggestionCount } from '../../lib/suggestions'
 import { TaggingStore } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
-import { WorkspaceContext, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
+import { useLoopPlayback } from '../../lib/useLoopPlayback'
+import { WorkspaceContext, useReview, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
 import { Cheatsheet } from './Cheatsheet'
 import { TagController } from './controller'
 import { EntryPanel } from './EntryPanel'
 import { EventTable } from './EventTable'
+import { RallyList } from './RallyList'
+import { ReviewController } from './review'
+import { ReviewPanel } from './ReviewPanel'
 import { RosterPanel } from './RosterPanel'
 import { SetsBar } from './SetsBar'
 import { SegmentPanel, Timeline } from './Timeline'
@@ -43,6 +51,8 @@ interface Session {
   store: TaggingStore
   outbox: Outbox
   bundle: Tagging
+  /** Proposals rejected before this session (no longer in the tagging data), for the review's progress. */
+  rejectedBefore: number
 }
 
 /**
@@ -50,7 +60,7 @@ interface Session {
  * miss changes sent moments ago), opens the outbox (queued changes of an earlier visit come
  * back), then shows the desk. Closing it sends what is still queued.
  */
-export function Workspace({ video, taxonomy }: { video: Video; taxonomy: Taxonomy }) {
+export function Workspace({ video, taxonomy, narrow = false }: { video: Video; taxonomy: Taxonomy; narrow?: boolean }) {
   const client = useQueryClient()
   const [session, setSession] = useState<Session | null>(null)
   const [failed, setFailed] = useState(false)
@@ -61,11 +71,16 @@ export function Workspace({ video, taxonomy }: { video: Video; taxonomy: Taxonom
     let opened: Session | null = null
     const start = async () => {
       await closing.get(video.id)
-      const bundle = await client.fetchQuery({
-        queryKey: keys.tagging(video.id),
-        queryFn: ({ signal }) => api.tagging(video.id, signal),
-        staleTime: 0,
-      })
+      const [bundle, analysis] = await Promise.all([
+        client.fetchQuery({
+          queryKey: keys.tagging(video.id),
+          queryFn: ({ signal }) => api.tagging(video.id, signal),
+          staleTime: 0,
+        }),
+        // Read with the tagging data, so its count of rejected proposals matches it. Optional:
+        // without it (basketball, an older server) the review counts what the data lists.
+        taxonomy.sport === 'basketball' ? null : client.fetchQuery({ ...analysisQuery(video.id), staleTime: 0, retry: false }).catch(() => null),
+      ])
       if (cancelled) return
       const store = new TaggingStore(video.id, bundle)
       const outbox = await Outbox.open({
@@ -78,7 +93,7 @@ export function Workspace({ video, taxonomy }: { video: Video; taxonomy: Taxonom
         return
       }
       store.attach(outbox)
-      opened = { store, outbox, bundle }
+      opened = { store, outbox, bundle, rejectedBefore: analysis?.proposals.rejected ?? 0 }
       setSession(opened)
     }
     start().catch(() => {
@@ -97,7 +112,7 @@ export function Workspace({ video, taxonomy }: { video: Video; taxonomy: Taxonom
       })
       closing.set(video.id, done)
     }
-  }, [client, video.id, attempt])
+  }, [client, video.id, taxonomy.sport, attempt])
 
   if (failed) {
     return (
@@ -111,7 +126,17 @@ export function Workspace({ video, taxonomy }: { video: Video; taxonomy: Taxonom
     )
   }
   if (!session) return <PageSpinner />
-  return <Desk video={video} bundle={session.bundle} taxonomy={taxonomy} store={session.store} outbox={session.outbox} />
+  return (
+    <Desk
+      video={video}
+      bundle={session.bundle}
+      taxonomy={taxonomy}
+      store={session.store}
+      outbox={session.outbox}
+      rejectedBefore={session.rejectedBefore}
+      narrow={narrow}
+    />
+  )
 }
 
 interface WorkspaceProps {
@@ -120,30 +145,104 @@ interface WorkspaceProps {
   taxonomy: Taxonomy
 }
 
-function Desk({ video, bundle, taxonomy, store, outbox }: WorkspaceProps & { store: TaggingStore; outbox: Outbox }) {
+interface DeskProps extends WorkspaceProps {
+  store: TaggingStore
+  outbox: Outbox
+  rejectedBefore: number
+  narrow: boolean
+}
+
+function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }: DeskProps) {
+  const [params, setParams] = useSearchParams()
   const [playhead] = useState(() => new Playhead())
   const [controller] = useState(() => new TagController(store, playhead, taxonomy, { duration_ms: video.duration_ms }))
+  const [review] = useState(() => new ReviewController(store, playhead, controller, { rejectedBefore }))
   const [element, setElement] = useState<HTMLVideoElement | null>(null)
+  const reload = useCallback(() => {
+    api
+      .tagging(video.id)
+      .then((fresh) => store.replaceBase(fresh))
+      .catch(() => {})
+  }, [store, video.id])
   const parts = useMemo<WorkspaceParts>(
-    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller }),
-    [video, bundle, taxonomy, store, outbox, playhead, controller],
+    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow, reload }),
+    [video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow, reload],
   )
+  const reviewing = useSyncedReview(review)
 
   useEffect(() => {
     playhead.attach(element)
     return () => playhead.detach()
   }, [playhead, element])
 
+  useEffect(() => review.attach(), [review])
+
+  // One keyboard at a time: the review's keys while reviewing, the tagging keys otherwise.
   useEffect(() => {
-    window.addEventListener('keydown', controller.onKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', controller.onKeyDown, { capture: true })
-  }, [controller])
+    const onKeyDown = (event: KeyboardEvent) => (review.getState().active ? review.onKeyDown(event) : controller.onKeyDown(event))
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+  }, [controller, review])
+
+  // ?mode=review (the video page's "Review suggestions") opens the review; a narrow screen has only it.
+  const wantsReview = narrow || params.get('mode') === 'review'
+  const started = useRef(false)
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    if (wantsReview) review.start()
+  }, [review, wantsReview])
+  // The mode stays in the address, so a reload comes back to it.
+  useEffect(() => {
+    if (narrow || reviewing === (params.get('mode') === 'review')) return
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (reviewing) next.set('mode', 'review')
+        else next.delete('mode')
+        return next
+      },
+      { replace: true },
+    )
+  }, [narrow, reviewing, params, setParams])
+
+  // An analysis that finishes while the page is open brings its suggestions in.
+  const analysis = useAnalysis(video.id, taxonomy.sport !== 'basketball')
+  const analysisStatus = analysis.data?.status ?? null
+  const lastStatus = useRef(analysisStatus)
+  useEffect(() => {
+    const before = lastStatus.current
+    lastStatus.current = analysisStatus
+    if (analysisStatus !== 'done' || before === null || !isBusy({ status: before })) return
+    let cancelled = false
+    void Promise.all([api.tagging(video.id), api.analysis(video.id).catch(() => null)])
+      .then(([fresh, latest]) => {
+        if (cancelled) return
+        store.replaceBase(fresh)
+        review.reset(latest?.proposals.rejected ?? 0)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [analysisStatus, store, review, video.id])
 
   return (
     <WorkspaceContext value={parts}>
       <DeskLayout element={element} setElement={setElement} />
     </WorkspaceContext>
   )
+}
+
+/** Whether the review is on, as React state. */
+function useSyncedReview(review: ReviewController): boolean {
+  const [active, setActive] = useState(() => review.getState().active)
+  useEffect(() => {
+    const update = () => setActive(review.getState().active)
+    update()
+    return review.subscribe(update)
+  }, [review])
+  return active
 }
 
 function DeskLayout({
@@ -154,14 +253,26 @@ function DeskLayout({
   setElement: (element: HTMLVideoElement | null) => void
 }) {
   const { t } = useTranslation()
-  const { video, controller } = useWorkspace()
+  const { video, controller, narrow, reload } = useWorkspace()
   const view = useView()
   const ui = useUi()
   const sync = useSync()
+  const review = useReview()
+  const reviewing = review.active
 
   const rallies = useMemo(() => ralliesOf(view.segments), [view.segments])
   const windows = useMemo(() => playWindows(rallies, { duration_ms: video.duration_ms }), [rallies, video.duration_ms])
-  useCondensedPlayback(element, windows, ui.skip)
+  // While reviewing, the suggestion on screen plays in a loop instead.
+  useCondensedPlayback(element, windows, ui.skip && !reviewing)
+  const current = reviewing ? (view.segments.find((s) => s.id === review.currentId) ?? null) : null
+  useLoopPlayback(element, current?.start_ms ?? null, current?.end_ms ?? null)
+
+  const progress = useMemo(() => reviewProgress(view.segments, review.seen, review.rejectedBefore), [view.segments, review.seen, review.rejectedBefore])
+  const live = useMemo(() => ({ total: progress.total, open: progress.total - progress.done }), [progress])
+  const byHand = rallies.length - suggestionCount(view.segments)
+  // The review is offered once Nomal suggested something (volleyball: basketball marks no rallies).
+  const canReview = controller.playsRallies && (progress.total > 0 || reviewing)
+  const status = controller.playsRallies && video.can_tag ? <AnalysisStatus video={video} rallies={byHand} live={live} onReviewed={reload} /> : null
 
   // Without IndexedDB, unsent changes are lost with the page: ask before leaving.
   useEffect(() => {
@@ -173,7 +284,7 @@ function DeskLayout({
 
   return (
     <div className="flex flex-col gap-4">
-      <title>{`${t('tagging.pageTitle', { title: video.title })} · nomal`}</title>
+      <title>{`${t(reviewing ? 'tagging.review.title' : 'tagging.pageTitle', { title: video.title })}${reviewing ? ` · ${video.title}` : ''} · nomal`}</title>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h1 className="text-xl font-bold wrap-break-word">{video.title}</h1>
@@ -185,32 +296,93 @@ function DeskLayout({
             </Link>
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {canReview && !narrow && <ModeSwitch open={live.open} />}
           <SyncStatus />
           <ButtonLink to={`/videos/${video.id}`}>{t('tagging.back')}</ButtonLink>
         </div>
       </header>
       <SyncNotes />
+      {narrow && <p className="text-sm text-muted">{t('tagging.review.phoneHint')}</p>}
+      {/* While reviewing, the suggestion comes first; the analysis and "rallies reviewed" go below. */}
+      {!reviewing && status}
 
-      <div className="flex items-start gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         {/* The video stays short enough to keep the sets bar and the timeline on screen. */}
-        <div className="flex max-w-[calc((100dvh-27rem)*16/9)] min-w-0 flex-[100_1_0%] flex-col gap-2">
+        <div className={cx('flex min-w-0 flex-col gap-2', !narrow && 'max-w-[calc((100dvh-27rem)*16/9)] flex-[100_1_0%]')}>
           <VideoPlayer video={video} videoRef={setElement} keyboard={false} onFrameRate={controller.setFps} />
           <Transport />
         </div>
         {/* About 22rem until the video reaches its height limit; then the panel takes the rest. */}
-        <aside className="flex min-w-80 flex-[1_0_22rem] flex-col gap-2" aria-label={t('tagging.panel')}>
-          <StatePanel />
-          <EntryPanel />
-          <RosterPanel />
-        </aside>
+        {reviewing ? (
+          <div className={cx('flex flex-col gap-2', !narrow && 'min-w-80 flex-[1_0_22rem]')}>
+            <ReviewPanel />
+          </div>
+        ) : (
+          <aside className="flex min-w-80 flex-[1_0_22rem] flex-col gap-2" aria-label={t('tagging.panel')}>
+            <StatePanel />
+            <EntryPanel />
+            <RosterPanel />
+          </aside>
+        )}
       </div>
-      <SetsBar />
+      {!reviewing && <SetsBar />}
       <Timeline />
-      {ui.segmentId && <SegmentPanel key={ui.segmentId} id={ui.segmentId} />}
-      <EventTable />
+      {!reviewing && ui.segmentId && <SegmentPanel key={ui.segmentId} id={ui.segmentId} />}
+      {reviewing ? <RallyList mode="review" /> : <Lists rallies={rallies.length} />}
+      {reviewing && status}
       <Cheatsheet />
       <WorkspaceClipDialog />
+    </div>
+  )
+}
+
+/** Tag or review: the review goes through Nomal's suggestions one by one. */
+function ModeSwitch({ open }: { open: number }) {
+  const { t } = useTranslation()
+  const { review } = useWorkspace()
+  const state = useReview()
+  return (
+    <Segmented
+      label={t('tagging.mode.label')}
+      value={state.active ? 'review' : 'tag'}
+      options={[
+        { value: 'tag', label: t('tagging.mode.tag') },
+        { value: 'review', label: open > 0 ? t('tagging.mode.reviewCount', { count: open }) : t('tagging.mode.review') },
+      ]}
+      onChange={(value, event) => {
+        if (value === 'review') review.start()
+        else review.stop()
+        // A pointer click must not leave Enter on this button: Enter answers the review.
+        if (event.detail > 0) event.currentTarget.blur()
+      }}
+    />
+  )
+}
+
+/** Below the timeline: the tags, or (volleyball) the rallies with Nomal's suggestions. */
+function Lists({ rallies }: { rallies: number }) {
+  const { t } = useTranslation()
+  const { controller } = useWorkspace()
+  const view = useView()
+  const [list, setList] = useState<'tags' | 'rallies'>('tags')
+  if (!controller.playsRallies) return <EventTable />
+  const lists = (
+    <Segmented
+      label={t('tagging.lists.label')}
+      value={list}
+      options={[
+        { value: 'tags', label: t('tagging.lists.tags', { count: view.events.length }) },
+        { value: 'rallies', label: t('tagging.lists.rallies', { count: rallies }) },
+      ]}
+      onChange={(value) => setList(value)}
+    />
+  )
+  if (list === 'rallies') return <RallyList mode="tag" toolbar={lists} />
+  return (
+    <div className="flex flex-col gap-3">
+      <div>{lists}</div>
+      <EventTable />
     </div>
   )
 }
@@ -245,9 +417,10 @@ function WorkspaceClipDialog() {
 
 function Transport() {
   const { t } = useTranslation()
-  const { controller, playhead, video } = useWorkspace()
+  const { controller, playhead, video, review: reviewer, narrow } = useWorkspace()
   const ui = useUi()
   const view = useView()
+  const reviewing = useReview().active
   const playing = usePlayhead(playhead, (s) => s.playing)
   const rate = usePlayhead(playhead, (s) => s.rate)
   const tenths = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 100))
@@ -270,24 +443,27 @@ function Transport() {
           <span aria-hidden="true">+</span>
         </Button>
       </div>
-      {/* Dead time is what lies between rallies; basketball marks none (yet). */}
-      {controller.playsRallies && (
+      {/* Dead time is what lies between rallies; basketball marks none (yet). Reviewing loops one rally. */}
+      {controller.playsRallies && !reviewing && (
         <label className="flex cursor-pointer items-center gap-1 text-sm font-semibold">
           <Switch checked={ui.skip} onChange={(on) => controller.toggleSkip(on)} label={t('tagging.condensed.skip')} />
           <span aria-hidden="true">{t('tagging.condensed.skip')}</span>
         </label>
       )}
       <div className="ml-auto flex items-center gap-1">
-        <Button variant="ghost" size="icon" disabled={!view.canUndo} onClick={controller.undo} aria-label={t('tagging.transport.undo')} title={t('tagging.transport.undo')}>
+        <Button variant="ghost" size="icon" disabled={!view.canUndo} onClick={reviewing ? reviewer.undo : controller.undo} aria-label={t('tagging.transport.undo')} title={t('tagging.transport.undo')}>
           <UndoIcon />
         </Button>
-        <Button variant="ghost" size="icon" disabled={!view.canRedo} onClick={controller.redo} aria-label={t('tagging.transport.redo')} title={t('tagging.transport.redo')}>
+        <Button variant="ghost" size="icon" disabled={!view.canRedo} onClick={reviewing ? reviewer.redo : controller.redo} aria-label={t('tagging.transport.redo')} title={t('tagging.transport.redo')}>
           <RedoIcon />
         </Button>
-        <Button variant="ghost" onClick={() => controller.toggleCheatsheet(true)}>
-          <KeyboardIcon />
-          {t('tagging.keys.open')}
-        </Button>
+        {/* Phones and tablets review by touch: no keys to list. */}
+        {!narrow && (
+          <Button variant="ghost" onClick={() => controller.toggleCheatsheet(true)}>
+            <KeyboardIcon />
+            {t('tagging.keys.open')}
+          </Button>
+        )}
       </div>
     </div>
   )

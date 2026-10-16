@@ -162,6 +162,11 @@ export interface Video {
   /** Download watermarked MP4s. */
   can_export: boolean
   files: VideoFile[]
+  /**
+   * A coach marked the rally list complete and right (PLAN §10.1): Nomal learns from the game.
+   * Absent from servers before the automatic analysis.
+   */
+  rallies_reviewed_at?: string | null
 }
 
 /** A match: a Wiedisync game, or a date and a title for one that is not in Wiedisync. */
@@ -290,7 +295,8 @@ export interface ImportChannel {
 // Tagging (M2, docs/PLAN.md §6.5–§6.7, §9).
 
 export type Side = 'us' | 'them'
-export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
+/** merged: a proposal folded into another one (merged_into); neither a rally nor a negative. */
+export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'merged'
 export type TimePrecision = 'live' | 'adjusted' | 'frame'
 export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
 
@@ -361,8 +367,13 @@ export interface Segment {
   score_us_after: number | null
   score_them_after: number | null
   score_source: string | null
+  /** manual | model | import. A model's segment is a proposal until someone reviews it (PLAN §10). */
   source: string
   review: Review
+  /** How sure the model is (0..1), for a model's proposal; absent from servers before the analysis. */
+  confidence?: number | null
+  /** The model run that made the proposal. */
+  model_run_id?: string | null
   version: number
   /** Null while live. Deleted segments only come back in a /changes answer that touched them. */
   deleted_at: string | null
@@ -412,6 +423,8 @@ export interface Tagging {
   official_sets: [number, number][] | null
   /** The game's official final result as [us, them] (both sports); null when not played or unknown. */
   official_final: [number, number] | null
+  /** See Video.rallies_reviewed_at. */
+  rallies_reviewed_at?: string | null
 }
 
 /**
@@ -447,6 +460,8 @@ export interface SegmentIn extends ChangeBase {
   end_ms: number
   won_by?: Side | null
   review?: Review
+  /** With review "merged": the segment it was folded into. */
+  merged_into?: string | null
 }
 
 export interface PeriodIn extends ChangeBase {
@@ -498,6 +513,45 @@ export interface EventRevision {
   changed_by: number | null
   changed_at: string
   after: Record<string, unknown>
+}
+
+// Automatic analysis (tier 2, docs/PLAN.md §10.1): rally proposals and the learning loop.
+
+export type AnalysisStatus = 'none' | 'queued' | 'running' | 'done' | 'failed'
+
+export interface ModelRun {
+  id: string
+  model_name: string
+  model_version: string
+  created_at: string
+  params: Record<string, unknown>
+  metrics: Record<string, unknown>
+}
+
+/** The model's proposals of a video by review state ("rejected": soft-deleted negatives). */
+export interface ProposalCounts {
+  unreviewed: number
+  confirmed: number
+  corrected: number
+  rejected: number
+}
+
+/** The proposals measured against the coach's own rallies (boundaries within ±1 s). */
+export interface MetricsVsHuman {
+  f1_1s: number
+  precision: number
+  recall: number
+  iou: number
+  rallies_human: number
+  rallies_model: number
+}
+
+/** GET /api/videos/{id}/analysis */
+export interface Analysis {
+  status: AnalysisStatus
+  model_run: ModelRun | null
+  proposals: ProposalCounts
+  metrics_vs_human: MetricsVsHuman | null
 }
 
 // Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).
