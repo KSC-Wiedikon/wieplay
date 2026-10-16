@@ -23,7 +23,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from nomal.core import jobs, pipeline, tagging
@@ -249,18 +249,28 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         raise ValueError(f"{job.kind} has no inputs")
     videos = _analysable_videos(db)
     features = latest_features(db, [v.id for v in videos])
-    train, others = [], []
+    train: list[dict[str, Any]] = []
+    others: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     for video in videos:
         artifact = features.get(video.id)
         if artifact is None:
             continue
         entry = {"video_id": str(video.id), "features": _artifact_out(artifact)}
         rallies = human_rallies(db, video.id) if video.rallies_reviewed_at else []
-        if rallies:
+        if rallies and open_proposals(db, video.id):
+            # Reopened after "done": not complete now, so no labels from it until it is.
+            skipped.append({"video_id": str(video.id), "reason": "open proposals"})
+        elif rallies:
             train.append({**entry, "rallies": [list(r) for r in rallies]})
         else:
             others.append(entry)
-    return {"rally_model": _rally_model_out(db), "train": train, "others": others}
+    return {
+        "rally_model": _rally_model_out(db),
+        "train": train,
+        "others": others,
+        "skipped": skipped,
+    }
 
 
 # --- results from the worker ----------------------------------------------------------------
@@ -374,12 +384,12 @@ def apply_rallies(
     live = [
         (int(s), int(e))
         for s, e, deleted, review in rallies_now
-        if deleted is None and review != "rejected"
+        if deleted is None and review not in ("rejected", "merged")
     ]
-    rejected = [
+    rejected = [  # a merged proposal is not "no rally": the one it went into covers it
         (int(s), int(e))
         for s, e, deleted, review in rallies_now
-        if deleted is not None or review == "rejected"
+        if review == "rejected" or (deleted is not None and review != "merged")
     ]
     room = tagging.MAX_SEGMENTS - int(
         db.scalar(select(func.count()).select_from(Segment).where(Segment.video_id == video.id))
@@ -516,33 +526,47 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 # --- the coach's side ------------------------------------------------------------------------
 
 
-def mark_reviewed(
-    db: Session, video: Video, actor: int, reviewed: bool, train_delay: timedelta
-) -> dict[str, Any]:
-    """The coach says the rally list is complete and right (or takes that back). Open
-    proposals are confirmed then: "done" means every rally still there is one. Either way
-    the training set changed, so a (debounced) training is queued."""
-    tagging.set_actor(db, actor)
-    confirmed = 0
-    if reviewed:
-        confirmed = db.execute(
-            update(Segment)
+def open_proposals(db: Session, video_id: uuid.UUID) -> int:
+    """Model rallies nobody has accepted, corrected, rejected or merged yet."""
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Segment)
             .where(
-                Segment.video_id == video.id,
+                Segment.video_id == video_id,
                 Segment.kind == "rally",
                 Segment.source == "model",
                 Segment.review == "unreviewed",
                 Segment.deleted_at.is_(None),
             )
-            .values(review="confirmed", version=Segment.version + 1, updated_by=actor)
-        ).rowcount  # type: ignore[attr-defined]  # a CursorResult for DML
+        )
+        or 0
+    )
+
+
+class OpenProposals(Exception):
+    def __init__(self, count: int) -> None:
+        super().__init__(f"{count} proposals are still open")
+        self.count = count
+
+
+def mark_reviewed(
+    db: Session, video: Video, actor: int, reviewed: bool, train_delay: timedelta
+) -> dict[str, Any]:
+    """The coach says the rally list is complete and right (or takes that back). Not while
+    proposals are open (OpenProposals): the coach answers each one first, so every label
+    is a person's. Either way the training set changed, so a (debounced) training is
+    queued."""
+    if reviewed:
+        if count := open_proposals(db, video.id):
+            raise OpenProposals(count)
         video.rallies_reviewed_at = datetime.now(UTC)
         video.rallies_reviewed_by = actor
     else:
         video.rallies_reviewed_at = None
         video.rallies_reviewed_by = None
     job = queue_training(db, train_delay) if video.sport in SPORTS else None
-    return {"confirmed": confirmed, "training_job_id": str(job.id) if job else None}
+    return {"training_job_id": str(job.id) if job else None}
 
 
 def proposal_counts(db: Session, video_id: uuid.UUID) -> dict[str, int]:
@@ -551,9 +575,10 @@ def proposal_counts(db: Session, video_id: uuid.UUID) -> dict[str, int]:
         .where(Segment.video_id == video_id, Segment.kind == "rally", Segment.source == "model")
         .group_by(Segment.review, Segment.deleted_at.is_(None))
     ).all()
-    counts = {"unreviewed": 0, "confirmed": 0, "corrected": 0, "rejected": 0}
+    counts = {"unreviewed": 0, "confirmed": 0, "corrected": 0, "rejected": 0, "merged": 0}
     for review, live, n in rows:
-        key = "rejected" if not live else review
+        # A deleted proposal is rejected or merged; one deleted otherwise counts as rejected.
+        key = review if live or review in ("rejected", "merged") else "rejected"
         counts[key] = counts.get(key, 0) + int(n)
     return counts
 

@@ -86,7 +86,8 @@ class AnalysisOut(BaseModel):
     # none | queued | running | done | failed (the newest analyse job of the video)
     status: str
     model_run: ModelRunOut | None
-    # Model rally proposals by review state ("rejected": rejected or deleted).
+    # Model rally proposals by review state: unreviewed, confirmed, corrected, rejected,
+    # merged (deleted ones are rejected or merged).
     proposals: dict[str, int]
     metrics_vs_human: MetricsVsHumanOut | None
     available: bool  # the sport has automatic analysis
@@ -103,7 +104,6 @@ class ReviewedIn(BaseModel):
 
 class ReviewedOut(BaseModel):
     rallies_reviewed_at: datetime | None
-    confirmed: int
     training_job_id: uuid.UUID | None
 
 
@@ -271,9 +271,10 @@ def analyse(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
 def rallies_reviewed(
     video_id: uuid.UUID, body: ReviewedIn, viewer: ViewerDep, db: DbDep, settings: SettingsDep
 ) -> ReviewedOut:
-    """The coach marks the video's rally list complete and right: remaining proposals are
-    confirmed, the rallies become training data and the finder retrains (debounced).
-    `reviewed: false` takes it back."""
+    """The coach marks the video's rally list complete and right: its rallies become
+    training data and the finder retrains (debounced). Refused (409, detail
+    {"message", "open_proposals": n}) while model proposals are still unreviewed: the coach
+    answers each one first. `reviewed: false` takes it back."""
     video, _ = _taggable(db, viewer, video_id)
     if video.status != "ready":
         raise HTTPException(409, "Review rallies once the video is ready")
@@ -285,24 +286,31 @@ def rallies_reviewed(
         )
     ):
         raise HTTPException(409, "The video has no rallies yet")
-    out = analysis.mark_reviewed(
-        db,
-        video,
-        viewer.member_id,
-        body.reviewed,
-        timedelta(seconds=settings.analysis_train_delay_seconds),
-    )
+    try:
+        out = analysis.mark_reviewed(
+            db,
+            video,
+            viewer.member_id,
+            body.reviewed,
+            timedelta(seconds=settings.analysis_train_delay_seconds),
+        )
+    except analysis.OpenProposals as exc:
+        raise HTTPException(
+            409,
+            {
+                "message": "Accept, correct, merge or reject the open proposals first",
+                "open_proposals": exc.count,
+            },
+        ) from exc
     audit(
         db,
         viewer.member_id,
         "rallies_reviewed" if body.reviewed else "rallies_review_withdrawn",
         "video",
         str(video.id),
-        confirmed=out["confirmed"],
     )
     db.commit()
     return ReviewedOut(
         rallies_reviewed_at=video.rallies_reviewed_at,
-        confirmed=out["confirmed"],
         training_job_id=uuid.UUID(out["training_job_id"]) if out["training_job_id"] else None,
     )

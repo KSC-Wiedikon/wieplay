@@ -95,7 +95,9 @@ class SegmentOut(BaseModel):
     source: str
     confidence: float | None
     model_run_id: uuid.UUID | None
+    # unreviewed | confirmed | corrected | rejected | merged
     review: str
+    merged_into: uuid.UUID | None = None
     version: int
     deleted_at: datetime | None
 

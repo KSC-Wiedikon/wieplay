@@ -134,7 +134,9 @@ def test_a_ready_volleyball_video_is_analysed(
 ) -> None:
     state = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()
     assert state["status"] == "queued" and state["model_run"] is None
-    assert state["proposals"] == {"unreviewed": 0, "confirmed": 0, "corrected": 0, "rejected": 0}
+    assert state["proposals"] == {
+        "unreviewed": 0, "confirmed": 0, "corrected": 0, "rejected": 0, "merged": 0,
+    }  # fmt: skip
     # The media lane (no "analyse" cap) never gets it; the background lane does.
     media = worker_client(club["coach"].app, club["admin"], MEDIA_CAPS)  # type: ignore[arg-type]
     assert claim(media, MEDIA_CAPS) == []
@@ -243,7 +245,7 @@ def test_rerun_replaces_untouched_proposals_and_respects_rejections(
     first = {s["start_ms"]: s for s in segments(club["coach"], ready)}
     change(club["coach"], ready, edit(first[40_000], deleted=True))  # the coach rejects one
     assert club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()["proposals"] == {
-        "unreviewed": 1, "confirmed": 0, "corrected": 0, "rejected": 1,
+        "unreviewed": 1, "confirmed": 0, "corrected": 0, "rejected": 1, "merged": 0,
     }  # fmt: skip
 
     club["coach"].post(f"/api/videos/{ready['id']}/analyse")
@@ -288,48 +290,107 @@ def test_review_actions_on_proposals(
     ready: Any, club: dict[str, TestClient], analyser: TestClient, db_engine: Engine
 ) -> None:
     job = claim_kind(analyser, "analyse")
-    complete(analyser, job, payload(job, [(10_000, 20_000), (40_000, 52_000), (80_000, 90_000)]))
+    complete(
+        analyser,
+        job,
+        payload(job, [(10_000, 20_000), (40_000, 52_000), (80_000, 90_000), (90_500, 99_000)]),
+    )
     by_start = {s["start_ms"]: s for s in segments(club["coach"], ready)}
+    a, b, c, d = (by_start[t] for t in (10_000, 40_000, 80_000, 90_500))
     out = change(
         club["coach"],
         ready,
-        edit(by_start[10_000], review="confirmed"),  # accept
-        edit(by_start[40_000], start_ms=41_000),  # nudge a boundary (client says nothing)
-        edit(by_start[80_000], deleted=True),  # reject
+        edit(a, review="confirmed"),  # accept
+        edit(b, start_ms=41_000),  # nudge a boundary (a client that says nothing)
+        edit(c, end_ms=99_000, review="corrected"),  # merge d into c: c grows ...
+        edit(d, deleted=True, review="merged", merged_into=c["id"]),  # ... d goes
     )
     after = {s["id"]: s for s in out["segments"]}
-    assert after[by_start[10_000]["id"]]["review"] == "confirmed"
-    assert after[by_start[40_000]["id"]]["review"] == "corrected"
-    assert after[by_start[80_000]["id"]]["review"] == "rejected"
-    assert after[by_start[80_000]["id"]]["deleted_at"] is not None
+    assert after[a["id"]]["review"] == "confirmed"
+    assert after[b["id"]]["review"] == "corrected"
+    assert (after[c["id"]]["review"], after[c["id"]]["end_ms"]) == ("corrected", 99_000)
+    assert after[d["id"]]["review"] == "merged" and after[d["id"]]["merged_into"] == c["id"]
+    assert after[d["id"]]["deleted_at"] is not None
     assert {s["source"] for s in after.values()} == {"model"}
-    # Undo of the rejection opens it again.
-    undo = change(club["coach"], ready, edit(after[by_start[80_000]["id"]], deleted=False))
-    assert {s["id"]: s for s in undo["segments"]}[by_start[80_000]["id"]]["review"] == "unreviewed"
+    state = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()
+    assert state["proposals"] == {
+        "unreviewed": 0, "confirmed": 1, "corrected": 2, "rejected": 0, "merged": 1,
+    }  # fmt: skip
+
+    # Undo, as the review page sends it: the fields as they were and "unreviewed".
+    undo = change(
+        club["coach"],
+        ready,
+        edit(after[a["id"]], review="unreviewed"),  # reopen an accepted one
+        edit(after[b["id"]], start_ms=40_000, review="unreviewed"),  # undo the correction
+        edit(after[c["id"]], end_ms=90_000, review="unreviewed"),
+        edit(after[d["id"]], deleted=False, review="unreviewed", merged_into=None),
+    )
+    back = {s["id"]: s for s in undo["segments"]}
+    assert [(back[x["id"]]["review"], back[x["id"]]["start_ms"], back[x["id"]]["end_ms"])
+            for x in (a, b, c, d)] == [
+        ("unreviewed", 10_000, 20_000), ("unreviewed", 40_000, 52_000),
+        ("unreviewed", 80_000, 90_000), ("unreviewed", 90_500, 99_000),
+    ]  # fmt: skip
+    assert back[d["id"]]["merged_into"] is None and back[d["id"]]["deleted_at"] is None
+
+    # Reject: a soft delete, kept as "not a rally"; undoing it reopens the proposal.
+    gone = change(club["coach"], ready, edit(back[c["id"]], deleted=True))
+    rejected = {s["id"]: s for s in gone["segments"]}[c["id"]]
+    assert rejected["review"] == "rejected" and rejected["deleted_at"] is not None
+    restored = change(club["coach"], ready, edit(rejected, deleted=False))
+    assert {s["id"]: s for s in restored["segments"]}[c["id"]]["review"] == "unreviewed"
+    # merged_into must name another segment of the video.
+    bad = edit(back[a["id"]], deleted=True, review="merged", merged_into=str(uuid.uuid4()))
+    r = club["coach"].post(f"/api/videos/{ready['id']}/changes", json={"segments": [bad]})
+    assert r.status_code == 422
+
     with db_engine.connect() as conn:
         actions = dict(
             conn.execute(
                 text(
-                    "SELECT s.start_ms, string_agg(r.action, ',' ORDER BY r.id) FROM segment s "
-                    "JOIN segment_revision r ON r.segment_id = s.id GROUP BY s.start_ms"
+                    "SELECT s.id::text, string_agg(r.action, ',' ORDER BY r.id) FROM segment s "
+                    "JOIN segment_revision r ON r.segment_id = s.id GROUP BY s.id"
                 )
             ).all()
         )
         before = conn.execute(
             text(
-                "SELECT r.before->>'start_ms' FROM segment_revision r JOIN segment s "
-                "ON s.id = r.segment_id WHERE s.start_ms = 41000 AND r.action = 'update'"
-            )
+                "SELECT r.before->>'start_ms' FROM segment_revision r WHERE r.segment_id = :id "
+                "AND r.after->>'start_ms' = '41000'"
+            ),
+            {"id": b["id"]},
         ).scalar()
-    assert actions == {
-        10_000: "create,confirm",
-        41_000: "create,update",
-        80_000: "create,delete,restore",
-    }
+    assert actions[a["id"]] == "create,confirm,update"
+    assert actions[b["id"]] == "create,update,update"
+    assert actions[d["id"]] == "create,delete,restore"
+    assert actions[c["id"]] == "create,update,update,delete,restore"
     assert before == "40000"  # the correction keeps what the model said
 
 
-def test_rallies_reviewed_confirms_open_proposals_and_trains_once(
+def test_merged_and_rejected_proposals_in_training_and_reruns(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    """A merged proposal is no "not a rally": a rerun may propose there again only where
+    nothing covers it; a rejected one keeps its span free of proposals."""
+    job = claim_kind(analyser, "analyse")
+    complete(analyser, job, payload(job, [(10_000, 15_000), (15_500, 22_000), (40_000, 50_000)]))
+    by_start = {s["start_ms"]: s for s in segments(club["coach"], ready)}
+    a, b, c = (by_start[t] for t in (10_000, 15_500, 40_000))
+    change(
+        club["coach"],
+        ready,
+        edit(b, deleted=True, review="merged", merged_into=a["id"]),
+        edit(c, deleted=True),
+    )
+    # a is still open: a rerun replaces it; c's span stays empty, b's does not.
+    club["coach"].post(f"/api/videos/{ready['id']}/analyse")
+    job = claim_kind(analyser, "analyse")
+    complete(analyser, job, payload(job, [(15_000, 22_000), (40_500, 50_000)], name="s2.npz"))
+    assert [s["start_ms"] for s in segments(club["coach"], ready)] == [15_000]
+
+
+def test_rallies_reviewed_needs_every_proposal_answered_and_trains_once(
     app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
 ) -> None:
     url = f"/api/videos/{ready['id']}/rallies-reviewed"
@@ -338,12 +399,16 @@ def test_rallies_reviewed_confirms_open_proposals_and_trains_once(
     complete(analyser, job, payload(job, [(10_000, 20_000), (40_000, 52_000)]))
     first = {s["start_ms"]: s for s in segments(club["coach"], ready)}
     change(club["coach"], ready, edit(first[40_000], deleted=True))
+    refused = club["coach"].post(url, json={"reviewed": True})
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["open_proposals"] == 1
+    # Nothing was confirmed behind the coach's back.
+    assert [s["review"] for s in segments(club["coach"], ready)] == ["unreviewed"]
+    change(club["coach"], ready, edit(first[10_000], review="confirmed"))
     done = club["coach"].post(url, json={"reviewed": True})
     assert done.status_code == 200, done.text
-    assert done.json()["confirmed"] == 1 and done.json()["rallies_reviewed_at"]
+    assert done.json()["rallies_reviewed_at"]
     train_id = done.json()["training_job_id"]
-    segs = segments(club["coach"], ready)
-    assert [(s["start_ms"], s["review"]) for s in segs] == [(10_000, "confirmed")]
     for where in (f"/api/videos/{ready['id']}", f"/api/videos/{ready['id']}/tagging"):
         assert (
             club["coach"].get(where).json()["rallies_reviewed_at"]
@@ -435,6 +500,8 @@ def test_a_training_that_does_not_beat_v0_changes_nothing(
 ) -> None:
     job = claim_kind(analyser, "analyse")
     complete(analyser, job, payload(job, [(10_000, 20_000)]))
+    [proposal] = segments(club["coach"], ready)
+    change(club["coach"], ready, edit(proposal, review="confirmed"))
     club["coach"].post(f"/api/videos/{ready['id']}/rallies-reviewed", json={"reviewed": True})
     train = claim_kind(analyser, "train_rallies")
     body = {
@@ -510,3 +577,20 @@ def test_open_proposals_are_not_facts_yet(
     pieces = club["coach"].get(f"{url}/condensed").json()
     assert len(pieces) == 1 and pieces[0]["start_ms"] < 10_000 < pieces[0]["end_ms"]
     assert club["coach"].get(f"{url}/stats").status_code == 200
+
+
+def test_a_reopened_game_does_not_train_until_it_is_done_again(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    job = claim_kind(analyser, "analyse")
+    complete(analyser, job, payload(job, [(10_000, 20_000)]))
+    [proposal] = segments(club["coach"], ready)
+    mine = rally(30_000, 40_000)
+    accepted = change(club["coach"], ready, edit(proposal, review="confirmed"), mine)["segments"]
+    accepted = next(s for s in accepted if s["id"] == proposal["id"])
+    club["coach"].post(f"/api/videos/{ready['id']}/rallies-reviewed", json={"reviewed": True})
+    change(club["coach"], ready, edit(accepted, review="unreviewed"))  # the coach reopens it
+    train = claim_kind(analyser, "train_rallies")
+    inputs = analyser.post(f"/api/worker/jobs/{train['id']}/inputs", json={}).json()
+    assert inputs["train"] == [] and inputs["others"] == []
+    assert inputs["skipped"] == [{"video_id": ready["id"], "reason": "open proposals"}]
