@@ -159,12 +159,21 @@ def test_a_link_becomes_a_video_through_import_and_ingest(
     assert created.status_code == 201, created.text
     video = created.json()
     assert (video["status"], video["source"]) == ("importing", "import")
+    assert video["imported_from"] == {
+        "platform": "youtube",
+        "url": "https://www.youtube.com/watch?v=NXNsZ_UNM6w",
+        "channel": None,
+        "title": None,
+    }
 
     w = worker_client(app, admin, IMPORT_CAPS)
     assert claim(w, MEDIA_CAPS) == []  # import jobs need the import capability
     [job] = claim(w, IMPORT_CAPS)
     assert job["kind"] == "import"
     params = job["params"]
+    progress = w.post(f"/api/worker/jobs/{job['id']}/heartbeat", json={"progress": 0.4})
+    assert progress.status_code in {200, 204}, progress.text
+    assert coach.get(f"/api/videos/{video['id']}").json()["progress"] == 0.4
     assert params["url"] == "https://www.youtube.com/watch?v=NXNsZ_UNM6w"
     assert params["channels"] == ["lucazbindenvolley2500"]
     assert params["file_name"] == "youtube-NXNsZ_UNM6w.mp4"

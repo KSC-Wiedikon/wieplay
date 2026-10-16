@@ -197,7 +197,7 @@ def _manages(viewer: Viewer, access: TeamAccess) -> bool:
     return can_upload(viewer, access.ref) or can_delete_video(viewer, access.ref, access.leads)
 
 
-IN_PROGRESS = ("uploading", "queued", "processing")
+IN_PROGRESS = ("uploading", "importing", "queued", "processing")
 
 
 def _progress(db: Session, videos: list[Video]) -> dict[uuid.UUID, float]:
@@ -528,6 +528,10 @@ def create_video(
         item.status = "assigned"
         item.video_id = video.id
     if link is not None:
+        # Where it comes from is known now; the import adds channel and title.
+        video.capture = {
+            "import": {"platform": link.platform, "id": link.external_id, "url": link.url}
+        }
         video.files.append(
             VideoSourceFile(part_no=1, file_name=link.file_name, bytes=0, content_type="video/mp4")
         )
