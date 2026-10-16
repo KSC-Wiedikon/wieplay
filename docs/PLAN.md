@@ -536,16 +536,23 @@ zones 1–9). A taxonomy change creates a new `version`; a mapping table transla
 ### 6.6 Periods, segments, scores
 
 ```text
-period           id, video_id, no (set or quarter), start_ms, end_ms,
-                 our_court_side_at_start 'near'|'far', side_switch_at_score NULL (5th set: 8),
-                 final_us, final_them, source, review
+period           id, video_id, no (set or quarter), start_ms, end_ms, start_us, start_them,
+                 first_serve 'us'|'them' NULL, our_court_side_at_start 'near'|'far',
+                 side_switch_at_score NULL (5th set: 8), start_rotation NULL (our setter's zone
+                 1-6 at the first serve), final_us, final_them, source, review,
+                 -- the scoring's (§10.3): model_first_serve, model_court_side, confidence,
+                 -- model_missed_us/them (points after the last rally), model_run_id
 segment          id, video_id, period_id NULL,
                  kind 'rally'|'possession'|'timeout'|'set_break'|'warmup'|'stoppage'|'other_dead',
                  start_ms, end_ms,
-                 serving 'us'|'them' NULL, serving_court 'near'|'far' NULL,
-                 won_by 'us'|'them' NULL, score_us_after NULL, score_them_after NULL,
-                 score_source 'tags'|'serve_inference'|'scoreboard_ocr'|'manual'|'import' NULL,
-                 score_confidence NULL, score_conflict bool,
+                 serving 'us'|'them' NULL (facts only), serving_manual NULL (called in review),
+                 won_by 'us'|'them' NULL (the coach's),
+                 -- the scoring's, next to the coach's and never in their place (§10.3):
+                 serving_court 'near'|'far' NULL, serve_confidence NULL,
+                 model_serving NULL, model_won_by NULL, model_missed_us/them NULL,
+                 score_us_after NULL, score_them_after NULL,
+                 score_source 'tags'|'model'|… NULL, score_confidence NULL, score_conflict bool,
+                 score_note NULL (missing_before|missing_after|extra|serve|coach|unsure),
                  source 'manual'|'model'|'import', import_system NULL, import_ref NULL,
                  model_run_id NULL, confidence NULL,
                  review 'unreviewed'|'confirmed'|'corrected'|'rejected'|'merged',
@@ -561,6 +568,12 @@ sync_point       id, video_id, video_ms, system ('openvolley'|'scoreboard'|'manu
   ("points after a timeout") and for training the gap classifier.
 - **Scores live on rallies** (`score_*_after`, `won_by`), with where they came from and how
   sure the system is. A coach correction is a revision, i.e. a training label.
+- **Facts and suggestions side by side** (since 16.10.2026, §10.3): `won_by` and `serving`
+  hold only what a coach decided (or what follows from it: a serve tag, a serve called in
+  review, the previous winner, the set's first server, the next rally's known server). The
+  model writes `model_serving` / `model_won_by`; the score line (`score_*_after`) counts the
+  coach's winners and fills the gaps with the model's (`score_source` "model"). So a model's
+  guess never becomes a stat or a training label by accident; the stats count facts only.
 - **Ready for OpenVolley later**: `source='import'`, `import_system`, `import_ref` on segments,
   and `sync_point` to map the e-scoresheet's wall-clock point times onto video time.
 
@@ -614,16 +627,19 @@ job              id, kind, video_id NULL, params jsonb, priority, required_caps 
                  backend NULL, backend_ref NULL, checkpoint jsonb, result jsonb, error,
                  created_at, started_at, finished_at
 worker           id, name, caps text[], token_hash, paused, version, last_seen_at
-model_run        id, kind 'analyse'|'train_rallies'|…, job_id, video_id NULL (a training has
+model_run        id, kind 'analyse'|'train_rallies'|'score'|…, job_id, video_id NULL (a training has
                  none), model_name, model_version (git sha), weights_sha256,
                  dataset_manifest NULL (training: games, their signals' SHA-256, rally counts),
                  params jsonb, metrics jsonb, timing jsonb, created_at
                  -- metrics.videos[<video id>]: what the run did for that video: the finder
                  -- (v0|v1), proposals written, or its score against the coach's rallies
 analysis_artifact id, video_id NULL (a model has none), model_run_id, kind 'features'|
-                 'rally_model'|later 'ball_track'|'player_tracks'|'scoreboard_ocr'|…,
+                 'rally_model'|'serve_model'|later 'ball_track'|'player_tracks'|…,
                  nas_path (relative to the analysis root), format 'npz'|'pickle' (Parquet
                  when other tools must read it), schema_version, sha256, bytes, stats jsonb
+analysis_track   id, video_id, model_run_id, kind 'serve'|'activity', step_ms, finder NULL,
+                 source_run_id NULL, channels jsonb (base64 zlib bytes), created_at
+                 -- small series the API scores with (§10.3), tens of KB a video
 calibration      id, video_id, hall_name, image_points, court_points, homography (3×3),
                  method 'manual'|'auto', reproj_error_cm, created_by, copied_from NULL
 scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
@@ -638,7 +654,8 @@ Per-frame data (ball positions, player boxes, OCR readings) is **not** stored in
 `analysis_artifact` (since 16.10.2026: one compressed numpy `.npz` of signals per video, a
 few MB, §10.1); only derived facts (segments, scores, serve placements, proposed events)
 become rows. Built in migration `0006` (16.10.2026) with `video.rallies_reviewed_at/_by`
-(§10.1).
+(§10.1). Migration `0007` (16.10.2026) adds `analysis_track`, two small per-video series the
+API scores with (§10.3), and the scoring's fields on `segment` and `period` (§6.6).
 
 ### 6.10 People, access, privacy
 
@@ -1159,8 +1176,13 @@ the skill, an ungraded tag counts as an attempt that is neither a point nor an e
 - Team: points won and lost (rallies), side-out % = rallies we received and won / received,
   break-point % = rallies we served and won / served (only rallies with a known server and
   winner). A tag counts for the set of its rally.
-- Not yet: rotation numbers (sets carry no starting rotation), zone heatmaps, the search bar,
-  saved filters and the regrade queue.
+- Rotations (since 16.10.2026): a set's starting rotation (our setter's zone 1–6 at its
+  first serve, `period.start_rotation`, entered in the Sets bar) is walked through the
+  rallies: we rotate (setter zone 1 → 6 → 5 → 4 → 3 → 2 → 1) on every side-out we win.
+  Points, side-out % and break-point % per rotation, per set and for the match, from the
+  coach's facts only (a winner is the coach's or the next rally's known server; where neither
+  is known the walk stops for that set).
+- Not yet: zone heatmaps, the search bar, saved filters and the regrade queue.
 
 ---
 
@@ -1223,9 +1245,18 @@ the recognition with each video". Runbook: [`runbooks/analysis.md`](runbooks/ana
   whistle on, since, until, rate; the same over 2, 6 and 20 s and the 3 s before and after)
   plus v0's own answer, smoothed with hysteresis into rallies of 2.5–120 s. Needs two
   reviewed games (one to learn from, one to check on); each game weighs the same.
-- **Still to do**: classifying the gaps (warmup, timeout, set break), telling our referee's
-  pitch from the next court's in tournament halls, a court mask against the neighbours'
-  balls, and the review UI.
+- **Gaps (built 16.10.2026, `nomal/ml/gaps.py`)**: with the sets (§10.3), the stretch before
+  the first serve is `warmup`, between sets `set_break`, after the match `other_dead`; a gap
+  of 30 s or more inside a set is a `timeout` when it looks like one (40–100 s, the players
+  at the benches: movement along the sides of the picture, little on court, no ball in play;
+  at most four a set), else a `stoppage` from 40 s (substitutions, an injury, ball
+  retrieval). Ordinary dead time stays unlabelled. Proposals like the rallies' (source
+  "model", review "unreviewed", a confidence), answered in the review (accept, relabel `W B T
+  D O`, reject), replaced on every scoring unless answered; never over a coach's own label
+  or one a coach rejected. Condensed playback plays rallies only; the video page marks the
+  warm-up, set starts and timeouts and starts at the first serve.
+- **Still to do**: telling our referee's pitch from the next court's in tournament halls, and
+  a court mask against the neighbours' balls.
 - **Review UI**: rally strip with `Enter` accept, `←/→` nudge a boundary, `X` reject, `M`
   merge, `S` split.
 - **Bar**: boundary F1 ≥ 0.9 at ±1 s on held-out matches before condensed mode is the default
@@ -1283,6 +1314,67 @@ Output: `won_by`, `serving`, `score_*_after`, `score_source`, `score_confidence`
 the score line in the UI; scores in exports and reels ("set 3, 22:20"). **Bar**: ≥ 98 % of
 rallies with the right winner on held-out matches with the set-score constraint; flagged
 rallies ≤ 5 %.
+
+**Built 16.10.2026** (steps 1–4; OCR, step 5, later):
+
+- **Serve side** (`nomal/ml/serve.py`, worker): the camera stands behind one end line, so the
+  far court is a narrow band around the net where the ball spends most of its time (the
+  video's median ball height). v0: the ball's first plausible track after a rally starts
+  shows far from that band (low, at the server's hands, or high above them on a jump-serve
+  toss) and flies into it → near serve; it starts in the band and comes towards the camera →
+  far serve (a late first track is trusted less). v1: a gradient-boosted classifier over the
+  same features (first and later height, distance to the band, speed, how much of the first
+  0.6 s is tracked, movement at each end line before, the loudest moment) plus v0's answer,
+  trained in the `train_rallies` job on the serves of reviewed games (the coach's server and
+  the set's sides give near/far), scored leaving one game out, used only when its mean
+  accuracy beats v0's. Not an image classifier yet: the ball track decides.
+- **Tracks**: the analysis (and a training, for every game, when the serve model changed)
+  sends two small series per video (`nomal/ml/tracks.py`, table `analysis_track`): P(near
+  serve) for a rally starting at every half-second (~10 KB) and the activity per second
+  (ball, movement in the middle and along the sides, whistles; ~20 KB). Not per-frame data:
+  the API has no NAS, and with them it scores any rally, also one a coach moved or added,
+  without asking the worker again.
+- **Scoring** (`nomal/ml/scoring.py`, plain Python in the API, `nomal/core/scoring.py`): a
+  dynamic programme over (score, next server) per set, given our side at its start and its
+  first server; a rally can be no point (cost from the finder's confidence), points can be
+  missing (cheaper in a gap long enough for a rally, with play or whistles in it), a serve
+  can be misread (its evidence's log-odds), contradicting a coach's serve or winner costs
+  12. With the official set score the set must end exactly there; without, on a set point.
+  Our side and the first server of set 1 are chosen for the whole match (sides change after
+  every set, the first serve alternates in sets 1–4, the deciding set has its own toss and
+  switches at 8); a coach's "we serve first" / "we start near" for a set wins and carries to
+  the others. Max-marginals (the cheapest path with the other winner) give each rally's
+  confidence; "check" when a point seems missing before or after it, it looks like no point,
+  the serve evidence or a coach disagrees, or the winner is unsure (< 70 %). About a second
+  a match.
+- **Sets**: a coach's sets when there are any (also a proposal the coach filled in);
+  otherwise proposed (`period` source "model") at the long breaks (≥ 45 s, a set break ~3
+  min costs nothing) with the official number of points per set, or plausible set sizes;
+  rallies before the first set (warm-up) and after the last are left out. A coach's own set
+  replaces the open proposals; a rejected one is not proposed again.
+- **When**: after every analysis and training, when a coach marks the rallies done, changes
+  a set (bounds, number, first serve, sides) or calls a serve in review, and on request
+  (`POST /api/videos/{id}/scoring`, `python -m nomal.cli score`). Each run is a `model_run`
+  (kind "score") with the metrics in `GET /api/videos/{id}/analysis` (`scoring`): per set
+  the official score, the score line's final and where the evidence alone ends; flagged
+  rallies; gaps; on games with a coach's serves and winners, the serve-side and winner
+  accuracy of a run blind to them.
+- **Review**: the suggested server and winner on each rally, the score line with "check"
+  marks, `1`/`2` call the serving team, gap labels in the same list, "First serve" / "We
+  start" and the starting rotation per set in the Sets bar.
+- **First real run, 16.10.2026** (the H3 vs Volero Legends match of §10.1, its stored signals,
+  v0 rallies, outside the workers): serve track 1.7 s and activity 0.7 s to compute, 9.5 KB
+  and 22 KB stored; 191 of 193 rallies in four sets cut at the three set breaks (331, 258,
+  262 s) with the official 52/50/47/48 points; the 871 s before the first serve a warm-up,
+  14 timeouts (of nine checked on the video, eight were team huddles, one a long break with the players on court), 3 stoppages (both checked: play interrupted on court). Our side
+  and first server were picked by the alignment alone (H3 far and serving in set 1, 99.7 %),
+  consistent with H3's jerseys in other videos. Every set ends on its official score after
+  3+0, 6+0, 2+5, 0+0 (missed + no-point) corrections; 29 % of the rallies are flagged for a
+  check (most "unsure" next to a missing point, set 3 the worst with 30 of 50). The evidence
+  alone ends no set exactly on the official score (sets 2 and 3 missing 6 and 2 points of v0
+  rallies): far from the bar, as expected without a coach's labels; a visual check of 48
+  serves of set 3 found 45 read right and 3 unclear frames. Next: coaches review this game,
+  the serve v1 learns from it, the rally finder's recall.
 
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.

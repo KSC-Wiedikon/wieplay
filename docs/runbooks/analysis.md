@@ -1,8 +1,11 @@
-# Runbook: automatic analysis (rally finder)
+# Runbook: automatic analysis (rally finder, scoring)
 
-What it is: [PLAN §10.1](../PLAN.md#101-dead-time-skipping-volleyball). Every ready volleyball
-video gets an `analyse` job on the Lenovo worker; coaches correct the proposed rallies and
-mark a game done; a `train_rallies` job learns from every game marked done.
+What it is: [PLAN §10.1](../PLAN.md#101-dead-time-skipping-volleyball) and
+[§10.3](../PLAN.md#103-automatic-scoring-volleyball). Every ready volleyball video gets an
+`analyse` job on the Lenovo worker; coaches correct the proposed rallies and mark a game done;
+a `train_rallies` job learns from every game marked done (the rally finder and the serve
+model). The API scores every analysed video (who served, who won, the score, sets, gap labels)
+by itself, in about a second.
 
 ## Switch it on (once per environment)
 
@@ -74,6 +77,33 @@ Admin → Jobs, or `GET /api/videos/{id}/analysis`.
    python -m nomal.cli rally-eval            # the latest training; --json for everything
    ```
 
+## Scoring (servers, winners, sets, gaps)
+
+Nothing to switch on: it runs in the API whenever a video gets new rallies or series (analysis,
+training), a coach marks the rallies done, changes a set or calls a serve in review. It needs
+the two small series the worker sends with each analysis (`analysis_track`); videos analysed
+before migration `0007` have none until their next analysis or the next training (it adds the
+missing series of every game), and are scored from the rally times only meanwhile (sets and
+gap lengths, no serve sides).
+
+```bash
+python -m nomal.cli score --video <id>       # score again now and print the sets
+python -m nomal.cli score --all-ready        # every ready volleyball video (after a deploy)
+python -m nomal.cli train-rallies            # also brings the missing series of old games
+```
+
+What a coach does: in the Sets bar, "First serve" and "We start" for set 1 when Nomal is not
+sure (the scoring card says so); the rules carry it to the other sets. In the review, `1`/`2`
+call the serving team, gap labels are answered like rallies (`W B T D O` relabel). Nothing the
+model writes overwrites a coach's winner, serve, set or label: its server and winner are in
+their own fields (`model_serving`, `model_won_by`), flagged rallies say why (`score_note`).
+
+The scores per video (`GET /api/videos/{id}/analysis` → `scoring`): per set the official
+score, the score line's final and where the serve evidence alone ends (`evidence`,
+`matches_official`), flagged rallies, gaps, and on reviewed games the serve-side and winner
+accuracy of a run blind to the coach (`vs_coach`). The serve model's held-out scores are in
+the training run's `metrics.serve`; `analyse` jobs use it once it beat the rule.
+
 ## When something goes wrong
 
 - **Analysis failed**: the video still plays; the error is on the job (Admin → Jobs) and,
@@ -94,8 +124,11 @@ analysis[-dev]/
   videos/<season>/<team>/<date>_match_<id8>/signals-<job8>.npz   per-frame ball and motion,
                                                                   audio numbers, whistles
   models/rallies/rally-v1-<job8>.pkl                              trained finders
+  models/rallies/serve-v1-<job8>.pkl                              trained serve models
 ```
 
 Each file has a row in `analysis_artifact` with its SHA-256; the worker refuses a model file
-whose hash does not match (pickle runs code). The signals hold no pictures and no sound:
+whose hash does not match (pickle runs code). The two small series per video (serve evidence
+every 0.5 s, activity every second, tens of KB) are in Postgres (`analysis_track`), not on
+the NAS: the API scores with them. The signals hold no pictures and no sound:
 ball positions, motion and loudness numbers only.
