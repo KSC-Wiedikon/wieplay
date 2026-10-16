@@ -59,6 +59,27 @@ match took 29 min in the worker image with 6 CPUs (2.8 CPU-hours, 1.5 GB; PLAN �
 22 imported games take about 10 hours, longer while transcodes run next to them. Progress:
 Admin → Jobs, or `GET /api/videos/{id}/analysis`.
 
+## The ball's path and the court (trajectory job)
+
+After each analysis a short `trajectory` job (seconds; same `analyse` capability and lane)
+smooths the ball track, stores it as `ball-track-<job8>.json.gz` next to the signals and in
+the bucket (`media/<video>/analysis/`, served by `GET /api/videos/{id}/ball-track`), and
+looks for the court in the median of 15 frames. A court found with confidence ≥ 0.6 pre-fills
+the coach's "Set up the court" dialog; otherwise the dialog starts from the team's last
+calibration (or empty). Videos analysed before this job existed get it with:
+
+```bash
+python -m nomal.cli trajectories --dry-run
+python -m nomal.cli trajectories            # --force: also videos that have a track
+```
+
+A 2 h 12 min match: 98 kB of track (gzip; 268 kB as JSON), 1.4 s to smooth, ~10 s for the
+court frames and 1–3 s to look for the court. The court finder is a first version: on multi-sport floors it finds the side
+lines and the near end line but can mistake another sport's lines for the court's depth; it
+then reports a low confidence and offers nothing (16.10.2026: the Legends hall, 0.29). A
+camera bumped during a match moves the court in the picture; one calibration per video does
+not follow that yet.
+
 ## The learning loop
 
 1. A coach tags or corrects a game's rallies (every proposal accepted, corrected, merged or
@@ -123,6 +144,8 @@ the training run's `metrics.serve`; `analyse` jobs use it once it beat the rule.
 analysis[-dev]/
   videos/<season>/<team>/<date>_match_<id8>/signals-<job8>.npz   per-frame ball and motion,
                                                                   audio numbers, whistles
+  videos/…/ball-track-<job8>.json.gz                              the ball's path (bucket copy
+                                                                  is what browsers get)
   models/rallies/rally-v1-<job8>.pkl                              trained finders
   models/rallies/serve-v1-<job8>.pkl                              trained serve models
 ```

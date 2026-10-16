@@ -31,7 +31,7 @@ export const courtDe: typeof courtEn = {
       exact: 'Vier Punkte passen immer. Setze die Enden der Mittel- oder Angriffslinien, um die Genauigkeit zu prüfen.',
       fit: 'Genauigkeit: ± {{cm}} cm (schlechtester Punkt {{max}} cm)',
       fitGood: 'Passt gut',
-      fitPoor: 'Prüfe die Punkte: Ein Klick liegt wohl daneben',
+      fitPoor: 'Prüfe die Punkte: Ein Klick liegt wohl daneben, oder ein Weitwinkel biegt die Linien',
       need: 'Setze mindestens vier Punkte, nicht alle auf einer oder zwei Linien.',
       auto: 'Automatisch gefunden: Prüfe die Linien vor dem Speichern.',
       fromTeam: 'Von {{title}} ({{date}}): Die Kamera stand wohl am selben Ort. Verschiebe die Punkte, wo nicht.',

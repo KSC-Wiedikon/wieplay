@@ -31,7 +31,7 @@ export const courtEn = {
       exact: 'Four points always fit. Add the ends of the centre or attack lines to check the fit.',
       fit: 'Fit: ± {{cm}} cm (worst {{max}} cm)',
       fitGood: 'Good fit',
-      fitPoor: 'Check the points: a click may be off',
+      fitPoor: 'Check the points: a click may be off, or a wide lens bends the lines',
       need: 'Place at least four points, not all on one or two lines.',
       auto: 'Found automatically: check the lines before saving.',
       fromTeam: 'From {{title}} ({{date}}): the camera likely stood at the same spot. Move the points where it did not.',

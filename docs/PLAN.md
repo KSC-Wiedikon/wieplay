@@ -648,7 +648,10 @@ analysis_track   id, video_id, model_run_id, kind 'serve'|'activity', step_ms, f
                  source_run_id NULL, channels jsonb (base64 zlib bytes), created_at
                  -- small series the API scores with (§10.3), tens of KB a video
 calibration      id, video_id, hall_name, image_points, court_points, homography (3×3),
-                 method 'manual'|'auto', reproj_error_cm, created_by, copied_from NULL
+                 method 'manual'|'auto'|'copied', reproj_error_cm, created_by, copied_from NULL
+                 -- built in 0007 (16.10.2026) with lineage_id, status 'confirmed'|'proposed'
+                 -- (the court finder's), landmarks, image_aspect, camera, max_error_cm,
+                 -- confidence, model_run_id; one row per video and status
 scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
                  clock), created_by, copied_from NULL
 compute_usage    id, job_id, backend, gpu_type, gpu_seconds, cpu_core_seconds, gib_seconds,
@@ -1401,7 +1404,14 @@ proposes the shot type.
   negatives; first from the halls where S0 found the models weakest (distant or very wide
   cameras).
 - Post-processing: outlier removal, gap interpolation, trajectory fitting; contact and bounce
-  candidates from direction changes.
+  candidates from direction changes. **Built 16.10.2026** (`nomal/ml/trajectory.py`, the
+  `trajectory` job after each analysis): stuck spots and one-frame spikes out, tracks linked
+  over gaps of up to 5 frames (filled), contacts where the path turns ≥ 40° or changes speed
+  2.2-fold, labelled *bounce* (came down, went up slower), *low* (came down, went up as fast:
+  dig, reception) or *high*; each piece between contacts smoothed on its own. Served as a
+  compact track (`GET /api/videos/{id}/ball-track`, 15 samples/s, delta-coded integers,
+  gzip): **98 kB for a 2 h 12 min match**. The video and tagging pages draw the last 1.2 s as a
+  "Trajectories" overlay (off by default on phones).
 - Runs only on live segments of the analysis copy.
 - **Bar**: precision ≥ 0.9 at recall ≥ 0.8 within 5 px on held-out frames, near and far court
   reported separately.
@@ -1422,6 +1432,15 @@ proposes the shot type.
   and undistorts before the homography.
 - Later: automatic line/keypoint detection initialised from the hall's last calibration.
 - **Bar**: reprojection error < 15 cm on held-out landmarks.
+- **Built 16.10.2026** (migration `0007`, `calibration` per video and status): the coach
+  clicks 4–10 landmarks (corners; centre and attack lines' ends stand in for corners out of
+  the picture and check the fit) on the paused frame; the API fits the homography (DLT,
+  pure Python), recovers the camera from it (focal length and position, principal point at
+  the centre) so points above the floor map too, and returns the court's lines and the
+  error. Pre-filled from the court finder (`nomal/ml/court_detect.py`: vanishing point, side
+  lines, the court's spacing along them, a camera that could see it; offered at confidence
+  ≥ 0.6) or from the team's last calibration (same hall first). Not yet: lens distortion
+  (the wide Legends hall fits at ± 24 cm), a camera bumped during a match.
 
 ### 10.7 Serve placement
 
@@ -1429,6 +1448,12 @@ A homography maps the **floor plane** only, and the ball is in the air. So place
 floor-level evidence: the bounce point when the ball lands, else the receiver's foot position
 at the reception contact. Output: `court_x/court_y` on serve events and a serve chart per
 server, filterable by result. **Bar**: ≥ 80 % agreement with manually tagged serve zones.
+**Built 16.10.2026 (first version)**: the "Tendencies" diagram on the video page draws each
+serve and attack to the first bounce (floor) or low contact (mapped at 0.7 m with the
+camera) in its window after the tag, else from its DataVolley zones; coloured by outcome
+(point, error, in play), filterable by player, side and set; an arrow plays its moment. Not
+stored on the events yet (`court_x/court_y`): computed in the browser from the track and the
+calibration.
 
 ### 10.8 Later: OpenVolley import
 
