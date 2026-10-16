@@ -199,8 +199,13 @@ def test_a_link_becomes_a_video_through_import_and_ingest(
     while jobs := claim(w, IMPORT_CAPS):
         body = transcode_result(jobs[0]) if jobs[0]["kind"] == "transcode" else THUMBS
         assert w.post(f"/api/worker/jobs/{jobs[0]['id']}/complete", json=body).status_code == 204
+        if jobs[0]["kind"] == "thumbs":
+            # Thumbnails are done, the renditions not yet: no poster to show so far.
+            mid = coach.get(f"/api/videos/{video['id']}").json()
+            assert mid["status"] == "processing" or mid["has_thumbs"]
+            assert mid["status"] == "ready" or not mid["has_thumbs"]
     got = coach.get(f"/api/videos/{video['id']}").json()
-    assert got["status"] == "ready"
+    assert got["status"] == "ready" and got["has_thumbs"]
     assert got["imported_from"] == {
         "platform": "youtube",
         "url": "https://www.youtube.com/watch?v=NXNsZ_UNM6w",
@@ -454,3 +459,19 @@ def test_the_worker_reports_youtubes_bot_check(
             progress=lambda f: None,
             cancel=threading.Event(),
         )
+
+
+def test_a_restarted_worker_gets_its_left_over_job_back_without_losing_an_attempt(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    allow_luca(club["admin"])
+    link_video(club["coach"])
+    w = worker_client(app, club["admin"], IMPORT_CAPS)
+    [job] = claim(w, IMPORT_CAPS)  # then the worker restarts before running it
+    assert job["attempt"] == 1
+    again = w.post(
+        "/api/worker/claim", json={"caps": IMPORT_CAPS, "wait": False, "restarted": True}
+    )
+    assert again.status_code == 200, again.text
+    [same] = again.json()["jobs"]
+    assert (same["id"], same["attempt"]) == (job["id"], 1)

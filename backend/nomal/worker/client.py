@@ -64,9 +64,18 @@ class ApiClient:
             return response
         raise ApiUnavailable(path)
 
-    def claim(self, caps: Sequence[str], *, wait: bool = True) -> tuple[list[ClaimedJob], bool]:
+    def claim(
+        self, caps: Sequence[str], *, wait: bool = True, restarted: bool = False
+    ) -> tuple[list[ClaimedJob], bool]:
         response = self._post(
-            "/claim", {"caps": list(caps), "max": 1, "version": self.version, "wait": wait}
+            "/claim",
+            {
+                "caps": list(caps),
+                "max": 1,
+                "version": self.version,
+                "wait": wait,
+                "restarted": restarted,
+            },
         )
         body = response.json()
         jobs = [
