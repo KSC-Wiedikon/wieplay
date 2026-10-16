@@ -1,140 +1,205 @@
-import type { TFunction } from 'i18next'
-import { Fragment, useState, type ReactNode } from 'react'
+import { useQueries, type UseQueryResult } from '@tanstack/react-query'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate } from 'react-router'
+import { Link } from 'react-router'
 import { SportBadge } from '../components/Badge'
-import { ChevronDownIcon } from '../components/icons'
-import { Card } from '../components/Card'
-import { LoadError, Message } from '../components/Message'
+import { Button, ButtonLink } from '../components/Button'
+import { ChevronDownIcon, FilmIcon, ReelIcon, ScissorsIcon, SlidersIcon, UploadIcon, UsersIcon } from '../components/icons'
+import { EmptyState, LoadError } from '../components/Message'
+import { PageHeader, SectionHeader } from '../components/PageHeader'
 import { PageSpinner } from '../components/Spinner'
-import { Table, TBody, Td, Th, THead, Tr } from '../components/Table'
-import { useTeams } from '../lib/queries'
 import { cx } from '../lib/cx'
-import { groupBySeasons, groupBySport } from '../lib/teams'
-import type { Team } from '../lib/types'
+import { firstName } from '../lib/names'
+import { teamVideosQuery, useTeams, useVideoConfig } from '../lib/queries'
+import { useSession } from '../lib/session'
+import { mayUpload, teamEntries } from '../lib/teams'
+import type { Team, Video } from '../lib/types'
+import { newestFirst } from '../lib/video'
+import { RecentVideoGrid, RecentVideoSkeleton } from './home/RecentVideos'
+import { TeamCard } from './home/TeamCard'
 
-function roleLabel(t: TFunction, rel: string): string {
-  switch (rel) {
-    case 'player':
-      return t('roles.player')
-    case 'coach':
-      return t('roles.coach')
-    case 'captain':
-      return t('roles.captain')
-    case 'team_responsible':
-      return t('roles.team_responsible')
-    default:
-      return rel
-  }
-}
+/** How many videos "Recent videos" shows. */
+const RECENT = 8
 
+/** The start page: a greeting, the viewer's teams as cards and the newest videos of those teams. */
 export function HomePage() {
   const { t } = useTranslation()
+  const me = useSession()
   const teams = useTeams()
+  const config = useVideoConfig()
+  const name = firstName(me.member.name)
+
+  const entries = useMemo(() => teamEntries(teams.data ?? []), [teams.data])
+  // Each team's newest season, and the one before it: right after a new season starts, the
+  // recent videos are still in last season's team.
+  const videoTeams = useMemo(() => entries.flatMap(({ latest, earlier }) => [latest, ...earlier.slice(0, 1)]), [entries])
+  const videoQueries = useQueries({ queries: videoTeams.map((team) => teamVideosQuery(team.id)) })
+  const videosOf = new Map<number, UseQueryResult<Video[]>>(videoTeams.map((team, i) => [team.id, videoQueries[i] as UseQueryResult<Video[]>]))
+
+  const videoEnabled = config.data?.enabled !== false
+  const uploadTeams = videoEnabled && config.data ? entries.map((e) => e.latest).filter((team) => mayUpload(team, me)) : []
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8 sm:gap-10">
       <title>{`${t('home.title')} · nomal`}</title>
-      <h1 className="text-2xl font-bold">{t('home.title')}</h1>
+      <PageHeader
+        title={name ? t('home.greeting', { name }) : t('home.greetingAnon')}
+        subtitle={t('home.subtitle')}
+        actions={
+          <>
+            <UploadAction teams={uploadTeams} />
+            {/* On phones the tab row below the bar already has these. */}
+            <ButtonLink to="/clips" className="max-sm:hidden">
+              <ScissorsIcon className="size-4" />
+              {t('home.myClips')}
+            </ButtonLink>
+            <ButtonLink to="/reels" className="max-sm:hidden">
+              <ReelIcon className="size-4" />
+              {t('home.reels')}
+            </ButtonLink>
+          </>
+        }
+      />
+
       {teams.isPending ? (
         <PageSpinner />
       ) : teams.isError ? (
         <LoadError onRetry={() => void teams.refetch()} />
-      ) : teams.data.length === 0 ? (
-        <Message>{t('home.empty')}</Message>
+      ) : entries.length === 0 ? (
+        <EmptyState
+          icon={<UsersIcon />}
+          title={t('home.empty')}
+          action={
+            me.is_admin ? (
+              <ButtonLink to="/admin/teams" variant="primary">
+                <SlidersIcon className="size-4" />
+                {t('home.emptyAdmin')}
+              </ButtonLink>
+            ) : null
+          }
+        >
+          {t('home.emptyHint')}
+        </EmptyState>
       ) : (
-        groupBySport(teams.data).map(({ sport, teams }) => (
-          <section key={sport} aria-labelledby={`sport-${sport}`} className="flex flex-col gap-3">
-            <h2 id={`sport-${sport}`} className="text-lg font-semibold">
-              {t(`sport.${sport}`)}
-            </h2>
-            <Card className="overflow-hidden">
-              <TeamTable teams={teams} caption={t(`sport.${sport}`)} />
-            </Card>
+        <>
+          <section aria-labelledby="home-teams" className="flex flex-col gap-4">
+            <SectionHeader id="home-teams" title={t('home.title')} />
+            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {entries.map(({ latest, earlier }) => (
+                <li key={latest.lineage_id} className="flex">
+                  <TeamCard latest={latest} earlier={earlier} videos={videosOf.get(latest.id)} />
+                </li>
+              ))}
+            </ul>
           </section>
-        ))
+          {videoEnabled && (
+            <RecentSection queries={videoQueries} canUpload={uploadTeams.length > 0} uploadAction={<UploadAction teams={uploadTeams} />} />
+          )}
+        </>
       )}
     </div>
   )
 }
 
-function TeamTable({ teams, caption }: { teams: Team[]; caption: string }) {
+function RecentSection({
+  queries,
+  canUpload,
+  uploadAction,
+}: {
+  queries: UseQueryResult<Video[]>[]
+  canUpload: boolean
+  uploadAction: ReactNode
+}) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
-  const toggle = (lineage: string) =>
-    setOpen((current) => {
-      const next = new Set(current)
-      if (next.has(lineage)) next.delete(lineage)
-      else next.add(lineage)
-      return next
-    })
+  const loading = queries.some((q) => q.isPending)
+  const videos = newestFirst(queries.flatMap((q) => q.data ?? []).filter((video) => video.status !== 'refused')).slice(0, RECENT)
+  const failed = !loading && queries.length > 0 && queries.every((q) => q.isError)
+
   return (
-    <Table caption={caption}>
-      <THead>
-        <tr>
-          <Th>{t('columns.team')}</Th>
-          <Th>{t('columns.league')}</Th>
-          <Th className="hidden sm:table-cell">{t('columns.season')}</Th>
-          <Th>{t('columns.roles')}</Th>
-        </tr>
-      </THead>
-      <TBody>
-        {groupBySeasons(teams).map(({ latest, earlier }) => {
-          const expanded = open.has(latest.lineage_id)
-          const panel = `earlier-${latest.lineage_id}`
-          return (
-            <Fragment key={latest.lineage_id}>
-              <TeamRow
-                team={latest}
-                toggle={
-                  earlier.length > 0 ? (
-                    <button
-                      type="button"
-                      aria-expanded={expanded}
-                      aria-controls={panel}
-                      aria-label={t(expanded ? 'home.hideEarlier' : 'home.showEarlier', { name: latest.name })}
-                      title={t(expanded ? 'home.hideEarlier' : 'home.showEarlier', { name: latest.name })}
-                      onClick={() => toggle(latest.lineage_id)}
-                      className="-my-1 inline-flex size-8 items-center justify-center rounded-md text-muted hover:bg-sunken hover:text-fg"
-                    >
-                      <ChevronDownIcon className={cx('size-4 transition-transform', expanded && 'rotate-180')} />
-                    </button>
-                  ) : null
-                }
-              />
-              {expanded &&
-                earlier.map((team) => <TeamRow key={team.id} team={team} earlier id={panel} />)}
-            </Fragment>
-          )
-        })}
-      </TBody>
-    </Table>
+    <section aria-labelledby="home-recent" className="flex flex-col gap-4">
+      <SectionHeader id="home-recent" title={t('home.recent')} hint={t('home.recentHint')} />
+      {failed ? (
+        <LoadError onRetry={() => queries.forEach((q) => void q.refetch())} />
+      ) : loading && videos.length === 0 ? (
+        <RecentVideoSkeleton />
+      ) : videos.length === 0 ? (
+        <EmptyState icon={<FilmIcon />} title={t('home.noVideos')} action={canUpload ? uploadAction : null}>
+          {canUpload ? t('home.noVideosUpload') : t('home.noVideosPlayer')}
+        </EmptyState>
+      ) : (
+        <RecentVideoGrid videos={videos} />
+      )}
+    </section>
   )
 }
 
-function TeamRow({ team, toggle, earlier, id }: { team: Team; toggle?: ReactNode; earlier?: boolean; id?: string }) {
+/** "Upload a video": straight to the upload page for one team, a short team list for several. */
+function UploadAction({ teams }: { teams: Team[] }) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
+  const id = useId()
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false)
+        button.current?.focus()
+      }
+    }
+    document.addEventListener('pointerdown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const [only] = teams
+  if (!only) return null
+  if (teams.length === 1) {
+    return (
+      <ButtonLink to={`/teams/${only.id}/upload`} variant="primary">
+        <UploadIcon className="size-4" />
+        {t('home.upload')}
+      </ButtonLink>
+    )
+  }
   return (
-    <Tr id={id} onActivate={() => navigate(`/teams/${team.id}`)} className={earlier ? 'bg-sunken/50' : undefined}>
-      <Td>
-        <span className={cx('flex items-start gap-2', earlier && 'pl-6')}>
-          {!earlier && <SportBadge sport={team.sport} />}
-          <Link
-            to={`/teams/${team.id}`}
-            className={cx('text-link underline-offset-2 hover:underline', earlier ? 'text-sm' : 'font-semibold')}
-          >
-            {team.name}
-          </Link>
-          {earlier && <span className="text-sm text-muted sm:hidden">{team.season}</span>}
-          {toggle}
-        </span>
-      </Td>
-      <Td className={earlier ? 'text-sm text-muted' : undefined}>{team.league || '–'}</Td>
-      <Td className={cx('hidden whitespace-nowrap sm:table-cell', earlier && 'text-sm text-muted')}>{team.season}</Td>
-      <Td className={cx('text-muted', earlier && 'text-sm')}>
-        {team.rel.length > 0 ? team.rel.map((rel) => roleLabel(t, rel)).join(', ') : t('roles.none')}
-      </Td>
-    </Tr>
+    <div ref={root} className="relative">
+      <Button ref={button} variant="primary" aria-expanded={open} aria-controls={id} onClick={() => setOpen((v) => !v)}>
+        <UploadIcon className="size-4" />
+        {t('home.upload')}
+        <ChevronDownIcon className={cx('size-4 transition-transform motion-reduce:transition-none', open && 'rotate-180')} />
+      </Button>
+      {open && (
+        <div
+          id={id}
+          className="absolute top-full left-0 z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-card border border-hairline bg-surface p-1.5 shadow-raised"
+        >
+          <p className="px-2.5 pt-1.5 pb-1 text-xs font-semibold text-muted">{t('home.uploadFor')}</p>
+          <ul className="flex flex-col">
+            {teams.map((team) => (
+              <li key={team.id}>
+                <Link
+                  to={`/teams/${team.id}/upload`}
+                  onClick={() => setOpen(false)}
+                  className="flex min-h-11 items-center gap-2 rounded-control px-2.5 text-sm font-semibold hover:bg-hover sm:min-h-9"
+                >
+                  <SportBadge sport={team.sport} />
+                  <span className="truncate">{team.name}</span>
+                  <span className="ml-auto text-xs font-normal text-muted tabular-nums">{team.season}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }

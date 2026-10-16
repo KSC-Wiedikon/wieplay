@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, UnauthorizedError } from './api'
 import { keys } from './queryClient'
@@ -112,13 +112,17 @@ export function useVideoConfig() {
   return useQuery({ queryKey: keys.videoConfig, queryFn: ({ signal }) => api.videoConfig(signal), staleTime: 5 * 60_000 })
 }
 
-/** Refreshes every 10 s while a video of the team is being imported or processed. */
-export function useTeamVideos(teamId: number) {
-  return useQuery({
+/** A team's videos; refreshes every 10 s while one of them is being imported or processed. */
+export function teamVideosQuery(teamId: number) {
+  return queryOptions({
     queryKey: keys.teamVideos(teamId),
     queryFn: ({ signal }) => api.teamVideos(teamId, signal),
     refetchInterval: (query) => (query.state.data?.some((v) => BUSY.has(v.status)) ? 10_000 : false),
   })
+}
+
+export function useTeamVideos(teamId: number) {
+  return useQuery(teamVideosQuery(teamId))
 }
 
 /** Refreshes every 5 s while the video is importing, queued or processing. */
