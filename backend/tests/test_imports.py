@@ -443,7 +443,7 @@ def test_the_worker_reports_youtubes_bot_check(
             raise error("ERROR: [youtube] NXNsZ_UNM6w: Sign in to confirm you're not a bot.")
 
     monkeypatch.setattr(importer, "_downloader", lambda options: Blocked(options, LUCA))
-    with pytest.raises(importer.RateLimited):
+    with pytest.raises(importer.RateLimited) as caught:
         importer.fetch(
             "https://www.youtube.com/watch?v=NXNsZ_UNM6w",
             "youtube",
@@ -454,6 +454,38 @@ def test_the_worker_reports_youtubes_bot_check(
             progress=lambda f: None,
             cancel=threading.Event(),
         )
+    assert caught.value.seconds == importer.RATE_LIMIT_PAUSE_S
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        "ERROR: [download] Got error: 186 bytes read, 10208381 more expected. Giving up",
+    ],
+)
+def test_youtubes_throttling_pauses_imports_for_a_while(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, message: str
+) -> None:
+    error = importer._download_error()
+
+    class Throttled(FakeYdl):
+        def extract_info(self, url: str, download: bool) -> dict[str, Any]:
+            raise error(message)
+
+    monkeypatch.setattr(importer, "_downloader", lambda options: Throttled(options, LUCA))
+    with pytest.raises(importer.RateLimited) as caught:
+        importer.fetch(
+            "https://www.youtube.com/watch?v=NXNsZ_UNM6w",
+            "youtube",
+            ["lucazbindenvolley2500"],
+            tmp_path,
+            max_seconds=3600,
+            max_bytes=10**9,
+            progress=lambda f: None,
+            cancel=threading.Event(),
+        )
+    assert caught.value.seconds == importer.THROTTLE_PAUSE_S == 900
 
 
 def test_a_restarted_worker_gets_its_left_over_job_back_without_losing_an_attempt(

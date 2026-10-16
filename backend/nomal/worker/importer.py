@@ -56,10 +56,20 @@ GONE = (
 # address: the import waits this long, and so do all other queued imports.
 RATE_LIMIT_PAUSE_S = 3600
 BOT_CHECK = ("not a bot", "sign in to confirm", "too many requests", "http error 429")
+# Softer throttling seen on 16.10.2026 after ~18 full downloads in a few hours: "HTTP Error
+# 403: Forbidden" on the video data, or the connection cut ("186 bytes read, 10208381 more
+# expected"). A retry a few minutes later went through; a short pause for all imports keeps
+# them from spending their attempts on it.
+THROTTLE_PAUSE_S = 900
+THROTTLED = ("http error 403", "more expected")
 
 
 class RateLimited(Exception):
-    """YouTube wants a pause."""
+    """YouTube wants a pause of `seconds`."""
+
+    def __init__(self, message: str, seconds: int = RATE_LIMIT_PAUSE_S) -> None:
+        super().__init__(message)
+        self.seconds = seconds
 
 
 class Refused(Exception):
@@ -167,6 +177,8 @@ def fetch(
         message = str(exc).removeprefix("ERROR: ")
         if any(marker in message.lower() for marker in BOT_CHECK):
             raise RateLimited(message[:300]) from exc
+        if any(marker in message.lower() for marker in THROTTLED):
+            raise RateLimited(message[:300], THROTTLE_PAUSE_S) from exc
         if any(marker in message.lower() for marker in GONE):
             raise Refused(message[:300]) from exc
         raise RuntimeError(message[:300]) from exc
