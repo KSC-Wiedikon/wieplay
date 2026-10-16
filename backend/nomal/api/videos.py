@@ -344,14 +344,15 @@ def team_videos(
     return [_video_out(db, v, access, viewer, settings, progress) for v in videos]
 
 
-def _resolve_match(db: Session, team_id: int, body: VideoCreateIn) -> tuple[date, str, int | None]:
+def _resolve_match(db: Session, team: WdTeam, body: VideoCreateIn) -> tuple[date, str, int | None]:
     """The recording day, the title and the Wiedisync game. A match that is not in Wiedisync
-    (a friendly, tournament or cup) has no game: the coach gives its date and a title."""
+    (a friendly, tournament or cup) has no game: the coach gives its date and a title, and
+    the date must fall in this team row's season (retention counts from it, PLAN §5.5)."""
     if body.game_id is not None:
         if body.recorded_on is not None:
             raise HTTPException(422, "Give either the game or a date, not both")
         game = db.get(WdGame, body.game_id)
-        if game is None or game.team_id != team_id or game.date is None:
+        if game is None or game.team_id != team.id or game.date is None:
             raise HTTPException(422, "Game not found for this team")
         title = body.title or f"{game.home_name or '?'} {DASH} {game.away_name or '?'}"
         return game.date, title, game.id
@@ -359,6 +360,13 @@ def _resolve_match(db: Session, team_id: int, body: VideoCreateIn) -> tuple[date
         raise HTTPException(422, "A match video needs its game, or a date and a title")
     if not body.title:
         raise HTTPException(422, "A match without a Wiedisync game needs a title")
+    season = pipeline.season_of(body.recorded_on)
+    if season != team.season:
+        raise HTTPException(
+            422,
+            f"{body.recorded_on:%d.%m.%Y} belongs to the {season} season; "
+            f"this is the team of {team.season}",
+        )
     return body.recorded_on, body.title, None
 
 
@@ -394,7 +402,7 @@ def create_video(
     if not can_upload(viewer, access.ref):
         raise HTTPException(403, "Only the team's coaches and sport admins upload videos")
     _check_files(body, settings)
-    on, title, game_id = _resolve_match(db, team_id, body)
+    on, title, game_id = _resolve_match(db, access.team, body)
     if on > club_today():
         raise HTTPException(422, "The recording date is in the future")
 

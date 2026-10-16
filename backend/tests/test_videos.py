@@ -299,6 +299,9 @@ def test_a_match_without_a_wiedisync_game_needs_a_date_and_a_title(
     assert friendly(coach, game_id=game_id(H3, 1)).status_code == 422  # both
     future = (TODAY + timedelta(days=2)).isoformat()
     assert friendly(coach, recorded_on=future).status_code == 422
+    # A date of another season belongs on that season's team page (retention counts from it).
+    last_year = friendly(coach, recorded_on=(TODAY - timedelta(days=400)).isoformat())
+    assert last_year.status_code == 422 and "season" in last_year.json()["detail"]
 
 
 def test_a_match_without_a_game_passes_the_filming_rules_too(
