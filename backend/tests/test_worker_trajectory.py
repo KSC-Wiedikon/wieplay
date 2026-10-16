@@ -1,6 +1,7 @@
-"""The trajectory job on the worker, for real: after the analysis of a generated clip, the
-handler smooths the ball's path, uploads it through a signed URL, looks for the court, and
-the result goes through the API to the browser's endpoint. Skipped without ffmpeg."""
+"""The trajectory and court jobs on the worker, for real: after the analysis of a generated
+clip, the handler smooths the ball's path, uploads it through a signed URL, and the result
+goes through the API to the browser's endpoint; the court job follows (the camera's setups,
+the empty hall's picture on the NAS). Skipped without ffmpeg."""
 
 from __future__ import annotations
 
@@ -75,12 +76,27 @@ def test_trajectory_end_to_end_on_a_generated_clip(
     assert nas.read_bytes() == data and hashlib.sha256(data).hexdigest() == out["track"]["sha256"]
     track = json.loads(gzip.decompress(data))
     assert track["schema"] == 1 and track["fps"] == 15.0 and track["scale"] == 1000
+    # The court is the court job's now.
+    assert out["court"] is None
+    assert not any(m == "finding the court" for _, m in ctx.seen)  # type: ignore[attr-defined]
+
+    [job] = w.post("/api/worker/claim", json=kinds).json()["jobs"]
+    assert job["kind"] == "court" and job["params"]["track"]["nas_path"] == out["track"]["nas_path"]
+    court_ctx = context(worker_settings, SigningApi(w), job)
+    found = HANDLERS["court"](court_ctx)
+    assert w.post(f"/api/worker/jobs/{job['id']}/complete", json=found).status_code == 204
+    # A still camera: one setup; its empty hall kept on the NAS for the hall's memory.
+    [setup] = found["setups"]
+    assert setup["from_ms"] == 0 and setup["to_ms"] == job["params"]["duration_ms"]
+    hall = worker_settings.analysis_root / found["frames"]["nas_path"]  # type: ignore[operator]
+    assert hashlib.sha256(hall.read_bytes()).hexdigest() == found["frames"]["sha256"]
     # A green floor with a dot: no court to find, or not one to trust.
-    assert out["court"] is None or out["court"]["confidence"] < 0.6
-    assert any(m == "finding the court" for _, m in ctx.seen)  # type: ignore[attr-defined]
+    assert found["court"] is None or found["court"]["confidence"] < 0.6
 
     coach = club["coach"]
     state = coach.get(f"/api/videos/{video['id']}/court").json()
     assert state["ball_track"]["available"] is True and state["ball_track"]["job"] == "done"
+    assert state["court_job"] == "done" and len(state["setups"]) == 1
+    assert state["calibration"] is None
     served = coach.get(f"/api/videos/{video['id']}/ball-track")
     assert served.status_code == 200 and served.json() == track

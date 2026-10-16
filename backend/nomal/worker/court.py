@@ -77,10 +77,12 @@ def grab(concat: Path, at_s: float, *, key: bool) -> np.ndarray | None:
 
 
 def sample_times(duration_ms: int) -> list[int]:
+    """Every STEP_S (at most MAX_SAMPLES; a short clip gets a dozen), not in the last seconds:
+    after the last key frame there is none to skip to."""
     duration_s = max(duration_ms / 1000, 1.0)
-    step = max(STEP_S, duration_s / MAX_SAMPLES)
-    # Not the last seconds: after the last key frame there is none to skip to.
-    return [int(1000 * t) for t in np.arange(step / 2, max(duration_s - 10, step / 2 + 0.1), step)]
+    step = min(max(STEP_S, duration_s / MAX_SAMPLES), max(duration_s / 12, 0.25))
+    end = duration_s - min(10.0, 0.1 * duration_s)
+    return [int(1000 * t) for t in np.arange(step / 2, max(end, step / 2 + 0.01), step)]
 
 
 def encode_jpeg(image: np.ndarray) -> bytes:
