@@ -9,6 +9,7 @@ python -m nomal.cli analyse --video ID | --team TEAM_ID | --all-ready   queue th
 python -m nomal.cli train-rallies              train the rally finder now
 python -m nomal.cli rally-eval [--run ID]      per-game scores of v0 and v1 (latest training)
 python -m nomal.cli score --video ID | --all-ready   score again: servers, winners, sets, gaps
+python -m nomal.cli trajectories [--force]     ball tracks and court proposals for analysed videos
 """
 
 from __future__ import annotations
@@ -289,6 +290,46 @@ def _set_line(s: dict[str, Any]) -> str:
     return line
 
 
+def trajectories(force: bool, dry_run: bool) -> int:
+    """Queue the trajectory job (the ball's path, the court finder) of every ready video
+    that has signals: the backfill for videos analysed before it existed. Videos with a
+    track are skipped unless --force."""
+    from nomal.core import analysis, calibration
+    from nomal.core.models import AnalysisArtifact, Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        analysed = set(
+            db.scalars(select(AnalysisArtifact.video_id).where(AnalysisArtifact.kind == "features"))
+        )
+        tracked = set(
+            db.scalars(
+                select(AnalysisArtifact.video_id).where(AnalysisArtifact.kind == "ball_track")
+            )
+        )
+        queued = 0
+        for row in db.scalars(
+            select(Video).where(Video.status == "ready").order_by(Video.recorded_on)
+        ):
+            if row.id not in analysed or (row.id in tracked and not force):
+                continue
+            label = f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id})"
+            if dry_run:
+                print(f"would queue {label}")
+                continue
+            job = calibration.queue_trajectory(db, row, analysis.analysis_subdir(db, row))
+            if job is not None:
+                queued += 1
+                print(f"queued {label}: job {job.id}")
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        print(f"{queued} queued")
+    return 0
+
+
 def _pct(value: Any) -> str:
     return f"{100 * float(value):5.1f}" if isinstance(value, int | float) else "    -"
 
@@ -376,7 +417,12 @@ def main(argv: list[str] | None = None) -> int:
     scope = score_cmd.add_mutually_exclusive_group(required=True)
     scope.add_argument("--video", help="one video id")
     scope.add_argument("--all-ready", action="store_true", help="every ready volleyball video")
+    track_cmd = sub.add_parser("trajectories", help="ball tracks and court proposals")
+    track_cmd.add_argument("--force", action="store_true", help="also videos that have one")
+    track_cmd.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "trajectories":
+        return trajectories(args.force, args.dry_run)
     if args.command == "score":
         return score(args.video, args.all_ready)
     if args.command == "analyse":

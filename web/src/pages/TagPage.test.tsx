@@ -530,8 +530,8 @@ describe('TagPage', () => {
     expect(within(screen.getByRole('table', { name: 'Tags' })).getByText('9B#')).toBeInTheDocument()
     const calls = fetch.mock.calls
       .map(([path, init]) => `${init?.method ?? 'GET'} ${String(path)}`)
-      // The timeline's comment markers and the analysis status load on their own.
-      .filter((c) => !c.endsWith('/comments') && !c.endsWith('/analysis'))
+      // The timeline's comment markers, the analysis status and the court (ball track) load on their own.
+      .filter((c) => !c.endsWith('/comments') && !c.endsWith('/analysis') && !c.endsWith('/court'))
     expect(calls.filter((c) => c.startsWith('POST'))).toHaveLength(1)
     // The data was loaded again only once the closing session's batch had been answered.
     expect(server.posts).toHaveLength(1)

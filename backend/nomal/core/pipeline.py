@@ -359,10 +359,14 @@ def finish_if_done(db: Session, video: Video, now: datetime | None = None) -> bo
 
 def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]) -> None:
     """Validate a worker's result and write it. Raises ValueError on a bad result."""
-    from nomal.core import analysis
+    from nomal.core import analysis, calibration
 
     if job.kind in analysis.KINDS:
         analysis.complete(db, video, job, payload)
+        calibration.after_analyse(db, video, job)  # the ball's path and the court follow
+        return
+    if job.kind in calibration.KINDS:
+        calibration.complete(db, video, job, payload)
         return
     if job.kind == "purge":
         jobs.succeed(job, payload)
@@ -396,9 +400,9 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
     """A job failed for good: the video failed, its other jobs stop. A failed export only
     fails that export. Failed analysis leaves the video as it is: it plays without it."""
-    from nomal.core import analysis
+    from nomal.core import analysis, calibration
 
-    if job.kind in analysis.KINDS:
+    if job.kind in analysis.KINDS or job.kind in calibration.KINDS:
         return
     if job.kind == "export":
         export = db.get(VideoExport, uuid.UUID(job.params["export_id"]))
@@ -416,6 +420,10 @@ def on_failed(db: Session, video: Video | None, job: Job) -> None:
 
 def may_sign(job: Job, op: str, key: str) -> bool:
     """Object keys a worker may touch for this job (PLAN §8.1: workers hold no credentials)."""
+    from nomal.core import calibration
+
+    if job.kind in calibration.KINDS:
+        return calibration.may_sign(job, op, key)
     video = job.params.get("video_id")
     if job.kind == "ingest":
         staged = {f["object_key"] for f in job.params.get("files", []) if f.get("object_key")}

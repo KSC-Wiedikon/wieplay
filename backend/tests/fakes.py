@@ -18,6 +18,7 @@ class FakeStore:
     objects: dict[str, int] = field(default_factory=dict)  # key -> size
     uploads: dict[str, dict[str, object]] = field(default_factory=dict)
     signed: list[tuple[str, str, int]] = field(default_factory=list)  # (op, key, ttl)
+    contents: dict[str, bytes] = field(default_factory=dict)  # objects put with put_object
     _ids: itertools.count[int] = field(default_factory=lambda: itertools.count(1))
 
     def presign_get(self, key: str, ttl: int, download_name: str | None = None) -> str:
@@ -66,9 +67,19 @@ class FakeStore:
     def size(self, key: str) -> int | None:
         return self.objects.get(key)
 
+    def put_object(self, key: str, data: bytes) -> None:
+        """Test helper: what a worker's PUT to a signed URL does."""
+        self.objects[key] = len(data)
+        self.contents[key] = data
+
+    def read(self, key: str, max_bytes: int) -> bytes | None:
+        data = self.contents.get(key)
+        return None if data is None else data[:max_bytes]
+
     def delete(self, keys: Iterable[str]) -> None:
         for key in keys:
             self.objects.pop(key, None)
+            self.contents.pop(key, None)
 
     def delete_prefix(self, prefix: str) -> int:
         keys = [k for k in self.objects if k.startswith(prefix)]

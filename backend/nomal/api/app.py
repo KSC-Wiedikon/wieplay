@@ -18,6 +18,7 @@ from nomal.api import (
     admin,
     analysis,
     auth,
+    court,
     library,
     media,
     stats,
@@ -152,6 +153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(library.router)
     app.include_router(stats.router)
     app.include_router(analysis.router)
+    app.include_router(court.router)
 
     if settings.web_dist:
         _mount_web(app, Path(settings.web_dist))
