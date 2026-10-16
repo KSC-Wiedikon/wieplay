@@ -65,7 +65,7 @@ The budget still assumes 100 videos per season.
 
 | Tier | What | Runs where |
 |---|---|---|
-| **1 · MVP** | Upload a match (original file, or a YouTube link from the club's channel) · timestamp-synced manual tagging with keyboard shortcuts (event type + player number) · rally markers and **skip-dead-time playback from manual markers** · clips and per-player highlight reels · clip/reel export with ffmpeg · Wiedisync login | API + web on Hetzner; media work on the Lenovo server |
+| **1 · MVP** | Upload a match (original file, split parts joined automatically, or imported from a YouTube or Twitch link of the club's or a member's channel) · timestamp-synced manual tagging with keyboard shortcuts (event type + player number) · rally markers and **skip-dead-time playback from manual markers** · clips and per-player highlight reels · clip/reel export with ffmpeg · Wiedisync login | API + web on Hetzner; media work on the Lenovo server |
 | **2 · Automatic** | **Dead-time skipping** (rallies vs. timeouts, set breaks, warm-up) · **automatic scoring** (volleyball from the serving side, scoreboard OCR when the scoreboard is in frame; basketball later) · ball tracking (TrackNet-style) · player detection + tracking (YOLO + tracker) · court homography → serve placement. Coach corrections become training data. | CPU stages on the Lenovo server; GPU stages on our own GPU at home first (Framework 16, always on), an EU or Swiss provider later; queued like everything else |
 | **3 · Later / maybe** | Per-touch action classification and player attribution | Same GPU path, trained on tier 1 + 2 data (training on the Framework 16) |
 
@@ -87,7 +87,7 @@ From the Q&A on 15.10.2026 (second round supersedes the first):
 
 | # | Topic | Decision |
 |---|---|---|
-| D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube link** is accepted as a source **for the club's own uploads only**: the club's channel or a club member's own channel; the **original file is preferred** (YouTube re-encodes and may drop 50 fps) and can replace the YouTube source later. |
+| D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube or Twitch link** is accepted as a source **for the club's own videos only** (the club's channel or a member's own channel): Nomal imports the file (§7.2.2, decided 16.10.2026); the **original file is preferred** (the platforms re-encode) and can replace the import later. |
 | D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 videos per season in total. **DU23-1: trainings only** (decided 15.10.2026, §5.3). **Matches only for now** (decided 16.10.2026): trainings removed from the product, tables kept until the cleanup migration (§5.3). |
 | D3 | Delivery | Hetzner Object Storage. **HLS**: the authenticated API serves the playlist and every segment URL is signed with a **TTL of minutes** at the moment the player asks for it. No long-lived link per video anywhere. A copied link dies quickly; a 2 h match plays without interruption (§7.6). |
 | D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference starts internal** (decided 15.10.2026): on the **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; always on), with a researched plan to move to an **EU or Swiss provider** later (§8.6). US providers are out. The Framework 16 is also the development and training machine; the RTX 4090 PC is not part of the plan. The worker interface is backend-agnostic (queue → worker), so internal, provider and a future GPU box are interchangeable (§8). |
@@ -139,7 +139,7 @@ flowchart LR
   B -- "app + API (cookie)" --> T --> API
   B -- "login redirect" --> DX
   B -- "HLS segments (signed, minutes)" --> OS
-  B -. "YouTube embed (club and member channels)" .-> YT[(YouTube)]
+  LS -. "import (allow-listed YouTube/Twitch links)" .-> YT[(YouTube / Twitch)]
   API --- PG
   DX --- PG
   API -- "sync rosters/games (localhost)" --> DX
@@ -388,7 +388,7 @@ A nightly `retention` job enforces this and logs what it deleted.
 | Hetzner (VPS, Object Storage) | Everything Nomal stores | Germany / EU | Adequate country; DPA with Hetzner |
 | Cloudflare | HTML, JSON, redirects (no video bytes) | Global edge | Already the club's provider |
 | GPU processing | Analysis copies (video), no names, no IDs | **Now: club hardware at home** (no third party). Later: an EU or Swiss provider | The move needs a DPA (§8.6) |
-| YouTube (Google) | Embedded playback of videos from the club's and members' channels only | Google | Only on YouTube-sourced videos, via `youtube-nocookie.com` |
+| YouTube (Google), Twitch | Source of imported videos from the club's and members' channels (§7.2.2); Nomal fetches them, the browser never talks to them | Google, Twitch | Only for imported videos |
 
 **Decision (15.10.2026): GPU inference starts internal**, on club-controlled hardware at home,
 so no video leaves the club for processing. The later move (§8.6) goes to a **Swiss or EU
@@ -405,8 +405,8 @@ segments, without audio unless a task needs it, with no names or IDs, deleted af
   Player attribution uses **jersey numbers and position on court only**. (Biometric data used
   for unique identification is sensitive personal data under the revDSG; avoid it entirely.)
 - Detection is masked to the court polygon plus a margin, which also excludes spectators.
-- No third-party analytics. The only third party in the browser is the YouTube embed, only on
-  YouTube-sourced videos.
+- No third-party analytics and no third party in the browser: imported YouTube/Twitch videos
+  are fetched by the worker and played from Nomal's own storage.
 
 ### 5.8 Audit log
 
@@ -495,8 +495,8 @@ season's team row. Sport is always part of the key: "H1" exists in both sports.
 video             id, team_id → wd_team, kind 'match'|'training'|'other',
                   game_id → wd_game NULL, training_id → wd_training NULL,
                   title, sport, recorded_at, recording_started_at NULL (wall clock, for imports),
-                  source 'file'|'youtube', youtube_id NULL, youtube_channel_id NULL,
-                  replaced_youtube_offset_ms NULL,
+                  source 'file'|'import', import_url NULL, import_channel_id NULL,
+                  replaced_import_offset_ms NULL,
                   status 'awaiting_upload'|'uploading'|'queued'|'processing'|'ready'|'failed'|'deleted',
                   duration_ms, fps_num, fps_den, width, height, has_audio, audio_muted,
                   capture jsonb  -- camera make/model, codec, bitrate, VFR flag, from metadata
@@ -683,16 +683,99 @@ distortion (§10.6). See §19, O8.
 |---|---|---|
 | **NAS inbox** (preferred at home) | Anyone with SD-card access at home | Copy files into the `nomal-inbox` share. The Lenovo worker sees stable files (size unchanged for 2 min), probes them, groups split parts, registers *inbox files*. In Nomal the coach picks the game (suggested from recording time vs. games that day). Nothing crosses the internet twice. |
 | **Browser upload** | Coaches elsewhere | Resumable S3 **multipart** upload straight to object storage (`incoming/<video>/`), parts signed by the API (64 MB parts → files up to ~640 GB; 4 in parallel; survives reloads). Several files per video (split recordings). The Lenovo worker downloads, archives to NAS, deletes the staging object. |
-| **YouTube link** | The club's own channel | Accepted only if the video's channel is on the allow-list: the club's channel and members' own channels (each player can have one). A member proposes their channel, a coach or admin confirms it; every link's channel is checked with one YouTube Data API metadata call (no download). Later, members could prove ownership by signing in with Google. Plays through the YouTube IFrame API (nocookie) with the same tagging UI; tags, clips, reels and skip-dead-time (manual rallies) work. **No export, no tier 2** (no file; YouTube may also serve fewer than 50 fps). Nomal does not download from YouTube (YouTube's terms). The UI keeps nudging: "Upload the original for 50 fps, export and automatic analysis". When the original arrives, the video switches to `source='file'`, keeping all tags; if the two versions start at different points, the coach marks one shared moment (e.g. the first serve whistle) and Nomal stores the offset. |
+| **Import from a link** (planned, §7.2.2) | Matches someone already put on YouTube or Twitch | Paste a link from an allow-listed channel (the club's, members' own) or pick one Wiedisync already stores for the game; the Lenovo worker downloads it and it continues like an upload. Decided 16.10.2026; replaces the earlier plan to embed YouTube without downloading. |
 
 Before any of these is accepted: permission, team policy and adult gate (§5.3). Refused
 means no bytes stored. YouTube-hosted footage sits outside Nomal's access control (whoever has
 the YouTube link can watch it), so the club and members should upload as *unlisted*; the
 adults-only rule applies just the same.
 
-Wiedisync already stores video links per game (`game_recordings`, often YouTube). Later the
-sync can carry them, so a coach can pick an existing link as a source in one click when its
-channel is on the allow-list.
+Wiedisync already stores video links per game (`game_recordings`, often YouTube). The sync
+carries them, so a coach can import an existing link in one click when its channel is on the
+allow-list (§7.2.2).
+
+#### 7.2.1 Split recordings are stitched automatically (planned)
+
+Action cameras split long recordings: DJI cameras start a new MP4 at about 4 GB and write a
+low-resolution proxy (`.LRF`) next to each part; GoPro writes `GX01xxxx`, `GX02xxxx`… plus
+`.LRV`/`.THM`. Today Nomal joins several files of one video in **file-name order** and the
+coach picks the files and the game by hand. Goal: the coach drops the **whole card or
+folder**, and Nomal finds the match recording, orders and joins its parts, and suggests the
+game; no sorting by hand.
+
+1. **Skip sidecars.** `.LRF`, `.LRV`, `.THM`, `.SRT`, `.OSV`, photos and anything that is not a
+   camera video are left out silently and listed as "skipped (preview and data files)". The
+   upload page accepts a folder (`webkitdirectory`) as well as files.
+2. **Read each file's metadata before uploading.** The browser reads the MP4 `moov` box with
+   `File.slice` (camera files keep it at the end, so a few MB at most): start time
+   (`creation_time`), duration, resolution, frame rate, codec, and make/model/serial where the
+   camera writes them. The NAS inbox already probes the same fields with ffprobe.
+3. **Group parts into recordings.** Same camera (serial, else model + resolution + frame rate
+   + codec), ordered by start time with file names as tie-break; a part continues the previous
+   one when it starts within ±3 s of the previous start + duration. A larger gap starts a new
+   recording. This works with an unset camera clock (only differences count).
+4. **Suggest the match.** The recording that overlaps the game's time (Wiedisync date + time,
+   club time zone, from 60 min before the first serve) is preselected with its game; stray
+   clips stay unticked. The coach sees e.g. "3 files · 19:12–21:04 · 1 h 52 min → KSC Wiedikon
+   H3 – Volero Legends" and confirms or changes it. If the clock is far off, name order is
+   used and the game is picked by hand, as today.
+5. **Several recordings for one match** (the camera was stopped at a set break) are allowed:
+   joined in time order, the break is kept as metadata and shown as a marker on the timeline
+   (and offered as dead time), not as black video.
+6. **Joining.** Originals stay untouched on the NAS (master copies); the join happens in the
+   transcode via ffconcat, as today. Parts must share resolution, frame rate and codec, or the
+   upload page proposes separate videos. DJI split points can carry a sub-second audio gap, so
+   the concat transcode resamples audio to stay in sync (`aresample=async=1`) and regenerates
+   timestamps; a test with a real Osmo card checks lip-sync at every boundary.
+7. **Store it.** `video_source_file` gains `recorded_at`, `duration_ms` and `camera` (one
+   migration), so exports keep cutting per file and later features can map wall-clock time
+   (scoreboard OCR, Wiedisync set times) onto the video.
+8. **Later, optional:** upload the `.LRF` proxy first (about a tenth of the size) so the coach
+   can start tagging while the full files still upload; the tags carry over unchanged because
+   proxy and original share the timeline.
+
+Before building: a listing and ffprobe output of a real card from the club's Osmo (part names,
+split size, whether `.LRF` files are split the same way). Tests: grouping with gaps, an unset
+clock, two cameras on one card, sidecars; a browser upload of a three-part match. Size: about
+2–3 days; worth doing before the first real season uploads.
+
+#### 7.2.2 Import from a link: YouTube and Twitch (planned)
+
+Many matches are already online (members' channels, club streams). Instead of downloading and
+re-uploading them by hand, the coach pastes the link and Nomal fetches the video itself.
+
+1. **Where:** the upload page gets a third source next to *this device* and *NAS inbox*:
+   **From a link**. It also offers the links Wiedisync already has for that game.
+2. **Which links:** only `youtube.com/watch?v=…`, `youtu.be/…` and `twitch.tv/videos/…`
+   (past broadcasts and highlights), checked by strict patterns; nothing else is fetched, so
+   no request to arbitrary addresses (SSRF). The video's channel must be on the allow-list (the
+   club's channel and members' own channels, confirmed by a coach or admin), checked from the
+   video's metadata.
+3. **Rules as for uploads:** the coach picks the game (suggested from the publish or stream
+   date); permission, team policy and adult gate (§5.3) run before anything is fetched.
+4. **The fetch:** a new job kind `import` (worker capability `import`) on the **Lenovo
+   worker**: it runs from the home connection, because YouTube often blocks downloads from
+   data-centre addresses such as the VPS. It runs `yt-dlp` (pinned version, run from Python,
+   never through a shell) with only the YouTube and Twitch extractors, no playlists, no cookies
+   (public and unlisted videos only), a size and time limit, and prefers 1080p at 50/60 fps
+   (H.264 + AAC where offered). The file lands in the NAS raw folder like an upload and the
+   normal chain continues (ingest, renditions, thumbnails); progress shows in the video list.
+5. **Keeping it working:** YouTube changes often break older `yt-dlp` versions, so the worker
+   image is rebuilt with the newest release on a schedule (and on demand when imports fail),
+   after the import tests pass.
+6. **Quality:** these platforms re-encode; that is fine for watching, tagging and exports,
+   less good for the later automatic analysis. The original from the camera stays better, and
+   uploading it later replaces the imported file while keeping all tags.
+7. **Timing:** Twitch deletes past broadcasts after 7 to 60 days depending on the channel;
+   import them soon after the match (highlights stay).
+8. **Terms:** YouTube's and Twitch's terms allow downloads only through their own features or
+   with the permission of the platform and the rights holder. The allow-list keeps imports to
+   the club's and members' own videos, whose owners agree; the remaining risk is the platform
+   blocking downloads, not a dispute with the people filmed. Decided by the club on
+   16.10.2026, reversing the earlier "no download" line.
+
+Size: about 1–2 days (job, worker step, allow-list admin, upload-page source, tests with a
+short public test video). No budget impact: it runs on the Lenovo and stores like an upload.
 
 ### 7.3 Processing chain
 
@@ -1386,7 +1469,7 @@ nomal/
 | Upload | Uppy with S3 multipart | Resumable |
 | Media | ffmpeg (pinned build in the image), ffprobe | — |
 | ML | PyTorch (CUDA 12.8+ builds for Blackwell), Ultralytics YOLO, ByteTrack via `supervision`, OpenCV, Polars/PyArrow | Licences compatible with AGPL |
-| YouTube | YouTube Data API v3 (metadata only, API key), IFrame Player API | Channel check, playback |
+| YouTube, Twitch | `yt-dlp` (pinned, run by the Lenovo worker, YouTube and Twitch extractors only) | Channel check and import (§7.2.2) |
 
 ### 14.3 Environments
 
@@ -1564,7 +1647,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | **M2** | Tagging + condensed playback | Volleyball taxonomy; roster snapshot; grammar + hotkeys; timeline + event table; rally key + rally/score from tags; **skip dead time (manual)** with timeout/set-break keys; set boundaries + starting score; rally list filters (player, action, outcome, set); outbox; revision triggers | A full match tagged in ≤ 1.5× its length; condensed playback works; pulling the network cable loses nothing |
 | **M3** | Clips, reels, export, comments | Virtual clips; smart per-player reels; highlight builder across matches; comments pinned to a moment with @mentions and audience; drill segments for trainings; ffmpeg export with watermark (incl. condensed match) | A player opens "my attacks this season" on a phone; a coach downloads a watermarked condensed match |
 | **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in Nomal without a spreadsheet |
-| **M4** | Launch | Basketball taxonomy + grammar for Herren 1; YouTube source (club channel); German UI; privacy page; filming/tagging guides; runbook; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
+| **M4** | Launch | Basketball taxonomy + grammar for Herren 1; import from YouTube/Twitch links (§7.2.2); automatic stitching of split recordings (§7.2.1); German UI; privacy page; filming/tagging guides; runbook; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
 | **M5** | Tier 2a: automatic dead time | CPU v0 (whistles + motion) on the Lenovo worker; rally review UI; analysis copies; internal GPU worker on the Framework 16 (`local-agent`, busy guard) + GPU-hour ledger; learned v1 once ~20 matches have manual rallies | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
 | **M6** | Tier 2b: automatic scoring (VB) | Serve-side classifier from tier-1 serve tags; side-switch rules; official-set-score constraint; scoreboard region UI + OCR; score correction UI | ≥ 98 % correct rally winners with ≤ 5 % flagged on held-out matches |
 | **M7** | Tier 2c: ball | Ball-labelling tool; TrackNet fine-tune on the Framework 16; Parquet artifacts | Ball bar met on near court; far court measured |
@@ -1591,7 +1674,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | VPS shared with prod Directus | Nomal hurts Wiedisync | Container limits; video never touches the VPS |
 | iOS playback quirks | iPhone users can't watch | Test in M1; playlist-refresh fallback (§7.6) |
 | Leaked export | Privacy incident | Coach-only, watermark, 30-day expiry, audit |
-| YouTube footage outside Nomal's control | Visible to anyone with the link | Club channel only, unlisted, original file preferred |
+| Imports break or get blocked | A platform change or block stops imports | Pinned `yt-dlp`, scheduled updates with tests; the original file upload always works |
 | Wiedisync changes (rollover, schema) | Broken sync | Versioned bridge contract + tests; lineage mapping |
 | "H1" exists in both sports | Wrong team linked | Sport is part of every team key and every picker |
 | Cloudflare terms on video | Account action | Video never through Cloudflare |
@@ -1611,7 +1694,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | O6 ⚠ | After the move, 1.5 GPU-h/video stays within CHF 80 only at Infomaniak (≈ CHF 45, price to confirm); OVHcloud ≈ CHF 122, Exoscale ≈ CHF 204 (§16.2). | Design to ≤ 0.8 h (§10.9); measure in S0 on the Framework 16 and on Infomaniak or OVHcloud. |
 | O7 ⚠ | Hot storage (≈ CHF 68–80/season) is not in the budget breakdown. | Use the CHF 50 backup line for hot storage and drop past seasons' 1080p rendition. |
 | O8 | Basketball camera: side of the court at the half-court line, as high as possible (§7.1). Where in Herren 1's halls is there a gallery or a high spot on the long side? | Check the home hall first; away halls vary. |
-| O9 | YouTube sources | ✓ **Decided 15.10.2026: the club's channel and members' own channels**, on a coach-confirmed allow-list. Channel IDs are added as members propose them. |
+| O9 | YouTube sources | ✓ **Decided 15.10.2026: the club's channel and members' own channels**, on a coach-confirmed allow-list. Channel IDs are added as members propose them. **16.10.2026: Twitch too, and Nomal imports the file instead of embedding** (§7.2.2). |
 | O10 | Camera models | ✓ **Not needed**: Nomal reads the specs from each file. |
 | O11 | Brand | ✓ **Done 15.10.2026**: assets in `docs/brand/`, icons generated, `mark-on-dark.svg` and the ball-only favicon approved (§13.3). |
 | O12 | Repo visibility | Private now; flip to public when you're happy, like Wiedisync. |
