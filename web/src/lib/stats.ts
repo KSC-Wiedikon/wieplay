@@ -61,11 +61,21 @@ export interface TeamLine {
   break_point_pct: number | null
 }
 
+/** Our points per rotation (our setter's zone, 1..6), walked from each set's starting rotation. */
+export interface RotationLine extends TeamLine {
+  rotation: number
+}
+
 export interface BoxScore {
   players: StatRow[]
   team: StatRow
   opponent: StatRow
   summary: TeamLine
+  /**
+   * One line per rotation 1..6; null when no set has a starting rotation (or, for a set,
+   * when it has none). Absent from servers before the automatic scoring.
+   */
+  rotations?: RotationLine[] | null
 }
 
 export interface SetBox extends BoxScore {

@@ -8,6 +8,7 @@ import hashlib
 import shutil
 import subprocess
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +176,11 @@ def test_analyse_end_to_end_on_a_generated_clip(
     assert state["status"] == "done"
     assert state["model_run"]["metrics"]["signals"]["whistles"] == 2
     assert state["model_run"]["params"]["analysis_fps"] == 30.0
+    # The series the API scores with came along, and the video was scored.
+    assert result["tracks"]["serve"]["finder"] == "v0"
+    assert set(result["tracks"]["activity"]["channels"]) == {"ball", "court", "side", "whistle"}
+    assert state["model_run"]["metrics"]["tracks"] == ["serve", "activity"]
+    assert state["scoring"]["serve_finder"] == "v0"
 
 
 def test_analyse_stops_when_cancelled(
@@ -191,6 +197,7 @@ def test_train_rallies_handler(worker_settings: WorkerSettings) -> None:
     root = worker_settings.analysis_root
     assert root is not None
     refs, labels = {}, {}
+    ids = [str(uuid.UUID(int=k + 1)) for k in range(3)]
     for k in range(3):
         true, duration = league_rallies(20, seed=50 + k)
         sig = synthetic_signals(true, duration, seed=60 + k, whistles=k != 1, audio=k != 1)
@@ -200,30 +207,40 @@ def test_train_rallies_handler(worker_settings: WorkerSettings) -> None:
         refs[k] = {"nas_path": str(path.relative_to(root)),
                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}  # fmt: skip
         labels[k] = [list(r) for r in to_ms(true)]
-    inputs = {
+    inputs: dict[str, Any] = {
         "rally_model": None,
-        "train": [{"video_id": f"v{k}", "features": refs[k], "rallies": labels[k]} for k in (0, 1)],
-        "others": [{"video_id": "v2", "features": refs[2]}],
-    }
+        "serve_model": None,
+        "train": [
+            {"video_id": ids[k], "features": refs[k], "rallies": labels[k],
+             "serves": [[s, int(n % 2 == 0)] for n, (s, _) in enumerate(labels[k])],
+             "tracks": []}
+            for k in (0, 1)
+        ],
+        "others": [{"video_id": ids[2], "features": refs[2], "tracks": ["activity"]}],
+    }  # fmt: skip
     job = {"id": "0123456789abcdef", "kind": "train_rallies",
            "params": {"out_dir": "models/rallies"}}  # fmt: skip
     result = HANDLERS["train_rallies"](context(worker_settings, FakeApi(inputs), job))
     TrainResult.model_validate(result)  # what the API accepts
-    assert set(result["evaluation"]["videos"]) == {"v0", "v1"}
+    assert set(result["evaluation"]["videos"]) == {ids[0], ids[1]}
     assert result["evaluation"]["summary"]["v1"]["videos"] == 2
-    assert [d["video_id"] for d in result["dataset"]] == ["v0", "v1"]
+    assert [d["video_id"] for d in result["dataset"]] == ids[:2]
     model_path = root / result["artifact"]["nas_path"]
     model = rallies.RallyModel.load(model_path, result["artifact"]["sha256"])
-    assert model.trained_on == ["v0", "v1"]
+    assert model.trained_on == ids[:2]
     if result["accepted"]:
-        assert result["predictions"]["v2"]["finder"] == "v1"
-        assert len(result["predictions"]["v2"]["proposals"]) >= 15
+        assert result["predictions"][ids[2]]["finder"] == "v1"
+        assert len(result["predictions"][ids[2]]["proposals"]) >= 15
     else:
         assert result["predictions"] == {}
+    # The serve model was scored on held-out games; every game without series gets them.
+    assert set(result["serve"]["evaluation"]["videos"]) == {ids[0], ids[1]}
+    assert set(result["tracks"][ids[0]]) == {"serve", "activity"}
+    assert set(result["tracks"][ids[2]]) == {"serve"}  # it had its activity already
     # A training never reads outside the analysis root.
     inputs["train"][0]["features"] = {"nas_path": "../../etc/passwd", "sha256": "0" * 64}
     escaped = HANDLERS["train_rallies"](context(worker_settings, FakeApi(inputs), job))
-    assert [d["video_id"] for d in escaped["dataset"]] == ["v1"]
+    assert [d["video_id"] for d in escaped["dataset"]] == [ids[1]]
 
 
 def test_the_analysis_runs_on_a_background_lane(tmp_path: Path) -> None:

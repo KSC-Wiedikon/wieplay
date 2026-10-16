@@ -205,7 +205,35 @@ function Numbers({ data, video, tagging, onPlay }: { data: Stats } & VideoStatsP
           />
         </div>
       )}
+      {data.rallies > 0 && <Rotations box={box} scope={scope} />}
       <StatsLegend columns={data.columns} team={data.rallies > 0} />
+    </div>
+  )
+}
+
+/**
+ * Our points per rotation (our setter's zone) for the match or the chosen set. It needs each
+ * set's starting rotation, which a coach sets in the sets bar of the tagging page.
+ */
+function Rotations({ box, scope }: { box: Stats['match']; scope: number | null }) {
+  const { t } = useTranslation()
+  const lines = box.rotations ?? null
+  const rows: TeamTableRow[] = (lines ?? []).map((line) => {
+    const name = t('stats.rotations.rotationNo', { n: line.rotation })
+    return { key: `rotation${line.rotation}`, label: name, name, score: String(line.rallies), line }
+  })
+  const caption = scope === null ? t('stats.rotations.title') : `${t('stats.rotations.title')} · ${t('stats.setNo', { no: scope })}`
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="font-semibold">{caption}</h3>
+      {lines === null ? (
+        <p className="text-sm text-muted">{t('stats.rotations.none')}</p>
+      ) : (
+        <>
+          <p className="text-sm text-muted">{t('stats.rotations.hint')}</p>
+          <TeamTable caption={caption} first={t('stats.rotations.rotation')} scoreLabel={t('stats.rotations.rallies')} rows={rows} target={() => null} />
+        </>
+      )}
     </div>
   )
 }

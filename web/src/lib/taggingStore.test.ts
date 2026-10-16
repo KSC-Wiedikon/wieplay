@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { basketball, bundle, period, rally, tag, volleyball } from '../test/tagging'
 import { Outbox, type OutboxItem } from './outbox'
-import { eventToIn, mergeView, TaggingStore } from './taggingStore'
+import { eventToIn, mergeView, periodToIn, segmentToIn, TaggingStore } from './taggingStore'
 import type { ChangesIn, ChangesOut, Tag } from './types'
 
 const VIDEO = '00000000-0000-4000-8000-0000000000cc'
@@ -161,5 +161,30 @@ describe('TaggingStore', () => {
     // Not recomputed: whatever the server says is shown.
     expect(store.getView().segments[0]).toMatchObject({ score_us_after: 9, score_them_after: 9 })
     expect(store.getView().provisional).toBe(false)
+  })
+
+  it("keeps the coach's serve call out of a change unless it sets or clears it", async () => {
+    const r = rally({ start_ms: 1000, end_ms: 5000, source: 'model', serving_manual: 'us', model_won_by: 'them', version: 2 })
+    expect(segmentToIn(r)).not.toHaveProperty('serving_manual')
+    const { store, outbox } = await setup(bundle({ segments: [r] }))
+    store.commit([{ kind: 'segment', payload: { ...segmentToIn(r), serving_manual: 'them' } }])
+    expect(store.getView().segments[0]).toMatchObject({ serving_manual: 'them', model_won_by: 'them', source: 'model' })
+    // A later change that doesn't name the call keeps the queued one (the queue keeps the last state only).
+    store.commit([{ kind: 'segment', payload: { ...segmentToIn(r), review: 'confirmed' } }])
+    expect(outbox.items()[0]?.payload).toMatchObject({ review: 'confirmed', serving_manual: 'them' })
+    store.undo()
+    expect(outbox.items()[0]?.payload).toMatchObject({ review: 'unreviewed', serving_manual: 'them' })
+    // Undoing the call sends the call from before.
+    store.undo()
+    expect(outbox.items()[0]?.payload).toMatchObject({ serving_manual: 'us' })
+    expect(store.getView().segments[0]?.serving_manual).toBe('us')
+  })
+
+  it('sends a set with its review and starting rotation as they are', async () => {
+    const set = period({ no: 1, start_ms: 0, source: 'model', review: 'unreviewed', start_rotation: 4, model_first_serve: 'them' })
+    expect(periodToIn(set)).toMatchObject({ review: 'unreviewed', start_rotation: 4 })
+    const { store } = await setup(bundle({ periods: [set] }))
+    store.commit([{ kind: 'period', payload: { ...periodToIn(set), start_rotation: null, first_serve: 'us' } }])
+    expect(store.getView().periods[0]).toMatchObject({ start_rotation: null, first_serve: 'us', source: 'model', model_first_serve: 'them' })
   })
 })

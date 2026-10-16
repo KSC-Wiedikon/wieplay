@@ -299,6 +299,19 @@ export type Side = 'us' | 'them'
 export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'merged'
 export type TimePrecision = 'live' | 'adjusted' | 'frame'
 export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
+/**
+ * Dead time worth a label (PLAN §6.6): before the first serve, between sets, a team timeout, a
+ * long mid-set interruption, after the match. Normal short dead time between rallies has none.
+ */
+export type GapKind = 'warmup' | 'set_break' | 'timeout' | 'stoppage' | 'other_dead'
+/** Where on the video a team stands: near is the camera's end. */
+export type CourtSide = 'near' | 'far'
+/**
+ * Why the automatic scoring flags a rally (PLAN §10.3): a point seems missing before it (or,
+ * for the last rally of a set, after it), it looks like no point at all (a replay), the serve
+ * evidence or a coach's fact disagrees with the score, or the model is unsure.
+ */
+export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure'
 
 export interface TaxonomySkill {
   /** One letter for volleyball (S R E A B D F); one or two characters for basketball (S2 S3 FT RO … F). */
@@ -345,11 +358,29 @@ export interface Period {
   start_us: number
   start_them: number
   first_serve: Side | null
-  our_court_side_at_start: 'near' | 'far' | null
+  our_court_side_at_start: CourtSide | null
   side_switch_at_score: number | null
-  /** Computed by the server: from the rallies (volleyball), the running score at its end (basketball). */
+  /**
+   * Computed by the server: from the rallies (volleyball: the score line, filled with the
+   * model's winners where no coach decided), the running score at its end (basketball).
+   */
   final_us: number | null
   final_them: number | null
+  // Automatic scoring (step D, PLAN §10.3); absent from servers before it.
+  /** manual | model: a model's set is a proposal until a coach accepts it. */
+  source?: string
+  review?: Review
+  /** A model's set: how sure the boundary is (0..1). */
+  confidence?: number | null
+  /** Our setter's zone (1..6) at the set's first serve (DataVolley P1..P6). Coach input. */
+  start_rotation?: number | null
+  /** The model's guess of who served first in this set. */
+  model_first_serve?: Side | null
+  /** The model's guess of our side at the set's start. */
+  model_court_side?: CourtSide | null
+  /** Model: points it thinks were played after the set's last rally without one. */
+  model_missed_us?: number | null
+  model_missed_them?: number | null
   version: number
   /** Null while live. Deleted sets only come back in a /changes answer that touched them. */
   deleted_at: string | null
@@ -374,6 +405,27 @@ export interface Segment {
   confidence?: number | null
   /** The model run that made the proposal. */
   model_run_id?: string | null
+  // Automatic scoring (step D, PLAN §10.3): the coach's facts and the model's suggestions side
+  // by side. `serving` and `won_by` are facts only; the model writes its own model_* fields.
+  // Absent from servers before it.
+  /** The serving team a coach called in the review (keys 1/2). */
+  serving_manual?: Side | null
+  /** Model: where the server stood. */
+  serving_court?: CourtSide | null
+  /** Model: how sure it is about serving_court (0.5..1). */
+  serve_confidence?: number | null
+  /** Model: the serving team (from the score alignment). */
+  model_serving?: Side | null
+  /** Model: the winner (the server of the next rally, aligned with the official set score). */
+  model_won_by?: Side | null
+  /** Model: how sure it is about model_won_by (0.5..1). */
+  score_confidence?: number | null
+  /** "Check": the score alignment disagrees with something here; score_note says what. */
+  score_conflict?: boolean
+  score_note?: ScoreNote | null
+  /** Model: points it thinks were played right before this rally without one (counted in the score line). */
+  model_missed_us?: number | null
+  model_missed_them?: number | null
   version: number
   /** Null while live. Deleted segments only come back in a /changes answer that touched them. */
   deleted_at: string | null
@@ -425,6 +477,8 @@ export interface Tagging {
   official_final: [number, number] | null
   /** See Video.rallies_reviewed_at. */
   rallies_reviewed_at?: string | null
+  /** The match's first serve (start of set 1, else the end of the warm-up): "Start at first serve". */
+  first_serve_ms?: number | null
 }
 
 /**
@@ -462,6 +516,8 @@ export interface SegmentIn extends ChangeBase {
   review?: Review
   /** With review "merged": the segment it was folded into. */
   merged_into?: string | null
+  /** The coach's call of the serving team; absent: the server keeps the current one. */
+  serving_manual?: Side | null
 }
 
 export interface PeriodIn extends ChangeBase {
@@ -471,8 +527,12 @@ export interface PeriodIn extends ChangeBase {
   start_us: number
   start_them: number
   first_serve?: Side | null
-  our_court_side_at_start?: 'near' | 'far' | null
+  our_court_side_at_start?: CourtSide | null
   side_switch_at_score?: number | null
+  /** Accept a model's set ("confirmed"); absent: the server keeps the current one. */
+  review?: Review
+  /** Absent: the server keeps the current one. */
+  start_rotation?: number | null
 }
 
 export interface ChangesIn {
@@ -546,12 +606,70 @@ export interface MetricsVsHuman {
   rallies_model: number
 }
 
-/** GET /api/videos/{id}/analysis */
+/** A set as the automatic scoring sees it. */
+export interface ScoringSet {
+  no: number
+  start_ms: number
+  end_ms: number | null
+  /** Whose set boundaries: the coach's or the model's. */
+  source: 'coach' | 'model'
+  /** [us, them] from the federation. */
+  official: [number, number] | null
+  /** The final of the score line (aligned with the official score when there is one). */
+  model: [number, number] | null
+  /** Where the serve evidence alone (without the official score) ends the set. */
+  evidence?: [number, number] | null
+  /** The evidence alone ends the set on the official score; null when there is no official score. */
+  matches_official: boolean | null
+  /** Point rallies in the set. */
+  rallies: number
+  /** Rallies with score_conflict. */
+  flagged: number
+  /** Used for the score: the coach's, else the model's guess. */
+  first_serve: Side | null
+  our_side_at_start: CourtSide | null
+}
+
+/** The model measured on the rallies a coach decided. */
+export interface ScoringVsCoach {
+  /** Model serving court vs the coach's server (via the set's sides). */
+  serving_side_accuracy: number | null
+  serving_known: number
+  /** model_won_by vs the coach's won_by. */
+  winner_accuracy: number | null
+  winners_known: number
+}
+
+/** The automatic scoring of a video (PLAN §10.3): server, winner, score, sets and gaps. */
+export interface Scoring {
+  run_id: string
+  created_at: string
+  /** null: no serve evidence for this video (analysed before step D). */
+  serve_finder: 'v0' | 'v1' | null
+  rallies: number
+  flagged: number
+  sets: ScoringSet[]
+  /** Sets whose evidence alone reaches the official score. */
+  sets_matching_official: number
+  sets_official: number
+  /**
+   * How sure the model is about which side we started on and who served first (0.5..1). Below
+   * 0.9 the sets bar asks the coach to set both for set 1 (the rules derive the other sets).
+   */
+  sides_confidence?: number | null
+  gaps: Record<GapKind, number>
+  first_serve_ms: number | null
+  vs_coach: ScoringVsCoach | null
+}
+
+/** GET /api/videos/{id}/analysis (and POST …/scoring) */
 export interface Analysis {
   status: AnalysisStatus
   model_run: ModelRun | null
   proposals: ProposalCounts
   metrics_vs_human: MetricsVsHuman | null
+  /** Absent from servers before the automatic scoring; null until it ran. */
+  scoring?: Scoring | null
 }
 
 // Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).

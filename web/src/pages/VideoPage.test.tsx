@@ -536,4 +536,145 @@ describe('VideoPage', () => {
       expect(fetch).not.toHaveBeenCalledWith(`/api/videos/${ID}/stats`, expect.anything())
     })
   })
+
+  describe('automatic scoring', () => {
+    const set1 = period({ no: 1, start_ms: 300_000, end_ms: 1_800_000, first_serve: 'us' })
+    const set2 = period({ no: 2, start_ms: 2_000_000, source: 'model', review: 'unreviewed', confidence: 0.7 })
+    const r1 = rally({ start_ms: 300_000, end_ms: 310_000, won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0, score_source: 'tags' })
+    const r2 = rally({
+      start_ms: 320_000,
+      end_ms: 330_000,
+      source: 'model',
+      review: 'confirmed',
+      model_won_by: 'them',
+      period_id: set1.id,
+      score_us_after: 1,
+      score_them_after: 1,
+      score_source: 'model',
+    })
+    const warmup = rally({ kind: 'warmup', start_ms: 0, end_ms: 290_000, source: 'model', confidence: 0.9 })
+    const timeout = rally({ kind: 'timeout', start_ms: 600_000, end_ms: 630_000 })
+    const tagged = (patch: Partial<Tagging> = {}): Tagging =>
+      bundle({ can_tag: false, periods: [set1, set2], segments: [warmup, r1, r2, timeout], first_serve_ms: 300_000, ...patch })
+
+    beforeEach(() => {
+      window.localStorage.clear()
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+    })
+
+    it('starts at the first serve, just before it, and plays', async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
+      const start = await screen.findByRole('button', { name: 'Start at first serve' })
+      const player = document.querySelector('video') as HTMLVideoElement
+      fireEvent.click(start)
+      expect(player.currentTime).toBe(298) // the rallies' 2 s pre-roll
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalled()
+    })
+
+    it('has no first serve to start at when it is not known', async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged({ first_serve_ms: null }) } })
+      await screen.findByRole('table', { name: 'Rallies' })
+      expect(screen.queryByRole('button', { name: 'Start at first serve' })).not.toBeInTheDocument()
+    })
+
+    it("marks breaks and set starts below the player, Nomal's suggestions lighter", async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
+      const strip = await screen.findByTestId('moments-strip')
+      const marks = [...strip.querySelectorAll('[data-marker]')].map((m) => [m.getAttribute('data-marker'), m.getAttribute('title'), m.hasAttribute('data-suggested')])
+      expect(marks).toEqual([
+        ['warmup', 'Warm-up (suggested)', true],
+        ['timeout', 'Timeout', false],
+        ['set-start', 'Set 1 starts', false],
+        ['set-start', 'Set 2 starts (suggested)', true],
+      ])
+      // The breaks are never played: skipping dead time plays the rallies only.
+      expect(screen.getByText('Plays only the rallies: 0:27 of 1:32:10.')).toBeInTheDocument()
+    })
+
+    it("shows Nomal's winners as suggestions in the rally list", async () => {
+      show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
+      const list = await screen.findByRole('table', { name: 'Rallies' })
+      const rows = within(list).getAllByRole('row').slice(1)
+      expect(rows.map((r) => [...r.querySelectorAll('[data-suggested]')].map((e) => e.textContent))).toEqual([[], ['1:1 (suggested)', 'Them (suggested)']])
+    })
+
+    it('sums up the automatic score in the analysis card', async () => {
+      const analysis: Analysis = {
+        status: 'done',
+        model_run: null,
+        proposals: { unreviewed: 0, confirmed: 1, corrected: 0, rejected: 0 },
+        metrics_vs_human: null,
+        scoring: {
+          run_id: 'score-1',
+          created_at: '2026-10-16T20:00:00Z',
+          serve_finder: 'v1',
+          rallies: 98,
+          flagged: 12,
+          sets: [
+            { no: 1, start_ms: 300_000, end_ms: 1_800_000, source: 'coach', official: [25, 27], model: [25, 27], evidence: [25, 27], matches_official: true, rallies: 52, flagged: 4, first_serve: 'us', our_side_at_start: 'near' },
+            { no: 2, start_ms: 2_000_000, end_ms: null, source: 'model', official: [25, 20], model: [25, 20], evidence: [24, 20], matches_official: false, rallies: 46, flagged: 8, first_serve: 'them', our_side_at_start: 'far' },
+          ],
+          sets_matching_official: 1,
+          sets_official: 2,
+          sides_confidence: 0.95,
+          gaps: { warmup: 1, set_break: 3, timeout: 5, stoppage: 0, other_dead: 0 },
+          first_serve_ms: 300_000,
+          vs_coach: { serving_side_accuracy: 0.96, serving_known: 50, winner_accuracy: 0.9, winners_known: 40 },
+        },
+      }
+      show(video({ can_tag: true }), 200, {
+        [`/api/videos/${ID}/tagging`]: { body: tagged({ can_tag: true }) },
+        [`/api/videos/${ID}/analysis`]: { body: analysis },
+      })
+      const card = await screen.findByRole('region', { name: 'Automatic score' })
+      expect(within(card).getByText('Set 1: official 25:27 · Nomal 25:27')).toBeInTheDocument()
+      expect(within(card).getByText('matches')).toBeInTheDocument()
+      // Against the official score: where the serve evidence alone ends the set.
+      expect(within(card).getByText('Set 2: official 25:20 · Nomal 24:20')).toBeInTheDocument()
+      expect(within(card).getByText('differs')).toBeInTheDocument()
+      expect(within(card).getByText('12 rallies to check')).toBeInTheDocument()
+      expect(within(card).getByText('Breaks found: 1 warm-up · 3 set breaks · 5 timeouts')).toBeInTheDocument()
+      expect(within(card).getByText('Serving side right: 96% of 50 rallies you decided')).toBeInTheDocument()
+      expect(within(card).getByText('Winner right: 90% of 40 rallies you decided')).toBeInTheDocument()
+    })
+  })
+
+  describe('stats per rotation', () => {
+    const set1 = period({ no: 1, start_ms: 0, first_serve: 'us', final_us: 1, final_them: 1, start_rotation: 1 })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, serving: 'us', won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })
+    const kill = tag({ t_ms: 15_000, code: 'A', number: 7, attributes: { grade: '#' }, segment_id: r1.id })
+    const tagging = bundle({ can_tag: false, periods: [set1], segments: [r1], events: [kill] })
+    const rotations = [1, 2, 3, 4, 5, 6].map((rotation) => ({
+      rotation,
+      ...teamLine(rotation === 1 ? { rallies: 3, won: 2, lost: 1, side_out_won: 1, side_out_of: 1, side_out_pct: 1, break_point_won: 1, break_point_of: 2, break_point_pct: 0.5 } : {}),
+    }))
+    const box = boxScore({ summary: teamLine({ rallies: 3, won: 2, lost: 1 }), rotations })
+
+    function showStats(stats: unknown) {
+      return show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagging }, [`/api/videos/${ID}/stats`]: { body: stats } })
+    }
+
+    beforeEach(() => window.localStorage.clear())
+
+    it('shows points per rotation for the match and the chosen set', async () => {
+      showStats(videoStats({ tags: 1, rallies: 3, match: box, sets: [{ ...box, no: 1, score_us: 1, score_them: 1, rotations: rotations.slice(0, 6).map((r) => (r.rotation === 1 ? { ...r, rallies: 2 } : r)) }] }))
+      const table = await screen.findByRole('table', { name: 'Points per rotation' })
+      const rows = within(table).getAllByRole('row')
+      expect(rows.map((r) => r.firstElementChild?.textContent)).toEqual(['Rotation', ...[1, 2, 3, 4, 5, 6].map((n) => `Rotation ${n}`)])
+      const first = within(rows[1] as HTMLElement).getAllByRole('cell').map((c) => c.textContent)
+      expect(first).toEqual(['3', '2', '1', '1', '1', '100.0%', '2', '1', '50.0%'])
+      // Plain numbers: no moments behind them to play.
+      expect(within(table).queryByRole('button')).not.toBeInTheDocument()
+
+      fireEvent.click(within(screen.getByRole('group', { name: 'Box score of' })).getByRole('button', { name: 'Set 1' }))
+      const set = screen.getByRole('table', { name: 'Points per rotation · Set 1' })
+      expect(within(within(set).getAllByRole('row')[1] as HTMLElement).getAllByRole('cell')[0]).toHaveTextContent('2')
+    })
+
+    it('says the starting rotation per set is needed when there is none', async () => {
+      showStats(videoStats({ tags: 1, rallies: 3, match: { ...box, rotations: null } }))
+      expect(await screen.findByText(/need the starting rotation of each set: set it in the sets bar on the tagging page/)).toBeInTheDocument()
+      expect(screen.queryByRole('table', { name: 'Points per rotation' })).not.toBeInTheDocument()
+    })
+  })
 })

@@ -8,6 +8,7 @@ python -m nomal.cli import-batch FILE --by NAME  queue many imports, paced (FILE
 python -m nomal.cli analyse --video ID | --team TEAM_ID | --all-ready   queue the analysis
 python -m nomal.cli train-rallies              train the rally finder now
 python -m nomal.cli rally-eval [--run ID]      per-game scores of v0 and v1 (latest training)
+python -m nomal.cli score --video ID | --all-ready   score again: servers, winners, sets, gaps
 """
 
 from __future__ import annotations
@@ -251,6 +252,43 @@ def train_rallies() -> int:
     return 0
 
 
+def score(video: str | None, all_ready: bool) -> int:
+    """Run the automatic scoring now (PLAN §10.3): after a deploy, or to see a video's numbers.
+    Nothing a coach set is changed."""
+    from nomal.core import scoring
+    from nomal.core.models import Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        query = select(Video).where(Video.status == "ready", Video.sport.in_(scoring.SPORTS))
+        if video:
+            query = query.where(Video.id == uuid.UUID(video))
+        elif not all_ready:
+            print("name --video or --all-ready", file=sys.stderr)
+            return 2
+        for row in db.scalars(query.order_by(Video.recorded_on)):
+            run = scoring.score_video(db, row, reason="cli")
+            db.commit()
+            if run is None:
+                continue
+            m = run.metrics
+            sets = " ".join(_set_line(s) for s in m["sets"])
+            print(
+                f"{row.recorded_on:%d.%m.%Y} {row.title}: {m['rallies']} rallies, "
+                f"{m['flagged']} to check, serve {m['serve_finder'] or '-'}, sets {sets or '-'}, "
+                f"gaps {sum(m['gaps'].values())}"
+            )
+    return 0
+
+
+def _set_line(s: dict[str, Any]) -> str:
+    line = f"{s['no']}:{'-'.join(map(str, s['model'] or []))}"
+    if s["official"]:
+        line += f" (official {'-'.join(map(str, s['official']))})"
+    return line
+
+
 def _pct(value: Any) -> str:
     return f"{100 * float(value):5.1f}" if isinstance(value, int | float) else "    -"
 
@@ -334,7 +372,13 @@ def main(argv: list[str] | None = None) -> int:
     evaluation = sub.add_parser("rally-eval", help="per-game scores of the rally finders")
     evaluation.add_argument("--run", help="a training run id (default: the latest)")
     evaluation.add_argument("--json", action="store_true")
+    score_cmd = sub.add_parser("score", help="run the automatic scoring now")
+    scope = score_cmd.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--video", help="one video id")
+    scope.add_argument("--all-ready", action="store_true", help="every ready volleyball video")
     args = parser.parse_args(argv)
+    if args.command == "score":
+        return score(args.video, args.all_ready)
     if args.command == "analyse":
         return analyse(args.video, args.team, args.all_ready, args.force, args.dry_run)
     if args.command == "train-rallies":

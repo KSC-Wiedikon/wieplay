@@ -425,9 +425,28 @@ export class TagController {
     this.commit([{ kind: 'period', payload: { ...periodToIn(period), end_ms } }])
   }
 
+  /** Deletes a set; a model's proposal is rejected (the server keeps it as a negative). */
   deletePeriod = (id: string): void => {
     const period = this.store.getView().periods.find((p) => p.id === id)
-    if (period) this.commit([{ kind: 'period', payload: { ...periodToIn(period), deleted: true } }])
+    if (!period) return
+    const review = period.source === 'model' ? 'rejected' : period.review
+    this.commit([{ kind: 'period', payload: { ...periodToIn(period), review, deleted: true } }])
+  }
+
+  /**
+   * Changes a set as it is (first serve, our side, starting rotation; a model's set that a coach
+   * edits is marked corrected by the server, which also scores the match again).
+   */
+  updatePeriod = (id: string, patch: Partial<PeriodIn>): void => {
+    const period = this.store.getView().periods.find((p) => p.id === id)
+    if (period) this.commit([{ kind: 'period', payload: { ...periodToIn(period), ...patch } }])
+  }
+
+  /** Accepts a set Nomal suggested as it is. */
+  acceptPeriod = (id: string): void => {
+    const period = this.store.getView().periods.find((p) => p.id === id)
+    if (!period || period.source !== 'model' || period.review !== 'unreviewed') return
+    this.commit([{ kind: 'period', payload: { ...periodToIn(period), review: 'confirmed' } }])
   }
 
   // Tags

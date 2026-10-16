@@ -38,8 +38,13 @@ rallies with a known server and winner count for those two.
 
 Per set, a tag belongs to the set of its rally (its rally link, or the rally starting within
 2 s after it, like the rally filters on the video page); a tag outside every rally belongs to
-the set running at its time. Rotation numbers are not computed: sets carry no starting
-rotation yet.
+the set running at its time.
+
+Rotations: a set with a starting rotation (our setter's zone at its first serve, 1-6, the
+DataVolley P1-P6) walks it through the rallies: we rotate (setter zone 1 → 6 → 5 → 4 → 3 →
+2 → 1) every time we win a rally the opponent served (a side-out). Points, side-out and
+break-point per rotation come from the coach's facts only: a rally's winner is the coach's,
+else the next rally's known server; where neither is known the walk stops for that set.
 
 Every number links to its plays: a cell's tags are those matching the row's `filter`, the
 column's `codes` and `grades`, and (per set) the set. The web plays them on the video page and
@@ -106,6 +111,7 @@ class SetIn:
     end_ms: int | None
     final_us: int | None = None
     final_them: int | None = None
+    start_rotation: int | None = None  # our setter's zone at the first serve (1-6)
 
 
 # --- columns ----------------------------------------------------------------------------
@@ -370,6 +376,39 @@ TEAM_FILTERS: dict[str, dict[str, str]] = {
 }
 
 
+# --- rotations ------------------------------------------------------------------------------
+
+ROTATIONS = (1, 2, 3, 4, 5, 6)
+
+
+def next_rotation(rotation: int) -> int:
+    """After a side-out the setter moves one zone on: 1 → 6 → 5 → 4 → 3 → 2 → 1."""
+    return 6 if rotation == 1 else rotation - 1
+
+
+def rotation_lines(rallies: Sequence[RallyIn], start_rotation: int) -> dict[int, TeamLine]:
+    """The team numbers of one set per rotation, walking from its starting rotation (module
+    docstring). Rallies in time order."""
+    lines = {r: TeamLine() for r in ROTATIONS}
+    rotation = start_rotation
+    for n, rally in enumerate(rallies):
+        won = rally.won_by
+        if won is None and n + 1 < len(rallies):
+            won = rallies[n + 1].serving
+        if won is None or rally.serving is None:
+            break  # from here on the rotation is not known
+        lines[rotation].add(team_line([RallyIn(rally.id, rally.start_ms, rally.end_ms,
+                                               rally.period_id, rally.serving, won)]))  # fmt: skip
+        if rally.serving == "them" and won == "us":
+            rotation = next_rotation(rotation)
+    return lines
+
+
+def add_lines(total: dict[int, TeamLine], more: dict[int, TeamLine]) -> None:
+    for r in ROTATIONS:
+        total[r].add(more[r])
+
+
 # --- sets -----------------------------------------------------------------------------------
 
 
@@ -412,6 +451,7 @@ class SetStats:
     set: SetIn
     box: BoxScore
     team: TeamLine
+    rotations: dict[int, TeamLine] | None = None  # with a starting rotation
 
 
 @dataclass
@@ -421,6 +461,7 @@ class VideoStats:
     sets: list[SetStats]
     tags: int
     rallies: int
+    rotations: dict[int, TeamLine] | None = None  # summed over the sets that have them
 
 
 def video_stats(
@@ -431,14 +472,20 @@ def video_stats(
 ) -> VideoStats:
     tag_sets = set_of_tags(tags, rallies, sets)
     per_set = []
+    total: dict[int, TeamLine] | None = None
     for s in sorted(sets, key=lambda s: s.no):
         in_set = [t for t, sid in zip(tags, tag_sets, strict=True) if sid == s.id]
-        per_set.append(
-            SetStats(
-                s, video_box(in_set, roster), team_line(r for r in rallies if r.period_id == s.id)
-            )
-        )
-    return VideoStats(video_box(tags, roster), team_line(rallies), per_set, len(tags), len(rallies))
+        played = sorted((r for r in rallies if r.period_id == s.id), key=lambda r: r.start_ms)
+        lines = None
+        if s.start_rotation in ROTATIONS:
+            lines = rotation_lines(played, s.start_rotation)
+            if total is None:
+                total = {r: TeamLine() for r in ROTATIONS}
+            add_lines(total, lines)
+        per_set.append(SetStats(s, video_box(in_set, roster), team_line(played), lines))
+    return VideoStats(
+        video_box(tags, roster), team_line(rallies), per_set, len(tags), len(rallies), total
+    )
 
 
 @dataclass(frozen=True)

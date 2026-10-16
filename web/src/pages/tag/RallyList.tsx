@@ -4,13 +4,25 @@ import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CheckIcon, CloseIcon } from '../../components/icons'
+import { CheckMark, SuggestedValue } from '../../components/ScoringMarks'
 import { Segmented } from '../../components/Segmented'
 import { SuggestionChip } from '../../components/SuggestionChip'
 import { Table, TBody, Td, Th, THead, Tr } from '../../components/Table'
 import { cx } from '../../lib/cx'
-import { formatClock, sideLabel } from '../../lib/labels'
+import { formatClock, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { periodAt, ralliesOf } from '../../lib/rallies'
-import { formatPercent, formatSeconds, isOpen, isSuggestion, reviewItems } from '../../lib/suggestions'
+import {
+  effectiveServer,
+  effectiveWinner,
+  formatPercent,
+  formatSeconds,
+  isGap,
+  isOpen,
+  isProposal,
+  isSuggestion,
+  reviewItems,
+  scoreAfter,
+} from '../../lib/suggestions'
 import type { Segment } from '../../lib/types'
 import { useReview, useUi, useView, useWorkspace } from './context'
 
@@ -30,12 +42,14 @@ function reveal(container: HTMLElement | null, id: string | null): void {
 
 /**
  * The rallies of the video. While tagging: every rally, with Nomal's suggestions marked and a
- * filter for those still to review (accept or reject them right here). While reviewing: the
- * suggestions in time order with their state, the one on screen highlighted.
+ * filter for those still to review (accept or reject them right here); who served and who won,
+ * suggested values muted, and "check" where the automatic score disagrees with something.
+ * While reviewing: the suggestions (rallies and breaks) in time order with their state, the one
+ * on screen highlighted.
  */
 export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?: ReactNode }) {
   const { t } = useTranslation()
-  const { controller, review } = useWorkspace()
+  const { controller, review, taxonomy } = useWorkspace()
   const view = useView()
   const ui = useUi()
   const state = useReview()
@@ -97,7 +111,9 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                   <Th className="hidden sm:table-cell">{t('tagging.filters.set')}</Th>
                   <Th>{t('tagging.suggestions.start')}</Th>
                   <Th className="hidden sm:table-cell">{t('tagging.suggestions.length')}</Th>
-                  {!reviewing && <Th>{t('tagging.condensed.score')}</Th>}
+                  {reviewing && <Th>{t('tagging.suggestions.what')}</Th>}
+                  {!reviewing && <Th className="hidden md:table-cell">{t('tagging.suggestions.serve')}</Th>}
+                  <Th>{t('tagging.condensed.score')}</Th>
                   {!reviewing && <Th className="hidden md:table-cell">{t('tagging.condensed.point')}</Th>}
                   <Th>{reviewing ? t('tagging.suggestions.state') : t('tagging.suggestions.source')}</Th>
                   {!reviewing && (
@@ -114,10 +130,15 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                   const set = rally.period_id ? sets.get(rally.period_id) : periodAt(view.periods, rally.start_ms)?.no
                   const time = formatClock(rally.start_ms)
                   const splitOff = state.pending.has(rally.id)
+                  const gap = isGap(rally.kind)
+                  const server = effectiveServer(rally)
+                  const winner = effectiveWinner(rally)
+                  const score = gap ? null : scoreAfter(rally)
                   return (
                     <Tr
                       key={rally.id}
                       data-rally={rally.id}
+                      data-check={rally.score_conflict ? 'true' : undefined}
                       onActivate={() => pick(rally)}
                       aria-current={current ? 'true' : undefined}
                       className={cx(current && 'bg-accent-soft', current && reviewing && 'outline-2 -outline-offset-2 outline-accent')}
@@ -135,18 +156,33 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                       <Td className="hidden tabular-nums sm:table-cell">{set ?? '–'}</Td>
                       <Td className="font-mono text-sm tabular-nums">{time}</Td>
                       <Td className="hidden text-muted tabular-nums sm:table-cell">{formatSeconds(rally.end_ms - rally.start_ms)}</Td>
-                      {!reviewing && (
-                        <Td className="font-semibold tabular-nums">
-                          {rally.score_us_after !== null && rally.score_them_after !== null ? `${rally.score_us_after}:${rally.score_them_after}` : '–'}
-                        </Td>
+                      {reviewing && (
+                        <Td className={cx('whitespace-nowrap', gap && 'font-semibold')}>{segmentKindLabel(t, rally.kind, taxonomy.sport)}</Td>
                       )}
                       {!reviewing && (
                         <Td className="hidden md:table-cell">
-                          {rally.won_by ? <Badge tone={rally.won_by === 'us' ? 'accent' : 'neutral'}>{sideLabel(t, rally.won_by)}</Badge> : '–'}
+                          {server.value ? <SuggestedValue suggested={server.suggested}>{sideLabel(t, server.value)}</SuggestedValue> : '–'}
+                        </Td>
+                      )}
+                      <Td className="font-semibold tabular-nums">
+                        <span className="inline-flex flex-wrap items-center gap-x-2">
+                          {score ? <SuggestedValue suggested={score.suggested}>{score.text}</SuggestedValue> : '–'}
+                          <CheckMark rally={rally} />
+                        </span>
+                      </Td>
+                      {!reviewing && (
+                        <Td className="hidden md:table-cell">
+                          {winner.value === null ? (
+                            '–'
+                          ) : winner.suggested ? (
+                            <SuggestedValue suggested>{sideLabel(t, winner.value)}</SuggestedValue>
+                          ) : (
+                            <Badge tone={winner.value === 'us' ? 'accent' : 'neutral'}>{sideLabel(t, winner.value)}</Badge>
+                          )}
                         </Td>
                       )}
                       <Td>
-                        {reviewing && !isSuggestion(rally) && !splitOff ? (
+                        {reviewing && !isProposal(rally) && !splitOff ? (
                           <ReviewedState rally={rally} />
                         ) : (
                           <SuggestionChip segment={rally} splitOff={splitOff} />

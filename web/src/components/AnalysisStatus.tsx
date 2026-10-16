@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { isBusy, proposalTotal, useAnalyse, useAnalysis, useSetRalliesReviewed } from '../lib/analysis'
 import { cx } from '../lib/cx'
 import { formatDateTime } from '../lib/format'
-import { formatPercent } from '../lib/suggestions'
-import type { Video } from '../lib/types'
+import { formatPercent, GAP_KINDS } from '../lib/suggestions'
+import type { Scoring, Video } from '../lib/types'
 import { Button, ButtonLink } from './Button'
 import { Card } from './Card'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -44,8 +44,8 @@ function Spinning() {
 /**
  * The automatic analysis of a video and the learning loop (PLAN §10.1), for those who may tag:
  * its state (queued and running update by themselves), "Analyse" when there is none or it
- * failed, how well the suggestions matched the coach's own rallies, and "Rallies reviewed",
- * which tells Nomal to learn from the game.
+ * failed, how well the suggestions matched the coach's own rallies, the automatic score
+ * (§10.3), and "Rallies reviewed", which tells Nomal to learn from the game.
  */
 export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, className }: AnalysisStatusProps) {
   const { t } = useTranslation()
@@ -113,6 +113,7 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, c
             </p>
           </>
         )}
+        {data.scoring && <ScoringSummary scoring={data.scoring} />}
         {(canAnalyse || action) && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {canAnalyse && (
@@ -128,6 +129,60 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, c
         <Reviewed video={video} open={open} total={total} onReviewed={onReviewed} />
       ) : null}
     </Card>
+  )
+}
+
+/**
+ * The automatic score in short: per set the official score against where Nomal's serve
+ * evidence alone ends it ("official 25:27 · Nomal 25:27 ✓"), the rallies to check, the breaks
+ * found, and how often Nomal agreed with the rallies a coach decided.
+ */
+function ScoringSummary({ scoring }: { scoring: Scoring }) {
+  const { t } = useTranslation()
+  const score = (pair: [number, number] | null) => (pair ? `${pair[0]}:${pair[1]}` : '–')
+  const gaps = GAP_KINDS.filter((kind) => (scoring.gaps[kind] ?? 0) > 0).map((kind) =>
+    t(`tagging.analysis.scoring.gap.${kind}`, { count: scoring.gaps[kind] }),
+  )
+  const vs = scoring.vs_coach
+  return (
+    <section aria-label={t('tagging.analysis.scoring.title')} className="mt-2 flex flex-col gap-1 border-t border-hairline pt-2 text-sm">
+      <h3 className="font-semibold">{t('tagging.analysis.scoring.title')}</h3>
+      {scoring.sets.length > 0 && (
+        <ul className="flex flex-col gap-0.5 tabular-nums">
+          {scoring.sets.map((set) => (
+            <li key={set.no} className={cx('flex items-center gap-1.5', set.matches_official === false && 'font-semibold text-danger')}>
+              {/* Against the official score: where the serve evidence alone ends the set (the score line
+                  itself is aligned with the official score). */}
+              {set.official
+                ? t('tagging.analysis.scoring.set', { no: set.no, official: score(set.official), model: score(set.evidence ?? set.model) })
+                : t('tagging.analysis.scoring.setNoOfficial', { no: set.no, model: score(set.model) })}
+              {set.matches_official === true && (
+                <>
+                  <CheckIcon className="size-4" />
+                  <span className="sr-only">{t('tagging.analysis.scoring.matches')}</span>
+                </>
+              )}
+              {set.matches_official === false && (
+                <>
+                  <AlertIcon className="size-4" />
+                  <span className="sr-only">{t('tagging.analysis.scoring.differs')}</span>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className={cx(scoring.flagged > 0 && 'font-semibold')}>
+        {scoring.flagged > 0 ? t('tagging.analysis.scoring.flagged', { count: scoring.flagged }) : t('tagging.analysis.scoring.noneFlagged')}
+      </p>
+      {gaps.length > 0 && <p className="text-muted">{t('tagging.analysis.scoring.gaps', { list: gaps.join(' · ') })}</p>}
+      {vs?.serving_side_accuracy != null && (
+        <p className="text-muted">{t('tagging.analysis.scoring.vsCoachServe', { value: formatPercent(vs.serving_side_accuracy), count: vs.serving_known })}</p>
+      )}
+      {vs?.winner_accuracy != null && (
+        <p className="text-muted">{t('tagging.analysis.scoring.vsCoachWinner', { value: formatPercent(vs.winner_accuracy), count: vs.winners_known })}</p>
+      )}
+    </section>
   )
 }
 

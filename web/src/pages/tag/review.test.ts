@@ -38,6 +38,8 @@ function server(initial: Segment[]) {
         end_ms: c.end_ms,
         won_by: c.won_by ?? null,
         review: c.review ?? 'unreviewed',
+        // Without the key the API keeps the coach's serve call.
+        serving_manual: 'serving_manual' in c ? (c.serving_manual ?? null) : (prev?.serving_manual ?? null),
         version: (prev?.version ?? 0) + 1,
         deleted_at: c.deleted ? '2026-10-16T20:00:00Z' : null,
       }
@@ -50,9 +52,9 @@ function server(initial: Segment[]) {
 
 let video: HTMLVideoElement
 
-async function setup() {
-  const initial = data()
-  const send = vi.fn(async (body: ChangesIn) => server(initial.segments)(body))
+async function setup(initial = data(), { onLeave = () => {} } = {}) {
+  const api = server(initial.segments)
+  const send = vi.fn(async (body: ChangesIn) => api(body))
   const store = new TaggingStore(VIDEO, initial)
   const outbox = await Outbox.open({ videoId: VIDEO, send, onSynced: (out) => store.applySynced(out), debounceMs: 60_000 })
   store.attach(outbox)
@@ -61,7 +63,7 @@ async function setup() {
   playhead.attach(video)
   const tag = new TagController(store, playhead, volleyball, { duration_ms: 600_000 })
   tag.setFps(50)
-  const review = new ReviewController(store, playhead, tag, { rejectedBefore: 1 })
+  const review = new ReviewController(store, playhead, tag, { rejectedBefore: 1, onLeave })
   review.attach()
   review.start()
   const press = (key: string, mods: KeyboardEventInit = {}) => review.onKeyDown(new KeyboardEvent('keydown', { key, cancelable: true, ...mods }))
@@ -283,5 +285,148 @@ describe('ReviewController', () => {
     review.onKeyDown(event)
     expect(segment('s1')).toBeDefined()
     input.remove()
+  })
+})
+
+describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
+  const gap = (id: string, kind: Segment['kind'], start_ms: number, end_ms: number, patch: Partial<Segment> = {}) =>
+    rally({ id, kind, start_ms, end_ms, source: 'model', confidence: 0.8, model_run_id: 'run-1', version: 1, ...patch })
+
+  /** Nomal's warm-up before the first rally and a timeout between two rallies. */
+  function scored() {
+    return bundle({
+      segments: [
+        gap('w', 'warmup', 0, 9_000),
+        suggestion('s1', 10_000, 0.95, { model_serving: 'us', serving_court: 'near', serve_confidence: 0.87, model_won_by: 'them' }),
+        gap('g', 'timeout', 20_000, 50_000),
+        suggestion('s2', 60_000, 0.9, { serving_manual: 'them' }),
+      ],
+    })
+  }
+
+  it('lists the breaks Nomal labelled with the rallies, in time order, and counts them in the progress', async () => {
+    const { review } = await setup(scored())
+    expect(review.items().map((s) => s.id)).toEqual(['w', 's1', 'g', 's2'])
+    expect(review.getState().currentId).toBe('w')
+    expect(review.progress()).toEqual({ done: 1, total: 5 }) // one rally rejected before
+  })
+
+  it('1 and 2 call the serving team on the rally; the same key again takes the call back; U undoes', async () => {
+    const { review, press, sent, segment } = await setup(scored())
+    press('ArrowDown')
+    expect(review.getState().currentId).toBe('s1')
+    press('1')
+    expect(segment('s1')).toMatchObject({ serving_manual: 'us', review: 'unreviewed' })
+    expect(review.getState().notice).toMatchObject({ key: 'serve', params: { side: 'us' } })
+    // Still on screen: a serve call is not an answer.
+    expect(review.getState().currentId).toBe('s1')
+    press('2')
+    expect(segment('s1')?.serving_manual).toBe('them')
+    press('2')
+    expect(segment('s1')?.serving_manual).toBeNull()
+    expect(review.getState().notice?.key).toBe('serveCleared')
+    press('u')
+    expect(segment('s1')?.serving_manual).toBe('them')
+    expect(await sent()).toEqual([
+      { id: 's1', base_version: 1, kind: 'rally', start_ms: 10_000, end_ms: 18_000, won_by: null, review: 'unreviewed', serving_manual: 'them' },
+    ])
+    // The answer after it doesn't name the call: the server keeps it.
+    press('Enter')
+    const [answer] = await sent()
+    expect(answer).toMatchObject({ id: 's1', review: 'confirmed' })
+    expect(answer).not.toHaveProperty('serving_manual')
+    expect(segment('s1')?.serving_manual).toBe('them')
+  })
+
+  it('takes a serve call back that was saved already', async () => {
+    const { review, press, sent } = await setup(scored())
+    review.select('s2')
+    press('2')
+    expect(await sent()).toEqual([expect.objectContaining({ id: 's2', serving_manual: null })])
+  })
+
+  it('accepts a break with Enter and rejects one with X', async () => {
+    const { review, press, sent, segment } = await setup(scored())
+    press('Enter')
+    expect(segment('w')?.review).toBe('confirmed')
+    expect(review.getState().notice).toMatchObject({ key: 'gapAccepted', params: { kind: 'warmup' } })
+    expect(review.getState().currentId).toBe('s1')
+    review.select('g')
+    press('x')
+    expect(segment('g')).toBeUndefined()
+    expect(review.getState().notice).toMatchObject({ key: 'gapRejected', params: { kind: 'timeout' } })
+    expect(review.getState().currentId).toBe('s2')
+    expect(await sent()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'w', kind: 'warmup', review: 'confirmed' }),
+        expect.objectContaining({ id: 'g', kind: 'timeout', review: 'rejected', deleted: true }),
+      ]),
+    )
+  })
+
+  it('relabels a break with W B T D O (corrected) and goes on; its own label accepts it', async () => {
+    const { review, press, sent, segment } = await setup(scored())
+    review.select('g')
+    press('b')
+    expect(segment('g')).toMatchObject({ kind: 'set_break', review: 'corrected' })
+    expect(review.getState().notice).toMatchObject({ key: 'relabelled', params: { kind: 'set_break' } })
+    expect(review.getState().currentId).toBe('s2')
+    review.select('w')
+    press('W')
+    expect(segment('w')).toMatchObject({ kind: 'warmup', review: 'confirmed' })
+    expect(await sent()).toEqual(
+      expect.arrayContaining([
+        { id: 'g', base_version: 1, kind: 'set_break', start_ms: 20_000, end_ms: 50_000, won_by: null, review: 'corrected' },
+        expect.objectContaining({ id: 'w', review: 'confirmed' }),
+      ]),
+    )
+    press('u')
+    press('u')
+    expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'unreviewed' })
+    expect(review.getState().currentId).toBe('g')
+  })
+
+  it('moves the boundaries of a break, but merges and splits rallies only', async () => {
+    const { review, press, segment, store } = await setup(scored())
+    review.select('g')
+    press('ArrowRight')
+    expect(segment('g')).toMatchObject({ start_ms: 20_250, review: 'corrected' })
+    press('m')
+    expect(review.getState().notice).toMatchObject({ key: 'ralliesOnly', tone: 'error' })
+    video.currentTime = 30
+    press('s')
+    expect(review.getState().notice).toMatchObject({ key: 'ralliesOnly', tone: 'error' })
+    press('1')
+    expect(review.getState().notice).toMatchObject({ key: 'ralliesOnly', tone: 'error' })
+    expect(store.getView().segments).toHaveLength(4)
+    // On a rally, the break labels say what they are for.
+    review.select('s1')
+    press('t')
+    expect(review.getState().notice).toMatchObject({ key: 'gapsOnly', tone: 'error' })
+    expect(segment('s1')?.kind).toBe('rally')
+  })
+
+  it('merges a rally with the next rally, past a break between them', async () => {
+    const { press, review, segment } = await setup(scored())
+    review.select('s1')
+    press('m')
+    expect(segment('s1')).toMatchObject({ end_ms: 68_000 })
+    expect(segment('s2')).toBeUndefined()
+    expect(segment('g')).toBeDefined()
+  })
+
+  it('asks the server to score again on leaving after a change, not after just looking', async () => {
+    const onLeave = vi.fn()
+    const { review, press } = await setup(scored(), { onLeave })
+    press('ArrowDown')
+    press('Escape')
+    expect(onLeave).not.toHaveBeenCalled()
+    review.start()
+    press('Enter')
+    press('Escape')
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    review.start()
+    review.stop()
+    expect(onLeave).toHaveBeenCalledTimes(1)
   })
 })

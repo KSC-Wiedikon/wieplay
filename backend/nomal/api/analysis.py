@@ -1,8 +1,10 @@
 """Automatic analysis of a video (PLAN §10.1): its state, a rerun, "rallies done".
 
 GET  /api/videos/{id}/analysis          status, latest model run, proposal counts, the
-                                        model's score against the coach's rallies
+                                        model's score against the coach's rallies, the
+                                        automatic scoring (PLAN §10.3)
 POST /api/videos/{id}/analyse           (re)run the analysis (whoever may tag)
+POST /api/videos/{id}/scoring           score the video again now (whoever may tag)
 POST /api/videos/{id}/rallies-reviewed  the rally list is complete and right (or not)
 
 The proposals themselves are ordinary segments in GET /api/videos/{id}/tagging with
@@ -21,7 +23,7 @@ from sqlalchemy import select
 
 from nomal.api.access import TeamAccess, visible_video
 from nomal.api.deps import DbDep, SettingsDep, ViewerDep, audit
-from nomal.core import analysis
+from nomal.core import analysis, scoring, tagging
 from nomal.core.models import Job, ModelRun, Segment, Video
 from nomal.core.permissions import Viewer, can_delete_video, can_tag, can_upload
 
@@ -81,6 +83,49 @@ class RallyModelOut(BaseModel):
     summary: dict[str, Any]
 
 
+class ScoringSetOut(BaseModel):
+    no: int
+    start_ms: int
+    end_ms: int | None
+    source: str  # coach | model: whose set boundaries
+    official: list[int] | None  # [us, them] from the federation
+    model: list[int] | None  # the score line's final
+    evidence: list[int] | None  # where the serve evidence alone ends the set
+    matches_official: bool | None  # the evidence alone reaches the official score
+    rallies: int  # point rallies
+    flagged: int
+    missed: int = 0  # points without a rally (the finder missed them)
+    extra: int = 0  # rallies that look like no point
+    first_serve: str | None
+    our_side_at_start: str | None
+
+
+class ScoringVsCoachOut(BaseModel):
+    """The model scored blind to the coach's serves and winners, against them."""
+
+    serving_side_accuracy: float | None
+    serving_known: int
+    winner_accuracy: float | None
+    winners_known: int
+
+
+class ScoringOut(BaseModel):
+    """The newest automatic scoring of the video (PLAN §10.3)."""
+
+    run_id: uuid.UUID
+    created_at: datetime
+    serve_finder: str | None  # v0 | v1; null: no serve evidence for this video yet
+    rallies: int
+    flagged: int
+    sets: list[ScoringSetOut]
+    sets_matching_official: int
+    sets_official: int
+    sides_confidence: float | None
+    gaps: dict[str, int]
+    first_serve_ms: int | None
+    vs_coach: ScoringVsCoachOut | None
+
+
 class AnalysisOut(BaseModel):
     video_id: uuid.UUID
     # none | queued | running | done | failed (the newest analyse job of the video)
@@ -96,6 +141,7 @@ class AnalysisOut(BaseModel):
     human_rallies: int
     rallies_reviewed_at: datetime | None
     rally_model: RallyModelOut
+    scoring: ScoringOut | None = None
 
 
 class ReviewedIn(BaseModel):
@@ -173,6 +219,27 @@ def _vs_human(run: ModelRun, entry: dict[str, Any], video: Video) -> MetricsVsHu
     )
 
 
+def _scoring(db: DbDep, video: Video) -> ScoringOut | None:
+    run = scoring.latest_run(db, video.id)
+    if run is None:
+        return None
+    m = run.metrics
+    return ScoringOut(
+        run_id=run.id,
+        created_at=run.created_at,
+        serve_finder=m.get("serve_finder"),
+        rallies=m.get("rallies", 0),
+        flagged=m.get("flagged", 0),
+        sets=[ScoringSetOut.model_validate(s) for s in m.get("sets", [])],
+        sets_matching_official=m.get("sets_matching_official", 0),
+        sets_official=m.get("sets_official", 0),
+        sides_confidence=m.get("sides_confidence"),
+        gaps=m.get("gaps", {}),
+        first_serve_ms=m.get("first_serve_ms"),
+        vs_coach=ScoringVsCoachOut.model_validate(m["vs_coach"]) if m.get("vs_coach") else None,
+    )
+
+
 def analysis_out(db: DbDep, video: Video, viewer: Viewer, access: TeamAccess) -> AnalysisOut:
     manager = _manages(viewer, access)
     job = db.scalars(
@@ -231,6 +298,7 @@ def analysis_out(db: DbDep, video: Video, viewer: Viewer, access: TeamAccess) ->
         human_rallies=len(analysis.human_rallies(db, video.id)),
         rallies_reviewed_at=video.rallies_reviewed_at,
         rally_model=_rally_model(db),
+        scoring=_scoring(db, video),
     )
 
 
@@ -263,6 +331,21 @@ def analyse(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
         raise HTTPException(409, reason)
     job = analysis.queue_analyse(db, video)
     audit(db, viewer.member_id, "analysis_requested", "video", str(video.id), job=str(job.id))
+    db.commit()
+    return analysis_out(db, video, viewer, access)
+
+
+@router.post("/videos/{video_id}/scoring", response_model=AnalysisOut)
+def rescore(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
+    """Score the video again now: the model's server and winner per rally, the sets when the
+    coach has none, the gap labels (PLAN §10.3). Nothing a coach set is changed."""
+    video, access = _taggable(db, viewer, video_id)
+    if video.status != "ready":
+        raise HTTPException(409, "Score a video once it is ready")
+    if video.sport not in scoring.SPORTS:
+        raise HTTPException(409, f"No automatic scoring for {video.sport} yet")
+    tagging.set_actor(db, viewer.member_id)
+    scoring.score_video(db, video, reason="request")
     db.commit()
     return analysis_out(db, video, viewer, access)
 

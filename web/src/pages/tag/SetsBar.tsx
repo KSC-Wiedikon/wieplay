@@ -3,14 +3,19 @@ import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
+import { Card } from '../../components/Card'
 import { Select, TextInput } from '../../components/Field'
-import { AlertIcon, CheckIcon } from '../../components/icons'
+import { AlertIcon, CheckIcon, CloseIcon, SparkleIcon } from '../../components/icons'
+import { SuggestedValue } from '../../components/ScoringMarks'
+import { Table, TBody, Td, Th, THead } from '../../components/Table'
+import { useAnalysis } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
 import { formatClock, periodLabel, sideLabel } from '../../lib/labels'
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
+import { formatPercent, isSetSuggestion } from '../../lib/suggestions'
 import { newId, periodToIn } from '../../lib/taggingStore'
-import type { Period, PeriodIn, Side } from '../../lib/types'
+import type { CourtSide, Period, PeriodIn, Segment, Side } from '../../lib/types'
 import { useView, useWorkspace } from './context'
 
 /** The bar's words: sets (volleyball) or quarters and overtimes (basketball). */
@@ -61,7 +66,8 @@ type Texts = ReturnType<typeof periodTexts>
 /**
  * The sets (basketball: quarters): add one at the playhead, end it, and compare its final score
  * with the official one. A basketball game has one official result, the final: it is compared
- * with the last quarter once that is the fourth or later and has ended.
+ * with the last quarter once that is the fourth or later and has ended. Volleyball: the sets
+ * Nomal suggested (accept or reject them), and per set what the automatic score needs.
  */
 export function SetsBar() {
   const { t } = useTranslation()
@@ -95,6 +101,16 @@ export function SetsBar() {
           {view.periods.map((p) => (
             <li key={p.id}>
               <SetChip period={p} official={officialOf(p)} current={running?.id === p.id} texts={texts} onEdit={() => setForm(periodToIn(p))} />
+              {isSetSuggestion(p) && (
+                <span className="ml-1 inline-flex gap-0.5 align-middle">
+                  <Button variant="ghost" size="icon" aria-label={t('tagging.sets.accept', { no: p.no })} title={t('tagging.sets.accept', { no: p.no })} onClick={() => controller.acceptPeriod(p.id)}>
+                    <CheckIcon className="size-4" />
+                  </Button>
+                  <Button variant="ghostDanger" size="icon" aria-label={t('tagging.sets.reject', { no: p.no })} title={t('tagging.sets.reject', { no: p.no })} onClick={() => controller.deletePeriod(p.id)}>
+                    <CloseIcon className="size-4" />
+                  </Button>
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -111,6 +127,7 @@ export function SetsBar() {
           </Button>
         )}
       </div>
+      {!basketball && view.periods.length > 0 && <SetDetails official={officialOf} />}
       {form && (
         <SetForm
           key={form.id}
@@ -149,14 +166,25 @@ function SetChip({
 }) {
   const { t } = useTranslation()
   const hasFinal = period.final_us !== null && period.final_them !== null
+  const suggested = isSetSuggestion(period)
+  const confidence = formatPercent(period.confidence)
   // A running set is not compared yet.
   const mismatch =
     hasFinal && period.end_ms !== null && official !== null && (official[0] !== period.final_us || official[1] !== period.final_them)
   const range = `${formatClock(period.start_ms, { tenths: false })}–${period.end_ms === null ? t('tagging.sets.running') : formatClock(period.end_ms, { tenths: false })}`
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
-      <Button onClick={onEdit} className={cx(current && 'ring-2 ring-accent')} aria-label={texts.edit(period.no)}>
+      <Button
+        onClick={onEdit}
+        data-suggestion={suggested ? 'open' : undefined}
+        className={cx(current && 'ring-2 ring-accent', suggested && 'border-2 border-dashed border-accent bg-accent-soft text-on-accent-soft')}
+        aria-label={texts.edit(period.no)}
+      >
+        {suggested && <SparkleIcon className="size-3.5" />}
         <span className="font-bold">{texts.name(period.no)}</span>
+        {suggested && (
+          <span className="text-xs font-semibold">{confidence ? t('tagging.sets.suggestedConfidence', { confidence }) : t('tagging.sets.suggested')}</span>
+        )}
         <span className="font-normal text-muted tabular-nums">{range}</span>
         {hasFinal && <span className="tabular-nums">{`${period.final_us}:${period.final_them}`}</span>}
       </Button>
@@ -173,6 +201,189 @@ function SetChip({
         </Badge>
       )}
     </span>
+  )
+}
+
+/**
+ * Per set: the official score against the final of Nomal's score line, who served first and
+ * where we started (Nomal's guess shown until a coach clicks), and our starting rotation. Each
+ * is an ordinary set change; the server scores the match again with it.
+ */
+/** Below this, Nomal asks the coach who served first in set 1 and where we started. */
+const SIDES_SURE = 0.9
+
+function SetDetails({ official }: { official: (p: Period) => [number, number] | null }) {
+  const { t } = useTranslation()
+  const { controller, video } = useWorkspace()
+  const view = useView()
+  const scoring = useAnalysis(video.id, true).data?.scoring ?? null
+  // Set 1's first serve and our side decide the score of the whole match (the rules derive the
+  // other sets): when Nomal is unsure about them and no coach set them, ask for that one click.
+  const first = view.periods.find((p) => p.no === 1) ?? view.periods[0] ?? null
+  const sides = scoring?.sides_confidence ?? null
+  const unsure = scoring !== null && (sides === null || sides < SIDES_SURE)
+  const invite = unsure && first !== null && (first.first_serve === null || first.our_court_side_at_start === null) ? first : null
+  return (
+    <div className="flex flex-col gap-1">
+      {invite && (
+        <div role="note" aria-label={t('tagging.sets.sidesTitle')} className="flex items-start gap-2 rounded-xl border border-accent bg-accent-soft p-3 text-sm text-on-accent-soft">
+          <SparkleIcon className="mt-0.5 size-4 shrink-0" />
+          <div className="flex flex-col gap-0.5">
+            <p className="font-semibold">{t('tagging.sets.sidesTitle')}</p>
+            <p>{sides === null ? t('tagging.sets.sidesBodyUnknown') : t('tagging.sets.sidesBody', { confidence: formatPercent(sides) })}</p>
+          </div>
+        </div>
+      )}
+      <Card className="overflow-hidden">
+        <Table caption={t('tagging.sets.details')}>
+          <THead>
+            <tr>
+              <Th>{t('tagging.sets.set')}</Th>
+              <Th>{t('tagging.sets.score')}</Th>
+              <Th>{t('tagging.sets.firstServe')}</Th>
+              <Th>{t('tagging.sets.weStart')}</Th>
+              <Th>
+                <abbr title={t('tagging.sets.rotationHint')} className="no-underline">
+                  {t('tagging.sets.rotation')}
+                </abbr>
+              </Th>
+            </tr>
+          </THead>
+          <TBody>
+            {view.periods.map((p) => (
+              <tr key={p.id} data-set={p.no} className={cx(invite?.id === p.id && 'bg-accent-soft/60 outline-2 -outline-offset-2 outline-accent')}>
+                <Td className="font-semibold whitespace-nowrap">{periodLabel(t, 'volleyball', p.no)}</Td>
+                <Td className="whitespace-nowrap tabular-nums">
+                  <SetScore period={p} official={official(p)} segments={view.segments} />
+                </Td>
+                <Td tight>
+                  <Choice<Side>
+                    label={t('tagging.sets.firstServeOf', { no: p.no })}
+                    value={p.first_serve}
+                    guess={p.model_first_serve ?? null}
+                    options={[
+                      { value: 'us', label: t('tagging.sets.us') },
+                      { value: 'them', label: t('tagging.sets.them') },
+                    ]}
+                    onChange={(first_serve) => controller.updatePeriod(p.id, { first_serve })}
+                  />
+                </Td>
+                <Td tight>
+                  <Choice<CourtSide>
+                    label={t('tagging.sets.weStartOf', { no: p.no })}
+                    value={p.our_court_side_at_start}
+                    guess={p.model_court_side ?? null}
+                    options={[
+                      { value: 'near', label: t('tagging.sets.near') },
+                      { value: 'far', label: t('tagging.sets.far') },
+                    ]}
+                    onChange={(our_court_side_at_start) => controller.updatePeriod(p.id, { our_court_side_at_start })}
+                  />
+                </Td>
+                <Td tight>
+                  <Select
+                    inline
+                    aria-label={t('tagging.sets.rotationOf', { no: p.no })}
+                    value={p.start_rotation ?? ''}
+                    onChange={(e) => controller.updatePeriod(p.id, { start_rotation: e.target.value === '' ? null : Number(e.target.value) })}
+                  >
+                    <option value="">{t('tagging.sets.rotationNone')}</option>
+                    {[1, 2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </Select>
+                </Td>
+              </tr>
+            ))}
+          </TBody>
+        </Table>
+      </Card>
+      <p className="text-xs text-muted">{t('tagging.sets.detailsHint')}</p>
+    </div>
+  )
+}
+
+/** "Official 25:21 · Nomal 25:21 ✓": the federation's score against the final of the score line. */
+function SetScore({ period, official, segments }: { period: Period; official: [number, number] | null; segments: readonly Segment[] }) {
+  const { t } = useTranslation()
+  if (period.final_us === null || period.final_them === null) return official ? `${official[0]}:${official[1]}` : '–'
+  const model = `${period.final_us}:${period.final_them}`
+  // Nomal's winners went into it where no coach decided a rally.
+  const suggested = segments.some((s) => s.kind === 'rally' && s.period_id === period.id && s.score_source === 'model')
+  const same = official !== null && official[0] === period.final_us && official[1] === period.final_them
+  const text = official
+    ? t('tagging.sets.officialVsNomal', { official: `${official[0]}:${official[1]}`, model })
+    : t('tagging.sets.nomalOnly', { model })
+  return (
+    <span className={cx('inline-flex items-center gap-1', official && !same && 'font-semibold text-danger')}>
+      <SuggestedValue suggested={suggested}>{text}</SuggestedValue>
+      {same && (
+        <span title={t('tagging.sets.sameAsOfficial')} className="inline-flex text-fg">
+          <CheckIcon className="size-4" />
+          <span className="sr-only">{t('tagging.sets.sameAsOfficial')}</span>
+        </span>
+      )}
+      {official && !same && <AlertIcon className="size-4" />}
+    </span>
+  )
+}
+
+/**
+ * Two buttons for one choice ("Us | Them", "Near | Far"). Nomal's guess shows as a dashed
+ * suggestion until a coach picks one; picking it confirms it.
+ */
+function Choice<T extends string>({
+  label,
+  value,
+  guess,
+  options,
+  onChange,
+}: {
+  label: string
+  value: T | null
+  guess: T | null
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div role="group" aria-label={label} className="inline-flex gap-1 rounded-control bg-sunken p-1 ring-1 ring-hairline ring-inset">
+      {options.map((option) => {
+        const on = value === option.value
+        const suggested = value === null && guess === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={on}
+            data-suggested={suggested ? 'true' : undefined}
+            title={suggested ? t('tagging.sets.guess', { value: option.label }) : undefined}
+            onClick={() => {
+              if (!on) onChange(option.value)
+            }}
+            className={cx(
+              'inline-flex min-h-9 cursor-pointer items-center justify-center rounded-[calc(var(--radius-control)-0.25rem)] px-3 text-sm font-semibold whitespace-nowrap sm:min-h-7',
+              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+              on
+                ? 'bg-surface text-fg shadow-card ring-1 ring-hairline'
+                : suggested
+                  ? 'border border-dashed border-accent bg-accent-soft text-on-accent-soft italic'
+                  : 'text-muted hover:bg-hover hover:text-fg',
+            )}
+          >
+            {option.label}
+            {suggested && (
+              <>
+                {' '}
+                <span className="sr-only">{`(${t('tagging.scoring.suggested')})`}</span>
+              </>
+            )}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

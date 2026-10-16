@@ -13,9 +13,9 @@ import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ExportButton } from '../components/ExportButton'
 import { AnalysisStatus } from '../components/AnalysisStatus'
-import { AlertIcon, CheckIcon, ChevronRightIcon, TrashIcon } from '../components/icons'
+import { AlertIcon, CheckIcon, ChevronRightIcon, PlayIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
-import { MomentsStrip } from '../components/MomentsStrip'
+import { MomentsStrip, type BreakMark, type StartMark } from '../components/MomentsStrip'
 import { PageHeader } from '../components/PageHeader'
 import { ProgressBar } from '../components/ProgressBar'
 import { RallyPanel } from '../components/RallyPanel'
@@ -28,14 +28,15 @@ import { VIDEO_STATS_ID, VideoStats } from '../components/VideoStats'
 import { ApiError, blockersOf } from '../lib/api'
 import { clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
 import { commentMoments } from '../lib/comments'
+import { PRE_ROLL_MS } from '../lib/condensed'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
-import { formatClock } from '../lib/labels'
+import { formatClock, segmentKindLabel } from '../lib/labels'
 import { useComments, useVideoClips } from '../lib/library'
 import { Playhead } from '../lib/playhead'
 import { useDeleteVideo, useMe, useTagging, useVideo, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
-import { isSuggestion } from '../lib/suggestions'
+import { isGap, isGapSuggestion, isSetSuggestion, isSuggestion } from '../lib/suggestions'
 import type { StatPlay } from '../lib/stats'
 import { useRangePlayback } from '../lib/useRangePlayback'
 import { useToast } from '../lib/toast'
@@ -297,9 +298,36 @@ function Ready({ video }: { video: Video }) {
   const tagCount = data?.events.length ?? 0
   const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
   const duration = video.duration_ms ?? playhead.getState().duration_ms
+  // Breaks and set starts on the strip below the player; Nomal's open suggestions lighter (PLAN §10.3).
+  const breaks = useMemo<BreakMark[]>(
+    () =>
+      (data?.segments ?? []).flatMap((s) =>
+        isGap(s.kind)
+          ? [{ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, kind: s.kind, label: segmentKindLabel(t, s.kind, video.sport), suggested: isGapSuggestion(s) }]
+          : [],
+      ),
+    [data, t, video.sport],
+  )
+  const starts = useMemo<StartMark[]>(
+    () =>
+      video.sport === 'volleyball'
+        ? (data?.periods ?? []).map((p) => ({ id: p.id, t_ms: p.start_ms, label: t('tagging.markers.setStart', { no: p.no }), suggested: isSetSuggestion(p) }))
+        : [],
+    [data, t, video.sport],
+  )
+  const firstServe = data?.first_serve_ms ?? null
 
   const seekTo = (t_ms: number) => {
     playhead.seek(t_ms)
+    element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }
+
+  /** Skips the warm-up: plays from just before the match's first serve. */
+  const startAtFirstServe = () => {
+    if (firstServe === null) return
+    setQueue(null)
+    playhead.seek(Math.max(0, firstServe - PRE_ROLL_MS))
+    playhead.play()
     element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }
 
@@ -332,11 +360,13 @@ function Ready({ video }: { video: Video }) {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_34rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_38rem]">
         <div className="flex min-w-0 flex-col gap-3">
           <VideoPlayer video={video} videoRef={setElement} />
-          {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
+          {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null) || breaks.length > 0 || starts.length > 0) ? (
             <MomentsStrip
               duration_ms={duration}
               ranges={(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' }))}
               marks={commentMoments(comments.data ?? [])}
+              breaks={breaks}
+              starts={starts}
               playhead={playhead}
               onSeek={(ms) => playhead.seek(ms)}
             />
@@ -363,7 +393,17 @@ function Ready({ video }: { video: Video }) {
               )}
             </p>
           )}
-          {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
+          {(facts.length > 0 || firstServe !== null) && (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
+              {firstServe !== null && (
+                <Button variant="ghost" onClick={startAtFirstServe} className="ml-auto">
+                  <PlayIcon className="size-4" />
+                  {t('tagging.markers.startAtFirstServe')}
+                </Button>
+              )}
+            </div>
+          )}
           <ClipBar
             playhead={playhead}
             clipIn={marks.in}

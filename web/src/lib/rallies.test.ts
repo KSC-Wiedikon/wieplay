@@ -69,6 +69,60 @@ describe('rescore (same rules as the server)', () => {
     expect(out.periods[0]).toMatchObject({ final_us: null, final_them: null })
   })
 
+  it("takes the coach's serve call before the previous winner, and never the model's", () => {
+    const set = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us' })
+    const r2 = rally({ start_ms: 30_000, end_ms: 40_000, serving_manual: 'them', model_serving: 'us' })
+    const r3 = rally({ start_ms: 50_000, end_ms: 60_000, model_serving: 'them' })
+    const out = rescore([set], [r1, r2, r3], [], S)
+    // After a rally without a coach's winner, who serves is not known from facts (Nomal suggests it).
+    expect(out.segments.map((r) => r.serving)).toEqual(['us', 'them', null])
+    // A serve tag still wins over the call.
+    const serve = tag({ code: 'S', side: 'us', t_ms: 31_000 })
+    expect(rescore([set], [r1, r2], [serve], S).segments[1]?.serving).toBe('us')
+  })
+
+  it("fills the score line with the model's winners where no coach decided, marked as the model's from there on", () => {
+    const set = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', model_won_by: 'them' })
+    const r2 = rally({ start_ms: 30_000, end_ms: 40_000, model_won_by: 'them' })
+    const r3 = rally({ start_ms: 50_000, end_ms: 60_000, won_by: 'them' })
+    const r4 = rally({ start_ms: 70_000, end_ms: 80_000 })
+    const out = rescore([set], [r1, r2, r3, r4], [], S)
+    expect(out.segments.map((r) => [r.score_us_after, r.score_them_after, r.score_source])).toEqual([
+      [1, 0, 'tags'],
+      [1, 1, 'model'],
+      [1, 2, 'model'],
+      [null, null, null],
+    ])
+    // The model's winner is no fact: after it, who serves is not known from facts.
+    expect(out.segments[2]?.serving).toBeNull()
+    expect(out.segments[3]?.serving).toBe('them')
+    expect(out.periods[0]).toMatchObject({ final_us: 1, final_them: 2 })
+  })
+
+  it('counts the points the model thinks were played without a rally', () => {
+    const set = period({ no: 1, start_ms: 0, first_serve: 'us', model_missed_us: 0, model_missed_them: 1 })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us' })
+    const r2 = rally({ start_ms: 50_000, end_ms: 60_000, model_won_by: 'us', model_missed_us: 1, model_missed_them: 0 })
+    const out = rescore([set], [r1, r2], [], S)
+    expect(out.segments.map((r) => [r.score_us_after, r.score_them_after, r.score_source])).toEqual([
+      [1, 0, 'tags'],
+      [3, 0, 'model'],
+    ])
+    expect(out.periods[0]).toMatchObject({ final_us: 3, final_them: 1 })
+  })
+
+  it("takes a rally's winner from the next rally's serve before the model's", () => {
+    const set = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, model_won_by: 'us' })
+    const r2 = rally({ start_ms: 30_000, end_ms: 40_000, serving_manual: 'them' })
+    const out = rescore([set], [r1, r2], [], S)
+    expect(out.segments[0]).toMatchObject({ serving: 'us', score_us_after: 0, score_them_after: 1, score_source: 'tags' })
+    expect(out.segments[1]).toMatchObject({ serving: 'them', score_us_after: null })
+    expect(scoreBefore(45_000, out.periods, out.segments)).toEqual({ period: out.periods[0], us: 0, them: 1, serving: 'them' })
+  })
+
   it("doesn't touch timeouts and doesn't change its inputs", () => {
     const set = period({ no: 1, start_ms: 0 })
     const timeout = rally({ kind: 'timeout', start_ms: 5_000, end_ms: 35_000 })
@@ -88,6 +142,7 @@ describe('score and proposals', () => {
     expect(scoreBefore(5_000, [set], [r1, r2])).toMatchObject({ us: 0, them: 0, serving: 'them' })
     expect(scoreBefore(35_000, [set], [r1, r2])).toMatchObject({ us: 1, them: 0, serving: 'us' })
     expect(scoreBefore(50_000, [set], [r1, r2])).toMatchObject({ us: 2, them: 0, serving: 'us' })
+    expect(scoreBefore(50_000, [set], [r1, r2])).not.toHaveProperty('suggested')
     expect(scoreBefore(50_000, [set], [r1, r2], r2.id)).toMatchObject({ us: 1, them: 0 })
   })
 
@@ -206,5 +261,15 @@ describe('basketball score (same rules as the server)', () => {
     const q2 = period({ no: 2, start_ms: 720_000 })
     const tags = [shot(10_000, 'S3', '+'), shot(730_000, 'S2', '+', 'them')]
     expect(shotScoreAt(740_000, [q1, q2], tags, basketball)).toMatchObject({ period: q2, us: 5, them: 2 })
+  })
+})
+
+describe('score with suggested winners', () => {
+  it("counts the model's winner where no coach decided, and says so", () => {
+    const set = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', period_id: set.id, score_us_after: 1, score_them_after: 0, score_source: 'tags' })
+    const r2 = rally({ start_ms: 30_000, end_ms: 40_000, model_won_by: 'them', period_id: set.id, score_us_after: 1, score_them_after: 1, score_source: 'model' })
+    expect(scoreBefore(25_000, [set], [r1, r2])).toEqual({ period: set, us: 1, them: 0, serving: 'us' })
+    expect(scoreBefore(45_000, [set], [r1, r2])).toEqual({ period: set, us: 1, them: 1, serving: 'them', suggested: true })
   })
 })

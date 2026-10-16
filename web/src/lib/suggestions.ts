@@ -1,9 +1,10 @@
-// Rally proposals from the automatic analysis (docs/PLAN.md §10, §10.1, §11): which segments
-// are suggestions, the review list and its order, and the loop the review plays. Pure, so the
-// review controller and the pages share one reading of the data.
+// Rally proposals from the automatic analysis (docs/PLAN.md §10, §10.1, §11) and the gap
+// labels of the automatic scoring (§10.3): which segments are suggestions, the review list and
+// its order, and the loop the review plays. Pure, so the review controller and the pages share
+// one reading of the data.
 
 import { byStart, ralliesOf } from './rallies'
-import type { Segment } from './types'
+import type { GapKind, Period, Segment, SegmentKind, Side } from './types'
 
 /** "Accept all remaining with confidence ≥ 90%". */
 export const ACCEPT_ALL_MIN = 0.9
@@ -25,9 +26,31 @@ export function isSuggestion(segment: Kind): boolean {
   return segment.kind === 'rally' && segment.source === 'model' && segment.review === 'unreviewed'
 }
 
+export const GAP_KINDS: readonly GapKind[] = ['warmup', 'set_break', 'timeout', 'stoppage', 'other_dead']
+
+/** Dead time with a label (warm-up, set break, timeout, stoppage, after the match). */
+export function isGap(kind: SegmentKind): kind is GapKind {
+  return (GAP_KINDS as readonly string[]).includes(kind)
+}
+
+/** A model's gap label that nobody has answered yet. */
+export function isGapSuggestion(segment: Kind): boolean {
+  return isGap(segment.kind) && segment.source === 'model' && segment.review === 'unreviewed'
+}
+
+/** Waits for an answer in the review: a rally proposal or a gap label. */
+export function isProposal(segment: Kind): boolean {
+  return isSuggestion(segment) || isGapSuggestion(segment)
+}
+
 /** A model's rally that a person accepted or corrected: a rally like any other, with a marker. */
 export function isReviewedSuggestion(segment: Kind): boolean {
   return segment.kind === 'rally' && segment.source === 'model' && (segment.review === 'confirmed' || segment.review === 'corrected')
+}
+
+/** A model's rally or break label that a person accepted or corrected. */
+export function isReviewedProposal(segment: Kind): boolean {
+  return (segment.kind === 'rally' || isGap(segment.kind)) && segment.source === 'model' && (segment.review === 'confirmed' || segment.review === 'corrected')
 }
 
 /** Rallies shown as fact: all but unanswered proposals (PLAN §10: nothing is fact until reviewed). */
@@ -45,16 +68,18 @@ export function modelRallies(segments: readonly Segment[]): Segment[] {
 }
 
 /**
- * The review list: the model's rallies plus the rallies split off in this session (`extra`,
- * manual rallies that still wait for an answer), in time order.
+ * The review list: the model's rallies and gap labels plus the rallies split off in this
+ * session (`extra`, manual rallies that still wait for an answer), in time order.
  */
 export function reviewItems(segments: readonly Segment[], extra: ReadonlySet<string>): Segment[] {
-  return segments.filter((s) => s.kind === 'rally' && (isModel(s) || extra.has(s.id))).sort(byStart)
+  return segments
+    .filter((s) => (s.kind === 'rally' && (isModel(s) || extra.has(s.id))) || (isGap(s.kind) && isModel(s)))
+    .sort(byStart)
 }
 
 /** Still waits for an answer: an unanswered proposal, or a part split off in this session. */
 export function isOpen(segment: Segment, pending: ReadonlySet<string>): boolean {
-  return isSuggestion(segment) || pending.has(segment.id)
+  return isProposal(segment) || pending.has(segment.id)
 }
 
 /**
@@ -86,6 +111,55 @@ export function reviewProgress(segments: readonly Segment[], seen: ReadonlySet<s
   const open = segments.filter((s) => isSuggestion(s) && seen.has(s.id)).length
   const total = seen.size + rejectedBefore
   return { done: Math.max(0, total - open), total }
+}
+
+/** Progress over the gap labels seen in this session (live or rejected since). */
+export function gapProgress(segments: readonly Segment[], seen: ReadonlySet<string>): ReviewProgress {
+  const open = segments.filter((s) => isGapSuggestion(s) && seen.has(s.id)).length
+  return { done: Math.max(0, seen.size - open), total: seen.size }
+}
+
+/** The review's progress: rallies and gap labels together. */
+export function allProgress(
+  segments: readonly Segment[],
+  seen: ReadonlySet<string>,
+  seenGaps: ReadonlySet<string>,
+  rejectedBefore: number,
+): ReviewProgress {
+  const rallies = reviewProgress(segments, seen, rejectedBefore)
+  const gaps = gapProgress(segments, seenGaps)
+  return { done: rallies.done + gaps.done, total: rallies.total + gaps.total }
+}
+
+// Who served and who won: the coach's facts, else the model's suggestions (PLAN §10.3).
+
+export interface Suggested<T> {
+  value: T | null
+  /** The value is the model's, not a fact. */
+  suggested: boolean
+}
+
+/** The serving team to show: the fact, else the model's suggestion. */
+export function effectiveServer(rally: Pick<Segment, 'serving' | 'model_serving'>): Suggested<Side> {
+  if (rally.serving) return { value: rally.serving, suggested: false }
+  return { value: rally.model_serving ?? null, suggested: rally.model_serving != null }
+}
+
+/** The winner to show: the coach's, else the model's suggestion. */
+export function effectiveWinner(rally: Pick<Segment, 'won_by' | 'model_won_by'>): Suggested<Side> {
+  if (rally.won_by) return { value: rally.won_by, suggested: false }
+  return { value: rally.model_won_by ?? null, suggested: rally.model_won_by != null }
+}
+
+/** The score after a rally ("12:10"), and whether a model's winner went into it; null when unknown. */
+export function scoreAfter(rally: Pick<Segment, 'score_us_after' | 'score_them_after' | 'score_source'>): { text: string; suggested: boolean } | null {
+  if (rally.score_us_after === null || rally.score_them_after === null) return null
+  return { text: `${rally.score_us_after}:${rally.score_them_after}`, suggested: rally.score_source === 'model' }
+}
+
+/** A model's set that nobody has accepted or rejected yet. */
+export function isSetSuggestion(period: Pick<Period, 'source' | 'review'>): boolean {
+  return period.source === 'model' && period.review === 'unreviewed'
 }
 
 const PERCENT = new Intl.NumberFormat('de-CH', { style: 'percent', maximumFractionDigits: 0 })

@@ -16,10 +16,12 @@ import { formatClock, sideLabel } from '../lib/labels'
 import { usePlayhead, type Playhead } from '../lib/playhead'
 import { ralliesOf } from '../lib/rallies'
 import { readStorage, writeStorage } from '../lib/storage'
+import { effectiveWinner, scoreAfter } from '../lib/suggestions'
 import type { Segment, Tagging } from '../lib/types'
 import { useCondensedPlayback } from '../lib/useCondensedPlayback'
 import { Badge } from './Badge'
 import { Card } from './Card'
+import { SuggestedValue } from './ScoringMarks'
 import { Switch } from './Switch'
 import { Table, TBody, Td, Th, THead, Tr } from './Table'
 import { TagFilters } from './TagFilters'
@@ -125,6 +127,9 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
                   const n = numbers.get(rally.id) ?? 0
                   const current = rally.id === currentId
                   const set = rally.period_id ? sets.get(rally.period_id) : undefined
+                  // Where no coach decided the point, Nomal's winner fills the score line (muted).
+                  const score = scoreAfter(rally)
+                  const winner = effectiveWinner(rally)
                   return (
                     <Tr
                       key={rally.id}
@@ -148,11 +153,17 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
                       <Td className="tabular-nums">{set ?? '–'}</Td>
                       <Td className="hidden text-muted tabular-nums sm:table-cell">{formatClock(rally.start_ms, { tenths: false })}</Td>
                       <Td className="font-semibold tabular-nums">
-                        {rally.score_us_after !== null && rally.score_them_after !== null
-                          ? `${rally.score_us_after}:${rally.score_them_after}`
-                          : '–'}
+                        {score ? <SuggestedValue suggested={score.suggested}>{score.text}</SuggestedValue> : '–'}
                       </Td>
-                      <Td>{rally.won_by ? <Badge tone={rally.won_by === 'us' ? 'accent' : 'neutral'}>{sideLabel(t, rally.won_by)}</Badge> : '–'}</Td>
+                      <Td>
+                        {winner.value === null ? (
+                          '–'
+                        ) : winner.suggested ? (
+                          <SuggestedValue suggested>{sideLabel(t, winner.value)}</SuggestedValue>
+                        ) : (
+                          <Badge tone={winner.value === 'us' ? 'accent' : 'neutral'}>{sideLabel(t, winner.value)}</Badge>
+                        )}
+                      </Td>
                     </Tr>
                   )
                 })}
