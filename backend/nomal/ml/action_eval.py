@@ -98,7 +98,9 @@ def summarise(per_game: Iterable[dict[str, Any]]) -> dict[str, Any]:
     if not games:
         return {"games": 0}
     out: dict[str, Any] = {"games": len(games)}
-    for key in ("precision", "recall", "f1", "action_f1", "skill_accuracy", "side_accuracy"):
+    keys = ("precision", "recall", "f1", "action_precision", "action_recall", "action_f1",
+            "skill_accuracy", "side_accuracy")  # fmt: skip
+    for key in keys:
         vals = [g[key] for g in games if g.get(key) is not None]
         out[key] = round(sum(vals) / len(vals), 4) if vals else None
     out["coach"] = sum(g["coach"] for g in games)

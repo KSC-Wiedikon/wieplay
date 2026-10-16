@@ -27,7 +27,10 @@ KINDS = ["analyse", "train_rallies", "trajectory", "actions", "train_actions"]
 
 @pytest.fixture
 def settings(settings: Settings) -> Settings:
-    return settings.model_copy(update={"analysis_train_delay_seconds": 0})
+    """Suggestions written whatever the measured score (the bar is in test_actions_gate.py)."""
+    return settings.model_copy(
+        update={"analysis_train_delay_seconds": 0, "action_suggestions": "on"}
+    )
 
 
 @pytest.fixture

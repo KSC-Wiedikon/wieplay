@@ -267,7 +267,7 @@ def complete(
     job = _running(db, job_id, worker)
     video = db.get(Video, job.video_id, with_for_update=True) if job.video_id else None
     try:
-        pipeline.complete(db, video, job, body)
+        pipeline.complete(db, video, job, body, settings)
     except ValueError as exc:
         db.rollback()
         job = _running(db, job_id, worker)

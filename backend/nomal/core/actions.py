@@ -30,6 +30,7 @@ from __future__ import annotations
 import uuid
 from bisect import bisect_left, bisect_right
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -38,6 +39,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from nomal.core import analysis, calibration, jobs, tagging
+from nomal.core.config import Settings, get_settings
 from nomal.core.models import (
     AnalysisArtifact,
     Event,
@@ -340,6 +342,86 @@ def latest_training(db: Session) -> ModelRun | None:
     ).first()
 
 
+# --- the bar: suggestions only once the finder gets them right often enough ----------------
+
+MIN_GAMES = 2  # games with actions reviewed before the held-out score means anything
+
+
+@dataclass(frozen=True)
+class Gate:
+    """Whether suggested actions are written (PLAN §10.4a): the active finder's held-out score
+    on games whose actions a coach reviewed (the newest training's) against the bars."""
+
+    mode: str  # auto | on | off
+    open: bool
+    # on, off (forced); passed; no_training; too_few_games; below_bar
+    reason: str
+    finder: str  # v0 | v1: the finder in use, whose score counts
+    games: int
+    precision: float | None  # fully right (±0.3 s, skill, side) of the suggested, held out
+    contact_recall: float | None  # the coaches' tags with a contact candidate
+    min_precision: float
+    min_recall: float
+    run_id: uuid.UUID | None = None
+    trained_at: datetime | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "open": self.open,
+            "reason": self.reason,
+            "finder": self.finder,
+            "games": self.games,
+            "precision": self.precision,
+            "contact_recall": self.contact_recall,
+            "min_precision": self.min_precision,
+            "min_recall": self.min_recall,
+            "run_id": str(self.run_id) if self.run_id else None,
+            "trained_at": self.trained_at.isoformat() if self.trained_at else None,
+        }
+
+
+def gate_of(run: ModelRun | None, settings: Settings) -> Gate:
+    mode = settings.action_suggestions
+    min_p, min_r = settings.action_suggest_min_precision, settings.action_suggest_min_recall
+    metrics = run.metrics if run is not None else {}
+    finder = "v1" if metrics.get("accepted") else "v0"
+    summary = metrics.get("summary") or {}
+    scores = summary.get(finder) or {}
+    games = int(summary.get("games") or scores.get("games") or 0)
+    precision = scores.get("action_precision")
+    recall = summary.get("contact_recall")
+    if mode == "on":
+        is_open, reason = True, "on"
+    elif mode == "off":
+        is_open, reason = False, "off"
+    elif run is None:
+        is_open, reason = False, "no_training"
+    elif games < MIN_GAMES:
+        is_open, reason = False, "too_few_games"
+    elif precision is None or recall is None or precision < min_p or recall < min_r:
+        is_open, reason = False, "below_bar"
+    else:
+        is_open, reason = True, "passed"
+    return Gate(
+        mode=mode,
+        open=is_open,
+        reason=reason,
+        finder=finder,
+        games=games,
+        precision=None if precision is None else float(precision),
+        contact_recall=None if recall is None else float(recall),
+        min_precision=min_p,
+        min_recall=min_r,
+        run_id=run.id if run is not None else None,
+        trained_at=run.created_at if run is not None else None,
+    )
+
+
+def gate(db: Session, settings: Settings | None = None) -> Gate:
+    return gate_of(latest_training(db), settings or get_settings())
+
+
 def _model_out(db: Session) -> dict[str, Any] | None:
     found = current_model(db)
     if found is None:
@@ -497,10 +579,12 @@ def _near(times: list[int], t: int, tol: int = TOLERANCE_MS) -> bool:
 
 
 def apply_actions(
-    db: Session, video: Video, run: ModelRun, result: ActionsResult
+    db: Session, video: Video, run: ModelRun, result: ActionsResult, bar: Gate | None = None
 ) -> dict[str, Any]:
-    """Write a model's actions for a video under the suggestion rules (module docstring).
+    """Write a model's actions for a video under the suggestion rules (module docstring), when
+    the bar is passed (`bar`, else nothing is written and the old untouched suggestions go).
     Returns what happened, with the score against the coach's tags where there are some."""
+    bar = bar or gate(db)
     tax = load(video.sport)
     rallies = _live_rallies(db, video)
     by_id = {r.id: r for r in rallies}
@@ -553,6 +637,9 @@ def apply_actions(
         if rally.id in locked:
             vs_pred.setdefault(rally.id, []).append((item.t_ms, item.code, side))
             skipped["coach"] += 1
+            continue
+        if not bar.open:
+            skipped["below_bar"] += 1  # measured where a coach tagged, written nowhere
             continue
         if not rally.start_ms - tagging.SERVE_SLACK_MS <= item.t_ms <= rally.end_ms + 1000:
             skipped["outside"] += 1
@@ -613,6 +700,7 @@ def apply_actions(
         "rallies": len(sides),
         "coach_rallies": len(locked),
         "stats": result.stats,
+        "gate": bar.as_dict(),
     }
     if locked:
         true: list[action_eval.Action] = []
@@ -637,7 +725,9 @@ def _check_model_run(db: Session, result: ActionsResult) -> uuid.UUID | None:
     return run.id
 
 
-def complete_actions(db: Session, video: Video, job: Job, payload: dict[str, Any]) -> ModelRun:
+def complete_actions(
+    db: Session, video: Video, job: Job, payload: dict[str, Any], settings: Settings | None = None
+) -> ModelRun:
     result = ActionsResult.model_validate(payload)
     _check_model_run(db, result)
     run = ModelRun(
@@ -652,12 +742,15 @@ def complete_actions(db: Session, video: Video, job: Job, payload: dict[str, Any
     )
     db.add(run)
     db.flush()
-    run.metrics = apply_actions(db, video, run, result)
+    run.metrics = apply_actions(db, video, run, result, gate(db, settings))
     return run
 
 
-def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
+def complete_train(
+    db: Session, job: Job, payload: dict[str, Any], settings: Settings | None = None
+) -> ModelRun:
     result = TrainResult.model_validate(payload)
+    before = gate(db, settings)
     if result.accepted and result.artifact is None:
         raise ValueError("an accepted training must store its model")
     if result.artifact is not None:
@@ -690,8 +783,12 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
                 **result.artifact.model_dump(),
             )
         )
-    if result.accepted:
-        # The new model suggests again for every game nobody has done yet.
+    db.flush()
+    after = gate_of(run, settings or get_settings())
+    run.metrics = {**run.metrics, "gate": after.as_dict()}
+    if after.open and (result.accepted or not before.open):
+        # A new model that is good enough, or the bar passed for the first time: suggestions
+        # for every game nobody has done yet.
         trained = {str(v.get("video_id")) for v in result.dataset}
         for video in db.scalars(
             select(Video).where(
@@ -705,16 +802,22 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
     return run
 
 
-def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]) -> None:
+def complete(
+    db: Session,
+    video: Video | None,
+    job: Job,
+    payload: dict[str, Any],
+    settings: Settings | None = None,
+) -> None:
     if job.kind == "actions":
         if video is None:
             raise ValueError("job has no video")
         if video.status != "ready":
             jobs.succeed(job, {"skipped": f"video is {video.status}"})
             return
-        run = complete_actions(db, video, job, payload)
+        run = complete_actions(db, video, job, payload, settings)
     else:
-        run = complete_train(db, job, payload)
+        run = complete_train(db, job, payload, settings)
     jobs.succeed(job, {"model_run_id": str(run.id)})
 
 

@@ -2,6 +2,7 @@ import '../i18n/pages'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
+import { ActionGateNote } from '../components/ActionGateNote'
 import { buttonClasses } from '../components/buttonStyles'
 import { ChartIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, LoadError } from '../components/Message'
@@ -75,7 +76,7 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
           ) : null
         }
       />
-      {(data?.suggested ?? 0) > 0 && <SuggestedHint count={data?.suggested ?? 0} />}
+      {(data?.suggested ?? 0) > 0 ? <SuggestedHint count={data?.suggested ?? 0} /> : <ActionGateNote gate={data?.actions_gate} />}
       {stats.isPending ? (
         <Spinner />
       ) : stats.isError || !data ? (

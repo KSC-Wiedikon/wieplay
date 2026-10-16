@@ -19,6 +19,7 @@ import {
 } from '../lib/stats'
 import type { Tagging, Video } from '../lib/types'
 import { buttonClasses } from './buttonStyles'
+import { ActionGateNote } from './ActionGateNote'
 import { ChartIcon, DownloadIcon, SparkleIcon } from './icons'
 import { EmptyState, LoadError } from './Message'
 import { SectionHeader } from './PageHeader'
@@ -58,7 +59,7 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
           ) : null
         }
       />
-      {(stats.data?.suggested ?? 0) > 0 && <SuggestedHint count={stats.data?.suggested ?? 0} />}
+      {(stats.data?.suggested ?? 0) > 0 ? <SuggestedHint count={stats.data?.suggested ?? 0} /> : <ActionGateNote gate={stats.data?.actions_gate} />}
       {stats.isPending ? (
         <Spinner />
       ) : stats.isError ? (

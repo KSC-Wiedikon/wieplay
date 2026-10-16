@@ -119,15 +119,15 @@ function fakeServer(initial: Tagging) {
   return { posts, changes, current, sent }
 }
 
-function show(url = `/videos/${ID}/tag`) {
-  const server = fakeServer(data())
+function show(url = `/videos/${ID}/tag`, initial = data(), state: Analysis = analysis) {
+  const server = fakeServer(initial)
   const reviewed = vi.fn(() => ({ actions_reviewed_at: '2026-10-17T10:00:00Z', training_job_id: 'job-t' }))
   const fetch = vi.fn(
     stubFetch({
       [`/api/videos/${ID}`]: { body: video },
       [`/api/videos/${ID}/tagging`]: { body: () => server.current() },
       [`POST /api/videos/${ID}/changes`]: { body: server.changes },
-      [`/api/videos/${ID}/analysis`]: { body: analysis },
+      [`/api/videos/${ID}/analysis`]: { body: state },
       [`POST /api/videos/${ID}/actions-reviewed`]: { body: reviewed },
       [`/api/videos/${ID}/comments`]: { body: [] },
       '/api/reels': { body: [] },
@@ -225,5 +225,42 @@ describe('TagPage, suggested actions', () => {
     expect(within(panel()).getByText('Accepted 4 actions of this rally.')).toBeInTheDocument()
     await waitFor(() => expect(server.sent().size).toBe(4), { timeout: 3000 })
     expect([...server.sent().values()].map((e) => e.review)).toEqual(['confirmed', 'confirmed', 'confirmed', 'confirmed'])
+  })
+})
+
+describe('TagPage, below the bar for action suggestions', () => {
+  const closed: Analysis = {
+    ...analysis,
+    actions: {
+      ...(analysis.actions as NonNullable<Analysis['actions']>),
+      suggestions: { unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0 },
+      proposed: 0,
+      gate: {
+        mode: 'auto', open: false, reason: 'below_bar', finder: 'v0', games: 2, precision: 0.41,
+        contact_recall: 0.66, min_precision: 0.7, min_recall: 0.6, trained_at: '2026-10-17T09:00:00Z',
+      },
+    },
+  }
+  // The coach tagged the rally by hand; Nomal suggested nothing.
+  const tagged = (): Tagging => ({ ...data(), events: [tag({ t_ms: 11_000, code: 'S', number: 7, segment_id: R1 }), tag({ t_ms: 12_200, code: 'R', side: 'them', number: 4, segment_id: R1 })] })
+
+  it('says why in the Actions queue and keeps "Mark actions reviewed" for a tagged game', async () => {
+    const { reviewed } = show(`/videos/${ID}/tag?mode=review&queue=actions`, tagged(), closed)
+    const region = await screen.findByRole('region', { name: 'Review actions' })
+    expect(
+      await within(region).findByText(
+        'Action suggestions start once Nomal gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: 2 games, last score 41%).',
+      ),
+    ).toBeInTheDocument()
+    fireEvent.click(within(region).getByRole('button', { name: 'Mark actions reviewed' }))
+    await waitFor(() => expect(reviewed).toHaveBeenCalled())
+  })
+
+  it('says it on the analysis card too, with the switch', async () => {
+    show(`/videos/${ID}/tag`, tagged(), closed)
+    const card = await screen.findByRole('region', { name: 'Automatic rallies' })
+    const actions = within(card).getByRole('region', { name: 'Suggested actions' })
+    expect(within(actions).getByText(/now: 2 games, last score 41%/)).toBeInTheDocument()
+    expect(within(actions).getByRole('switch', { name: 'Actions reviewed' })).not.toBeChecked()
   })
 })

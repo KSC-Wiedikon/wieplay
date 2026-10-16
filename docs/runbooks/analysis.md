@@ -188,6 +188,20 @@ python -m nomal.cli actions --all-ready --dry-run
 python -m nomal.cli actions --all-ready          # or --video <id>
 ```
 
+**The bar.** Suggestions are written only once the action finder's held-out score on games
+whose actions a coach reviewed passes it: two games or more, precision of fully right
+suggestions ≥ 0.70, contact recall ≥ 0.6. Until then the jobs run and measure themselves
+where coaches tagged, and the pages say why there are no suggestions. Settings (API):
+
+```bash
+NOMAL_ACTION_SUGGESTIONS=auto            # auto (the bar) | on (write anyway, testing) | off
+NOMAL_ACTION_SUGGEST_MIN_PRECISION=0.70
+NOMAL_ACTION_SUGGEST_MIN_RECALL=0.6
+```
+
+`GET /api/videos/{id}/analysis` → `actions.gate` says where it stands (reason, games, score).
+After switching to `on`, `python -m nomal.cli actions --all-ready` fills the games in.
+
 Suggestions are tags with source "model" and review "unreviewed": they show dashed on the
 tagging page and are answered in Review → Actions (Enter, X, S R E A B D F, # + ! - / =, a
 number then Enter, Tab, ←/→, Shift+Enter, U). They never count in stats, reels or the score

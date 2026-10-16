@@ -5,8 +5,8 @@ import { Button } from '../../components/Button'
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, SparkleIcon, UndoIcon } from '../../components/icons'
 import { EmptyState } from '../../components/Message'
 import { ProgressBar } from '../../components/ProgressBar'
-import { actionItems, actionProgress, GRADE_KEYS, isReviewedSuggestion, isSuggestedTag, openInRally } from '../../lib/actions'
-import { useSetActionsReviewed } from '../../lib/analysis'
+import { actionItems, actionProgress, factTags, gateText, GRADE_KEYS, isReviewedSuggestion, isSuggestedTag, openInRally } from '../../lib/actions'
+import { useAnalysis, useSetActionsReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
 import { skillByCode } from '../../lib/grammar'
 import { formatClock, gradeLabel, sideLabel, skillLabel } from '../../lib/labels'
@@ -192,9 +192,7 @@ export function ActionReviewPanel() {
       ) : progress.total > 0 ? (
         <Done videoId={video.id} reviewed={Boolean(reviewedAt)} />
       ) : (
-        <EmptyState icon={<SparkleIcon />} title={t('actions.emptyTitle')}>
-          {t('actions.emptyBody')}
-        </EmptyState>
+        <Empty videoId={video.id} reviewed={Boolean(reviewedAt)} />
       )}
 
       <p role="status" className={cx('min-h-5 text-sm', state.notice?.tone === 'error' ? 'text-danger' : 'text-muted')}>
@@ -301,6 +299,37 @@ function Facts({ tag, number }: { tag: Tag; number: string }) {
         </dd>
       </dl>
     </div>
+  )
+}
+
+/**
+ * Nothing suggested: below the bar (PLAN §10.4a) the reason plainly, and "actions reviewed" for
+ * a game the coach tagged, which is how Nomal learns to suggest.
+ */
+function Empty({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
+  const { t } = useTranslation()
+  const { reload } = useWorkspace()
+  const view = useView()
+  const gate = useAnalysis(videoId, true).data?.actions?.gate
+  const mark = useSetActionsReviewed(videoId)
+  const tagged = factTags(view.events).length > 0
+  const done = reviewed || mark.isSuccess
+  const text = gateText(t, gate)
+  return (
+    <EmptyState
+      icon={<SparkleIcon />}
+      title={t('actions.emptyTitle')}
+      action={
+        tagged && !done ? (
+          <Button variant="primary" size="touch" disabled={mark.isPending} onClick={() => mark.mutate(true, { onSuccess: reload })}>
+            {t('actions.markReviewed')}
+          </Button>
+        ) : undefined
+      }
+    >
+      {text ?? t('actions.emptyBody')}
+      {done && tagged && <span className="mt-1 block">{t('actions.doneReviewed')}</span>}
+    </EmptyState>
   )
 }
 

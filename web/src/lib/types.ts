@@ -686,7 +686,29 @@ export interface ActionsVsCoach {
   skill_accuracy: number | null
   side_accuracy: number | null
   action_f1: number
+  /** Fully right (time, skill, side) of the suggested; absent from older servers. */
+  action_precision?: number | null
   labels_complete: boolean
+}
+
+/**
+ * Whether Nomal writes suggested actions (PLAN §10.4a): only once its held-out score on games
+ * whose actions a coach reviewed passes the bars (mode auto; on and off force it).
+ */
+export interface ActionGate {
+  mode: 'auto' | 'on' | 'off'
+  open: boolean
+  /** on | off | passed | no_training | too_few_games | below_bar */
+  reason: string
+  finder: string
+  /** Games with actions reviewed in the newest training. */
+  games: number
+  /** Share of suggestions fully right (time ±0.3 s, skill, side) on held-out games. */
+  precision: number | null
+  contact_recall: number | null
+  min_precision: number
+  min_recall: number
+  trained_at: string | null
 }
 
 /** The suggested actions of a video (PLAN §10.4a). */
@@ -704,6 +726,8 @@ export interface ActionsState {
   vs_coach: ActionsVsCoach | null
   reviewed_at: string | null
   model: { finder: string; run_id: string | null; trained_at: string | null; games: number; summary: Record<string, unknown> }
+  /** Absent from servers before the bar. */
+  gate?: ActionGate | null
 }
 
 export interface Analysis {

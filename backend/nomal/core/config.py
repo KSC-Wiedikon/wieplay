@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # after a burst of games).
     analysis_auto: bool = True
     analysis_train_delay_seconds: int = 600
+    # Suggested actions (PLAN §10.4a) are written only once the action finder's held-out score
+    # on games whose actions a coach reviewed passes the bars (auto); "on" writes them anyway
+    # (testing), "off" never. Below the bars the finder still runs and measures itself.
+    action_suggestions: Literal["auto", "on", "off"] = "auto"
+    action_suggest_min_precision: float = 0.70  # fully right (±0.3 s, skill, side) / suggested
+    action_suggest_min_recall: float = 0.6  # coach's tags with a contact candidate ±0.3 s
 
     @model_validator(mode="after")
     def _check(self) -> Settings:

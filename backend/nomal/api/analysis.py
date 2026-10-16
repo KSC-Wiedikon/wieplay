@@ -27,6 +27,7 @@ from sqlalchemy import select
 from nomal.api.access import TeamAccess, visible_video
 from nomal.api.deps import DbDep, SettingsDep, ViewerDep, audit
 from nomal.core import actions, analysis, scoring, tagging
+from nomal.core.config import Settings
 from nomal.core.models import Job, ModelRun, Segment, Video
 from nomal.core.permissions import Viewer, can_delete_video, can_tag, can_upload
 
@@ -141,6 +142,7 @@ class ActionsVsCoachOut(BaseModel):
     f1: float
     skill_accuracy: float | None
     side_accuracy: float | None
+    action_precision: float | None = None  # fully right (time, skill, side) of the suggested
     action_f1: float
     labels_complete: bool  # the coach marked the actions done
 
@@ -153,6 +155,22 @@ class ActionModelOut(BaseModel):
     trained_at: datetime | None
     games: int
     summary: dict[str, Any]
+
+
+class ActionGateOut(BaseModel):
+    """Whether Nomal writes suggested actions: only once its action finder's held-out score on
+    games whose actions a coach reviewed passes the bars (mode auto; on and off force it)."""
+
+    mode: str  # auto | on | off
+    open: bool
+    reason: str  # on | off | passed | no_training | too_few_games | below_bar
+    finder: str
+    games: int  # games with actions reviewed in the newest training
+    precision: float | None  # fully right (±0.3 s, skill, side) of the suggested, held out
+    contact_recall: float | None
+    min_precision: float
+    min_recall: float
+    trained_at: datetime | None
 
 
 class ActionsOut(BaseModel):
@@ -173,6 +191,7 @@ class ActionsOut(BaseModel):
     vs_coach: ActionsVsCoachOut | None
     reviewed_at: datetime | None
     model: ActionModelOut
+    gate: ActionGateOut | None = None
 
 
 class AnalysisOut(BaseModel):
@@ -302,7 +321,23 @@ def _action_model(db: DbDep) -> ActionModelOut:
     )
 
 
-def _actions(db: DbDep, video: Video) -> ActionsOut | None:
+def gate_out(db: DbDep, settings: Settings) -> ActionGateOut:
+    g = actions.gate(db, settings)
+    return ActionGateOut(
+        mode=g.mode,
+        open=g.open,
+        reason=g.reason,
+        finder=g.finder,
+        games=g.games,
+        precision=g.precision,
+        contact_recall=g.contact_recall,
+        min_precision=g.min_precision,
+        min_recall=g.min_recall,
+        trained_at=g.trained_at,
+    )
+
+
+def _actions(db: DbDep, video: Video, settings: Settings) -> ActionsOut | None:
     if video.sport not in actions.SPORTS:
         return None
     run = actions.latest_run(db, video.id)
@@ -322,10 +357,13 @@ def _actions(db: DbDep, video: Video) -> ActionsOut | None:
         vs_coach=ActionsVsCoachOut.model_validate(vs) if vs else None,
         reviewed_at=video.actions_reviewed_at,
         model=_action_model(db),
+        gate=gate_out(db, settings),
     )
 
 
-def analysis_out(db: DbDep, video: Video, viewer: Viewer, access: TeamAccess) -> AnalysisOut:
+def analysis_out(
+    db: DbDep, video: Video, viewer: Viewer, access: TeamAccess, settings: Settings
+) -> AnalysisOut:
     manager = _manages(viewer, access)
     job = db.scalars(
         select(Job)
@@ -384,14 +422,16 @@ def analysis_out(db: DbDep, video: Video, viewer: Viewer, access: TeamAccess) ->
         rallies_reviewed_at=video.rallies_reviewed_at,
         rally_model=_rally_model(db),
         scoring=_scoring(db, video),
-        actions=_actions(db, video),
+        actions=_actions(db, video, settings),
     )
 
 
 @router.get("/videos/{video_id}/analysis", response_model=AnalysisOut)
-def get_analysis(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
+def get_analysis(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> AnalysisOut:
     video, access = _readable(db, viewer, video_id)
-    return analysis_out(db, video, viewer, access)
+    return analysis_out(db, video, viewer, access, settings)
 
 
 def _taggable(db: DbDep, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, TeamAccess]:
@@ -408,7 +448,9 @@ def _taggable(db: DbDep, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, Te
 
 
 @router.post("/videos/{video_id}/analyse", response_model=AnalysisOut, status_code=202)
-def analyse(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
+def analyse(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> AnalysisOut:
     """Queue the analysis (again): new signals, new proposals for a video nobody has done
     the rallies of yet, else a new score against the coach's rallies."""
     video, access = _taggable(db, viewer, video_id)
@@ -418,11 +460,13 @@ def analyse(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
     job = analysis.queue_analyse(db, video)
     audit(db, viewer.member_id, "analysis_requested", "video", str(video.id), job=str(job.id))
     db.commit()
-    return analysis_out(db, video, viewer, access)
+    return analysis_out(db, video, viewer, access, settings)
 
 
 @router.post("/videos/{video_id}/scoring", response_model=AnalysisOut)
-def rescore(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
+def rescore(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> AnalysisOut:
     """Score the video again now: the model's server and winner per rally, the sets when the
     coach has none, the gap labels (PLAN §10.3). Nothing a coach set is changed."""
     video, access = _taggable(db, viewer, video_id)
@@ -433,7 +477,7 @@ def rescore(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
     tagging.set_actor(db, viewer.member_id)
     scoring.score_video(db, video, reason="request")
     db.commit()
-    return analysis_out(db, video, viewer, access)
+    return analysis_out(db, video, viewer, access, settings)
 
 
 @router.post("/videos/{video_id}/rallies-reviewed", response_model=ReviewedOut)
@@ -491,7 +535,9 @@ class ActionsReviewedOut(BaseModel):
 
 
 @router.post("/videos/{video_id}/actions", response_model=AnalysisOut, status_code=202)
-def suggest_actions(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> AnalysisOut:
+def suggest_actions(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> AnalysisOut:
     """Suggest the actions again: untouched suggestions are replaced, nothing a coach tagged
     or answered is changed."""
     video, access = _taggable(db, viewer, video_id)
@@ -502,7 +548,7 @@ def suggest_actions(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> Analys
     audit(db, viewer.member_id, "actions_requested", "video", str(video.id),
           job=str(job.id) if job else None)  # fmt: skip
     db.commit()
-    return analysis_out(db, video, viewer, access)
+    return analysis_out(db, video, viewer, access, settings)
 
 
 @router.post("/videos/{video_id}/actions-reviewed", response_model=ActionsReviewedOut)

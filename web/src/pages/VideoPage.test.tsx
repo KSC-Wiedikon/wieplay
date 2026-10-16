@@ -529,6 +529,16 @@ describe('VideoPage', () => {
       expect(screen.getByText('1 of 2')).toBeInTheDocument()
     })
 
+    it('says why there are no suggested actions yet', async () => {
+      const gate = {
+        mode: 'auto' as const, open: false, reason: 'too_few_games', finder: 'v0', games: 1, precision: null,
+        contact_recall: null, min_precision: 0.7, min_recall: 0.6, trained_at: null,
+      }
+      showStats({ stats: { ...stats, suggested: 0, actions_gate: gate } })
+      expect(await screen.findByText(/Action suggestions start once Nomal gets them right often enough/)).toBeInTheDocument()
+      expect(screen.getByText(/\(now: 1 game\)/)).toBeInTheDocument()
+    })
+
     it('says when there is nothing to count yet', async () => {
       showStats({ tagging: bundle({ can_tag: true }), stats: videoStats() })
       expect(await screen.findByText('No stats yet')).toBeInTheDocument()

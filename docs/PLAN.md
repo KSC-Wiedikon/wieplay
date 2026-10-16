@@ -1462,6 +1462,17 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   its mean action F1 (contact within ±0.3 s with the coach's skill and side) beats v0's; a
   kept model suggests again for every game nobody has done. Also reported: the contact
   recall (the coaches' tags with a candidate within ±0.3 s: what the ball's path can find).
+- **The bar** (since 17.10.2026, a coach's review costs more than wrong suggestions save):
+  suggestions are written only once the finder in use passes it on games whose actions a
+  coach reviewed, held out: at least two games, **precision of fully right suggestions**
+  (contact within ±0.3 s with the coach's skill and side) **≥ 0.70** and **contact recall ≥
+  0.6** (`NOMAL_ACTION_SUGGEST_MIN_PRECISION`, `NOMAL_ACTION_SUGGEST_MIN_RECALL`;
+  `NOMAL_ACTION_SUGGESTIONS` = `auto` (default) | `on` (write anyway, for testing) | `off`).
+  Below it every run still measures itself where a coach tagged and writes nothing (its old
+  untouched suggestions go); the training that first passes it brings suggestions to every
+  game nobody has reviewed. The tagging page, the analysis card and the stats say plainly why
+  there are none yet ("… now: 2 games, last score 41 %"); "Actions reviewed" stays available
+  for a game the coach tagged, which is how the loop gets its labels.
 - **Rules for writing**: never into a rally that has a person's tags (made, imported, or a
   suggestion accepted or corrected): there the run only scores itself against them
   (precision, recall, F1 of contacts at ±0.3 s, skill and side accuracy, action F1; in
@@ -1484,7 +1495,7 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   same): 2.9 k candidates, 7.2 per rally; 587 suggestions, 3.1 per rally: 188 serves (one in
   188 of 191 rallies), 97 receptions, 120 sets, 71 attacks, 85 digs, 24 freeballs, 2 blocks;
   grade hints on 72 (28 aces, 14 serve errors, 10 kills). 3 s to read the signals and find the
-  candidates, 0.5 s to label. Eyeballed on the video, 60 random suggestions in three rounds
+  candidates, 0.5 s to label (with the bar off). Eyeballed on the video, 60 random suggestions in three rounds
   (the rules tuned between them): 30 % right in time, skill and side; 57 % at a real contact,
   where the side was right in about three of four. Most errors are not contacts at all (the
   ball in flight, at the ceiling, on the floor after the point), serves put on a later contact

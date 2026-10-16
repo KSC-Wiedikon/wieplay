@@ -381,9 +381,15 @@ function DeskLayout({
   const byHand = rallies.length - suggestionCount(view.segments)
   const actionCount = useMemo(() => actionItems(view.events).length, [view.events])
   const openActions = useMemo(() => suggestedCount(view.events), [view.events])
+  const factCount = useMemo(() => factTags(view.events).length, [view.events])
+  // Below the bar (PLAN §10.4a) the Actions queue says why there are no suggestions.
+  const gate = useAnalysis(video.id, controller.playsRallies).data?.actions?.gate
   // The review is offered once Nomal suggested something (volleyball: basketball marks no rallies).
   const canReview = controller.playsRallies && (progress.total > 0 || actionCount > 0 || reviewing)
-  const status = controller.playsRallies && video.can_tag ? <AnalysisStatus video={video} rallies={byHand} live={live} onReviewed={reload} /> : null
+  const status =
+    controller.playsRallies && video.can_tag ? (
+      <AnalysisStatus video={video} rallies={byHand} live={live} actionTags={factCount} onReviewed={reload} />
+    ) : null
 
   // Without IndexedDB, unsent changes are lost with the page: ask before leaving.
   useEffect(() => {
@@ -433,7 +439,7 @@ function DeskLayout({
         {/* About 22rem until the video reaches its height limit; then the panel takes the rest. */}
         {reviewing ? (
           <div className={cx('flex flex-col gap-2', !narrow && 'min-w-80 flex-[1_0_22rem]')}>
-            {actionCount > 0 && <QueueSwitch rallies={progress.total - progress.done} actions={openActions} />}
+            {(actionCount > 0 || gate) && <QueueSwitch rallies={progress.total - progress.done} actions={openActions} />}
             {reviewingActions ? <ActionReviewPanel /> : <ReviewPanel />}
           </div>
         ) : (

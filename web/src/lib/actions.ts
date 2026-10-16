@@ -6,10 +6,12 @@
 // Nothing a model suggests is a fact until a coach accepts it: the score, the stats and the
 // plays behind a number use `factTags` (the server's stats do the same).
 
+import type { TFunction } from 'i18next'
 import { isSuggestedTag } from './facts'
+import { formatPercent } from './suggestions'
 import { eventToIn } from './taggingStore'
 import type { Change } from './outbox'
-import type { EventIn, Review, Tag } from './types'
+import type { ActionGate, EventIn, Review, Tag } from './types'
 
 export { factTags, isSuggestedTag } from './facts'
 
@@ -99,4 +101,15 @@ export function acceptChange(tag: Tag, patch: Partial<EventIn> = {}): Change {
 /** Not an action: rejected and deleted (the server keeps it as a negative). */
 export function rejectChange(tag: Tag): Change {
   return { kind: 'event', payload: { ...eventToIn(tag), review: isModelTag(tag) ? 'rejected' : tag.review, deleted: true } }
+}
+
+/**
+ * Why there are no suggested actions yet (PLAN §10.4a): Nomal writes them only once its score on
+ * games whose actions a coach reviewed passes the bar. Null while the bar is passed (or unknown).
+ */
+export function gateText(t: TFunction, gate: ActionGate | null | undefined): string | null {
+  if (!gate || gate.open) return null
+  if (gate.mode === 'off') return t('actions.gate.off')
+  if (gate.precision == null) return t('actions.gate.closedNoScore', { count: gate.games })
+  return t('actions.gate.closed', { count: gate.games, score: formatPercent(gate.precision) })
 }

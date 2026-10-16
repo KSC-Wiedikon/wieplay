@@ -451,7 +451,7 @@ function Ready({ video }: { video: Video }) {
             </div>
           )}
           {data?.can_tag && video.sport === 'volleyball' && (
-            <AnalysisStatus video={video} rallies={rallyCount} reviewHref={`/videos/${video.id}/tag?mode=review`} />
+            <AnalysisStatus video={video} rallies={rallyCount} actionTags={tagCount} reviewHref={`/videos/${video.id}/tag?mode=review`} />
           )}
           {video.meets_standard === false && (
             <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">

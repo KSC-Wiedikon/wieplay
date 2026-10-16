@@ -25,7 +25,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from nomal.api.access import visible_team
-from nomal.api.deps import DbDep, ViewerDep
+from nomal.api.analysis import ActionGateOut, gate_out
+from nomal.api.deps import DbDep, SettingsDep, ViewerDep
 from nomal.api.tagging import _readable
 from nomal.core import stats, tagging
 from nomal.core.models import (
@@ -114,6 +115,8 @@ class VideoStatsOut(BaseModel):
     sets: list[SetOut]
     # Suggested actions nobody has accepted or rejected yet: not counted above.
     suggested: int = 0
+    # Whether Nomal suggests actions yet (PLAN §10.4a); null for older servers.
+    actions_gate: ActionGateOut | None = None
 
 
 class MatchOut(BaseModel):
@@ -138,6 +141,7 @@ class TeamStatsOut(BaseModel):
     matches: list[MatchOut]
     # Suggested actions nobody has accepted or rejected yet, over the matches: not counted.
     suggested: int = 0
+    actions_gate: ActionGateOut | None = None
 
 
 # --- loading --------------------------------------------------------------------------------
@@ -353,7 +357,9 @@ def _video_stats(
 
 
 @router.get("/videos/{video_id}/stats", response_model=VideoStatsOut)
-def video_stats(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> VideoStatsOut:
+def video_stats(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> VideoStatsOut:
     video, result, cols = _video_stats(db, viewer, video_id)
     return VideoStatsOut(
         video_id=video.id,
@@ -378,6 +384,7 @@ def video_stats(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> VideoStats
             for s in result.sets
         ],
         suggested=_suggested(db, [video.id]),
+        actions_gate=gate_out(db, settings),
     )
 
 
@@ -435,7 +442,7 @@ def _season(
 
 
 @router.get("/teams/{team_id}/stats", response_model=TeamStatsOut)
-def team_stats(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamStatsOut:
+def team_stats(team_id: int, viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> TeamStatsOut:
     team, result, cols, ids = _season(db, viewer, team_id)
     return TeamStatsOut(
         team_id=team.id,
@@ -459,6 +466,7 @@ def team_stats(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamStatsOut:
             for m in result.matches
         ],
         suggested=_suggested(db, ids),
+        actions_gate=gate_out(db, settings),
     )
 
 

@@ -1,11 +1,12 @@
 import '../i18n/pages'
 import { useId, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { isBusy, proposalTotal, useAnalyse, useAnalysis, useSetRalliesReviewed } from '../lib/analysis'
+import { isBusy, proposalTotal, useAnalyse, useAnalysis, useSetActionsReviewed, useSetRalliesReviewed } from '../lib/analysis'
 import { cx } from '../lib/cx'
 import { formatDateTime } from '../lib/format'
 import { formatPercent, GAP_KINDS } from '../lib/suggestions'
-import type { Scoring, Video } from '../lib/types'
+import type { ActionsState, Scoring, Video } from '../lib/types'
+import { ActionGateNote } from './ActionGateNote'
 import { Button, ButtonLink } from './Button'
 import { Card } from './Card'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -29,6 +30,8 @@ interface AnalysisStatusProps {
   reviewHref?: string
   /** After "rallies reviewed" was saved: the server accepted the open suggestions itself. */
   onReviewed?: () => void
+  /** The coach's own action tags (suggestions not counted): "actions reviewed" needs some. */
+  actionTags?: number
   className?: string
 }
 
@@ -47,7 +50,7 @@ function Spinning() {
  * failed, how well the suggestions matched the coach's own rallies, the automatic score
  * (§10.3), and "Rallies reviewed", which tells Nomal to learn from the game.
  */
-export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, className }: AnalysisStatusProps) {
+export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, actionTags = 0, className }: AnalysisStatusProps) {
   const { t } = useTranslation()
   const analysis = useAnalysis(video.id, true)
   const analyse = useAnalyse(video.id)
@@ -114,6 +117,7 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, c
           </>
         )}
         {data.scoring && <ScoringSummary scoring={data.scoring} />}
+        {data.actions && <ActionsSummary videoId={video.id} actions={data.actions} tags={actionTags} />}
         {(canAnalyse || action) && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {canAnalyse && (
@@ -181,6 +185,51 @@ function ScoringSummary({ scoring }: { scoring: Scoring }) {
       )}
       {vs?.winner_accuracy != null && (
         <p className="text-muted">{t('tagging.analysis.scoring.vsCoachWinner', { value: formatPercent(vs.winner_accuracy), count: vs.winners_known })}</p>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The suggested actions (PLAN §10.4a): below the bar, why there are none yet; else how many
+ * and how many are open; the score against the coach's tags; "Actions reviewed", which makes a
+ * game the coach tagged teach Nomal.
+ */
+function ActionsSummary({ videoId, actions, tags }: { videoId: string; actions: ActionsState; tags: number }) {
+  const { t } = useTranslation()
+  const id = useId()
+  const mark = useSetActionsReviewed(videoId)
+  const s = actions.suggestions
+  const total = s.unreviewed + s.confirmed + s.corrected + s.rejected
+  const vs = actions.vs_coach
+  const at = actions.reviewed_at
+  const canMark = tags > 0 || total - s.unreviewed > 0 || at !== null
+  return (
+    <section aria-label={t('actions.card.title')} className="mt-2 flex flex-col gap-1 border-t border-hairline pt-2 text-sm">
+      <h3 className="font-semibold">{t('actions.card.title')}</h3>
+      <ActionGateNote gate={actions.gate} />
+      {total > 0 && <p>{t('actions.card.counts', { count: total, open: s.unreviewed })}</p>}
+      {vs && (
+        <p className="text-muted">{t('actions.card.measured', { score: formatPercent(vs.action_precision ?? null), recall: formatPercent(vs.recall) })}</p>
+      )}
+      {canMark && (
+        <div className="mt-1 flex items-start gap-2">
+          <Switch
+            checked={at !== null}
+            disabled={mark.isPending}
+            label={t('actions.card.reviewed')}
+            describedBy={`${id}-hint`}
+            onChange={(on) => mark.mutate(on)}
+          />
+          <div className="flex min-w-0 flex-col gap-0.5 pt-1.5">
+            <p className="font-semibold" aria-hidden="true">
+              {t('actions.card.reviewed')}
+            </p>
+            <p id={`${id}-hint`} className="text-muted">
+              {at ? t('actions.card.reviewedAt', { date: formatDateTime(at) }) : t('actions.card.reviewedHint')}
+            </p>
+          </div>
+        </div>
       )}
     </section>
   )

@@ -1,4 +1,6 @@
+import '../i18n/pages'
 import { describe, expect, it } from 'vitest'
+import i18n from '../i18n'
 import { bundle, period, rally, tag } from '../test/tagging'
 import {
   acceptChange,
@@ -6,6 +8,7 @@ import {
   actionItems,
   actionProgress,
   factTags,
+  gateText,
   isReviewedSuggestion,
   isSuggestedTag,
   nextOpenAction,
@@ -15,7 +18,7 @@ import {
 } from './actions'
 import type { OutboxItem } from './outbox'
 import { mergeView } from './taggingStore'
-import type { EventIn, Tag } from './types'
+import type { ActionGate, EventIn, Tag } from './types'
 
 const model = (id: string, t_ms: number, patch: Partial<Tag> = {}) =>
   tag({ id, t_ms, code: 'S', number: null, member_id: null, source: 'model', confidence: 0.8, ...patch })
@@ -107,5 +110,24 @@ describe('the score from facts only', () => {
     expect(open.segments[0]?.serving).toBeNull()
     const accepted = mergeView({ ...base, events: new Map([['sv', { ...serve, review: 'confirmed' as const }]]) }, [nudge], data.roster, data.taxonomy)
     expect(accepted.segments[0]?.serving).toBe('them')
+  })
+})
+
+describe('the bar for suggestions', () => {
+  const gate = (patch: Partial<ActionGate>): ActionGate => ({
+    mode: 'auto', open: false, reason: 'below_bar', finder: 'v0', games: 2, precision: 0.41,
+    contact_recall: 0.7, min_precision: 0.7, min_recall: 0.6, trained_at: null, ...patch,
+  })
+  const t = i18n.getFixedT('en')
+
+  it('says plainly why there are none yet, and nothing once the bar is passed', () => {
+    expect(gateText(t, gate({}))).toBe(
+      'Action suggestions start once Nomal gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: 2 games, last score 41%).',
+    )
+    expect(gateText(t, gate({ games: 1, precision: null, reason: 'too_few_games' }))).toMatch(/\(now: 1 game\)\.$/)
+    expect(gateText(t, gate({ mode: 'off', reason: 'off' }))).toBe('Action suggestions are switched off.')
+    expect(gateText(t, gate({ open: true, reason: 'passed' }))).toBeNull()
+    expect(gateText(t, null)).toBeNull()
+    expect(gateText(i18n.getFixedT('de'), gate({}))).toMatch(/jetzt: 2 Spiele, letzter Wert 41/)
   })
 })
