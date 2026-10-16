@@ -107,7 +107,7 @@ function Jobs() {
                     {job.video_id && (
                       <Link
                         to={`/videos/${job.video_id}`}
-                        className="block text-link underline-offset-2 hover:underline"
+                        className="block link"
                       >
                         {job.video_title || job.video_id}
                       </Link>

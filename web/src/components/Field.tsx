@@ -3,7 +3,7 @@ import { cx } from '../lib/cx'
 
 // Same height scale as Button: 44px on phones, 36px from sm up.
 const control =
-  'rounded-xl border border-hairline bg-surface px-3 text-sm text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-60'
+  'rounded-control border border-hairline-strong bg-surface px-3 text-sm text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-60'
 
 /** `inline` sizes the control to its content instead of the full width. */
 type Sizing = { inline?: boolean }

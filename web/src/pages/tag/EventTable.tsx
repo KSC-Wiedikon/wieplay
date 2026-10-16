@@ -90,7 +90,7 @@ export function EventTable() {
             <p className="p-4 text-sm text-muted">{view.events.length === 0 ? t('tagging.table.empty') : t('tagging.table.emptyFiltered')}</p>
           ) : (
             <Table caption={t('tagging.table.title')}>
-              <THead className="sticky top-0 z-10 bg-surface">
+              <THead className="sticky top-0 z-10">
                 <tr>
                   <Th>{t('tagging.table.time')}</Th>
                   <Th>{basketball ? t('tagging.basketball.quarter') : t('tagging.filters.set')}</Th>
@@ -138,14 +138,14 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
       onActivate={() => controller.select(tag.id, { seek: true })}
       aria-current={current ? 'true' : undefined}
       aria-selected={selected}
-      className={cx(current && 'bg-sunken', selected && 'outline-2 -outline-offset-2 outline-accent')}
+      className={cx(current && 'bg-accent-soft', selected && 'outline-2 -outline-offset-2 outline-accent')}
     >
       <Td tight>
         <button
           type="button"
           onClick={() => controller.select(tag.id, { seek: true })}
           aria-label={t('tagging.table.go', { entry, time: formatClock(tag.t_ms) })}
-          className="min-h-9 cursor-pointer rounded-lg px-1 font-mono text-sm text-link tabular-nums underline-offset-2 hover:underline"
+          className="min-h-9 cursor-pointer rounded-lg px-1 font-mono text-sm link tabular-nums"
         >
           {formatClock(tag.t_ms)}
         </button>

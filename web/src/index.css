@@ -17,6 +17,10 @@
     system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif,
     'Apple Color Emoji', 'Segoe UI Emoji';
   --font-wordmark: 'Bricolage Grotesque', var(--font-sans);
+
+  /* One radius for controls (buttons, inputs, nav pills), one for cards and panels. */
+  --radius-control: 0.625rem;
+  --radius-card: 1rem;
 }
 
 /* Semantic tokens. Components use only these; the values switch with the
@@ -33,6 +37,16 @@
   --color-link: var(--link);
   --color-ring: var(--ring);
   --color-danger: var(--danger);
+  /* Translucent, so hover works the same on the page, on cards and in the app bar. */
+  --color-hover: var(--hover);
+  --color-hairline-strong: var(--hairline-strong);
+  /* Tinted accent for selected and active states; text on it uses on-accent-soft. */
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent-soft: var(--on-accent-soft);
+  --color-appbar: var(--appbar);
+  --color-link-line: var(--link-line);
+  --shadow-card: var(--card-shadow);
+  --shadow-raised: var(--raised-shadow);
 }
 
 /* Contrast rules: white on blue, navy on yellow and orange; never yellow or
@@ -50,12 +64,25 @@
   --link: var(--color-vb-blue);
   --ring: var(--color-vb-blue);
   --danger: #b42318;
+  --hover: rgb(19 32 58 / 0.05);
+  --hairline-strong: rgb(19 32 58 / 0.24);
+  --accent-soft: rgb(31 95 191 / 0.1);
+  --on-accent-soft: var(--color-vb-blue);
+  /* Links keep a light underline, so they read as links even where their colour is navy. */
+  --link-line: rgb(31 95 191 / 0.35);
+  --appbar: var(--color-navy);
+  --card-shadow: 0 1px 2px rgb(19 32 58 / 0.05), 0 1px 3px rgb(19 32 58 / 0.04);
+  --raised-shadow: 0 10px 24px -8px rgb(19 32 58 / 0.18), 0 2px 6px -2px rgb(19 32 58 / 0.08);
 }
 
 :root[data-sport='bb'] {
   --accent: var(--color-bb-orange);
   --on-accent: var(--color-navy);
   --link: var(--color-navy);
+  --accent-soft: rgb(242 107 29 / 0.16);
+  --on-accent-soft: var(--color-navy);
+  /* Orange is never text on light, but it may underline navy text. */
+  --link-line: var(--color-bb-orange);
 }
 
 :root.dark {
@@ -71,11 +98,73 @@
   --link: var(--color-vb-yellow);
   --ring: var(--color-vb-yellow);
   --danger: #ff9b8f;
+  --hover: rgb(238 241 245 / 0.07);
+  --hairline-strong: rgb(238 241 245 / 0.26);
+  --accent-soft: rgb(255 199 44 / 0.14);
+  --on-accent-soft: var(--color-vb-yellow);
+  --link-line: rgb(255 199 44 / 0.45);
+  --appbar: #0c1629;
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.22);
+  --raised-shadow: 0 12px 28px -10px rgb(0 0 0 / 0.6), 0 2px 6px -2px rgb(0 0 0 / 0.3);
 }
 
 :root.dark[data-sport='bb'] {
   --accent: var(--color-bb-orange);
   --link: var(--color-bb-orange);
+  --accent-soft: rgb(242 107 29 / 0.18);
+  /* Orange text on the tinted fill is below 4.5:1; a lighter orange keeps it readable. */
+  --on-accent-soft: #ffb27f;
+  --link-line: rgb(242 107 29 / 0.55);
+}
+
+/* The navy app bar uses the dark-mode tokens in both themes (PLAN §13.2: navy app bar,
+   mark-on-dark on it). */
+.appbar {
+  color-scheme: dark;
+  --surface: #1a2a48;
+  --sunken: #16243f;
+  --fg: var(--color-light);
+  --muted: #b4bdcc;
+  --hairline: rgb(238 241 245 / 0.16);
+  --hairline-strong: rgb(238 241 245 / 0.28);
+  --hover: rgb(238 241 245 / 0.09);
+  --accent: var(--color-vb-yellow);
+  --on-accent: var(--color-navy);
+  --accent-soft: rgb(255 199 44 / 0.16);
+  --on-accent-soft: var(--color-vb-yellow);
+  --link: var(--color-vb-yellow);
+  --link-line: rgb(255 199 44 / 0.45);
+  --ring: var(--color-vb-yellow);
+  background-color: var(--appbar);
+  color: var(--fg);
+}
+
+:root[data-sport='bb'] .appbar {
+  --accent: var(--color-bb-orange);
+  --accent-soft: rgb(242 107 29 / 0.2);
+  --on-accent-soft: #ffb27f;
+  --link: var(--color-bb-orange);
+  --ring: var(--color-bb-orange);
+}
+
+/* The hover tint as a layer on top of the background, so a highlighted row stays highlighted. */
+@utility tint-hover {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+
+/* Text links: the link colour with a light underline that firms up on hover. */
+@utility link {
+  color: var(--link);
+  text-decoration-line: underline;
+  text-decoration-color: var(--link-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  border-radius: 0.25rem;
+
+  &:hover {
+    text-decoration-color: currentColor;
+    text-decoration-thickness: 2px;
+  }
 }
 
 @layer base {

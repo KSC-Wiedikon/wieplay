@@ -180,7 +180,7 @@ function DeskLayout({
           <p className="text-sm text-muted">
             <span className="tabular-nums">{formatDate(video.recorded_on)}</span>
             {' · '}
-            <Link to={`/teams/${video.team_id}`} className="font-semibold text-link underline-offset-2 hover:underline">
+            <Link to={`/teams/${video.team_id}`} className="font-semibold link">
               {`${video.team_name} ${video.team_season}`}
             </Link>
           </p>
@@ -254,7 +254,7 @@ function Transport() {
   const duration = usePlayhead(playhead, (s) => s.duration_ms) ?? video.duration_ms
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-hairline bg-surface p-2">
+    <div className="flex flex-wrap items-center gap-2 rounded-card border border-hairline bg-surface shadow-card p-2">
       <Button variant="primary" size="icon" onClick={controller.togglePlay} aria-label={playing ? t('tagging.transport.pause') : t('tagging.transport.play')}>
         {playing ? <PauseIcon /> : <PlayIcon />}
       </Button>
@@ -404,7 +404,7 @@ function SetState() {
   const serving = serveTag?.side ?? state.serving
 
   return (
-    <section aria-label={t('tagging.state.title')} className="flex flex-col gap-1 rounded-2xl border border-hairline bg-surface px-4 py-3">
+    <section aria-label={t('tagging.state.title')} className="flex flex-col gap-1 rounded-card border border-hairline bg-surface shadow-card px-4 py-3">
       <p className="flex flex-wrap items-baseline gap-x-3 text-lg font-bold tabular-nums">
         <span>{state.period ? t('tagging.setNo', { no: state.period.no }) : t('tagging.state.noSet')}</span>
         {state.period && <span className="text-2xl">{`${state.us}:${state.them}`}</span>}
@@ -431,7 +431,7 @@ function QuarterState() {
   const running = periodAt(view.periods, t_ms)
 
   return (
-    <section aria-label={t('tagging.state.title')} className="flex flex-col gap-1 rounded-2xl border border-hairline bg-surface px-4 py-3">
+    <section aria-label={t('tagging.state.title')} className="flex flex-col gap-1 rounded-card border border-hairline bg-surface shadow-card px-4 py-3">
       <p className="flex flex-wrap items-baseline gap-x-3 text-lg font-bold tabular-nums">
         <span>{running ? periodLabel(t, taxonomy.sport, running.no) : t('tagging.basketball.noQuarter')}</span>
         {state.period && <span className="text-2xl">{`${state.us}:${state.them}`}</span>}

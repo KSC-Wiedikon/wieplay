@@ -33,7 +33,7 @@ function ChannelRef({ channel }: { channel: ImportChannel }) {
   const { text, url } = channelDisplay(channel)
   if (!url) return <span className="font-mono">{text}</span>
   return (
-    <a href={url} target="_blank" rel="noreferrer noopener" className="font-mono text-link underline-offset-2 hover:underline">
+    <a href={url} target="_blank" rel="noreferrer noopener" className="font-mono link">
       {text}
     </a>
   )

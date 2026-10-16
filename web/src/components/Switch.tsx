@@ -19,7 +19,7 @@ export function Switch({ checked, onChange, label, disabled }: SwitchProps) {
       onClick={() => onChange(!checked)}
       className={cx(
         // The button is the 44px (36px sm+) hit area; the track sits inside it.
-        'group inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-xl sm:min-h-9',
+        'group inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-control sm:min-h-9',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
         'disabled:cursor-not-allowed disabled:opacity-60',
       )}

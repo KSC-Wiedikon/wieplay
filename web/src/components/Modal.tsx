@@ -71,7 +71,7 @@ function Panel({ title, onClose, children, footer, size = 'md' }: Omit<ModalProp
         tabIndex={-1}
         onKeyDown={onKeyDown}
         className={cx(
-          'flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-2xl border border-hairline bg-surface shadow-lg',
+          'flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-card border border-hairline bg-surface shadow-lg',
           sizes[size],
         )}
       >

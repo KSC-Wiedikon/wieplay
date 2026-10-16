@@ -46,7 +46,7 @@ export function RosterPanel() {
   )
 
   return (
-    <section aria-labelledby="roster-title" className="flex flex-col gap-1 rounded-2xl border border-hairline bg-surface px-4 py-3">
+    <section aria-labelledby="roster-title" className="flex flex-col gap-1 rounded-card border border-hairline bg-surface shadow-card px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <h2 id="roster-title" className="font-semibold">
           {t('tagging.roster.title')}

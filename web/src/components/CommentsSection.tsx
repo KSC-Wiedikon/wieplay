@@ -21,7 +21,7 @@ import { LoadError } from './Message'
 import { Spinner } from './Spinner'
 
 const textarea =
-  'w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+  'w-full rounded-control border border-hairline-strong bg-surface px-3 py-2 text-sm text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 
 interface CommentsSectionProps {
   videoId: string
@@ -55,7 +55,7 @@ export function CommentsSection({ videoId, meId, playhead, onSeek }: CommentsSec
       ) : sorted.length === 0 ? (
         <p className="text-sm text-muted">{t('comments.empty')}</p>
       ) : (
-        <ol className="flex flex-col divide-y divide-hairline rounded-2xl border border-hairline bg-surface" aria-label={t('comments.title')}>
+        <ol className="flex flex-col divide-y divide-hairline rounded-card border border-hairline bg-surface shadow-card" aria-label={t('comments.title')}>
           {sorted.map((comment) => (
             <CommentItem key={comment.id} comment={comment} videoId={videoId} people={everyone} onSeek={onSeek} />
           ))}
@@ -110,7 +110,7 @@ function Composer({ videoId, people, loaded, playhead }: { videoId: string; peop
 
   return (
     <form
-      className="flex flex-col gap-2 rounded-2xl border border-hairline bg-surface p-3"
+      className="flex flex-col gap-2 rounded-card border border-hairline bg-surface shadow-card p-3"
       aria-label={t('comments.new')}
       onSubmit={(e) => {
         e.preventDefault()
@@ -312,7 +312,7 @@ function CommentItem({ comment, videoId, people, onSeek }: { comment: Comment; v
             type="button"
             onClick={() => onSeek(comment.t_ms ?? 0)}
             aria-label={t('comments.goTo', { time: formatClock(comment.t_ms, { tenths: false }) })}
-            className="min-h-11 cursor-pointer rounded-lg px-1 font-mono font-semibold text-link tabular-nums underline-offset-2 hover:underline sm:min-h-0"
+            className="min-h-11 cursor-pointer rounded-lg px-1 font-mono font-semibold link tabular-nums sm:min-h-0"
           >
             {formatClock(comment.t_ms, { tenths: false })}
           </button>

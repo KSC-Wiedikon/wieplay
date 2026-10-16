@@ -130,14 +130,14 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
                       key={rally.id}
                       onActivate={() => play(rally)}
                       aria-current={current ? 'true' : undefined}
-                      className={cx(current && 'bg-sunken')}
+                      className={cx(current && 'bg-accent-soft')}
                     >
                       <Td tight>
                         <button
                           type="button"
                           onClick={() => play(rally)}
                           className={cx(
-                            'min-h-11 cursor-pointer rounded-lg px-1 text-left font-semibold text-link tabular-nums underline-offset-2 hover:underline sm:min-h-9',
+                            'min-h-11 cursor-pointer rounded-lg px-1 text-left font-semibold link tabular-nums sm:min-h-9',
                             current && 'text-fg',
                           )}
                           aria-label={t('tagging.condensed.playRally', { n })}
