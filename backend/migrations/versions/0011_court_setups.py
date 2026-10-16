@@ -5,8 +5,8 @@ with its own landmarks and homography; NULL: one setup for the whole video, the 
 fields), `checked` (whether a person set or checked it; false: set by the court job) and
 `at_ms` (where in the video the coach set it up). Rows saved before are checked.
 
-Revision ID: 0009
-Revises: 0008
+Revision ID: 0011
+Revises: 0008 (after 0009/0010 of the actions and players branches: relink when they merge)
 Create Date: 2026-10-17 01:00:00.000000
 """
 
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0009"
+revision: str = "0011"
 down_revision: str | None = "0008"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
