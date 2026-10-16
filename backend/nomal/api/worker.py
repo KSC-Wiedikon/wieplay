@@ -199,7 +199,7 @@ def _check_camera_day(db: Session, bridge: BridgeClient | None, video: Video) ->
         return
     team = db.get(WdTeam, video.team_id)
     assert team is not None
-    check = check_filming(db, bridge, team, video.kind, day, fresh=True)
+    check = check_filming(db, bridge, team, day, fresh=True)
     codes = [b.code for b in check.blockers]
     if check.allowed:
         audit(db, None, "camera_day_differs", "video", str(video.id), camera_day=day.isoformat())

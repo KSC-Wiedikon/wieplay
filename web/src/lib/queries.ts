@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError, UnauthorizedError } from './api'
 import { keys } from './queryClient'
 import { useToast } from './toast'
-import type { AdminTeam, Job, Policy, PolicyUpdate, Video, VideoKind, Worker } from './types'
+import type { AdminTeam, Job, Policy, PolicyUpdate, Video, Worker } from './types'
 
 export function useMe() {
   return useQuery({ queryKey: keys.me, queryFn: ({ signal }) => api.me(signal), staleTime: 5 * 60_000 })
@@ -19,10 +19,6 @@ export function useTeam(id: number) {
 
 export function useTeamGames(id: number) {
   return useQuery({ queryKey: keys.teamGames(id), queryFn: ({ signal }) => api.teamGames(id, signal) })
-}
-
-export function useTeamTrainings(id: number) {
-  return useQuery({ queryKey: keys.teamTrainings(id), queryFn: ({ signal }) => api.teamTrainings(id, signal) })
 }
 
 export function useAdminTeams() {
@@ -129,10 +125,10 @@ export function useVideo(id: string) {
   })
 }
 
-export function useFilming(teamId: number, kind: VideoKind, on: string | null) {
+export function useFilming(teamId: number, on: string | null) {
   return useQuery({
-    queryKey: keys.teamFilming(teamId, kind, on ?? ''),
-    queryFn: ({ signal }) => api.filming(teamId, kind, on ?? '', signal),
+    queryKey: keys.teamFilming(teamId, on ?? ''),
+    queryFn: ({ signal }) => api.filming(teamId, on ?? '', signal),
     enabled: on !== null,
     staleTime: 0,
   })

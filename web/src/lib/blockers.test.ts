@@ -12,8 +12,8 @@ describe('blockerMessage', () => {
     expect(blockerMessage(en, b('policy_matches', null, 'U23 opponents may be under 18'))).toBe(
       'Matches are not filmed for this team. Reason: U23 opponents may be under 18',
     )
-    expect(blockerMessage(en, b('policy_trainings'))).toBe('Trainings are not filmed for this team.')
-    expect(blockerMessage(en, b('policy_trainings', null, '  '))).toBe('Trainings are not filmed for this team.')
+    expect(blockerMessage(en, b('policy_matches'))).toBe('Matches are not filmed for this team.')
+    expect(blockerMessage(en, b('policy_matches', null, '  '))).toBe('Matches are not filmed for this team.')
   })
 
   it('counts people, with singular and plural', () => {

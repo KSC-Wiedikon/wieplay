@@ -73,14 +73,12 @@ function PolicyCard({ policy }: { policy: Policy }) {
   const id = useId()
   const save = useSetPolicy()
   const [matches, setMatches] = useState(policy.matches_allowed)
-  const [trainings, setTrainings] = useState(policy.trainings_allowed)
   const [reason, setReason] = useState(policy.reason ?? '')
-  const dirty =
-    matches !== policy.matches_allowed || trainings !== policy.trainings_allowed || reason.trim() !== (policy.reason ?? '')
+  const dirty = matches !== policy.matches_allowed || reason.trim() !== (policy.reason ?? '')
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    save.mutate({ policy, update: { matches_allowed: matches, trainings_allowed: trainings, reason: reason.trim() || null } })
+    save.mutate({ policy, update: { matches_allowed: matches, reason: reason.trim() || null } })
   }
 
   return (
@@ -96,14 +94,6 @@ function PolicyCard({ policy }: { policy: Policy }) {
             checked={matches}
             label={`${policy.label}: ${t('admin.policies.matches')}`}
             onChange={setMatches}
-          />
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm">{t('admin.policies.trainings')}</span>
-          <Switch
-            checked={trainings}
-            label={`${policy.label}: ${t('admin.policies.trainings')}`}
-            onChange={setTrainings}
           />
         </div>
         <Field label={t('admin.policies.reason')} hint={t('admin.policies.reasonHint')} htmlFor={`${id}-reason`}>

@@ -16,20 +16,21 @@ import { api, ApiError, blockersOf, ForbiddenError, NotFoundError } from '../lib
 import { cx } from '../lib/cx'
 import { addDaysIso, formatBytes, formatDate, formatDateTime, formatDuration, todayIso } from '../lib/format'
 import { opponentOf } from '../lib/games'
-import { useFilming, useInbox, useTeam, useTeamGames, useTeamTrainings, useVideoConfig } from '../lib/queries'
+import { useFilming, useInbox, useTeam, useTeamGames, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
 import { useToast } from '../lib/toast'
-import type { InboxFile, TeamDetail, Video, VideoConfig, VideoCreate, VideoKind } from '../lib/types'
+import type { InboxFile, TeamDetail, Video, VideoConfig, VideoCreate } from '../lib/types'
 import { matchFiles, sortByName, useUpload, type FilePair } from '../lib/upload'
 import { inboxFolder, inTeamFolder, isVideoFileName, VIDEO_ACCEPT, VIDEO_EXTENSIONS } from '../lib/video'
 import { NotFoundPage } from './NotFoundPage'
 
-/** How far back a game or training can be picked. */
+/** How far back a game can be picked. */
 const RECENT_DAYS = 60
 /** The filming check answers for days up to 400 days back. */
 const OLDEST_DAYS = 400
-const OTHER_DAY = 'other'
+/** A match that is not in Wiedisync (friendly, tournament, cup): a date and a title instead of a game. */
+const OTHER_MATCH = 'other'
 
 type Source = 'device' | 'inbox'
 
@@ -95,9 +96,9 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const from = addDaysIso(today, -RECENT_DAYS)
   const oldest = addDaysIso(today, -OLDEST_DAYS)
 
-  const [kind, setKind] = useState<VideoKind>('match')
-  const [event, setEvent] = useState('')
+  const [match, setMatch] = useState('')
   const [otherDate, setOtherDate] = useState(today)
+  const [otherTitle, setOtherTitle] = useState('')
   const [source, setSource] = useState<Source>('device')
   const [files, setFiles] = useState<File[]>([])
   const [inboxIds, setInboxIds] = useState<ReadonlySet<string>>(new Set())
@@ -105,12 +106,11 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const [pairs, setPairs] = useState<FilePair[]>([])
 
   const games = useTeamGames(team.id)
-  const trainings = useTeamTrainings(team.id)
   const inbox = useInbox(true)
 
-  const choices = useMemo<Choice[]>(() => {
-    if (kind === 'match') {
-      return (games.data ?? [])
+  const choices = useMemo<Choice[]>(
+    () =>
+      (games.data ?? [])
         .filter((g) => g.date && g.date >= from && g.date <= today)
         .sort((a, b) => b.date.localeCompare(a.date))
         .map((g) => ({
@@ -118,26 +118,15 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
           label: `${formatDate(g.date)} · ${opponentOf(g)}`,
           date: g.date,
           defaultTitle: `${g.home_name} – ${g.away_name}`,
-        }))
-    }
-    return (trainings.data ?? [])
-      .filter((tr) => tr.date && tr.date >= from && tr.date <= today)
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .map((tr) => ({
-        value: String(tr.id),
-        label: [formatDate(tr.date), tr.hall_name].filter(Boolean).join(' · '),
-        date: tr.date,
-        defaultTitle: `${t('video.kind.training')} ${formatDate(tr.date)}`,
-      }))
-  }, [kind, games.data, trainings.data, from, today, t])
+        })),
+    [games.data, from, today],
+  )
 
-  const choice = choices.find((c) => c.value === event)
+  const other = match === OTHER_MATCH
+  const choice = choices.find((c) => c.value === match)
   const otherDateOk = /^\d{4}-\d{2}-\d{2}$/.test(otherDate) && otherDate >= oldest && otherDate <= today
-  const on =
-    kind === 'training' && event === OTHER_DAY ? (otherDateOk ? otherDate : null) : (choice?.date ?? null)
-  const defaultTitle =
-    choice?.defaultTitle ?? (on ? `${t('video.kind.training')} ${formatDate(on)}` : '')
-  const filming = useFilming(team.id, kind, on)
+  const on = other ? (otherDateOk ? otherDate : null) : (choice?.date ?? null)
+  const filming = useFilming(team.id, on)
 
   // The inbox has one folder per team; only this team's files can go into its videos.
   const folder = inboxFolder(team)
@@ -195,6 +184,7 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
 
   const ready =
     on !== null &&
+    (!other || otherTitle.trim() !== '') &&
     filming.data?.allowed === true &&
     (chosenSource === 'device' ? files.length > 0 && !fileError : inboxIds.size > 0) &&
     !create.isPending
@@ -202,11 +192,14 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const onStart = (formEvent: FormEvent) => {
     formEvent.preventDefault()
     if (!ready || !on) return
-    const body: VideoCreate = { kind }
-    if (title.trim()) body.title = title.trim()
-    if (kind === 'match') body.game_id = Number(event)
-    else if (event === OTHER_DAY) body.recorded_on = on
-    else body.training_id = Number(event)
+    const body: VideoCreate = {}
+    if (other) {
+      body.recorded_on = on
+      body.title = otherTitle.trim()
+    } else {
+      body.game_id = Number(match)
+      if (title.trim()) body.title = title.trim()
+    }
     if (chosenSource === 'device') body.files = sortedFiles.map((f) => ({ name: f.name, size: f.size, type: f.type }))
     else body.inbox_file_ids = pickedInbox.map((f) => f.id)
 
@@ -225,39 +218,24 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
     })
   }
 
-  const chooseKind = (next: VideoKind) => {
-    setKind(next)
-    setEvent('')
-    create.reset()
-  }
-
   return (
     <form onSubmit={onStart} className="flex flex-col gap-6">
       <Card className="flex flex-col gap-5 p-5">
-        <Segmented
-          legend={t('upload.kind')}
-          name={`${id}-kind`}
-          value={kind}
-          onChange={chooseKind}
-          options={[
-            { value: 'match', label: t('video.kind.match') },
-            { value: 'training', label: t('video.kind.training') },
-          ]}
-        />
-
-        {(kind === 'match' ? games : trainings).isPending ? (
+        {games.isPending ? (
           <Spinner />
-        ) : (kind === 'match' ? games : trainings).isError ? (
-          <LoadError onRetry={() => void (kind === 'match' ? games : trainings).refetch()} />
-        ) : kind === 'match' && choices.length === 0 ? (
-          <p className="text-sm text-muted">{t('upload.noGames')}</p>
+        ) : games.isError ? (
+          <LoadError onRetry={() => void games.refetch()} />
         ) : (
-          <Field label={kind === 'match' ? t('upload.pickGame') : t('upload.pickTraining')} htmlFor={`${id}-event`}>
+          <Field
+            label={t('upload.pickMatch')}
+            hint={choices.length === 0 ? t('upload.noGames') : undefined}
+            htmlFor={`${id}-match`}
+          >
             <Select
-              id={`${id}-event`}
-              value={event}
+              id={`${id}-match`}
+              value={match}
               onChange={(e) => {
-                setEvent(e.target.value)
+                setMatch(e.target.value)
                 create.reset()
               }}
             >
@@ -269,29 +247,43 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
                   {c.label}
                 </option>
               ))}
-              {kind === 'training' && <option value={OTHER_DAY}>{t('upload.otherDay')}</option>}
+              <option value={OTHER_MATCH}>{t('upload.otherMatch')}</option>
             </Select>
           </Field>
         )}
 
-        {kind === 'training' && event === OTHER_DAY && (
-          <Field label={t('upload.date')} htmlFor={`${id}-date`}>
-            <TextInput
-              id={`${id}-date`}
-              type="date"
-              min={oldest}
-              max={today}
-              value={otherDate}
-              aria-invalid={otherDateOk ? undefined : true}
-              onChange={(e) => setOtherDate(e.target.value)}
-              className="sm:max-w-48"
-            />
-          </Field>
-        )}
-        {kind === 'training' && event === OTHER_DAY && !otherDateOk && (
-          <p role="alert" className="text-sm text-danger">
-            {t('upload.dateRange')}
-          </p>
+        {other && (
+          <>
+            <Field label={t('upload.date')} htmlFor={`${id}-date`}>
+              <TextInput
+                id={`${id}-date`}
+                type="date"
+                min={oldest}
+                max={today}
+                value={otherDate}
+                aria-invalid={otherDateOk ? undefined : true}
+                onChange={(e) => setOtherDate(e.target.value)}
+                className="sm:max-w-48"
+              />
+            </Field>
+            {!otherDateOk && (
+              <p role="alert" className="text-sm text-danger">
+                {t('upload.dateRange')}
+              </p>
+            )}
+            <Field label={t('upload.matchTitle')} hint={t('upload.matchTitleHint')} htmlFor={`${id}-match-title`}>
+              <TextInput
+                id={`${id}-match-title`}
+                value={otherTitle}
+                required
+                maxLength={200}
+                onChange={(e) => {
+                  setOtherTitle(e.target.value)
+                  create.reset()
+                }}
+              />
+            </Field>
+          </>
         )}
 
         {on && <FilmingResult query={filming} on={on} />}
@@ -341,15 +333,17 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
           </Card>
 
           <Card className="flex flex-col gap-4 p-5">
-            <Field label={t('upload.titleLabel')} htmlFor={`${id}-title`}>
-              <TextInput
-                id={`${id}-title`}
-                value={title}
-                maxLength={200}
-                placeholder={defaultTitle}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </Field>
+            {!other && (
+              <Field label={t('upload.titleLabel')} htmlFor={`${id}-title`}>
+                <TextInput
+                  id={`${id}-title`}
+                  value={title}
+                  maxLength={200}
+                  placeholder={choice?.defaultTitle}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </Field>
+            )}
             {create.isError && (
               <div role="alert" className="flex flex-col gap-2 text-sm">
                 {blockers ? (

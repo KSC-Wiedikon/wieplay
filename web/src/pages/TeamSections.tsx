@@ -11,7 +11,7 @@ import { BlockerList, FilmingBadge, VideoStatusBadge } from '../components/Video
 import { formatDate, formatDuration } from '../lib/format'
 import { useTeamVideos, useUpcomingFilming, useVideoConfig } from '../lib/queries'
 import type { TeamDetail, UpcomingFilming, Video } from '../lib/types'
-import { newestFirst } from '../lib/video'
+import { kindLabel, newestFirst } from '../lib/video'
 
 function SectionHead({ id, title, hint, action }: { id: string; title: string; hint?: string; action?: ReactNode }) {
   return (
@@ -116,7 +116,9 @@ function VideoTable({ videos }: { videos: Video[] }) {
               <span className="mt-0.5 block text-xs text-muted tabular-nums sm:hidden">
                 {[formatDate(video.recorded_on), formatDuration(video.duration_ms)].filter(Boolean).join(' · ')}
               </span>
-              <span className="mt-0.5 hidden text-xs text-muted sm:block">{t(`video.kind.${video.kind}`)}</span>
+              {kindLabel(t, video.kind) && (
+                <span className="mt-0.5 hidden text-xs text-muted sm:block">{kindLabel(t, video.kind)}</span>
+              )}
             </Td>
             <Td className="hidden whitespace-nowrap tabular-nums sm:table-cell">{formatDate(video.recorded_on)}</Td>
             <Td className="hidden whitespace-nowrap tabular-nums sm:table-cell">
@@ -132,7 +134,7 @@ function VideoTable({ videos }: { videos: Video[] }) {
   )
 }
 
-// Filming allowed / blocked for the next games and trainings
+// Filming allowed / blocked for the next games
 
 export function FilmingSection({ teamId }: { teamId: number }) {
   const { t } = useTranslation()
@@ -169,14 +171,13 @@ function FilmingTable({ items }: { items: UpcomingFilming[] }) {
       </THead>
       <TBody>
         {items.map((item) => (
-          <tr key={`${item.kind}-${item.id}`}>
+          <tr key={item.id}>
             <Td className="whitespace-nowrap tabular-nums">{formatDate(item.date)}</Td>
             <Td>
               <span className="mb-1 block sm:hidden">
                 <FilmingBadge allowed={item.allowed} />
               </span>
-              <span className="block font-semibold">{t(`video.kind.${item.kind}`)}</span>
-              {item.label && <span className="block text-muted">{item.label}</span>}
+              <span className="block font-semibold">{item.label}</span>
               {!item.allowed && item.blockers.length > 0 && (
                 <div className="mt-2">
                   <BlockerList blockers={item.blockers} />

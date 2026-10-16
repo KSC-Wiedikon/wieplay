@@ -7,7 +7,6 @@ import {
   formatDuration,
   formatSeconds,
   formatTime,
-  formatTimeRange,
   todayIso,
 } from './format'
 
@@ -67,18 +66,6 @@ describe('formatDateTime', () => {
 
   it('returns an empty string for missing values', () => {
     expect(formatDateTime(null)).toBe('')
-  })
-})
-
-describe('formatTimeRange', () => {
-  it('joins start and end with an en dash', () => {
-    expect(formatTimeRange('20:00', '22:00')).toBe('20:00–22:00')
-  })
-
-  it('falls back to whichever end is known', () => {
-    expect(formatTimeRange('20:00', null)).toBe('20:00')
-    expect(formatTimeRange(null, '22:00')).toBe('22:00')
-    expect(formatTimeRange(null, null)).toBe('')
   })
 })
 

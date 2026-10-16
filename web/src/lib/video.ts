@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next'
 import type { SportName, Video } from './types'
 
 /** The API decides by extension only (415 otherwise). */
@@ -38,6 +39,11 @@ export function newestFirst(videos: readonly Video[]): Video[] {
   return [...videos].sort(
     (a, b) => b.recorded_on.localeCompare(a.recorded_on) || b.created_at.localeCompare(a.created_at),
   )
+}
+
+/** "Match"; null for a kind Nomal no longer offers (training rows from before 16.10.2026). */
+export function kindLabel(t: TFunction, kind: string): string | null {
+  return kind === 'match' ? t('video.kind.match') : null
 }
 
 /** "1920×1080 · 50 fps · 1:32:10" parts that are known. */

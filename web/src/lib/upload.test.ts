@@ -36,7 +36,6 @@ function video(files: VideoFile[], status: Video['status'] = 'uploading'): Video
     sport: 'volleyball',
     kind: 'match',
     game_id: 501,
-    training_id: null,
     title: 'KSCW – Volley Näfels',
     recorded_on: '2026-10-11',
     source: 'file',
