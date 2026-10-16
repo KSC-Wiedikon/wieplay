@@ -91,6 +91,10 @@ function detailOf(body: unknown): string | null {
   if (!body || typeof body !== 'object' || !('detail' in body)) return null
   const { detail } = body
   if (typeof detail === 'string') return detail
+  // {"message": …, …more fields}: e.g. 409 "suggestions still open" with their count.
+  if (detail && typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string') {
+    return detail.message
+  }
   if (Array.isArray(detail)) {
     const first: unknown = detail[0]
     if (first && typeof first === 'object' && 'msg' in first && typeof first.msg === 'string') return first.msg

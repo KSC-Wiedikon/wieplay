@@ -447,6 +447,8 @@ export const videoDe: Messages<typeof videoEn> = {
       reviewedOn: 'Ballwechsel als geprüft markiert. Nomal lernt aus diesem Spiel.',
       reviewedOff: 'Die Ballwechsel sind nicht mehr als geprüft markiert.',
       reviewedFailed: 'Speichern nicht möglich: {{detail}}',
+      openProposals_one: 'Ein Vorschlag ist noch offen: zuerst annehmen, korrigieren oder ablehnen.',
+      openProposals_other: '{{count}} Vorschläge sind noch offen: zuerst annehmen, korrigieren oder ablehnen.',
       analyseFailed: 'Analyse konnte nicht gestartet werden: {{detail}}',
     },
     basketball: {

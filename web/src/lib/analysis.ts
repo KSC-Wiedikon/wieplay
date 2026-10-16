@@ -57,6 +57,16 @@ function withReviewed<T extends { rallies_reviewed_at?: string | null }>(value: 
  * Marks the video's rallies reviewed (or not). Shown at once on the video and in the tagging
  * data; the server retrains its rally finder with the game.
  */
+/** The server refuses "reviewed" while proposals are open: 409 {"detail": {"open_proposals": n}}. */
+export function openProposals(error: unknown): number | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null
+  const body = error.body
+  if (!body || typeof body !== 'object' || !('detail' in body)) return null
+  const detail = body.detail
+  if (!detail || typeof detail !== 'object' || !('open_proposals' in detail)) return null
+  return typeof detail.open_proposals === 'number' ? detail.open_proposals : null
+}
+
 export function useSetRalliesReviewed(videoId: string) {
   const client = useQueryClient()
   const toast = useToast()
@@ -75,7 +85,9 @@ export function useSetRalliesReviewed(videoId: string) {
       const at = context?.before ?? null
       client.setQueryData<Video>(keys.video(videoId), (v) => withReviewed(v, at))
       client.setQueryData<Tagging>(keys.tagging(videoId), (b) => withReviewed(b, at))
-      toast.error(t('tagging.analysis.reviewedFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') }))
+      const open = openProposals(error)
+      if (open !== null) toast.error(t('tagging.analysis.openProposals', { count: open }))
+      else toast.error(t('tagging.analysis.reviewedFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') }))
     },
     onSuccess: (out, reviewed) => {
       if (out && 'rallies_reviewed_at' in out) {

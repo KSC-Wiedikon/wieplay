@@ -141,7 +141,7 @@ describe('ReviewController', () => {
     expect(review.getState().notice?.key).toBe('tooShort')
   })
 
-  it('M merges with the next suggestion: this one ends where that one ended, that one is rejected', async () => {
+  it('M merges with the next suggestion: this one ends where that one ended, that one is merged into it', async () => {
     const { review, press, sent, segment } = await setup()
     press('m')
     expect(segment('s1')).toMatchObject({ start_ms: 10_000, end_ms: 38_000, review: 'corrected' })
@@ -151,7 +151,7 @@ describe('ReviewController', () => {
     expect(body).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 's1', end_ms: 38_000, review: 'corrected' }),
-        expect.objectContaining({ id: 's2', review: 'rejected', deleted: true }),
+        expect.objectContaining({ id: 's2', review: 'merged', merged_into: 's1', deleted: true }),
       ]),
     )
     expect(body).toHaveLength(2)

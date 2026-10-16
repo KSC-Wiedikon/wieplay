@@ -295,7 +295,8 @@ export interface ImportChannel {
 // Tagging (M2, docs/PLAN.md §6.5–§6.7, §9).
 
 export type Side = 'us' | 'them'
-export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
+/** merged: a proposal folded into another one (merged_into); neither a rally nor a negative. */
+export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'merged'
 export type TimePrecision = 'live' | 'adjusted' | 'frame'
 export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
 
@@ -459,6 +460,8 @@ export interface SegmentIn extends ChangeBase {
   end_ms: number
   won_by?: Side | null
   review?: Review
+  /** With review "merged": the segment it was folded into. */
+  merged_into?: string | null
 }
 
 export interface PeriodIn extends ChangeBase {

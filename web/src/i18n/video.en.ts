@@ -446,6 +446,8 @@ export const videoEn = {
       reviewedOn: 'Rallies marked reviewed. Nomal learns from this game.',
       reviewedOff: 'The rallies are no longer marked reviewed.',
       reviewedFailed: "Couldn't save: {{detail}}",
+      openProposals_one: '{{count}} suggestion is still open: accept, correct or reject it first.',
+      openProposals_other: '{{count}} suggestions are still open: accept, correct or reject them first.',
       analyseFailed: "Couldn't start the analysis: {{detail}}",
     },
     // Basketball (M4): quarters instead of sets, a running score from the made shots, no

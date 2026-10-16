@@ -247,7 +247,7 @@ describe('TagPage, suggestions', () => {
     expect(within(panel()).getByText('Merged with the next suggestion.')).toBeInTheDocument()
     await waitFor(() => expect(server.sent().get(S2)).toBeDefined(), { timeout: 3000 })
     expect(server.sent().get(S1)).toMatchObject({ start_ms: 10_250, end_ms: 38_000, review: 'corrected' })
-    expect(server.sent().get(S2)).toMatchObject({ review: 'rejected', deleted: true })
+    expect(server.sent().get(S2)).toMatchObject({ review: 'merged', merged_into: S1, deleted: true })
   })
 
   it('still asks for a bigger screen on a phone when there is nothing to review', async () => {

@@ -273,7 +273,8 @@ export class ReviewController {
     else this.tag.seek(Math.max(start_ms - LOOP_PRE_MS, value - END_PREVIEW_MS))
   }
 
-  /** M: this item takes in the next one (to its end); the next one is rejected as a rally of its own. */
+  /** M: this item takes in the next one (to its end); the next one is folded in ("merged": not a
+   * rally of its own, but no "not a rally" either for training). */
   merge = (): void => {
     const segment = this.current()
     if (!segment) {
@@ -286,7 +287,7 @@ export class ReviewController {
       return
     }
     const end_ms = Math.max(segment.end_ms, next.end_ms)
-    this.commit([segmentChange(segment, { end_ms }), rejection(next)], without(this.state.pending, next.id))
+    this.commit([segmentChange(segment, { end_ms }), mergedInto(next, segment)], without(this.state.pending, next.id))
     this.set({ notice: this.notify('merged', { time: segment.start_ms }) })
     this.go(this.current())
   }
@@ -467,6 +468,15 @@ function segmentChange(segment: Segment, patch: Partial<SegmentIn>): Change {
   let review: Review = patch.review ?? segment.review
   if (isModel(segment) && moved) review = 'corrected'
   return { kind: 'segment', payload: { ...segmentToIn(segment), ...patch, review } }
+}
+
+/** Folded into `into` by M: a proposal becomes "merged" (soft-deleted, kept apart from rejections). */
+function mergedInto(segment: Segment, into: Segment): Change {
+  if (!isModel(segment)) return rejection(segment)
+  return {
+    kind: 'segment',
+    payload: { ...segmentToIn(segment), review: 'merged', merged_into: into.id, deleted: true },
+  }
 }
 
 /** Not a rally: a proposal is rejected and deleted (soft, the server keeps it); anything else is deleted. */
