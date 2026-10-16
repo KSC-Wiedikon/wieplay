@@ -472,6 +472,18 @@ class Period(Base):
     first_serve: Mapped[str | None] = mapped_column(String(8))  # us | them
     our_court_side_at_start: Mapped[str | None] = mapped_column(String(8))  # near | far
     side_switch_at_score: Mapped[int | None] = mapped_column(Integer)
+    # Our setter's zone (1-6) at the set's first serve: the rotation stats walk from it.
+    start_rotation: Mapped[int | None] = mapped_column(Integer)
+    # The automatic scoring's guesses (PLAN §10.3), next to the coach's first_serve and
+    # our_court_side_at_start: who served first, our side at the start; how sure a set the
+    # model proposed is, and the run that proposed or scored it.
+    model_first_serve: Mapped[str | None] = mapped_column(String(8))
+    model_court_side: Mapped[str | None] = mapped_column(String(8))
+    confidence: Mapped[float | None] = mapped_column(Float)
+    model_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    # Points the model thinks were played after the set's last rally without a rally.
+    model_missed_us: Mapped[int | None] = mapped_column(Integer)
+    model_missed_them: Mapped[int | None] = mapped_column(Integer)
     final_us: Mapped[int | None] = mapped_column(Integer)  # computed from the rallies
     final_them: Mapped[int | None] = mapped_column(Integer)
     source: Mapped[str] = mapped_column(String(16), default="manual")
@@ -501,14 +513,29 @@ class Segment(Base):
     label: Mapped[str | None] = mapped_column(String(80))
     start_ms: Mapped[int] = mapped_column(BigInteger)
     end_ms: Mapped[int] = mapped_column(BigInteger)
+    # Who served: derived from the coach's facts only (a serve tag, the serve called in review,
+    # the previous rally's winner, the set's first server).
     serving: Mapped[str | None] = mapped_column(String(8))
+    serving_manual: Mapped[str | None] = mapped_column(String(8))  # called by a coach
+    won_by: Mapped[str | None] = mapped_column(String(8))  # the coach's
+    # The automatic scoring (PLAN §10.3), next to the coach's, never in its place: where the
+    # server stood (near: the camera's end) and how sure that is; the model's server and
+    # winner; how sure the winner is, whether to check it and why.
     serving_court: Mapped[str | None] = mapped_column(String(8))
-    won_by: Mapped[str | None] = mapped_column(String(8))
+    serve_confidence: Mapped[float | None] = mapped_column(Float)
+    model_serving: Mapped[str | None] = mapped_column(String(8))
+    model_won_by: Mapped[str | None] = mapped_column(String(8))
+    # Points the model thinks were played right before this rally without one of their own
+    # (a rally the finder missed): the score line counts them.
+    model_missed_us: Mapped[int | None] = mapped_column(Integer)
+    model_missed_them: Mapped[int | None] = mapped_column(Integer)
+    # The score line: the coach's winners, the model's where the coach has none ("model").
     score_us_after: Mapped[int | None] = mapped_column(Integer)
     score_them_after: Mapped[int | None] = mapped_column(Integer)
-    score_source: Mapped[str | None] = mapped_column(String(16))
+    score_source: Mapped[str | None] = mapped_column(String(16))  # tags | model
     score_confidence: Mapped[float | None] = mapped_column(Float)
     score_conflict: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    score_note: Mapped[str | None] = mapped_column(String(16))
     source: Mapped[str] = mapped_column(String(16), default="manual")
     import_system: Mapped[str | None] = mapped_column(String(32))
     import_ref: Mapped[str | None] = mapped_column(String(128))
@@ -728,7 +755,7 @@ class ModelRun(Base):
     __tablename__ = "model_run"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    kind: Mapped[str] = mapped_column(String(32), index=True)  # analyse | train_rallies
+    kind: Mapped[str] = mapped_column(String(32), index=True)  # analyse | train_rallies | score
     job_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
     video_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("video.id", ondelete="CASCADE"), index=True
@@ -757,7 +784,7 @@ class AnalysisArtifact(Base):
     model_run_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("model_run.id", ondelete="CASCADE"), index=True
     )
-    kind: Mapped[str] = mapped_column(String(32))  # features | rally_model
+    kind: Mapped[str] = mapped_column(String(32))  # features | rally_model | serve_model
     nas_path: Mapped[str] = mapped_column(String(1024))  # relative to the analysis root
     format: Mapped[str] = mapped_column(String(16))  # npz | pickle
     schema_version: Mapped[int] = mapped_column(Integer, default=1)
@@ -765,3 +792,28 @@ class AnalysisArtifact(Base):
     bytes: Mapped[int] = mapped_column(BigInteger)
     stats: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnalysisTrack(Base):
+    """A small per-video series the API scores with (nomal/ml/tracks.py): the serve evidence
+    every 0.5 s, the activity every second. A few tens of KB, not per-frame data: the API has
+    no NAS, so it keeps what it needs to score rallies a coach moved or added. The newest of a
+    kind counts."""
+
+    __tablename__ = "analysis_track"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    video_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("video.id", ondelete="CASCADE"))
+    model_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("model_run.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))  # serve | activity
+    step_ms: Mapped[int] = mapped_column(Integer)
+    finder: Mapped[str | None] = mapped_column(String(16))  # serve: v0 | v1
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)  # serve v1: its training
+    channels: Mapped[dict[str, str]] = mapped_column(JSONB)  # name: base64(zlib(bytes))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+Index("ix_analysis_track_video_kind", AnalysisTrack.video_id, AnalysisTrack.kind,
+      AnalysisTrack.created_at)  # fmt: skip

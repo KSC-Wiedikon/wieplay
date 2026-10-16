@@ -17,15 +17,16 @@ from pathlib import Path
 from typing import Any
 
 from nomal import __version__
-from nomal.ml import ball, rallies
+from nomal.ml import ball, rallies, serve, tracks
 from nomal.ml.extract import extract, lower_thread_priority, summary
-from nomal.ml.features import HEIGHT, SCHEMA_VERSION, WIDTH, Signals
+from nomal.ml.features import HEIGHT, SCHEMA_VERSION, WIDTH, Signals, ball_tracks
 from nomal.worker import ffmpeg
 from nomal.worker.handlers import Context, PermanentError, inside, raw_inputs
 
 log = logging.getLogger(__name__)
 SIGNALS_MODEL = f"nomal-signals/{ball.MODEL_NAME}"
 RALLY_MODEL = "rallies-v1-hgb"
+SERVE_MODEL = "serve-v1-hgb"
 
 
 def code_version() -> str:
@@ -117,6 +118,46 @@ def find_rallies(
     return rallies.find_v0(sig), "v0", None
 
 
+def serve_finder(
+    model: dict[str, Any] | None, root: Path
+) -> tuple[serve.ServeModel | None, str, str | None]:
+    """The current serve finder: the accepted v1 model when there is one and it loads, else
+    the rule (v0)."""
+    if model:
+        try:
+            v1 = serve.ServeModel.load(inside(root, root / model["nas_path"]), model["sha256"])
+            return v1, "v1", str(model["model_run_id"])
+        except (OSError, ValueError, KeyError, PermanentError) as exc:
+            log.warning("serve model unusable (%s); using the rule", exc)
+    return None, "v0", None
+
+
+def series(
+    sig: Signals,
+    finder: tuple[serve.ServeModel | None, str, str | None],
+    kinds: tuple[str, ...] = ("serve", "activity"),
+) -> dict[str, Any]:
+    """The small series the API scores with (nomal/ml/tracks.py)."""
+    trk = ball_tracks(sig)
+    out: dict[str, Any] = {}
+    if "serve" in kinds:
+        model, name, run_id = finder
+        data = serve.serve_track(sig, model, serve.evidence(sig, trk))
+        out["serve"] = {
+            "step_ms": tracks.SERVE_STEP_MS,
+            "finder": name,
+            "model_run_id": run_id,
+            "channels": {"p_near": tracks.encode(data)},
+        }
+    if "activity" in kinds:
+        act = serve.activity_track(sig, trk)
+        out["activity"] = {
+            "step_ms": tracks.ACTIVITY_STEP_MS,
+            "channels": {name: tracks.encode(data) for name, data in act.items()},
+        }
+    return out
+
+
 def analyse(ctx: Context) -> dict[str, Any]:
     """One video: decode the NAS originals once, find the ball in every frame, the motion
     and the whistles; store the signals; find the rallies with the current finder."""
@@ -124,7 +165,8 @@ def analyse(ctx: Context) -> dict[str, Any]:
     params = ctx.job.params
     root, out = _out_dir(ctx)
     inputs = [Path(p) for p in raw_inputs(ctx)]
-    current = ctx.api.inputs(ctx.job.id).get("rally_model")
+    found_inputs = ctx.api.inputs(ctx.job.id)
+    current = found_inputs.get("rally_model")
     settings = ctx.settings
     sig, timing = extract(
         inputs,
@@ -144,6 +186,7 @@ def analyse(ctx: Context) -> dict[str, Any]:
     _write(target, signals=sig)
     ctx.report(0.99, "finding rallies")
     found, finder, model_run = find_rallies(sig, current, root)
+    found_series = series(sig, serve_finder(found_inputs.get("serve_model"), root))
     return {
         "artifact": _artifact(root, target, "npz", summary(sig)),
         "model": {
@@ -159,6 +202,7 @@ def analyse(ctx: Context) -> dict[str, Any]:
         },
         "timing": timing,
         "rallies": {"finder": finder, "model_run_id": model_run, "proposals": _proposals(found)},
+        "tracks": found_series,
     }
 
 
@@ -173,6 +217,8 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
     found = ctx.api.inputs(ctx.job.id)
     threads = ctx.settings.analysis_threads
     videos: list[rallies.TrainVideo] = []
+    serve_videos: list[serve.ServeVideo] = []
+    loaded: dict[str, Signals] = {}
     dataset: list[dict[str, Any]] = []
     for n, entry in enumerate(found.get("train", [])):
         ctx.report(0.1 * n / max(len(found["train"]), 1), "loading reviewed games")
@@ -183,9 +229,12 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
             continue
         spans = [(int(s), int(e)) for s, e in entry["rallies"]]
         videos.append(rallies.TrainVideo(entry["video_id"], sig, spans))
+        serves = [(int(t), bool(near)) for t, near in entry.get("serves", [])]
+        serve_videos.append(serve.ServeVideo(entry["video_id"], serve.evidence(sig), serves))
+        loaded[entry["video_id"]] = sig
         dataset.append(
             {"video_id": entry["video_id"], "features_sha256": entry["features"]["sha256"],
-             "rallies": len(spans)}
+             "rallies": len(spans), "serves": len(serves)}
         )  # fmt: skip
     if ctx.cancel.is_set():
         raise ffmpeg.Cancelled()
@@ -208,22 +257,54 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
         artifact = _artifact(
             root, target, "pickle", {"games": len(videos), "features": len(model.names)}
         )
+    ctx.report(0.78, "the serve model")
+    serve_eval = serve.cross_validate(serve_videos, threads=threads)
+    serve_accepted = bool(serve_eval["v1_better"])
+    serve_artifact = None
+    serve_model = serve.fit(serve_videos, threads=threads) if serve_accepted else None
+    if serve_model is None:
+        serve_accepted = False
+    else:
+        target = out / f"serve-v1-{ctx.job.id[:8]}.pkl"
+        _write(target, data=serve_model.dumps())
+        serve_artifact = _artifact(root, target, "pickle", {"games": len(serve_videos)})
+    finder = (
+        (serve_model, "v1", None)
+        if serve_model is not None
+        else serve_finder(found.get("serve_model"), root)
+    )
+
     predictions: dict[str, Any] = {}
+    new_series: dict[str, Any] = {}
     others = found.get("others", [])
-    if accepted and model is not None:
-        for n, entry in enumerate(others):
-            if ctx.cancel.is_set():
-                raise ffmpeg.Cancelled()
-            ctx.report(0.8 + 0.19 * n / max(len(others), 1), "proposing rallies")
+    everyone = [*found.get("train", []), *others, *found.get("skipped", [])]
+    for n, entry in enumerate(everyone):
+        if ctx.cancel.is_set():
+            raise ffmpeg.Cancelled()
+        # Every game gets the new serve model's track; the others what they miss.
+        kinds = tuple(
+            k for k in ("serve", "activity")
+            if (k == "serve" and serve_model is not None) or k not in entry.get("tracks", [])
+        )  # fmt: skip
+        propose = accepted and model is not None and entry in others
+        if not kinds and not propose:
+            continue
+        ctx.report(0.8 + 0.19 * n / max(len(everyone), 1), "proposing rallies and serves")
+        sig_found = loaded.get(entry["video_id"])
+        if sig_found is None:
             try:
-                sig = load_signals(root, entry["features"])
+                sig_found = load_signals(root, entry["features"])
             except (OSError, ValueError, PermanentError) as exc:
                 log.warning("skipping %s: %s", entry["video_id"], exc)
                 continue
+        if propose:
+            assert model is not None
             predictions[entry["video_id"]] = {
                 "finder": "v1",
-                "proposals": _proposals(model.predict(sig)),
+                "proposals": _proposals(model.predict(sig_found)),
             }
+        if kinds:
+            new_series[entry["video_id"]] = series(sig_found, finder, kinds)
     return {
         "model": {
             "name": RALLY_MODEL,
@@ -233,6 +314,7 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
                 "v0": rallies.V0Params().as_dict(),
                 "sklearn": sklearn.__version__,
                 "features": model.names if model else [],
+                "serve": {"name": SERVE_MODEL, "features": serve.FEATURES},
             },
         },
         "artifact": artifact,
@@ -241,9 +323,16 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
             "wall_s": round(time.perf_counter() - started, 1),
             "games": len(videos),
             "proposed_for": len(predictions),
+            "series_for": len(new_series),
             "threads": threads,
         },
         "evaluation": {"summary": evaluation["summary"], "videos": evaluation["videos"]},
         "dataset": dataset,
         "predictions": predictions,
+        "serve": {
+            "accepted": serve_accepted,
+            "artifact": serve_artifact,
+            "evaluation": {"summary": serve_eval["summary"], "videos": serve_eval["videos"]},
+        },
+        "tracks": new_series,
     }

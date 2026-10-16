@@ -26,9 +26,18 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
-from nomal.core import jobs, pipeline, tagging
-from nomal.core.models import AnalysisArtifact, Job, ModelRun, Segment, Video, WdTeam
+from nomal.core import jobs, pipeline, scoring, tagging
+from nomal.core.models import (
+    AnalysisArtifact,
+    AnalysisTrack,
+    Job,
+    ModelRun,
+    Segment,
+    Video,
+    WdTeam,
+)
 from nomal.ml import metrics
+from nomal.ml import tracks as track_format
 
 ANALYSE_CAPS = ("analyse", "nas")
 TRAIN_CAPS = ("analyse", "nas")
@@ -212,6 +221,35 @@ def current_rally_model(db: Session) -> tuple[ModelRun, AnalysisArtifact] | None
     return None
 
 
+def current_serve_model(db: Session) -> tuple[ModelRun, AnalysisArtifact] | None:
+    """The newest training whose serve model beat the serve rule (v0) on held-out games."""
+    runs = db.scalars(
+        select(ModelRun)
+        .where(
+            ModelRun.kind == "train_rallies",
+            ModelRun.metrics["serve"]["accepted"].as_boolean(),
+        )
+        .order_by(ModelRun.created_at.desc())
+    )
+    for run in runs:
+        artifact = db.scalars(
+            select(AnalysisArtifact).where(
+                AnalysisArtifact.model_run_id == run.id, AnalysisArtifact.kind == "serve_model"
+            )
+        ).first()
+        if artifact is not None:
+            return run, artifact
+    return None
+
+
+def _serve_model_out(db: Session) -> dict[str, Any] | None:
+    found = current_serve_model(db)
+    if found is None:
+        return None
+    run, artifact = found
+    return {"model_run_id": str(run.id), **_artifact_out(artifact)}
+
+
 def latest_training(db: Session) -> ModelRun | None:
     return db.scalars(
         select(ModelRun)
@@ -244,11 +282,18 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     was queued): the current rally model; for a training, the reviewed games with their
     rallies and the other analysed games to propose rallies for."""
     if job.kind == "analyse":
-        return {"rally_model": _rally_model_out(db)}
+        return {"rally_model": _rally_model_out(db), "serve_model": _serve_model_out(db)}
     if job.kind != "train_rallies":
         raise ValueError(f"{job.kind} has no inputs")
     videos = _analysable_videos(db)
     features = latest_features(db, [v.id for v in videos])
+    have_tracks: dict[uuid.UUID, set[str]] = {}
+    for video_id, kind in db.execute(
+        select(AnalysisTrack.video_id, AnalysisTrack.kind)
+        .where(AnalysisTrack.video_id.in_([v.id for v in videos]))
+        .distinct()
+    ):
+        have_tracks.setdefault(video_id, set()).add(kind)
     train: list[dict[str, Any]] = []
     others: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -256,17 +301,29 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         artifact = features.get(video.id)
         if artifact is None:
             continue
-        entry = {"video_id": str(video.id), "features": _artifact_out(artifact)}
+        entry: dict[str, Any] = {
+            "video_id": str(video.id),
+            "features": _artifact_out(artifact),
+            # Series the API already has for it (the worker adds what is missing).
+            "tracks": sorted(have_tracks.get(video.id, set())),
+        }
         rallies = human_rallies(db, video.id) if video.rallies_reviewed_at else []
         if rallies and open_proposals(db, video.id):
             # Reopened after "done": not complete now, so no labels from it until it is.
-            skipped.append({"video_id": str(video.id), "reason": "open proposals"})
+            skipped.append({**entry, "reason": "open proposals"})
         elif rallies:
-            train.append({**entry, "rallies": [list(r) for r in rallies]})
+            train.append(
+                {
+                    **entry,
+                    "rallies": [list(r) for r in rallies],
+                    "serves": scoring.serve_labels(db, video),
+                }
+            )
         else:
             others.append(entry)
     return {
         "rally_model": _rally_model_out(db),
+        "serve_model": _serve_model_out(db),
         "train": train,
         "others": others,
         "skipped": skipped,
@@ -310,11 +367,54 @@ class ModelIn(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+MAX_TRACK_TEXT = 512 * 1024  # base64 of a compressed channel; a 2 h match is ~20 KB
+
+
+class TrackIn(BaseModel):
+    """One of the small series of a video (nomal/ml/tracks.py)."""
+
+    step_ms: int = Field(ge=100, le=10_000)
+    channels: dict[str, str] = Field(max_length=8)
+    finder: Literal["v0", "v1"] | None = None  # serve: the rule or the trained model
+    model_run_id: uuid.UUID | None = None  # serve v1: its training
+
+    @model_validator(mode="after")
+    def _channels(self) -> TrackIn:
+        for name, text in self.channels.items():
+            if not re.fullmatch(r"[a-z_]{1,16}", name) or len(text) > MAX_TRACK_TEXT:
+                raise ValueError("bad track channel")
+            track_format.decode(text)  # raises on anything that is not one
+        return self
+
+
+class TracksIn(BaseModel):
+    serve: TrackIn | None = None
+    activity: TrackIn | None = None
+
+    @model_validator(mode="after")
+    def _kinds(self) -> TracksIn:
+        if self.serve is not None and set(self.serve.channels) != set(track_format.SERVE_CHANNELS):
+            raise ValueError("a serve track has the channel p_near")
+        if self.activity is not None and set(self.activity.channels) != set(
+            track_format.ACTIVITY_CHANNELS
+        ):
+            raise ValueError("an activity track has the channels ball, court, side, whistle")
+        return self
+
+
 class AnalyseResult(BaseModel):
     artifact: ArtifactIn
     model: ModelIn
     timing: dict[str, Any] = Field(default_factory=dict)
     rallies: RalliesIn
+    tracks: TracksIn | None = None
+
+
+class ServeTrainIn(BaseModel):
+    accepted: bool  # v1 beat the rule on held-out games
+    artifact: ArtifactIn | None = None  # the v1 model, when one was trained
+    # summary {v0, v1 mean accuracy, games}; per video {"v0": {...}, "v1": {...}}
+    evaluation: dict[str, Any] = Field(default_factory=dict)
 
 
 class TrainResult(BaseModel):
@@ -327,6 +427,11 @@ class TrainResult(BaseModel):
     dataset: list[dict[str, Any]] = Field(default_factory=list, max_length=10_000)
     # New rallies for the games that were not trained on, by video id.
     predictions: dict[uuid.UUID, RalliesIn] = Field(default_factory=dict)
+    # The serve model (PLAN §10.3): trained and scored on held-out games like the rally finder.
+    serve: ServeTrainIn | None = None
+    # New series by video id: the serve track with the current serve finder, activity where
+    # the API had none.
+    tracks: dict[uuid.UUID, TracksIn] = Field(default_factory=dict, max_length=10_000)
 
 
 def _check_path(path: str, out_dir: str) -> None:
@@ -455,8 +560,23 @@ def complete_analyse(db: Session, video: Video, job: Job, payload: dict[str, Any
         )
     )
     outcome = apply_rallies(db, video, run, result.rallies, source_run=source_run)
+    if result.tracks is not None:
+        _check_serve_run(db, result.tracks)
+        outcome["tracks"] = scoring.store_tracks(
+            db, video.id, run, result.tracks.model_dump(mode="json", exclude_none=True)
+        )
     run.metrics = {"signals": result.artifact.stats, "videos": {str(video.id): outcome}}
+    scoring.score_video(db, video, reason="analyse")
     return run
+
+
+def _check_serve_run(db: Session, found: TracksIn) -> None:
+    serve = found.serve
+    if serve is None or serve.finder != "v1":
+        return
+    run = db.get(ModelRun, serve.model_run_id) if serve.model_run_id else None
+    if run is None or run.kind != "train_rallies":
+        raise ValueError("a v1 serve track must name its training")
 
 
 def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
@@ -467,6 +587,14 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
         _check_path(result.artifact.nas_path, job.params["out_dir"])
         if result.artifact.format != "pickle":
             raise ValueError("rally models are stored as pickle")
+    serve = result.serve
+    if serve is not None:
+        if serve.accepted and serve.artifact is None:
+            raise ValueError("an accepted serve model must be stored")
+        if serve.artifact is not None:
+            _check_path(serve.artifact.nas_path, job.params["out_dir"])
+            if serve.artifact.format != "pickle":
+                raise ValueError("serve models are stored as pickle")
     run = ModelRun(
         id=uuid.uuid4(),
         kind="train_rallies",
@@ -489,6 +617,15 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
                 **result.artifact.model_dump(),
             )
         )
+    if serve is not None and serve.artifact is not None:
+        db.add(
+            AnalysisArtifact(
+                video_id=None,
+                model_run_id=run.id,
+                kind="serve_model",
+                **serve.artifact.model_dump(),
+            )
+        )
     per_video: dict[str, Any] = {}
     for video_id, entry in (result.evaluation.get("videos") or {}).items():
         per_video[str(video_id)] = {"mode": "trained_on", "lovo": entry}
@@ -501,12 +638,36 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
             raise ValueError("v1 proposals from a model that was not accepted")
         source = run.id if rallies.finder == "v1" else None
         per_video[str(video_id)] = apply_rallies(db, video, run, rallies, source_run=source)
+    touched = {uuid.UUID(v) for v in per_video if per_video[v].get("mode") != "trained_on"}
+    for video_id, found in result.tracks.items():
+        video = db.get(Video, video_id)
+        if video is None or video.status != "ready" or video.sport not in SPORTS:
+            continue
+        if found.serve is not None and found.serve.finder == "v1":
+            if found.serve.model_run_id is None:  # this training's serve model
+                if not (serve and serve.accepted):
+                    raise ValueError("v1 serve tracks from a serve model that was not accepted")
+                found.serve.model_run_id = run.id
+            else:
+                _check_serve_run(db, found)
+        scoring.store_tracks(db, video.id, run, found.model_dump(mode="json", exclude_none=True))
+        touched.add(video.id)
     run.metrics = {
         "accepted": result.accepted,
         "finder": "v1" if result.accepted else "v0",
         "summary": result.evaluation.get("summary", {}),
         "videos": per_video,
+        "serve": {
+            "accepted": bool(serve and serve.accepted),
+            "finder": "v1" if serve and serve.accepted else "v0",
+            "summary": serve.evaluation.get("summary", {}) if serve else {},
+            "videos": serve.evaluation.get("videos", {}) if serve else {},
+        },
     }
+    for video_id in sorted(touched, key=str):
+        video = db.get(Video, video_id)
+        if video is not None and video.status == "ready" and video.sport in SPORTS:
+            scoring.score_video(db, video, reason="train")
     return run
 
 
@@ -566,6 +727,7 @@ def mark_reviewed(
         video.rallies_reviewed_at = None
         video.rallies_reviewed_by = None
     job = queue_training(db, train_delay) if video.sport in SPORTS else None
+    scoring.score_video(db, video, reason="rallies_reviewed" if reviewed else "reopened")
     return {"training_job_id": str(job.id) if job else None}
 
 

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from nomal.api.access import TeamAccess, visible_video
 from nomal.api.deps import DbDep, ViewerDep, audit
-from nomal.core import tagging
+from nomal.core import scoring, tagging
 from nomal.core.models import (
     Event,
     Period,
@@ -86,8 +86,24 @@ class SegmentOut(BaseModel):
     start_ms: int
     end_ms: int
     period_id: uuid.UUID | None
+    # The coach's: who served (derived from facts), the serve called in review, the winner.
     serving: str | None
+    serving_manual: str | None = None
     won_by: str | None
+    # The automatic scoring's (PLAN §10.3), never in place of the coach's: where the server
+    # stood (near: the camera's end) and how sure; its server and winner; how sure the
+    # winner is; "check" and why (missing_before, missing_after, extra, serve, coach, unsure).
+    serving_court: str | None = None
+    serve_confidence: float | None = None
+    model_serving: str | None = None
+    model_won_by: str | None = None
+    score_confidence: float | None = None
+    score_conflict: bool = False
+    score_note: str | None = None
+    # Points the model thinks were played right before this rally without one (counted).
+    model_missed_us: int | None = None
+    model_missed_them: int | None = None
+    # The score line: the coach's winners, else the model's (score_source "model").
     score_us_after: int | None
     score_them_after: int | None
     score_source: str | None
@@ -112,8 +128,20 @@ class PeriodOut(BaseModel):
     first_serve: str | None
     our_court_side_at_start: str | None
     side_switch_at_score: int | None
+    # Our setter's zone (1-6) at the set's first serve: rotation stats.
+    start_rotation: int | None = None
     final_us: int | None
     final_them: int | None
+    # manual | model (a set the scoring proposed, answered like a rally proposal).
+    source: str = "manual"
+    review: str = "unreviewed"
+    confidence: float | None = None
+    # The scoring's guesses next to the coach's first_serve and our_court_side_at_start.
+    model_first_serve: str | None = None
+    model_court_side: str | None = None
+    # Points the model thinks were played after the set's last rally without one (counted).
+    model_missed_us: int | None = None
+    model_missed_them: int | None = None
     version: int
     deleted_at: datetime | None
 
@@ -132,6 +160,9 @@ class TaggingOut(BaseModel):
     official_final: list[int] | None
     # A coach marked the rally list complete and right (POST .../rallies-reviewed).
     rallies_reviewed_at: datetime | None = None
+    # The match's first serve (start of set 1, else the end of the warm-up): "start at the
+    # first serve" on the video page.
+    first_serve_ms: int | None = None
 
 
 class ChangesIn(BaseModel):
@@ -296,6 +327,7 @@ def get_tagging(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> TaggingOut
         official_sets=_official_sets(db, video),
         official_final=_official_final(db, video),
         rallies_reviewed_at=video.rallies_reviewed_at,
+        first_serve_ms=scoring.first_serve_ms(db, video),
     )
 
 
@@ -359,6 +391,7 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
     items = _last_by_id(body.events)
     stale: list[uuid.UUID] = []
     events: list[Event] = []
+    rescore_model = _changes_scoring(db, periods, segments)
     try:
         tagging.check_limits(db, video, [i.id for i in items], [s.id for s in segments])
         for period in periods:
@@ -380,6 +413,8 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
                 assert isinstance(exc.row, Event)
                 events.append(exc.row)
         tagging.rescore(db, video)
+        if rescore_model:
+            scoring.score_video(db, video, reason="changes")
     except tagging.TaggingError as exc:
         db.rollback()
         raise HTTPException(422, str(exc)) from exc
@@ -390,6 +425,33 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
         periods=_periods(db, video, {p.id for p in periods}),
         stale=stale,
     )
+
+
+SCORING_PERIOD_FIELDS = (
+    "no", "start_ms", "end_ms", "start_us", "start_them", "first_serve",
+    "our_court_side_at_start", "side_switch_at_score",
+)  # fmt: skip
+
+
+def _changes_scoring(
+    db: Session, periods: list[tagging.PeriodIn], segments: list[tagging.SegmentIn]
+) -> bool:
+    """Whether a batch changes what the automatic scoring stands on: a set (its bounds, its
+    number, who served first, our side) or a serve a coach called in review."""
+    for item in periods:
+        row = db.get(Period, item.id)
+        if row is None or (row.deleted_at is not None) != item.deleted:
+            return True
+        if any(getattr(row, f) != getattr(item, f) for f in SCORING_PERIOD_FIELDS):
+            return True
+        if item.review is not None and item.review != row.review:
+            return True
+    for seg in segments:
+        if "serving_manual" in seg.model_fields_set:
+            found = db.get(Segment, seg.id)
+            if found is None or found.serving_manual != seg.serving_manual:
+                return True
+    return False
 
 
 @router.put("/events/{event_id}", response_model=EventOut)

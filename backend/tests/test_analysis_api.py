@@ -107,8 +107,9 @@ def complete(w: TestClient, job: dict[str, Any], body: dict[str, Any], status: i
 
 
 def segments(client: TestClient, video: dict[str, Any]) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = client.get(f"/api/videos/{video['id']}/tagging").json()["segments"]
-    return out
+    """The video's rallies (the scoring's gap labels are tested in test_scoring_api.py)."""
+    found = client.get(f"/api/videos/{video['id']}/tagging").json()["segments"]
+    return [s for s in found if s["kind"] == "rally"]
 
 
 def rally(start: int, end: int, **extra: Any) -> dict[str, Any]:
@@ -146,7 +147,8 @@ def test_a_ready_volleyball_video_is_analysed(
     assert params["inputs"] == [f"/nas/nomal/raw/{params['out_dir'][7:]}/01.mp4"]
     assert (params["fps"], params["has_audio"], params["duration_ms"]) == (50.0, True, 3_600_000)
     inputs = analyser.post(f"/api/worker/jobs/{job['id']}/inputs", json={})
-    assert inputs.status_code == 200 and inputs.json() == {"rally_model": None}
+    assert inputs.status_code == 200
+    assert inputs.json() == {"rally_model": None, "serve_model": None}
     assert club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()["status"] == "running"
 
 
@@ -211,7 +213,10 @@ def test_proposals_are_written_with_their_model_run(
         # The model wrote them: the revision trigger records no person.
         assert (
             conn.execute(
-                text("SELECT count(*) FROM segment_revision WHERE changed_by IS NULL")
+                text(
+                    "SELECT count(*) FROM segment_revision r JOIN segment s ON s.id = r.segment_id"
+                    " WHERE r.changed_by IS NULL AND s.kind = 'rally'"
+                )
             ).scalar()
             == 3
         )
@@ -593,4 +598,6 @@ def test_a_reopened_game_does_not_train_until_it_is_done_again(
     train = claim_kind(analyser, "train_rallies")
     inputs = analyser.post(f"/api/worker/jobs/{train['id']}/inputs", json={}).json()
     assert inputs["train"] == [] and inputs["others"] == []
-    assert inputs["skipped"] == [{"video_id": ready["id"], "reason": "open proposals"}]
+    assert [(e["video_id"], e["reason"]) for e in inputs["skipped"]] == [
+        (ready["id"], "open proposals")
+    ]

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.orm import Session
 
 from nomal.core.models import (
@@ -76,8 +76,10 @@ class SegmentIn(_Change):
     kind: SegmentKind
     start_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
     end_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
-    # Who served is derived (serve tag, previous winner, the set's first server).
+    # Who served is derived (serve tag, the serve called in review, previous winner, the set's
+    # first server). `serving_manual`: the serving team a coach called; left out, it stays.
     won_by: Side | None = None
+    serving_manual: Side | None = None
     review: Review = "unreviewed"
     # With review "merged": the segment of the same video it was merged into.
     merged_into: uuid.UUID | None = None
@@ -98,6 +100,10 @@ class PeriodIn(_Change):
     first_serve: Side | None = None
     our_court_side_at_start: Literal["near", "far"] | None = None
     side_switch_at_score: int | None = Field(default=None, ge=1, le=99)
+    # Left out, these stay as they are: our setter's zone at the first serve, and the answer
+    # to a set the model proposed.
+    start_rotation: int | None = Field(default=None, ge=1, le=6)
+    review: Review | None = None
 
     @model_validator(mode="after")
     def _order(self) -> PeriodIn:
@@ -197,11 +203,14 @@ EVENT_FIELDS = (
     "code", "t_ms", "frame", "time_precision", "side", "number", "attributes",
     "clip_pre_ms", "clip_post_ms", "note", "review",
 )  # fmt: skip
-SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review", "merged_into")
+SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review", "merged_into",
+                  "serving_manual")  # fmt: skip
 PERIOD_FIELDS = (
     "no", "start_ms", "end_ms", "start_us", "start_them", "first_serve",
-    "our_court_side_at_start", "side_switch_at_score",
+    "our_court_side_at_start", "side_switch_at_score", "start_rotation", "review",
 )  # fmt: skip
+# Fields a client may leave out to keep them as they are.
+KEPT_WHEN_ABSENT = ("serving_manual", "start_rotation", "review")
 
 
 def _bump(
@@ -264,6 +273,15 @@ def _intended(item: _Change, fields: tuple[str, ...], **overrides: Any) -> tuple
     return (*(overrides.get(f, getattr(item, f, None)) for f in fields), item.deleted)
 
 
+def _kept(item: _Change, row: Segment | Period | None) -> dict[str, Any]:
+    """The values of fields the client left out: the row's (nothing for a new row)."""
+    return {
+        f: getattr(row, f, None) if row is not None else None
+        for f in KEPT_WHEN_ABSENT
+        if f not in item.model_fields_set and hasattr(item, f)
+    }
+
+
 def _apply_event(
     db: Session,
     video: Video,
@@ -308,7 +326,8 @@ def upsert_segment(
     db: Session, video: Video, item: SegmentIn, actor: int, now: datetime
 ) -> Segment:
     row = db.get(Segment, item.id)
-    if not _check_base(row, video, item, _intended(item, SEGMENT_FIELDS), SEGMENT_FIELDS):
+    kept = _kept(item, row)
+    if not _check_base(row, video, item, _intended(item, SEGMENT_FIELDS, **kept), SEGMENT_FIELDS):
         assert row is not None
         return row
     if video.duration_ms is not None and item.start_ms > video.duration_ms + 1000:
@@ -324,6 +343,7 @@ def upsert_segment(
     review = _model_review(row, item)
     row.kind, row.start_ms, row.end_ms = item.kind, item.start_ms, item.end_ms
     row.won_by, row.review = item.won_by, review
+    row.serving_manual = kept.get("serving_manual", item.serving_manual)
     row.merged_into = item.merged_into if review == "merged" else None
     _stamp(row, item.deleted, now)
     after = _snapshot(row, SEGMENT_FIELDS)
@@ -375,15 +395,21 @@ def upsert_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
 
 def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: datetime) -> Period:
     row = db.get(Period, item.id)
-    if not _check_base(row, video, item, _intended(item, PERIOD_FIELDS), PERIOD_FIELDS):
+    kept = _kept(item, row)
+    if row is None and kept.get("review") is None:
+        kept["review"] = "unreviewed"
+    if not _check_base(row, video, item, _intended(item, PERIOD_FIELDS, **kept), PERIOD_FIELDS):
         assert row is not None
         return row
     if video.duration_ms is not None and item.start_ms > video.duration_ms + 1000:
         raise TaggingError("set or quarter beyond the end of the video")
     before = None if row is None else _snapshot(row, PERIOD_FIELDS)
     if row is None:
+        # A coach's own set replaces the sets the scoring proposed that nobody answered.
+        db.execute(delete(Period).where(Period.video_id == video.id, untouched_model_sets()))
         row = Period(id=item.id, video_id=video.id, version=0, created_by=actor)
         db.add(row)
+    review = _period_review(row, item, kept.get("review", item.review) or "unreviewed")
     for key in (
         "no",
         "start_ms",
@@ -395,9 +421,47 @@ def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
         "side_switch_at_score",
     ):
         setattr(row, key, getattr(item, key))
+    row.start_rotation = kept.get("start_rotation", item.start_rotation)
+    row.review = review
     _stamp(row, item.deleted, now)
     _bump(row, before, _snapshot(row, PERIOD_FIELDS))
     return row
+
+
+PERIOD_EDIT = ("no", "start_ms", "end_ms", "start_us", "start_them")
+# What a coach fills in on a set (the model never does).
+PERIOD_COACH_FIELDS = (
+    "first_serve", "our_court_side_at_start", "side_switch_at_score", "start_rotation",
+)  # fmt: skip
+
+
+def untouched_model_sets() -> Any:
+    """Sets the scoring proposed that nobody answered or filled in: replaced freely."""
+    return (
+        (Period.source == "model")
+        & (Period.review == "unreviewed")
+        & Period.deleted_at.is_(None)
+        & (Period.start_us == 0)
+        & (Period.start_them == 0)
+        & and_(*(getattr(Period, f).is_(None) for f in PERIOD_COACH_FIELDS))
+    )
+
+
+def _period_review(row: Period, item: PeriodIn, asked: str) -> str:
+    """Review state of a set the model proposed after a person's change, like a rally
+    proposal's (_model_review): a delete rejects it, moving it or changing its number or
+    starting score corrects it; filling in who served first or the sides does not (that is
+    information the model asks for). A coach's own set keeps what the client sends."""
+    if row.source != "model":
+        return asked
+    if item.deleted:
+        return "rejected"
+    if row.deleted_at is not None:  # undo of a rejection
+        return "unreviewed" if asked == "rejected" else asked
+    edited = any(getattr(row, f) != getattr(item, f) for f in PERIOD_EDIT)
+    if edited and asked in ("confirmed", "unreviewed"):
+        return "corrected"
+    return asked
 
 
 def rescore(db: Session, video: Video) -> None:
@@ -443,11 +507,9 @@ def rescore(db: Session, video: Video) -> None:
         rally.period_id = period.id if period else None
         by_period.setdefault(rally.period_id, []).append(rally)
 
-    for rally in by_period.get(None, []):
-        rally.score_us_after = rally.score_them_after = None
-        rally.score_source = None
-    # Who served: a serve tag in the rally wins; else the previous rally's winner; else the
-    # set's first server. Derived on every rescore, so a corrected rally fixes the rest.
+    # Who served: a serve tag in the rally wins, then the serve a coach called in review; else
+    # the previous rally's winner; else the set's first server. Facts only (the model's server
+    # is model_serving); derived on every rescore, so a corrected rally fixes the rest.
     serves = list(
         db.execute(
             select(Event.t_ms, Event.side)
@@ -461,31 +523,50 @@ def rescore(db: Session, video: Video) -> None:
     )
     serve_times = [t for t, _ in serves]
 
-    def served_by(rally: Segment) -> str | None:
+    def called(rally: Segment) -> str | None:
         at = bisect_left(serve_times, rally.start_ms - SERVE_SLACK_MS)
         if at < len(serves) and serves[at][0] <= rally.end_ms:
             return str(serves[at][1])
-        return None
+        return rally.serving_manual
+
+    for rally in by_period.get(None, []):
+        rally.score_us_after = rally.score_them_after = None
+        rally.score_source = None
+        rally.serving = called(rally)
 
     for period in periods:
         us, them = period.start_us, period.start_them
         serving = period.first_serve
         played = by_period.get(period.id, [])
-        for rally in played:
-            derived = served_by(rally) or serving
-            if derived is not None:
-                rally.serving = derived
-            if rally.won_by == "us":
+        calls = [called(r) for r in played]
+        from_model = False
+        for n, rally in enumerate(played):
+            # Points the model thinks were played before it without a rally (one it missed).
+            if rally.model_missed_us or rally.model_missed_them:
+                us += rally.model_missed_us or 0
+                them += rally.model_missed_them or 0
+                from_model = True
+            rally.serving = calls[n] or serving
+            # The winner: the coach's; else the next rally's server (a fact); else the model's.
+            winner = rally.won_by
+            if winner is None and n + 1 < len(played):
+                winner = calls[n + 1]
+            fact = winner is not None
+            if winner is None and rally.model_won_by is not None:
+                winner, from_model = rally.model_won_by, True
+            if winner == "us":
                 us += 1
-            elif rally.won_by == "them":
+            elif winner == "them":
                 them += 1
-            if rally.won_by is None:
+            if winner is None:
                 rally.score_us_after = rally.score_them_after = None
                 rally.score_source = None
             else:
                 rally.score_us_after, rally.score_them_after = us, them
-                rally.score_source = "tags"
-                serving = rally.won_by
+                rally.score_source = "model" if from_model else "tags"
+            serving = winner if fact else None
+        us += period.model_missed_us or 0
+        them += period.model_missed_them or 0
         period.final_us, period.final_them = (us, them) if played else (None, None)
 
 

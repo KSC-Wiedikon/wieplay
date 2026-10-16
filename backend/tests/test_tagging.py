@@ -289,7 +289,14 @@ def test_rescoring_writes_no_revisions(
         f"/api/videos/{ready['id']}/changes", json={"periods": [period], "segments": [r1]}
     )
     with db_engine.connect() as conn:
-        actions = conn.execute(text("SELECT action FROM segment_revision")).scalars().all()
+        actions = (
+            conn.execute(
+                text("SELECT action FROM segment_revision WHERE segment_id = :id"),
+                {"id": r1["id"]},
+            )
+            .scalars()
+            .all()
+        )
     assert actions == ["create"]  # the score the server added is not someone's edit
 
 

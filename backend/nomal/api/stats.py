@@ -81,11 +81,17 @@ class TeamLineOut(BaseModel):
     break_point_pct: float | None
 
 
+class RotationOut(TeamLineOut):
+    rotation: int  # our setter's zone, 1-6
+
+
 class BoxOut(BaseModel):
     players: list[RowOut]
     team: RowOut
     opponent: RowOut
     summary: TeamLineOut
+    # Per rotation (sets with a starting rotation only); null when no set has one.
+    rotations: list[RotationOut] | None = None
 
 
 class SetOut(BoxOut):
@@ -163,7 +169,13 @@ def _rally(s: Segment) -> stats.RallyIn:
 
 
 def _set(p: Period) -> stats.SetIn:
-    return stats.SetIn(p.id, p.no, p.start_ms, p.end_ms, p.final_us, p.final_them)
+    return stats.SetIn(p.id, p.no, p.start_ms, p.end_ms, p.final_us, p.final_them, p.start_rotation)
+
+
+def _rotations(lines: dict[int, stats.TeamLine] | None) -> list[RotationOut] | None:
+    if lines is None:
+        return None
+    return [RotationOut(rotation=r, **_line(lines[r]).model_dump()) for r in stats.ROTATIONS]
 
 
 def _events(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[stats.TagIn]]:
@@ -301,7 +313,12 @@ def _video_stats(
     sets = [
         _set(p)
         for p in db.scalars(
-            select(Period).where(Period.video_id == video.id, Period.deleted_at.is_(None))
+            select(Period).where(
+                Period.video_id == video.id,
+                Period.deleted_at.is_(None),
+                # A set the scoring proposed counts once a coach accepted it.
+                ~((Period.source == "model") & (Period.review == "unreviewed")),
+            )
         )
     ]
     cols = stats.columns(load("volleyball"))
@@ -320,13 +337,16 @@ def video_stats(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> VideoStats
         rallies=result.rallies,
         columns=_columns(cols),
         team_filters=stats.TEAM_FILTERS,
-        match=_box(result.box, result.team, cols),
+        match=_box(result.box, result.team, cols).model_copy(
+            update={"rotations": _rotations(result.rotations)}
+        ),
         sets=[
             SetOut(
                 no=s.set.no,
                 score_us=s.set.final_us,
                 score_them=s.set.final_them,
-                **_box(s.box, s.team, cols).model_dump(),
+                **_box(s.box, s.team, cols).model_dump(exclude={"rotations"}),
+                rotations=_rotations(s.rotations),
             )
             for s in result.sets
         ],
