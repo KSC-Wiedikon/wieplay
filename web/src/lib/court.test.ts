@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { AIR_2_12, calibration, FLOOR_2_12, FLOOR_6_4 } from '../test/court'
 import { bundle, tag } from '../test/tagging'
 import type { BallTrack } from './ballTrack'
+import type { CalibrationSegment, Mat3 } from './court'
 import {
   applyH,
+  calibrationAt,
+  cameraMoves,
   diagramArrows,
   listOf,
   nextLandmark,
@@ -114,5 +117,56 @@ describe('diagramArrows', () => {
     expect(outcomeOf({ code: 'A', attributes: { grade: '/' } }, taxonomy)).toBe('error')
     expect(outcomeOf({ code: 'A', attributes: { grade: '+' } }, taxonomy)).toBe('play')
     expect(outcomeOf({ code: 'A', attributes: {} }, null)).toBe('play')
+  })
+
+  it('maps each moment through the camera setup of its time', () => {
+    // After the bump the picture moved 3 % to the right: the same floor point shows there.
+    const dx = -0.03
+    const shifted = calibration.image_to_court.map((row) => [row[0] ?? 0, row[1] ?? 0, (row[2] ?? 0) + (row[0] ?? 0) * dx]) as Mat3
+    const segment = (patch: Partial<CalibrationSegment>): CalibrationSegment => ({
+      index: 0,
+      from_ms: 0,
+      to_ms: 4_350_000,
+      start: 'start',
+      shift_px: 0,
+      view: 0,
+      points: [],
+      method: 'auto-hall',
+      checked: false,
+      main: true,
+      image_to_court: calibration.image_to_court,
+      court_to_image: null,
+      camera: null,
+      error_cm: null,
+      max_error_cm: null,
+      lines: [],
+      ...patch,
+    })
+    const cal = {
+      ...calibration,
+      segments: [
+        segment({}),
+        segment({ index: 1, from_ms: 4_350_000, to_ms: 6_000_000, start: 'bump', main: false, image_to_court: shifted }),
+        segment({ index: 2, from_ms: 6_000_000, to_ms: null, start: 'moved', main: false, image_to_court: null, method: 'none' }),
+      ],
+    }
+    expect(calibrationAt(cal, 1_000)?.image_to_court).toBe(calibration.image_to_court)
+    expect(calibrationAt(cal, 4_350_000)?.image_to_court).toBe(shifted)
+    expect(calibrationAt(cal, 7_000_000)).toBeNull() // the camera showed no court then
+    expect(calibrationAt(calibration, 7_000_000)).toBe(calibration) // one setup: the calibration
+    expect(cameraMoves(cal.segments)).toEqual([4_350_000, 6_000_000])
+    // A bounce after the bump: through the moved picture it lands where it did before.
+    const later: [number, number] = [FLOOR_2_12[0] + 0.03, FLOOR_2_12[1]]
+    const bounce = (t: number, x: number, y: number): BallTrack => ({
+      fps: 15,
+      x: new Float32Array(10).fill(Number.NaN),
+      y: new Float32Array(10).fill(Number.NaN),
+      contacts: [{ t, x, y, kind: 'bounce' }],
+    })
+    const s = serve({ id: 's', t_ms: 4_400_000, attributes: { grade: '#' } })
+    const [arrow] = diagramArrows({ tags: [s], taxonomy, calibration: cal, track: bounce(4_401, ...later) })
+    expect(arrow?.evidence).toBe('ball')
+    expect(arrow?.to[0]).toBeCloseTo(2, 2)
+    expect(arrow?.to[1]).toBeCloseTo(12, 2)
   })
 })

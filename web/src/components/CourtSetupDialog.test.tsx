@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Solution } from '../lib/court'
+import type { CalibrationSegment, Solution } from '../lib/court'
 import { CORNER_POINTS, courtState, savedCalibration } from '../test/court'
 import { renderRoute, stubFetch } from '../test/render'
 import { CourtSetupDialog } from './CourtSetupDialog'
@@ -157,5 +157,97 @@ describe('CourtSetupDialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  })
+
+  it('shows a court set from the hall’s memory, the camera’s setups, and fixes one setup', async () => {
+    const fetch = vi.fn(
+      stubFetch({
+        [`POST /api/videos/${ID}/court/solve`]: { body: solution({ error_cm: 4.1, max_error_cm: 6.0 }) },
+        [`PUT /api/videos/${ID}/court`]: { body: savedCalibration({ method: 'manual' }) },
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const moved = CORNER_POINTS.map((p) => ({ ...p, u: p.u + 0.03 }))
+    const seg = (patch: Partial<CalibrationSegment>): CalibrationSegment => ({
+      index: 0,
+      from_ms: 0,
+      to_ms: 4_350_000,
+      start: 'start',
+      shift_px: 0,
+      view: 0,
+      points: CORNER_POINTS,
+      method: 'auto-hall',
+      checked: false,
+      main: true,
+      image_to_court: savedCalibration().image_to_court,
+      court_to_image: savedCalibration().court_to_image,
+      camera: null,
+      error_cm: null,
+      max_error_cm: null,
+      lines: [
+        [
+          [0.062, 0.857],
+          [0.938, 0.857],
+        ],
+      ],
+      ...patch,
+    })
+    const calibration = savedCalibration({
+      method: 'auto-hall',
+      checked: false,
+      confidence: 0.92,
+      segments: [seg({}), seg({ index: 1, from_ms: 4_350_000, to_ms: null, start: 'bump', shift_px: 24.9, main: false, points: moved })],
+    })
+    const video = paused()
+    Object.defineProperty(video, 'duration', { value: 7909 })
+    renderRoute(<CourtSetupDialog open videoId={ID} element={video} onClose={() => {}} state={courtState({ calibration })} />)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Set automatically from this hall’s earlier videos/)).toBeInTheDocument()
+    expect(within(dialog).getByText('(confidence 92 %)')).toBeInTheDocument()
+    expect(within(dialog).getByText('The camera moved at 1:12:30: 2 setups.')).toBeInTheDocument()
+    const setups = within(dialog).getByRole('list', { name: 'Camera setups' })
+    const [first, second] = within(setups).getAllByRole('button')
+    if (!first || !second) throw new Error('two setups')
+    expect(first).toHaveAttribute('aria-pressed', 'true') // the main setup
+    expect(second).toHaveTextContent('1:12:30 – end')
+    expect(second).toHaveTextContent('set automatically')
+    // The second setup: the video goes there, its own points come up.
+    fireEvent.click(second)
+    expect(second).toHaveAttribute('aria-pressed', 'true')
+    expect(video.currentTime).toBeCloseTo(4_350 + 300, 0) // its middle, at most five minutes in
+    // A point moved: the server fits it, saved for that setup only.
+    fireEvent.click(within(dialog).getByRole('button', { name: /Centre line, left end/ }))
+    fireEvent.pointerDown(area(), { clientX: 250, clientY: 281.25, pointerId: 1 })
+    expect(await within(dialog).findByText(/Fit: ± 4.1 cm/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save court' }))
+    await waitFor(() => expect(fetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true))
+    const put = fetch.mock.calls.find(([, init]) => init?.method === 'PUT')
+    const body = JSON.parse(String(put?.[1]?.body)) as { segment: number; method: string; points: { landmark: string; u: number }[] }
+    expect(body.segment).toBe(1)
+    expect(body.method).toBe('manual')
+    expect(body.points.find((p) => p.landmark === 'near_left')?.u).toBeCloseTo(0.092, 3)
+  })
+
+  it('says a court that only drifted, and a guess the job was not sure of', async () => {
+    vi.stubGlobal('fetch', vi.fn(stubFetch({ [`POST /api/videos/${ID}/court/solve`]: { body: solution() } })))
+    renderRoute(
+      <CourtSetupDialog
+        open
+        videoId={ID}
+        element={paused()}
+        onClose={() => {}}
+        state={courtState({
+          suggestions: [{ source: 'auto', points: CORNER_POINTS, confidence: 0.5, video_id: ID, video_title: null, recorded_on: null, calibration_id: 'x' }],
+          setups: [
+            { from_ms: 0, to_ms: 1_800_000, start: 'start', shift_px: 0 },
+            { from_ms: 1_800_000, to_ms: 3_600_000, start: 'drift', shift_px: 5.2 },
+          ],
+        })}
+      />,
+    )
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Nomal’s best guess \(not sure\)/)).toBeInTheDocument()
+    expect(within(dialog).getByText('The camera drifted slowly during the match: 2 setups follow it.')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('list', { name: 'Camera setups' })).toBeNull() // nothing set yet
   })
 })

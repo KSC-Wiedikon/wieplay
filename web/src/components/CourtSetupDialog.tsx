@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../lib/api'
 import {
+  cameraMoves,
   CORNERS,
   GOOD_FIT_CM,
   LANDMARKS,
@@ -13,6 +14,7 @@ import {
   useRemoveCourt,
   useSaveCourt,
   withoutPoint,
+  type CalibrationSegment,
   type CourtState,
   type Landmark,
   type SetupPoints,
@@ -21,6 +23,7 @@ import {
 } from '../lib/court'
 import { cx } from '../lib/cx'
 import { formatDate } from '../lib/format'
+import { formatClock } from '../lib/labels'
 import { useToast } from '../lib/toast'
 import { Badge } from './Badge'
 import { Button } from './Button'
@@ -41,7 +44,10 @@ interface CourtSetupDialogProps {
 /**
  * "Set up the court" (PLAN §10.6): click the court's landmarks on the paused frame; the server
  * fits the homography, the lines come back drawn over the picture with the fit's error.
- * Pre-filled from the video's calibration, else from the court finder or the team's last one.
+ * Pre-filled from the video's calibration (the court job's, to check, says where it came from),
+ * else from the court job's guess or the team's last one. When the camera moved during the match,
+ * each setup is checked on a frame of its own (the video seeks there); the setups nobody set
+ * follow the coach's changes.
  */
 export function CourtSetupDialog({ open, onClose, videoId, state, element }: CourtSetupDialogProps) {
   const { t } = useTranslation()
@@ -52,19 +58,53 @@ export function CourtSetupDialog({ open, onClose, videoId, state, element }: Cou
   )
 }
 
+/** A setup's court as a solution to show (none when the camera showed no court then). */
+function segmentSolution(seg: CalibrationSegment): Solution | null {
+  if (!seg.image_to_court || !seg.court_to_image) return null
+  return {
+    image_to_court: seg.image_to_court,
+    court_to_image: seg.court_to_image,
+    camera: seg.camera,
+    error_cm: seg.error_cm,
+    max_error_cm: seg.max_error_cm,
+    residuals_cm: {},
+    lines: seg.lines,
+  }
+}
+
+/** Moves the paused video into a setup (its middle, at most five minutes in): its own frame. */
+function showSetup(video: HTMLVideoElement, seg: CalibrationSegment): void {
+  const end = seg.to_ms ?? (Number.isFinite(video.duration) ? video.duration * 1000 : seg.from_ms + 60_000)
+  video.currentTime = (seg.from_ms + Math.min(end - seg.from_ms, 10 * 60_000) / 2) / 1000
+}
+
+function solvedOf(points: CourtSetupDialogProps['state']['suggestions'][number]['points'], solution: Solution | null) {
+  return { key: JSON.stringify(listOf(pointsOf(points))), solution, problem: null }
+}
+
 function Setup({ videoId, state, element, onClose }: Omit<CourtSetupDialogProps, 'open'>) {
   const { t } = useTranslation()
   const id = useId()
   const toast = useToast()
   const save = useSaveCourt(videoId)
   const remove = useRemoveCourt(videoId)
-  const [source, setSource] = useState<Suggestion | null>(() => (state.calibration ? null : (state.suggestions[0] ?? null)))
-  const [points, setPoints] = useState<SetupPoints>(() => pointsOf(state.calibration?.points ?? state.suggestions[0]?.points ?? []))
+  const calibration = state.calibration
+  const segments = calibration?.segments && calibration.segments.length > 1 ? calibration.segments : null
+  // The setup of the paused frame (the picture to click on), else the main one.
+  const [segment, setSegment] = useState<number | null>(() => {
+    if (!segments) return null
+    const at = element && Number.isFinite(element.currentTime) ? element.currentTime * 1000 : null
+    const here = at === null ? -1 : segments.findIndex((s) => s.from_ms <= at && (s.to_ms === null || at < s.to_ms))
+    return here >= 0 ? here : Math.max(0, segments.findIndex((s) => s.main))
+  })
+  const initial = segments && segment !== null ? segments[segment] : null
+  const [source, setSource] = useState<Suggestion | null>(() => (calibration ? null : (state.suggestions[0] ?? null)))
+  const [points, setPoints] = useState<SetupPoints>(() => pointsOf(initial?.points ?? calibration?.points ?? state.suggestions[0]?.points ?? []))
   const [dirty, setDirty] = useState(false)
   const [active, setActive] = useState<Landmark | null>(() => nextLandmark(points) ?? 'near_left')
   // The server's answer for a set of points (keyed by them): shown while it is the current set.
   const [solved, setSolved] = useState<{ key: string; solution: Solution | null; problem: string | null } | null>(() =>
-    state.calibration ? { key: JSON.stringify(listOf(pointsOf(state.calibration.points))), solution: state.calibration, problem: null } : null,
+    initial ? solvedOf(initial.points, segmentSolution(initial)) : calibration ? solvedOf(calibration.points, calibration) : null,
   )
   const [hasFrame, setHasFrame] = useState(true)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -72,9 +112,9 @@ function Setup({ videoId, state, element, onClose }: Omit<CourtSetupDialogProps,
   const dragging = useRef<Landmark | null>(null)
   const aspect = element && element.videoWidth > 0 ? element.videoWidth / element.videoHeight : state.aspect
 
-  // The paused frame, drawn once (a cross-origin frame can be drawn, only not read back).
-  useEffect(() => {
-    element?.pause()
+  // The paused frame (a cross-origin frame can be drawn, only not read back); again after the
+  // video moved to another camera setup.
+  const draw = useCallback(() => {
     const c = canvas.current
     if (!c || !element || element.readyState < 2 || element.videoWidth === 0) {
       setHasFrame(false)
@@ -90,6 +130,27 @@ function Setup({ videoId, state, element, onClose }: Omit<CourtSetupDialogProps,
       setHasFrame(false)
     }
   }, [element])
+  useEffect(() => {
+    element?.pause()
+    draw()
+  }, [element, draw])
+  useEffect(() => {
+    if (!element) return
+    element.addEventListener('seeked', draw)
+    return () => element.removeEventListener('seeked', draw)
+  }, [element, draw])
+
+  const pickSegment = (index: number) => {
+    const seg = segments?.[index]
+    if (!seg) return
+    setSegment(index)
+    const next = pointsOf(seg.points)
+    setPoints(next)
+    setSolved(solvedOf(seg.points, segmentSolution(seg)))
+    setDirty(false)
+    setActive(nextLandmark(next) ?? 'near_left')
+    if (element) showSetup(element, seg)
+  }
 
   const list = useMemo(() => listOf(points), [points])
   const key = JSON.stringify(list)
@@ -188,12 +249,24 @@ function Setup({ videoId, state, element, onClose }: Omit<CourtSetupDialogProps,
     setActive(nextLandmark(next) ?? 'near_left')
   }
 
+  const picked = segments && segment !== null ? segments[segment] : null
+  const keptMethod = picked ? picked.method : calibration?.method
   const onSave = () =>
     save.mutate(
       {
         points: list,
-        method: dirty || !source ? 'manual' : source.source === 'auto' ? 'auto' : 'copied',
+        method: dirty
+          ? 'manual'
+          : source
+            ? source.source === 'team'
+              ? 'copied'
+              : source.source
+            : keptMethod === 'auto' || keptMethod === 'auto-hall' || keptMethod === 'copied'
+              ? keptMethod
+              : 'manual',
         copied_from: !dirty && source?.source === 'team' ? source.calibration_id : null,
+        segment: segments ? segment : null,
+        at_ms: element && Number.isFinite(element.currentTime) ? Math.round(element.currentTime * 1000) : null,
       },
       {
         onSuccess: () => {
@@ -215,17 +288,81 @@ function Setup({ videoId, state, element, onClose }: Omit<CourtSetupDialogProps,
 
   const error = solution?.error_cm ?? null
   const other = state.suggestions.find((s) => s !== source)
+  const pct = (c: number | null | undefined) => (c === null || c === undefined ? null : t('court.setup.confidence', { pct: Math.round(c * 100) }))
+  // Where the court came from: the court job (to check), a coach, a suggestion.
+  const origin =
+    calibration && !dirty
+      ? calibration.checked === false
+        ? { badge: 'auto', text: calibration.method === 'auto-hall' ? t('court.setup.autoHall') : t('court.setup.autoFound'), extra: pct(calibration.confidence) }
+        : { badge: null, text: t('court.setup.yours'), extra: null }
+      : null
+  const allSetups = segments ?? state.setups ?? []
+  const moves = cameraMoves(allSetups)
+  const setupCount = allSetups.length
+  const stateOf = (seg: CalibrationSegment) =>
+    seg.method === 'none' ? 'none' : seg.checked ? 'checked' : seg.method === 'derived' ? 'derived' : 'auto'
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted">{t('court.setup.intro')}</p>
+      {origin && (
+        <p className="flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-sunken p-3 text-sm" role="status">
+          {origin.badge && <Badge>{origin.badge}</Badge>}
+          {origin.text}
+          {origin.extra && <span className="text-muted">{`(${origin.extra})`}</span>}
+        </p>
+      )}
       {source && !dirty && (
         <p className="flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-sunken p-3 text-sm" role="status">
-          <Badge>{source.source === 'auto' ? 'auto' : formatDate(source.recorded_on)}</Badge>
-          {source.source === 'auto'
-            ? t('court.setup.auto')
-            : t('court.setup.fromTeam', { title: source.video_title ?? '', date: formatDate(source.recorded_on) })}
+          <Badge>{source.source === 'team' ? formatDate(source.recorded_on) : 'auto'}</Badge>
+          {source.source === 'team'
+            ? t('court.setup.fromTeam', { title: source.video_title ?? '', date: formatDate(source.recorded_on) })
+            : (source.confidence ?? 0) >= 0.6
+              ? source.source === 'auto-hall'
+                ? t('court.setup.autoHall')
+                : t('court.setup.auto')
+              : t('court.setup.guess')}
+          {source.source !== 'team' && pct(source.confidence) && <span className="text-muted">{`(${pct(source.confidence)})`}</span>}
         </p>
+      )}
+      {setupCount > 1 && (
+        <p className="text-sm" role="note">
+          {moves.length > 0
+            ? t('court.setup.moved', { count: setupCount, at: moves.map((ms) => formatClock(ms, { tenths: false })).join(', ') })
+            : t('court.setup.drifted', { count: setupCount })}
+        </p>
+      )}
+      {segments && (
+        <div className="flex flex-col gap-1.5">
+          <h3 id={`${id}-setups`} className="text-sm font-semibold">
+            {t('court.setup.setups')}
+          </h3>
+          <p className="text-xs text-muted">{t('court.setup.setupsHint')}</p>
+          <ul aria-labelledby={`${id}-setups`} className="flex flex-wrap gap-1.5">
+            {segments.map((seg, k) => (
+              <li key={seg.index}>
+                <button
+                  type="button"
+                  aria-pressed={segment === k}
+                  onClick={() => pickSegment(k)}
+                  className={cx(
+                    'flex min-h-11 cursor-pointer flex-col items-start rounded-control border px-2.5 py-1 text-left text-sm sm:min-h-9',
+                    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                    segment === k ? 'border-transparent bg-accent-soft text-on-accent-soft' : 'border-hairline bg-surface hover:bg-hover',
+                  )}
+                >
+                  <span className="font-semibold tabular-nums">
+                    {t('court.setup.span', {
+                      from: formatClock(seg.from_ms, { tenths: false }),
+                      to: seg.to_ms === null ? t('court.setup.end') : formatClock(seg.to_ms, { tenths: false }),
+                    })}
+                  </span>
+                  <span className="text-xs text-muted">{t(`court.setup.setupState.${stateOf(seg)}`)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {other && (
         <div>
