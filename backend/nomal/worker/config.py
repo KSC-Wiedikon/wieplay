@@ -26,6 +26,12 @@ class WorkerSettings(BaseSettings):
     # NAS: originals live under raw_root; the inbox share is scanned when "inbox" is a cap.
     raw_root: Path = Path("/nas/nomal/raw")
     inbox_root: Path | None = None
+    # Automatic analysis (cap "analyse"): signals and rally models are written here, on the
+    # NAS next to raw/ (analysis/, analysis-dev/).
+    analysis_root: Path | None = None
+    # Decoding for the analysis: VAAPI on the iGPU (falls back to the CPU by itself).
+    analysis_hwaccel: Literal["vaapi", "none"] = "vaapi"
+    analysis_threads: int = 6
     inbox_scan_seconds: int = 60
     inbox_stable_seconds: int = 120
 

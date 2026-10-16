@@ -65,18 +65,23 @@ class ApiClient:
         raise ApiUnavailable(path)
 
     def claim(
-        self, caps: Sequence[str], *, wait: bool = True, restarted: bool = False
+        self,
+        caps: Sequence[str],
+        *,
+        wait: bool = True,
+        restarted: bool = False,
+        kinds: Sequence[str] | None = None,
     ) -> tuple[list[ClaimedJob], bool]:
-        response = self._post(
-            "/claim",
-            {
-                "caps": list(caps),
-                "max": 1,
-                "version": self.version,
-                "wait": wait,
-                "restarted": restarted,
-            },
-        )
+        body: dict[str, Any] = {
+            "caps": list(caps),
+            "max": 1,
+            "version": self.version,
+            "wait": wait,
+            "restarted": restarted,
+        }
+        if kinds is not None:
+            body["kinds"] = list(kinds)
+        response = self._post("/claim", body)
         body = response.json()
         jobs = [
             ClaimedJob(
@@ -109,6 +114,11 @@ class ApiClient:
             )
             urls.update(response.json()["urls"])
         return urls
+
+    def inputs(self, job_id: str) -> dict[str, Any]:
+        """An analysis job's inputs from the database, as of now."""
+        body: dict[str, Any] = self._post(f"/jobs/{job_id}/inputs", {}).json()
+        return body
 
     def complete(self, job_id: str, result: dict[str, Any]) -> None:
         self._post(f"/jobs/{job_id}/complete", result)

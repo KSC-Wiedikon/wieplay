@@ -13,11 +13,15 @@ services:
       NOMAL_WORKER_WORK_DIR: /work
       NOMAL_WORKER_RAW_ROOT: /nas/raw
       NOMAL_WORKER_INBOX_ROOT: /nas/inbox
+      NOMAL_WORKER_ANALYSIS_ROOT: /nas/analysis
+      NOMAL_GIT_SHA: ${NOMAL_TAG}  # recorded with every model run (PLAN §11)
       HOME: /tmp  # the host uid has no home in the image (Mesa's shader cache)
     secrets: [nomal-worker-token]
     volumes:
       - ${NOMAL_NAS_RAW:?NOMAL_NAS_RAW must be set}:/nas/raw
       - ${NOMAL_NAS_INBOX:?NOMAL_NAS_INBOX must be set}:/nas/inbox
+      # Signals and rally models of the automatic analysis (cap "analyse", PLAN §10.1).
+      - ${NOMAL_NAS_ANALYSIS:?NOMAL_NAS_ANALYSIS must be set (see env.example)}:/nas/analysis
       - work:/work
     devices:
       - /dev/dri:/dev/dri  # VAAPI on the Radeon 780M
