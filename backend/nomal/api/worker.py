@@ -90,6 +90,8 @@ class SignOut(BaseModel):
 class FailIn(BaseModel):
     error: str = Field(max_length=4000)
     retryable: bool = True
+    # Wait at least this long before the next attempt (at most 6 h).
+    retry_after_s: int | None = Field(default=None, ge=0, le=6 * 3600)
 
 
 class InboxEntry(BaseModel):
@@ -251,7 +253,11 @@ def complete(
 @router.post("/jobs/{job_id}/fail", status_code=204)
 def fail(job_id: uuid.UUID, body: FailIn, worker: WorkerDep, db: DbDep) -> Response:
     job = _running(db, job_id, worker)
-    final = jobs.fail(job, body.error, retryable=body.retryable)
+    delay = timedelta(seconds=body.retry_after_s) if body.retry_after_s else None
+    final = jobs.fail(job, body.error, retryable=body.retryable, retry_after=delay)
+    if delay and job.kind == "import" and body.retryable:
+        # YouTube's bot check: the other imports would meet it too, they wait as well.
+        jobs.hold(db, "import", datetime.now(UTC) + delay)
     if final:
         video = db.get(Video, job.video_id) if job.video_id else None
         pipeline.on_failed(db, video, job)

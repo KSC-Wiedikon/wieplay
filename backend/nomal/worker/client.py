@@ -104,8 +104,13 @@ class ApiClient:
     def complete(self, job_id: str, result: dict[str, Any]) -> None:
         self._post(f"/jobs/{job_id}/complete", result)
 
-    def fail(self, job_id: str, error: str, *, retryable: bool) -> None:
-        self._post(f"/jobs/{job_id}/fail", {"error": error[:4000], "retryable": retryable})
+    def fail(
+        self, job_id: str, error: str, *, retryable: bool, retry_after_s: int | None = None
+    ) -> None:
+        body: dict[str, Any] = {"error": error[:4000], "retryable": retryable}
+        if retry_after_s is not None:
+            body["retry_after_s"] = retry_after_s
+        self._post(f"/jobs/{job_id}/fail", body)
 
     def report_inbox(self, files: list[dict[str, Any]]) -> None:
         self._post("/inbox", {"files": files})

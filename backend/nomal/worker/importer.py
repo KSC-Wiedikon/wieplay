@@ -52,6 +52,16 @@ GONE = (
 )
 
 
+# YouTube's bot check ("Sign in to confirm you're not a bot") after many downloads from one
+# address: the import waits this long, and so do all other queued imports.
+RATE_LIMIT_PAUSE_S = 3600
+BOT_CHECK = ("not a bot", "sign in to confirm", "too many requests", "http error 429")
+
+
+class RateLimited(Exception):
+    """YouTube wants a pause."""
+
+
 class Refused(Exception):
     """The video cannot be imported (channel, live, length, gone); retrying will not help."""
 
@@ -155,6 +165,8 @@ def fetch(
         if cancel.is_set():
             raise Stopped() from exc
         message = str(exc).removeprefix("ERROR: ")
+        if any(marker in message.lower() for marker in BOT_CHECK):
+            raise RateLimited(message[:300]) from exc
         if any(marker in message.lower() for marker in GONE):
             raise Refused(message[:300]) from exc
         raise RuntimeError(message[:300]) from exc

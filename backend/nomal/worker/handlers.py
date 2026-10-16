@@ -31,6 +31,14 @@ class PermanentError(Exception):
     """Retrying will not help (bad input file, wrong parameters)."""
 
 
+class RetryLater(Exception):
+    """Retrying helps, but not soon (YouTube's bot check)."""
+
+    def __init__(self, message: str, seconds: int) -> None:
+        super().__init__(message)
+        self.seconds = seconds
+
+
 @dataclass
 class Context:
     settings: WorkerSettings
@@ -369,6 +377,8 @@ def import_video(ctx: Context) -> dict[str, Any]:
         os.replace(partial, target)
     except importer.Refused as exc:
         raise PermanentError(str(exc)) from exc
+    except importer.RateLimited as exc:
+        raise RetryLater(str(exc), importer.RATE_LIMIT_PAUSE_S) from exc
     except importer.Stopped as exc:
         raise ffmpeg.Cancelled() from exc
     finally:

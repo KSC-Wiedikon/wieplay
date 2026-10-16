@@ -5,17 +5,22 @@
 from __future__ import annotations
 
 import threading
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine, text
+from sqlalchemy.orm import Session
 
-from nomal.core import imports
+from nomal.api.dev_bridge import FixtureBridgeClient
+from nomal.core import batch, imports
 from nomal.worker import importer
 from tests.fakes import FakeStore
 from tests.test_videos import (  # noqa: F401  (fixtures)
+    DU23,
     H3,
     MEDIA_CAPS,
     THUMBS,
@@ -343,3 +348,109 @@ def test_a_failed_import_can_be_retried(
     assert club["coach"].get(f"/api/videos/{video['id']}").json()["status"] == "importing"
     [again] = claim(w, IMPORT_CAPS)
     assert again["id"] == job["id"]
+
+
+# --- Batches and pacing ------------------------------------------------------------------
+
+
+def test_batch_files_are_parsed() -> None:
+    text = (
+        "# team\tdate\tlink\ttitle\n"
+        "\n"
+        "9101\t2026-10-02\thttps://youtu.be/NXNsZ_UNM6w\n"
+        "9101\t17.09.2026\thttps://youtu.be/ztugf8Dr4M8\tMobiliarcup vs S.9\n"
+    )
+    lines = batch.parse(text)
+    assert [(ln.number, ln.team_id, ln.on.isoformat(), ln.title) for ln in lines] == [
+        (3, 9101, "2026-10-02", None),
+        (4, 9101, "2026-09-17", "Mobiliarcup vs S.9"),
+    ]
+    for bad in ("9101\t2026-10-02", "H3\t2026-10-02\tx", "9101\t32.13.2026\tx"):
+        with pytest.raises(ValueError, match="line 1"):
+            batch.parse(bad)
+
+
+def test_a_batch_queues_paced_imports_under_the_upload_rules(
+    club: dict[str, TestClient], db_engine: Engine, store: FakeStore
+) -> None:
+    allow_luca(club["admin"])
+    games = {g["id"]: g for g in club["coach"].get(f"/api/teams/{H3}/games").json()}
+    played = games[game_id(H3, 1)]["date"]
+    other_day = (date.fromisoformat(played) - timedelta(days=1)).isoformat()
+    text = "\n".join(
+        [
+            f"{H3}\t{played}\thttps://youtu.be/NXNsZ_UNM6w",  # the Wiedisync game of that day
+            f"{H3}\t{other_day}\thttps://youtu.be/ztugf8Dr4M8\tFriendly vs Volero",
+            f"{H3}\t{played}\thttps://youtu.be/NXNsZ_UNM6w",  # twice in the batch
+            f"{H3}\t{other_day}\thttps://youtu.be/s8eZwM4WP48",  # no game, no title
+            f"{H3}\t{played}\thttps://vimeo.com/1",
+            f"{DU23}\t{played}\thttps://youtu.be/N5a7K6OWSNM\tTournament",  # an under-18
+        ]
+    )
+    with Session(db_engine) as db:
+        planned = batch.plan(db, FixtureBridgeClient(), batch.parse(text))
+        problems = [p.problem for p in planned]
+        assert problems[:2] == [None, None]
+        assert problems[2] == "already imported"
+        assert "add a title" in (problems[3] or "")
+        assert "YouTube" in (problems[4] or "")
+        assert "filming not allowed" in (problems[5] or "") and "under_18" in (problems[5] or "")
+        assert planned[0].game_id == game_id(H3, 1)
+        now = datetime.now(UTC)
+        queued = batch.queue(db, planned, created_by=101, spacing=timedelta(minutes=10), now=now)
+        assert [p.line.number for p, _, _ in queued] == [1, 2]
+        assert [round((start - now).total_seconds()) for _, _, start in queued] == [0, 600]
+    imported = club["coach"].get(f"/api/teams/{H3}/videos").json()
+    game = games[game_id(H3, 1)]
+    match_title = f"{game['home_name']} {batch.DASH} {game['away_name']}"
+    assert sorted((v["title"], v["status"]) for v in imported) == sorted(
+        [("Friendly vs Volero", "importing"), (match_title, "importing")]
+    )
+    with Session(db_engine) as db:
+        again = batch.plan(db, FixtureBridgeClient(), batch.parse(text.split("\n")[0]))
+        assert (again[0].problem or "").startswith("already imported (video ")
+
+
+def test_youtubes_bot_check_holds_every_queued_import(
+    app: FastAPI, club: dict[str, TestClient], db_engine: Engine, store: FakeStore
+) -> None:
+    allow_luca(club["admin"])
+    link_video(club["coach"], "https://youtu.be/NXNsZ_UNM6w")
+    link_video(club["coach"], "https://youtu.be/o9qYHvF9d80")
+    w = worker_client(app, club["admin"], IMPORT_CAPS)
+    first = claim(w, IMPORT_CAPS)[0]
+    message = "Sign in to confirm you're not a bot"
+    r = w.post(
+        f"/api/worker/jobs/{first['id']}/fail",
+        json={"error": message, "retryable": True, "retry_after_s": 3600},
+    )
+    assert r.status_code == 204
+    assert claim(w, IMPORT_CAPS) == []  # the other import waits too
+    with Session(db_engine) as db:
+        waits = db.execute(
+            text("SELECT extract(epoch FROM not_before - now()) FROM job WHERE kind = 'import'")
+        ).scalars()
+        assert all(3500 < float(s) <= 3600 for s in waits)
+
+
+def test_the_worker_reports_youtubes_bot_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    error = importer._download_error()
+
+    class Blocked(FakeYdl):
+        def extract_info(self, url: str, download: bool) -> dict[str, Any]:
+            raise error("ERROR: [youtube] NXNsZ_UNM6w: Sign in to confirm you're not a bot.")
+
+    monkeypatch.setattr(importer, "_downloader", lambda options: Blocked(options, LUCA))
+    with pytest.raises(importer.RateLimited):
+        importer.fetch(
+            "https://www.youtube.com/watch?v=NXNsZ_UNM6w",
+            "youtube",
+            ["lucazbindenvolley2500"],
+            tmp_path,
+            max_seconds=3600,
+            max_bytes=10**9,
+            progress=lambda f: None,
+            cancel=threading.Event(),
+        )
