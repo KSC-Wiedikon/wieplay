@@ -345,8 +345,6 @@ def test_basketball_quarters_and_score_from_made_shots(
     app: FastAPI, club: dict[str, TestClient], store: FakeStore
 ) -> None:
     coach = club["coach"]  # also team manager of Herren 1
-    for mid in (107, 108):
-        coach.put(f"/api/teams/{HERREN1}/consent/{mid}", json={"status": "accepted"})
     created = coach.post(
         f"/api/teams/{HERREN1}/videos",
         json={"kind": "match", "game_id": HERREN1 * 100 + 1,
