@@ -652,7 +652,7 @@ calibration      id, video_id, hall_name, image_points, court_points, homography
                  -- built in 0008 (16.10.2026) with lineage_id, status 'confirmed'|'proposed'
                  -- (the court finder's), landmarks, image_aspect, camera, max_error_cm,
                  -- confidence, model_run_id; one row per video and status
-                 -- 0011 (17.10.2026): segments jsonb NULL (the camera's setups, each a time
+                 -- 0009 (17.10.2026): segments jsonb NULL (the camera's setups, each a time
                  -- range with its own landmarks and homography), checked (false: set by the
                  -- court job), at_ms; method also 'auto-hall' (the hall's memory)
 scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
@@ -1445,7 +1445,7 @@ proposes the shot type.
   lines, the court's spacing along them, a camera that could see it; offered at confidence
   ≥ 0.6) or from the team's last calibration (same hall first). Not yet: lens distortion
   (the wide Legends hall fits at ± 24 cm), a camera bumped during a match.
-- **Set automatically, 17.10.2026** (migration `0011`, the `court` job after each trajectory
+- **Set automatically, 17.10.2026** (migration `0009`, the `court` job after each trajectory
   job; runbook: [analysis](runbooks/analysis.md#the-court-set-automatically-court-job)):
   - *The camera's setups*: a key frame every 30 s, matched (ORB, RANSAC homography) to an
     anchor frame; where floor probe points land, smoothed over five frames, splits the match

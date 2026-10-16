@@ -109,7 +109,7 @@ class Calibration(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    # Since 0011: the camera's setups (None: one for the whole video, the fields above);
+    # Since 0009: the camera's setups (None: one for the whole video, the fields above);
     # whether a person set or checked it (False: the court job set it); where in the video
     # the coach set it up.
     segments: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
@@ -180,7 +180,7 @@ def queue_trajectory(db: Session, video: Video, out_dir: str) -> Job | None:
             "duration_ms": video.duration_ms,
             "out_dir": out_dir,
             "track_key": f"media/{video.id}/analysis/ball-track-{token}.json.gz",
-            # The court job finds the court now (since 0011); older workers ignore this.
+            # The court job finds the court now (since 0009); older workers ignore this.
             "court": False,
         },
     )
