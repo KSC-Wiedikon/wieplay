@@ -1,6 +1,7 @@
 # ADR-002: Video pipeline for M1
 
-- Status: accepted (15.10.2026)
+- Status: accepted (15.10.2026); updated 16.10.2026 (workers reach the API through an SSH
+  tunnel, see the update at the end)
 - Context: `docs/PLAN.md` §5.2–§5.5, §7, §8; M1 in §17
 
 ## Decision
@@ -32,6 +33,8 @@
    - A permanent failure fails the video and cancels its other jobs.
    - Each worker has its own token (only its hash is stored, revocable in Admin).
    - Worker routes answer 404 to anything carrying `CF-Connecting-IP`.
+   - (Since 16.10.2026 the workers pull through an SSH tunnel, not the tailnet; see
+     *Update 16.10.2026*.)
 4. **One media worker on the Lenovo server** (`nomal/worker/`, `Dockerfile.worker`,
    `deploy/lenovo/`).
    - It handles `ingest`, `transcode` ×2, `thumbs`, `purge` and the NAS inbox scan.
@@ -68,7 +71,8 @@
 ## Consequences
 
 - The VPS publishes the API on its tailnet address too (`NOMAL_TAILNET_IP`), so the worker
-  can reach it without Cloudflare.
+  can reach it without Cloudflare. (Until 16.10.2026; since then `NOMAL_TAILNET_IP` is unset,
+  see the update below.)
 - The bucket needs CORS for the Nomal origin and lifecycle rules: `incoming/` 14 days,
   `exports/` 30 days, `analysis/` 3 days. `python -m nomal.cli storage-setup` applies them.
 - Before the bucket exists, the app runs without video features: `/api/video/config`
@@ -80,3 +84,22 @@
   - the retention job;
   - the audio mute switch;
   - exports.
+
+## Update 16.10.2026: SSH tunnel instead of the tailnet
+
+The VPS moved to the club's own Hetzner account and left the owner's private tailnet, so it
+is on no tailnet now. Decision 3 holds (workers pull, worker routes refuse Cloudflare); only
+the path changed:
+
+- `NOMAL_TAILNET_IP` is unset in both VPS `.env` files. Compose falls back to `127.0.0.2`,
+  so the APIs listen on the VPS's loopback only (`127.0.0.1:8090` dev, `:8091` prod).
+- The Lenovo server connects out to the VPS with `nomal-api-tunnel.service`
+  (`deploy/lenovo/`), an `ssh -N` with two local forwards that publishes the APIs on the
+  Docker bridge (`172.17.0.1:18090` dev, `:18091` prod). ufw there lets only Docker networks
+  reach those ports. The workers' `NOMAL_WORKER_API_URL` points there.
+- Requests through the tunnel carry no `CF-Connecting-IP`, so the worker routes accept them.
+  The security idea is unchanged: the worker routes are not reachable from the internet;
+  only a machine with SSH access to the VPS can reach them. The VPS has no access to the
+  home network.
+- The Framework 16 GPU worker (PLAN §8.2) is not set up yet. It will need its own path to
+  the API (for example its own SSH tunnel); that is decided when it is set up.

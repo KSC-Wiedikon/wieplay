@@ -19,7 +19,7 @@ Read [`docs/PLAN.md`](docs/PLAN.md) first, then [`docs/adr/`](docs/adr/).
 | `web/` | React app (Vite, Tailwind v4), built into the API image |
 | `docs/` | Plan, ADRs, research, brand assets |
 | `deploy/hetzner/` | Compose file and env template for the VPS (API) |
-| `deploy/lenovo/` | Compose file and env template for the media worker |
+| `deploy/lenovo/` | Compose file and env template for the media worker; systemd unit for its SSH tunnel to the API |
 | `scripts/` | `deploy.sh`, `deploy-worker.sh`, `setup-hetzner.sh`, `vault-secrets.sh`, brand icons |
 
 ## Run it locally
@@ -84,7 +84,9 @@ The worker tests encode a tiny clip and are skipped when ffmpeg is not installed
 
 `scripts/deploy.sh dev|prod` builds the image here, loads it on the VPS, dumps the database,
 runs migrations and restarts. `scripts/deploy-worker.sh dev|prod` builds and restarts the
-media worker on the Lenovo server (run it there).
+media worker on the Lenovo server (run it there). The worker reaches the API through an SSH
+tunnel: install `deploy/lenovo/nomal-api-tunnel.service` and its ufw rule there once (steps in
+the unit's header, `docs/PLAN.md` §8.1).
 
 Once per environment, `scripts/setup-hetzner.sh dev|prod` creates the secrets, the database,
 the Wiedisync bridge env and `/opt/nomal-<env>/.env`, then deploys and moves the secrets into

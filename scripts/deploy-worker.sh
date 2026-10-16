@@ -5,7 +5,8 @@
 #
 # Runs on the Lenovo server itself (the worker runs there; no registry needed). The stack
 # directory ~/stacks/nomal-worker-<env> holds compose.yaml (from deploy/lenovo/), .env and
-# worker.token (0600, from Admin → Workers).
+# worker.token (0600, from Admin → Workers). The worker reaches the API through
+# nomal-api-tunnel.service (deploy/lenovo/, installed once; PLAN §8.1).
 set -euo pipefail
 
 env="${1:-}"

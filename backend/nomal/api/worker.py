@@ -1,5 +1,6 @@
-"""Worker endpoints (PLAN §8.1). Workers reach the API over the tailnet only: anything that
-arrives through Cloudflare (CF-Connecting-IP) gets 404. Each worker has its own token.
+"""Worker endpoints (PLAN §8.1). Workers reach the API through an SSH tunnel to the VPS
+(since 16.10.2026; before, the tailnet): anything that arrives through Cloudflare
+(CF-Connecting-IP) gets 404. Each worker has its own token.
 """
 
 from __future__ import annotations
