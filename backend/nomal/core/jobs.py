@@ -42,6 +42,7 @@ def enqueue(
     depends_on: Iterable[uuid.UUID] = (),
     priority: int = 0,
     max_attempts: int = 3,
+    not_before: datetime | None = None,
 ) -> Job:
     job = Job(
         id=uuid.uuid4(),
@@ -54,6 +55,7 @@ def enqueue(
         max_attempts=max_attempts,
         status="queued",
         attempts=0,
+        not_before=not_before,
     )
     db.add(job)
     db.flush()
@@ -139,19 +141,38 @@ def backoff(attempts: int) -> timedelta:
     return timedelta(minutes=min(60, 2 ** max(0, attempts - 1)))
 
 
-def fail(job: Job, error: str, *, retryable: bool, now: datetime | None = None) -> bool:
-    """Record a failed attempt. Returns True when the job is finally failed."""
+def fail(
+    job: Job,
+    error: str,
+    *,
+    retryable: bool,
+    retry_after: timedelta | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Record a failed attempt. Returns True when the job is finally failed. A worker may
+    ask for a longer pause than the usual backoff (YouTube's bot check: an hour)."""
     now = now or datetime.now(UTC)
     job.error = error[:4000]
     job.lease_owner = None
     job.lease_expires_at = None
     if retryable and job.attempts < job.max_attempts:
         job.status = "queued"
-        job.not_before = now + backoff(job.attempts)
+        job.not_before = now + (retry_after or backoff(job.attempts))
         return False
     job.status = "failed"
     job.finished_at = now
     return True
+
+
+def hold(db: Session, kind: str, until: datetime) -> int:
+    """Hold every queued job of a kind until a time (imports after YouTube's bot check:
+    the next one would meet the same check)."""
+    held = 0
+    for job in db.scalars(select(Job).where(Job.kind == kind, Job.status == "queued")):
+        if job.not_before is None or job.not_before < until:
+            job.not_before = until
+            held += 1
+    return held
 
 
 def cancel_active(db: Session, video_id: uuid.UUID, reason: str) -> int:

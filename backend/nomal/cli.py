@@ -4,6 +4,7 @@ python -m nomal.cli storage-setup              bucket CORS + lifecycle rules (PL
 python -m nomal.cli create-worker NAME CAPS    register a worker, print its token once
 python -m nomal.cli add-worker-cap NAME CAP    give an existing worker one more capability
 python -m nomal.cli allow-channel CHANNEL LABEL  allow imports from a YouTube/Twitch channel
+python -m nomal.cli import-batch FILE --by NAME  queue many imports, paced (FILE or - for stdin)
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 import uuid
+from typing import Any
 
 from sqlalchemy import select
 
@@ -121,6 +123,58 @@ def allow_channel(channel: str, label: str) -> int:
     return 0
 
 
+def import_batch(path: str, by: str, spacing_min: int, dry_run: bool) -> int:
+    from datetime import timedelta
+
+    from nomal.core import batch
+    from nomal.core.models import WdMember
+    from nomal.core.sync import HttpBridgeClient
+
+    if path == "-":
+        text = sys.stdin.read()
+    else:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    try:
+        lines = batch.parse(text)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    settings = get_settings()
+    if settings.dev_bridge:
+        from nomal.api.dev_bridge import FixtureBridgeClient
+
+        bridge: Any = FixtureBridgeClient()
+    else:
+        bridge = HttpBridgeClient(settings.bridge_api_url, settings.bridge_service_token)
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        members = list(db.scalars(select(WdMember).where(WdMember.display_name == by)))
+        if len(members) != 1:
+            print(f"--by must name exactly one member, found {len(members)}", file=sys.stderr)
+            return 2
+        planned = batch.plan(db, bridge, lines)
+        for p in planned:
+            if p.problem:
+                print(f"line {p.line.number}: skipped: {p.problem}")
+        if dry_run:
+            ok = [p for p in planned if not p.problem]
+            for p in ok:
+                print(f"line {p.line.number}: would import {p.title} ({p.line.on:%d.%m.%Y})")
+            db.rollback()
+            return 0
+        queued = batch.queue(
+            db, planned, created_by=members[0].id, spacing=timedelta(minutes=spacing_min)
+        )
+        for p, video, start in queued:
+            print(
+                f"line {p.line.number}: queued {p.title} ({p.line.on:%d.%m.%Y}), "
+                f"starts {start.astimezone():%H:%M}, video {video.id}"
+            )
+        print(f"{len(queued)} queued, {len(planned) - len(queued)} skipped")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nomal")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -134,7 +188,14 @@ def main(argv: list[str] | None = None) -> int:
     channel = sub.add_parser("allow-channel")
     channel.add_argument("channel", help="YouTube link, @handle or UC… id, or a Twitch link")
     channel.add_argument("label")
+    batch_cmd = sub.add_parser("import-batch")
+    batch_cmd.add_argument("file", help="tab-separated: team id, date, link [, title]; - = stdin")
+    batch_cmd.add_argument("--by", required=True, help="the member it is done for (full name)")
+    batch_cmd.add_argument("--spacing-min", type=int, default=10)
+    batch_cmd.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "import-batch":
+        return import_batch(args.file, args.by, args.spacing_min, args.dry_run)
     if args.command == "storage-setup":
         return storage_setup()
     if args.command == "add-worker-cap":

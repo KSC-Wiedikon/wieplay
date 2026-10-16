@@ -13,7 +13,7 @@ from nomal import __version__
 from nomal.worker import ffmpeg
 from nomal.worker.client import ApiClient, ApiUnavailable, ClaimedJob, NotLeased
 from nomal.worker.config import WorkerSettings
-from nomal.worker.handlers import HANDLERS, Context, PermanentError
+from nomal.worker.handlers import HANDLERS, Context, PermanentError, RetryLater
 from nomal.worker.inbox import InboxScanner
 
 log = logging.getLogger(__name__)
@@ -79,6 +79,9 @@ class Worker:
                 log.info("job %s done in %.0fs", job.id, time.monotonic() - started)
             except (ffmpeg.Cancelled, NotLeased):
                 log.warning("job %s stopped (cancelled or lease lost)", job.id)
+            except RetryLater as exc:
+                log.warning("job %s waits %d s: %s", job.id, exc.seconds, exc)
+                self._fail(job, str(exc), retryable=True, retry_after_s=exc.seconds)
             except (PermanentError, ffmpeg.FfmpegError) as exc:
                 log.error("job %s failed: %s", job.id, exc)
                 self._fail(job, str(exc), retryable=isinstance(exc, ffmpeg.FfmpegError))
@@ -88,9 +91,11 @@ class Worker:
             finally:
                 shutil.rmtree(self.settings.work_dir / job.id, ignore_errors=True)
 
-    def _fail(self, job: ClaimedJob, error: str, *, retryable: bool) -> None:
+    def _fail(
+        self, job: ClaimedJob, error: str, *, retryable: bool, retry_after_s: int | None = None
+    ) -> None:
         try:
-            self.api.fail(job.id, error, retryable=retryable)
+            self.api.fail(job.id, error, retryable=retryable, retry_after_s=retry_after_s)
         except (ApiUnavailable, NotLeased):
             log.warning("could not report the failure of %s; the lease will expire", job.id)
 

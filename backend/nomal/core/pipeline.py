@@ -155,9 +155,17 @@ def start_ingest(db: Session, video: Video, team: WdTeam) -> Job:
 
 
 def start_import(
-    db: Session, video: Video, team: WdTeam, source: imports.ImportSource, allowed: set[str]
+    db: Session,
+    video: Video,
+    team: WdTeam,
+    source: imports.ImportSource,
+    allowed: set[str],
+    *,
+    not_before: datetime | None = None,
 ) -> Job:
-    """Fetch a YouTube or Twitch video into the video's raw folder; ingest follows."""
+    """Fetch a YouTube or Twitch video into the video's raw folder; ingest follows. A batch
+    spreads its imports with `not_before`; more attempts than usual, because YouTube's bot
+    check makes an import wait an hour and try again."""
     video.status = "importing"
     return jobs.enqueue(
         db,
@@ -165,6 +173,8 @@ def start_import(
         caps=IMPORT_CAPS,
         video_id=video.id,
         priority=10,
+        max_attempts=8,
+        not_before=not_before,
         params={
             "video_id": str(video.id),
             "url": source.url,
