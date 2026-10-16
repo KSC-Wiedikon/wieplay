@@ -84,6 +84,7 @@ def evaluate(db: Session, visible_team_ids: set[int], query: ReelQuery) -> list[
         .join(WdTeam, WdTeam.id == Video.team_id)
         .where(
             Event.deleted_at.is_(None),
+            tagging.event_stands(),  # suggested actions only once a coach accepted them
             Video.status == "ready",
             Video.team_id.in_(visible_team_ids),
         )

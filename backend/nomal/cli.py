@@ -12,6 +12,9 @@ python -m nomal.cli score --video ID | --all-ready   score again: servers, winne
 python -m nomal.cli trajectories [--force]     ball tracks and court proposals for analysed videos
 python -m nomal.cli court --video ID | --all-ready [--force]   find the court (hall memory, setups)
 python -m nomal.cli court-eval [--json]        the court job against the coaches' calibrations
+python -m nomal.cli actions --video ID | --all-ready   suggest the actions (serve, reception, …)
+python -m nomal.cli train-actions              train the action proposer now
+python -m nomal.cli action-eval [--run ID]      per-game scores of the action proposers
 """
 
 from __future__ import annotations
@@ -430,6 +433,99 @@ def court_eval(as_json: bool) -> int:
     return 0
 
 
+def actions_cmd(video: str | None, all_ready: bool, dry_run: bool) -> int:
+    """Queue the actions job (the suggested actions, PLAN §10.4a) of analysed videos: after a
+    deploy, or to suggest again now. Untouched suggestions are replaced; nothing a coach
+    tagged or answered changes."""
+    from nomal.core import actions
+    from nomal.core.models import Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        query = select(Video).where(Video.status == "ready", Video.sport.in_(actions.SPORTS))
+        if video:
+            query = query.where(Video.id == uuid.UUID(video))
+        elif not all_ready:
+            print("name --video or --all-ready", file=sys.stderr)
+            return 2
+        queued = 0
+        for row in db.scalars(query.order_by(Video.recorded_on)):
+            label = f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id})"
+            reason = actions.can_propose(db, row)
+            if reason:
+                print(f"skip {label}: {reason}")
+                continue
+            if dry_run:
+                print(f"would queue {label}")
+                continue
+            job = actions.queue_actions(db, row, reason="cli")
+            if job is not None:
+                queued += 1
+                print(f"queued {label}: job {job.id}")
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        print(f"{queued} queued")
+    return 0
+
+
+def train_actions() -> int:
+    from datetime import timedelta
+
+    from nomal.core import actions
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        job = actions.queue_training(db, timedelta(0))
+        db.commit()
+        print(f"action training job {job.id} queued")
+    return 0
+
+
+def action_eval(run_id: str | None, as_json: bool) -> int:
+    """Held-out scores of the rules (v0) and the learned proposer (v1) per reviewed game."""
+    import json
+
+    from nomal.core.models import ModelRun
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        query = select(ModelRun).where(ModelRun.kind == "train_actions")
+        if run_id:
+            query = query.where(ModelRun.id == uuid.UUID(run_id))
+        run = db.scalars(query.order_by(ModelRun.created_at.desc()).limit(1)).first()
+        if run is None:
+            print("no action training yet", file=sys.stderr)
+            return 1
+        if as_json:
+            print(json.dumps(run.metrics, indent=1, default=str))
+            return 0
+        print(f"training {run.id} at {run.created_at:%d.%m.%Y %H:%M}: "
+              f"{'v1 kept' if run.metrics.get('accepted') else 'v0 kept'}")  # fmt: skip
+        for video_id, entry in sorted((run.metrics.get("videos") or {}).items()):
+            parts = [f"{video_id[:8]} recall {_pct(entry.get('contact_recall'))}%"]
+            for finder in ("v0", "v1"):
+                m = entry.get(finder)
+                if m:
+                    parts.append(
+                        f"{finder} F1 {_pct(m.get('f1'))}% action F1 {_pct(m.get('action_f1'))}% "
+                        f"skill {_pct(m.get('skill_accuracy'))}% "
+                        f"side {_pct(m.get('side_accuracy'))}%"
+                    )
+            print("  ".join(parts))
+        summary = run.metrics.get("summary") or {}
+        for finder in ("v0", "v1"):
+            m = summary.get(finder) or {}
+            if m.get("games"):
+                print(f"{finder}: {m['games']} games, action F1 {_pct(m.get('action_f1'))}%, "
+                      f"contacts F1 {_pct(m.get('f1'))}%")  # fmt: skip
+    return 0
+
+
 def _pct(value: Any) -> str:
     return f"{100 * float(value):5.1f}" if isinstance(value, int | float) else "    -"
 
@@ -530,7 +626,22 @@ def main(argv: list[str] | None = None) -> int:
     court_cmd.add_argument("--dry-run", action="store_true")
     court_eval_cmd = sub.add_parser("court-eval", help="the court job against the coaches")
     court_eval_cmd.add_argument("--json", action="store_true")
+    actions_parser = sub.add_parser("actions", help="suggest the actions of analysed videos")
+    which_actions = actions_parser.add_mutually_exclusive_group(required=True)
+    which_actions.add_argument("--video", help="one video id")
+    which_actions.add_argument("--all-ready", action="store_true", help="every analysed video")
+    actions_parser.add_argument("--dry-run", action="store_true")
+    sub.add_parser("train-actions", help="train the action proposer now")
+    action_evaluation = sub.add_parser("action-eval", help="per-game scores of the proposers")
+    action_evaluation.add_argument("--run", help="a training run id (default: the latest)")
+    action_evaluation.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "actions":
+        return actions_cmd(args.video, args.all_ready, args.dry_run)
+    if args.command == "train-actions":
+        return train_actions()
+    if args.command == "action-eval":
+        return action_eval(args.run, args.json)
     if args.command == "court":
         return court_jobs(args.video, args.all_ready, args.force, args.dry_run)
     if args.command == "court-eval":

@@ -139,7 +139,12 @@ def _serve_calls(db: Session, video: Video, rallies: Sequence[Segment]) -> list[
     serves = list(
         db.execute(
             select(Event.t_ms, Event.side)
-            .where(Event.video_id == video.id, Event.code == "S", Event.deleted_at.is_(None))
+            .where(
+                Event.video_id == video.id,
+                Event.code == "S",
+                Event.deleted_at.is_(None),
+                tagging.event_stands(),  # a suggested serve is no fact
+            )
             .order_by(Event.t_ms)
         ).all()
     )
@@ -437,6 +442,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         "notes": dict(Counter(r.note for so in match.sets for r in so.rallies if r.note)),
     }
     run.timing = {"wall_s": round(time.perf_counter() - started, 3), "rallies": len(rallies)}
+    from nomal.core import actions  # the suggested actions follow the new sides (PLAN §10.4a)
+
+    actions.after_scoring(db, video, reason)
     return run
 
 

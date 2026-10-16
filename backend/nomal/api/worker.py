@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nomal.api.deps import BridgeDep, DbDep, SettingsDep, audit
-from nomal.core import analysis, jobs, pipeline
+from nomal.core import actions, analysis, jobs, pipeline
 from nomal.core.filming import CAMERA_DATE_WINDOW_DAYS, camera_day, check_filming
 from nomal.core.models import InboxFile, Job, Video, WdTeam, Worker
 from nomal.core.storage import ObjectStore
@@ -241,6 +241,13 @@ def job_inputs(job_id: uuid.UUID, worker: WorkerDep, db: DbDep) -> dict[str, Any
     """What an analysis job needs from the database, as of now: the current rally model,
     and for a training the reviewed games with their rallies (PLAN §10.1)."""
     job = _running(db, job_id, worker)
+    if job.kind in actions.KINDS:
+        try:
+            out = actions.job_inputs(db, job)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        db.rollback()
+        return out
     if job.kind not in analysis.KINDS:
         raise HTTPException(404, "This job has no inputs")
     out = analysis.job_inputs(db, job)
