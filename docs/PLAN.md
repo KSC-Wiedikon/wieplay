@@ -502,7 +502,8 @@ video             id, team_id → wd_team, kind 'match'|'training'|'other',
                   duration_ms, fps_num, fps_den, width, height, has_audio, audio_muted,
                   capture jsonb  -- camera make/model, codec, bitrate, VFR flag, from metadata
                   meets_standard bool, standard_issues text[]  -- e.g. '25fps', '720p'
-                  retention_until, created_by, created_at, deleted_at, deleted_by
+                  retention_until, created_by, created_at, deleted_at, deleted_by,
+                  rallies_reviewed_at NULL, rallies_reviewed_by NULL  -- §10.1
 video_source_file video_id, part_no, nas_path, bytes, sha256, duration_ms, offset_ms
 video_rendition   video_id, name '1080p50'|'540p25', codec, bitrate, segment_seconds,
                   segment_count, storage_prefix, bytes, job_id
@@ -547,7 +548,8 @@ segment          id, video_id, period_id NULL,
                  score_confidence NULL, score_conflict bool,
                  source 'manual'|'model'|'import', import_system NULL, import_ref NULL,
                  model_run_id NULL, confidence NULL,
-                 review 'unreviewed'|'confirmed'|'corrected'|'rejected',
+                 review 'unreviewed'|'confirmed'|'corrected'|'rejected'|'merged',
+                 merged_into NULL (a merged proposal: the segment it went into),
                  created_by, updated_by, timestamps, deleted_at, version
 segment_revision same shape as event_revision (§6.7), written by trigger
 sync_point       id, video_id, video_ms, system ('openvolley'|'scoreboard'|'manual'),
@@ -612,11 +614,16 @@ job              id, kind, video_id NULL, params jsonb, priority, required_caps 
                  backend NULL, backend_ref NULL, checkpoint jsonb, result jsonb, error,
                  created_at, started_at, finished_at
 worker           id, name, caps text[], token_hash, paused, version, last_seen_at
-model_run        id, job_id, model_name, model_version (git sha), weights_sha256,
-                 dataset_manifest NULL, params jsonb, metrics jsonb, created_at
-analysis_artifact id, video_id, model_run_id, kind 'ball_track'|'player_tracks'|'audio_events'|
-                 'motion'|'scoreboard_ocr'|…, object_key or nas_path, format 'parquet',
-                 schema_version, stats jsonb
+model_run        id, kind 'analyse'|'train_rallies'|…, job_id, video_id NULL (a training has
+                 none), model_name, model_version (git sha), weights_sha256,
+                 dataset_manifest NULL (training: games, their signals' SHA-256, rally counts),
+                 params jsonb, metrics jsonb, timing jsonb, created_at
+                 -- metrics.videos[<video id>]: what the run did for that video: the finder
+                 -- (v0|v1), proposals written, or its score against the coach's rallies
+analysis_artifact id, video_id NULL (a model has none), model_run_id, kind 'features'|
+                 'rally_model'|later 'ball_track'|'player_tracks'|'scoreboard_ocr'|…,
+                 nas_path (relative to the analysis root), format 'npz'|'pickle' (Parquet
+                 when other tools must read it), schema_version, sha256, bytes, stats jsonb
 calibration      id, video_id, hall_name, image_points, court_points, homography (3×3),
                  method 'manual'|'auto', reproj_error_cm, created_by, copied_from NULL
 scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
@@ -627,9 +634,11 @@ budget           period ('2026/27'), line ('cloud_gpu'|'test_gpu'), cap_chf
 ```
 
 Per-frame data (ball positions, player boxes, OCR readings) is **not** stored in Postgres: a
-2 h match at 50 fps is 360 000 frames. It goes into Parquet files referenced by
-`analysis_artifact`; only derived facts (segments, scores, serve placements, proposed events)
-become rows.
+2 h match at 50 fps is 360 000 frames. It goes into files on the NAS referenced by
+`analysis_artifact` (since 16.10.2026: one compressed numpy `.npz` of signals per video, a
+few MB, §10.1); only derived facts (segments, scores, serve placements, proposed events)
+become rows. Built in migration `0006` (16.10.2026) with `video.rallies_reviewed_at/_by`
+(§10.1).
 
 ### 6.10 People, access, privacy
 
@@ -907,7 +916,7 @@ tailnet; it is on no tailnet now. The path since then:
 
 | Worker | Caps | Notes |
 |---|---|---|
-| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists) | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. Reaches the API through `nomal-api-tunnel.service` (§8.1). |
+| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `analyse`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists). With `analyse` the worker runs a second, background lane for the analysis jobs (nice 15), so an hour of analysis never holds up an upload | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. Reaches the API through `nomal-api-tunnel.service` (§8.1). |
 | **Framework 16** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, always on. **Busy guard**: stops claiming jobs while a training run or other GPU-heavy work uses the GPU (checked from free VRAM, plus a `nomal-worker pause` switch); optionally only at night. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so a pause or reboot loses at most one chunk. Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. A dev agent (`--env dev`) runs beside it, off by default. Not set up yet: it needs its own path to the API (§8.1). |
 
 ### 8.3 The GPU interface (backend-agnostic)
@@ -954,7 +963,9 @@ the job waits in `waiting_budget` and admins are told.
 | `ingest` | `ingest`, `nas` | Probe, join parts, SHA-256, raw on NAS, staging deleted |
 | `transcode` (per rendition) | `transcode` | HLS in `media/{video}/{rendition}/` |
 | `thumbs`, `audio` | `thumbs` / `audio` | Sprite + VTT; 16 kHz mono FLAC on NAS |
-| `cpu_analysis` | `cpu_analysis` | Whistle events, motion energy, scoreboard OCR (Parquet); dead-time proposals |
+| `analyse` (16.10.2026) | `analyse`, `nas` | One volleyball video: ball per frame (VballNet-Fast, CPU), motion, whistles and loudness as signals in `analysis/` on the NAS; rally proposals, or their score against the coach's rallies (§10.1). Priority −10, background lane |
+| `train_rallies` (16.10.2026) | `analyse`, `nas` | Rally finder v1 from every reviewed game, held-out scores of v0 and v1, new proposals when v1 wins (§10.1). Priority −5, debounced |
+| `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
 | `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
@@ -1167,19 +1178,71 @@ CPU stages run free on the Lenovo server; only what needs a GPU goes to the GPU 
 
 The Balltime-style "skip the downtime" feature. Live play = rallies; everything else is dead.
 
-- **v0, CPU only (Lenovo)**: referee **whistle detection** on the audio (narrow-band energy
-  around 2–4.5 kHz with a tonal check and a duration window), **motion energy** inside the
-  court mask, and a small state machine: dead → serve whistle → serve (toss/hit within a few
-  seconds) → rally → end whistle → dead. Gaps are classified by duration and position: before
-  the first serve = `warmup`; ~30 s = `timeout`; minutes between sets = `set_break`; else
-  `other_dead`.
-- **v1, learned**: a small temporal model over per-second features (audio embedding, motion,
-  and, once available, ball-visible ratio and ball speed), trained on the manual rally segments
-  from tier 1 and the corrected v0 output.
+**The loop (built 16.10.2026)**, from the owner's "start tagging one video and then build up
+the recognition with each video". Runbook: [`runbooks/analysis.md`](runbooks/analysis.md).
+
+1. **Analyse.** Once a volleyball video is ready (and meets the capture standard), the
+   `analyse` job (§8.4) decodes the NAS originals once (every n-th frame to ~30 fps,
+   512x288; VAAPI, else CPU), finds the ball in every frame with VballNet-Fast on the CPU
+   (§10.4), measures motion in a 3x4 grid and reads the whistle band of the audio. These
+   *signals* (a compressed `.npz` of a few MB, no pictures, no sound) go to `analysis/` on
+   the NAS; features are derived from them on every run, so a better rule needs no new pass
+   over the video. The current finder then proposes rallies.
+2. **Propose.** Proposals are rally segments with `source='model'`, `review='unreviewed'`,
+   a `confidence` and their `model_run_id`. A model never writes into a video that has
+   rallies a person made, confirmed or corrected: there it only scores itself against them
+   (boundary precision, recall and F1 at ±1 s, IoU, counts: the per-game accuracy).
+   Proposals nobody touched are replaced on a rerun; one that overlaps a rally a coach
+   rejected is dropped. Stats and condensed playback ignore a proposal until it is accepted.
+3. **Review.** Accept → `confirmed`; a moved boundary, another kind or winner → `corrected`
+   (the revision tables keep before and after); delete → `rejected` (soft-deleted: a hard
+   negative); merged into another proposal → `merged` with `merged_into` (soft-deleted, no
+   label either way: the surviving one carries it); undo → `unreviewed` again. The server
+   marks edits and deletes itself when a client does not say. "Rallies done"
+   (`POST /api/videos/{id}/rallies-reviewed`, `video.rallies_reviewed_at`) makes the game
+   training data; it is refused (409 with the count) while a proposal is still open, and a
+   game reopened later trains again only once it is done again.
+4. **Learn.** Ten minutes after the last "done", one `train_rallies` job learns v1 from every
+   reviewed game, scores v0 and v1 on each game while it is held out (split by match, §11),
+   and keeps v1 only when its mean boundary F1 beats v0's. A kept v1 re-proposes for every
+   game nobody has done, and the next analyses use it. `python -m nomal.cli rally-eval`
+   prints the per-game scores.
+
+- **v0, rules (now)**: the ball in plausible tracks (stuck spots and parked balls removed)
+  over 2 s, or less ball with more movement than usual; gaps up to 3 s bridged; edges from
+  the raw half-second activity, opened 1 s before the ball shows (the toss: the tagging page
+  opens a rally 2 s before the serve tag) and closed 1 s after it is lost. When a referee
+  whistles (≥ 0.8 whistles per minute), whistles inside a stretch split it into rallies and
+  give the end, and a rally never starts before its serve whistle. 3–90 s. Without sound
+  (friendlies) it runs on the ball and motion alone. The earlier plan of a whistle-first
+  state machine gave way to this: the ball is the stronger signal (spike S0), whistles miss
+  in friendlies and multiply in tournament halls.
+- **v1, learned (now)**: a gradient-boosted classifier (scikit-learn HistGradientBoosting on
+  the CPU, seconds to train) answers "in a rally?" per half-second from ~40 features (ball
+  seen, tracked, speed, height, track length; motion overall and per court band; loudness;
+  whistle on, since, until, rate; the same over 2, 6 and 20 s and the 3 s before and after)
+  plus v0's own answer, smoothed with hysteresis into rallies of 2.5–120 s. Needs two
+  reviewed games (one to learn from, one to check on); each game weighs the same.
+- **Still to do**: classifying the gaps (warmup, timeout, set break), telling our referee's
+  pitch from the next court's in tournament halls, a court mask against the neighbours'
+  balls, and the review UI.
 - **Review UI**: rally strip with `Enter` accept, `←/→` nudge a boundary, `X` reject, `M`
   merge, `S` split.
 - **Bar**: boundary F1 ≥ 0.9 at ±1 s on held-out matches before condensed mode is the default
   view for new videos.
+- **First run, 16.10.2026** (2. Liga, H3 vs Volero Legends, 132 min, YouTube 1080p60), in
+  the worker image with its 6-CPU limit but outside the worker, while other work ran on the
+  box: **28.9 min** wall (4.6x faster than the match), 2.8 CPU-hours (decoding 38 %),
+  1.5 GB of memory, 237,264 frames at 139 frames/s, 8 MB of signals. The ball was found in
+  33 % of the frames, in a plausible track in 22.5 %; 436 whistles (3.3 per minute, median
+  3,875 Hz, as in S0). **v0 proposes 193 rallies** (37 min of play, median 8.6 s; 2.3
+  whistles per rally); features and v0 take 0.6 s. The first version proposed 325: shoe
+  squeaks split rallies and the ball thrown back after the whistle looked like play, hence
+  the serve-whistle anchoring. Ignoring the whistles (as in a friendly), v0 finds 226 on
+  the same match, at boundary F1 0.72 against the whistle version. VAAPI decoding was no
+  faster in the image (the model is the bottleneck) and found ~1 % fewer balls, so the CPU
+  decodes by default. No coach's rallies exist yet: the first boundary F1 comes with the
+  first reviewed game.
 - **Bonus**: the live segments define the **analysis copy** for the GPU (§8.4), which cuts GPU
   time to the live share of the match.
 
@@ -1715,7 +1778,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | **M3** | Clips, reels, export, comments | Virtual clips; smart per-player reels; highlight builder across matches; comments pinned to a moment with @mentions and audience; drill segments for trainings; ffmpeg export with watermark (incl. condensed match) | A player opens "my attacks this season" on a phone; a coach downloads a watermarked condensed match |
 | **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in Nomal without a spreadsheet |
 | **M4** | Launch | Basketball taxonomy + grammar for Herren 1; import from YouTube/Twitch links (§7.2.2); automatic stitching of split recordings (§7.2.1); German UI; privacy page; filming/tagging guides; runbook; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
-| **M5** | Tier 2a: automatic dead time | CPU v0 (whistles + motion) on the Lenovo worker; rally review UI; analysis copies; internal GPU worker on the Framework 16 (`local-agent`, busy guard) + GPU-hour ledger; learned v1 once ~20 matches have manual rallies | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
+| **M5** | Tier 2a: automatic dead time | CPU v0 (ball + whistles + motion) on the Lenovo worker; rally review UI; analysis copies; internal GPU worker on the Framework 16 (`local-agent`, busy guard) + GPU-hour ledger; learned v1 from the reviewed games. **16.10.2026**: analyse job, v0, v1 with its training loop and per-game scores built (§10.1); review UI, analysis copies and the GPU worker open | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
 | **M6** | Tier 2b: automatic scoring (VB) | Serve-side classifier from tier-1 serve tags; side-switch rules; official-set-score constraint; scoreboard region UI + OCR; score correction UI | ≥ 98 % correct rally winners with ≤ 5 % flagged on held-out matches |
 | **M7** | Tier 2c: ball | Ball-labelling tool; TrackNet fine-tune on the Framework 16; Parquet artifacts | Ball bar met on near court; far court measured |
 | **M8** | Tier 2d: players + court | YOLO + ByteTrack; calibration UI; serve placement charts | Serve zones agree ≥ 80 % with manual tags |
