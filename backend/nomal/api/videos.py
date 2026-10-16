@@ -267,7 +267,9 @@ def _video_out(
             RenditionOut(name=r.name, width=r.width, height=r.height, fps=r.fps)
             for r in video.renditions
         ],
-        has_thumbs=bool(video.thumbs),
+        # Thumbnails exist before the renditions, but media URLs are served once the video
+        # is ready: saying so earlier shows broken images (PLAN §7.6).
+        has_thumbs=bool(video.thumbs) and video.status == "ready",
         progress=progress,
         error=video.error if manager else None,
         created_at=video.created_at,

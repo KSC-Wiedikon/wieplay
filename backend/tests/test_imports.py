@@ -199,8 +199,13 @@ def test_a_link_becomes_a_video_through_import_and_ingest(
     while jobs := claim(w, IMPORT_CAPS):
         body = transcode_result(jobs[0]) if jobs[0]["kind"] == "transcode" else THUMBS
         assert w.post(f"/api/worker/jobs/{jobs[0]['id']}/complete", json=body).status_code == 204
+        if jobs[0]["kind"] == "thumbs":
+            # Thumbnails are done, the renditions not yet: no poster to show so far.
+            mid = coach.get(f"/api/videos/{video['id']}").json()
+            assert mid["status"] == "processing" or mid["has_thumbs"]
+            assert mid["status"] == "ready" or not mid["has_thumbs"]
     got = coach.get(f"/api/videos/{video['id']}").json()
-    assert got["status"] == "ready"
+    assert got["status"] == "ready" and got["has_thumbs"]
     assert got["imported_from"] == {
         "platform": "youtube",
         "url": "https://www.youtube.com/watch?v=NXNsZ_UNM6w",
