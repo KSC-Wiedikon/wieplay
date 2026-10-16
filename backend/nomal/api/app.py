@@ -179,8 +179,10 @@ def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -
         if not _last_housekeeping or now - _last_housekeeping[-1] >= HOUSEKEEPING_EVERY:
             _last_housekeeping[:] = [now]
             done = run_housekeeping(session, now)
+            for video_id in done.video_ids:
+                media.permission_cache.forget_video(video_id)  # as in a coach's delete
             if done.any():
-                log.info("housekeeping: %s", done)
+                log.info("housekeeping: %s", done.counts())
 
 
 def _mount_web(app: FastAPI, dist: Path) -> None:

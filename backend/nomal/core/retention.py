@@ -7,12 +7,14 @@
 | Sessions, login nonces | 30 days |
 | Inbox entries that left the share, adult-check answers | 30 days |
 
-Expired videos go the same way as a coach's delete: soft-deleted, NAS originals purged by
-the worker, bucket objects swept by the API (videos.sweep_deleted).
+Expired videos go the same way as a coach's delete: soft-deleted, NAS originals and analysis
+signals purged by the worker, bucket objects swept by the API (videos.sweep_deleted), inbox
+entries released.
 """
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
@@ -41,9 +43,13 @@ class Housekeeping:
     audit: int
     inbox: int
     adult_checks: int
+    video_ids: tuple[uuid.UUID, ...] = ()  # the expired videos, so the API forgets them
+
+    def counts(self) -> dict[str, int]:
+        return {k: v for k, v in vars(self).items() if k != "video_ids"}
 
     def any(self) -> bool:
-        return any(vars(self).values())
+        return any(self.counts().values())
 
 
 def run_housekeeping(db: Session, now: datetime | None = None) -> Housekeeping:
@@ -60,7 +66,14 @@ def run_housekeeping(db: Session, now: datetime | None = None) -> Housekeeping:
         .with_for_update(skip_locked=True)
     ).all()
     for video in expired:
+        ingest_started = pipeline.ingest_started(db, video)
         pipeline.mark_deleted(db, video, actor=None)
+        for f in video.files:
+            inbox = db.get(InboxFile, f.inbox_file_id) if f.inbox_file_id else None
+            if inbox is not None and inbox.status == "assigned":
+                # As in a coach's delete: ingest moved the file into the raw folder.
+                inbox.status = "gone" if ingest_started else "new"
+                inbox.video_id = None
         db.add(
             AuditLog(
                 action="retention_deleted",
@@ -84,10 +97,11 @@ def run_housekeeping(db: Session, now: datetime | None = None) -> Housekeeping:
             )
         ),
         adult_checks=purge(delete(AdultCheck).where(AdultCheck.on_date < today - SHORT_KEEP)),
+        video_ids=tuple(video.id for video in expired),
     )
     if done.any():
         db.add(
-            AuditLog(action="housekeeping", object_type=None, object_id=None, details=vars(done))
+            AuditLog(action="housekeeping", object_type=None, object_id=None, details=done.counts())
         )
     db.commit()
     return done

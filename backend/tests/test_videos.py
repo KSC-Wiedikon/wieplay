@@ -688,10 +688,12 @@ def test_housekeeping_applies_the_retention_rules(
     with app.state.sessionmaker() as db:
         done = run_housekeeping(db)
     assert done.videos == 1 and done.nonces >= 1 and done.sessions >= 1 and done.audit == 1
+    assert [str(video_id) for video_id in done.video_ids] == [video["id"]]
     with db_engine.connect() as conn:
         assert conn.execute(text("SELECT status FROM video")).scalar() == "deleted"
         actions = conn.execute(text("SELECT action FROM audit_log")).scalars().all()
     assert "retention_deleted" in actions and "ancient" not in actions
     [purge] = claim(w, MEDIA_CAPS)
     assert purge["kind"] == "purge" and purge["params"]["raw_subdir"]
+    assert purge["params"]["analysis_subdir"]  # the analysis signals go with the video
     assert club["coach"].get(f"/api/videos/{video['id']}").status_code in (401, 404)
