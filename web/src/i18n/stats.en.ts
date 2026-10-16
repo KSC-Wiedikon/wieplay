@@ -125,6 +125,14 @@ export const statsEn = {
         break_point_pct: 'Break-point: break points ÷ rallies we served',
       },
     },
+    rotations: {
+      title: 'Points per rotation',
+      rotation: 'Rotation',
+      rotationNo: 'Rotation {{n}}',
+      rallies: 'Rallies',
+      hint: "Our setter's zone, counted from each set's starting rotation.",
+      none: 'Points per rotation need the starting rotation of each set: set it in the sets bar on the tagging page.',
+    },
     legend: {
       title: 'What the numbers mean',
       ratings: 'Ratings, 0 to 3. Serve: ace or overpass forced 3, positive or OK 2, negative 1, error 0. Pass: perfect 3, good or OK 2, poor 1, overpass or error 0.',

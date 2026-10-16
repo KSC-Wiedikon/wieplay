@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -8,6 +8,7 @@ import { Button, ButtonLink } from '../../components/Button'
 import { ClipDialog } from '../../components/ClipDialog'
 import { AlertIcon, CheckIcon, KeyboardIcon, PauseIcon, PlayIcon, RedoIcon, UndoIcon } from '../../components/icons'
 import { LoadError } from '../../components/Message'
+import { SuggestedValue } from '../../components/ScoringMarks'
 import { PageSpinner } from '../../components/Spinner'
 import { Segmented } from '../../components/Segmented'
 import { Switch } from '../../components/Switch'
@@ -24,7 +25,7 @@ import { Outbox, type OutboxItem } from '../../lib/outbox'
 import { Playhead, usePlayhead } from '../../lib/playhead'
 import { keys } from '../../lib/queryClient'
 import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
-import { reviewProgress, suggestionCount } from '../../lib/suggestions'
+import { allProgress, reviewProgress, suggestionCount } from '../../lib/suggestions'
 import { TaggingStore } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
@@ -152,11 +153,30 @@ interface DeskProps extends WorkspaceProps {
   narrow: boolean
 }
 
+/**
+ * Leaving the review after changes: once they are sent, Nomal scores the match again with them
+ * (who served, who won, sets, breaks) and the page takes over the new suggestions. Nothing to
+ * wait for: a failure (or a sport without scoring, 409) leaves things as they are.
+ */
+function scoreAgain(client: QueryClient, outbox: Outbox, store: TaggingStore, videoId: string): void {
+  void outbox
+    .flush()
+    .then(() => api.scoring(videoId))
+    .then(async (analysis) => {
+      client.setQueryData(keys.analysis(videoId), analysis)
+      store.replaceBase(await api.tagging(videoId))
+    })
+    .catch(() => {})
+}
+
 function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }: DeskProps) {
+  const client = useQueryClient()
   const [params, setParams] = useSearchParams()
   const [playhead] = useState(() => new Playhead())
   const [controller] = useState(() => new TagController(store, playhead, taxonomy, { duration_ms: video.duration_ms }))
-  const [review] = useState(() => new ReviewController(store, playhead, controller, { rejectedBefore }))
+  const [review] = useState(
+    () => new ReviewController(store, playhead, controller, { rejectedBefore, onLeave: () => scoreAgain(client, outbox, store, video.id) }),
+  )
   const [element, setElement] = useState<HTMLVideoElement | null>(null)
   const reload = useCallback(() => {
     api
@@ -267,8 +287,14 @@ function DeskLayout({
   const current = reviewing ? (view.segments.find((s) => s.id === review.currentId) ?? null) : null
   useLoopPlayback(element, current?.start_ms ?? null, current?.end_ms ?? null)
 
-  const progress = useMemo(() => reviewProgress(view.segments, review.seen, review.rejectedBefore), [view.segments, review.seen, review.rejectedBefore])
-  const live = useMemo(() => ({ total: progress.total, open: progress.total - progress.done }), [progress])
+  // The analysis card counts rally proposals ("rallies reviewed" waits for those only); the
+  // review goes through the breaks Nomal labelled too.
+  const rallyProgress = useMemo(() => reviewProgress(view.segments, review.seen, review.rejectedBefore), [view.segments, review.seen, review.rejectedBefore])
+  const live = useMemo(() => ({ total: rallyProgress.total, open: rallyProgress.total - rallyProgress.done }), [rallyProgress])
+  const progress = useMemo(
+    () => allProgress(view.segments, review.seen, review.seenGaps, review.rejectedBefore),
+    [view.segments, review.seen, review.seenGaps, review.rejectedBefore],
+  )
   const byHand = rallies.length - suggestionCount(view.segments)
   // The review is offered once Nomal suggested something (volleyball: basketball marks no rallies).
   const canReview = controller.playsRallies && (progress.total > 0 || reviewing)
@@ -297,7 +323,7 @@ function DeskLayout({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canReview && !narrow && <ModeSwitch open={live.open} />}
+          {canReview && !narrow && <ModeSwitch open={progress.total - progress.done} />}
           <SyncStatus />
           <ButtonLink to={`/videos/${video.id}`}>{t('tagging.back')}</ButtonLink>
         </div>
@@ -578,15 +604,21 @@ function SetState() {
     ? view.events.find((e) => serves.has(e.code) && e.t_ms >= open.start_ms - SERVE_SLACK_MS && e.t_ms <= t_ms)
     : undefined
   const serving = serveTag?.side ?? state.serving
+  // The score counts winners Nomal suggested (no coach decided those rallies yet).
+  const suggested = !serveTag && state.suggested === true
 
   return (
     <section aria-label={t('tagging.state.title')} className="flex flex-col gap-1 rounded-card border border-hairline bg-surface shadow-card px-4 py-3">
       <p className="flex flex-wrap items-baseline gap-x-3 text-lg font-bold tabular-nums">
         <span>{state.period ? t('tagging.setNo', { no: state.period.no }) : t('tagging.state.noSet')}</span>
-        {state.period && <span className="text-2xl">{`${state.us}:${state.them}`}</span>}
-        <span className="text-base font-semibold">
+        {state.period && (
+          <SuggestedValue suggested={state.suggested === true} className="text-2xl">
+            {`${state.us}:${state.them}`}
+          </SuggestedValue>
+        )}
+        <SuggestedValue suggested={suggested && serving !== null} className="text-base font-semibold">
           {serving ? t('tagging.state.serve', { side: sideLabel(t, serving) }) : t('tagging.state.serveUnknown')}
-        </span>
+        </SuggestedValue>
       </p>
       <p className="text-sm text-muted tabular-nums">
         {open ? t('tagging.state.rallyOpen', { time: formatClock(open.start_ms) }) : t('tagging.state.noRally')}

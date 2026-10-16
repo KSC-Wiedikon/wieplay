@@ -1,18 +1,19 @@
 import '../i18n/pages'
 import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
-import { formatPercent, isReviewedSuggestion, isSuggestion } from '../lib/suggestions'
+import { formatPercent, isProposal, isReviewedProposal } from '../lib/suggestions'
 import type { Segment } from '../lib/types'
 import { SparkleIcon } from './icons'
 
 /**
- * Where a rally comes from, when Nomal suggested it: "Suggested · 87%" with a dashed outline
- * while nobody has answered it; a small marker once it is accepted or corrected (it is a rally
- * like any other then). A part split off in this review session waits for an answer too.
+ * Where a rally (or a break's label) comes from, when Nomal suggested it: "Suggested · 87%"
+ * with a dashed outline while nobody has answered it; a small marker once it is accepted or
+ * corrected (it is a rally like any other then). A part split off in this review session waits
+ * for an answer too.
  */
 export function SuggestionChip({ segment, splitOff = false, className }: { segment: Segment; splitOff?: boolean; className?: string }) {
   const { t } = useTranslation()
-  if (splitOff || isSuggestion(segment)) {
+  if (splitOff || isProposal(segment)) {
     const confidence = formatPercent(segment.confidence)
     return (
       <span
@@ -31,7 +32,7 @@ export function SuggestionChip({ segment, splitOff = false, className }: { segme
       </span>
     )
   }
-  if (isReviewedSuggestion(segment)) {
+  if (isReviewedProposal(segment)) {
     const corrected = segment.review === 'corrected'
     const full = corrected ? t('tagging.suggestions.corrected') : t('tagging.suggestions.confirmed')
     return (

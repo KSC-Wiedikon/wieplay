@@ -43,6 +43,10 @@ export function eventToIn(tag: Tag): EventIn {
   }
 }
 
+/**
+ * A segment's state for a change. Without `serving_manual`: the server keeps the coach's serve
+ * call as it is (a change that sets or clears it adds the key itself).
+ */
 export function segmentToIn(segment: Segment): SegmentIn {
   return {
     id: segment.id,
@@ -67,6 +71,8 @@ export function periodToIn(period: Period): PeriodIn {
     first_serve: period.first_serve,
     our_court_side_at_start: period.our_court_side_at_start,
     side_switch_at_score: period.side_switch_at_score,
+    review: period.review,
+    start_rotation: period.start_rotation,
   }
 }
 
@@ -116,6 +122,16 @@ function segmentFromIn(p: SegmentIn, prev: Segment | undefined): Segment {
     review: p.review ?? prev?.review ?? 'unreviewed',
     confidence: prev?.confidence ?? null,
     model_run_id: prev?.model_run_id ?? null,
+    // Without the key the server keeps the coach's serve call.
+    serving_manual: 'serving_manual' in p ? (p.serving_manual ?? null) : (prev?.serving_manual ?? null),
+    // The model's suggestions stay until the server answers with new ones.
+    serving_court: prev?.serving_court ?? null,
+    serve_confidence: prev?.serve_confidence ?? null,
+    model_serving: prev?.model_serving ?? null,
+    model_won_by: prev?.model_won_by ?? null,
+    score_confidence: prev?.score_confidence ?? null,
+    score_conflict: prev?.score_conflict ?? false,
+    score_note: prev?.score_note ?? null,
     version: prev?.version ?? 0,
     deleted_at: null,
   }
@@ -134,6 +150,13 @@ function periodFromIn(p: PeriodIn, prev: Period | undefined): Period {
     side_switch_at_score: p.side_switch_at_score ?? null,
     final_us: prev?.final_us ?? null,
     final_them: prev?.final_them ?? null,
+    source: prev?.source ?? 'manual',
+    review: p.review ?? prev?.review ?? 'unreviewed',
+    confidence: prev?.confidence ?? null,
+    // Without the key the server keeps the starting rotation.
+    start_rotation: 'start_rotation' in p ? (p.start_rotation ?? null) : (prev?.start_rotation ?? null),
+    model_first_serve: prev?.model_first_serve ?? null,
+    model_court_side: prev?.model_court_side ?? null,
     version: prev?.version ?? 0,
     deleted_at: null,
   }
@@ -370,7 +393,10 @@ export class TaggingStore {
     }
     if (change.kind === 'segment') {
       const segment = this.view.segments.find((s) => s.id === id)
-      return segment ? { kind: 'segment', payload: segmentToIn(segment) } : null
+      if (!segment) return null
+      // A change to the serve call is undone by sending the call from before.
+      const payload = 'serving_manual' in change.payload ? { ...segmentToIn(segment), serving_manual: segment.serving_manual ?? null } : segmentToIn(segment)
+      return { kind: 'segment', payload }
     }
     const period = this.view.periods.find((p) => p.id === id)
     return period ? { kind: 'period', payload: periodToIn(period) } : null
@@ -381,12 +407,21 @@ export class TaggingStore {
       this.openRally = openRally
       writeStorage(openRallyKey(this.videoId), openRally ? JSON.stringify(openRally) : '')
     }
-    const based = changes.map(
-      (c) => ({ ...c, payload: { ...c.payload, base_version: this.baseVersion(c.kind, c.payload.id) } }) as Change,
-    )
+    const based = changes.map((c) => this.keepServeCall({ ...c, payload: { ...c.payload, base_version: this.baseVersion(c.kind, c.payload.id) } } as Change))
     if (based.length > 0 && this.outbox) void this.outbox.enqueue(based)
     // enqueue() notifies synchronously (refresh), but an open-rally-only step needs its own.
     this.refresh()
+  }
+
+  /**
+   * A queued change is replaced by the next one to the same segment (last state wins): a serve
+   * call still waiting to be sent goes along with a change that doesn't name one.
+   */
+  private keepServeCall(change: Change): Change {
+    if (change.kind !== 'segment' || 'serving_manual' in change.payload || !this.outbox) return change
+    const queued = this.outbox.items().find((item) => item.kind === 'segment' && item.id === change.payload.id)
+    if (queued?.kind !== 'segment' || !('serving_manual' in queued.payload)) return change
+    return { kind: 'segment', payload: { ...change.payload, serving_manual: queued.payload.serving_manual ?? null } }
   }
 
   private refresh(): void {

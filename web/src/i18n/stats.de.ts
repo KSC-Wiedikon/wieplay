@@ -125,6 +125,14 @@ export const statsDe: Messages<typeof statsEn> = {
         break_point_pct: 'Breakpunkt-Quote: Breakpunkte ÷ Ballwechsel mit Aufschlag',
       },
     },
+    rotations: {
+      title: 'Punkte pro Rotation',
+      rotation: 'Rotation',
+      rotationNo: 'Rotation {{n}}',
+      rallies: 'Ballwechsel',
+      hint: 'Zone unseres Passeurs, ab der Startrotation jedes Satzes gezählt.',
+      none: 'Für die Punkte pro Rotation braucht es die Startrotation jedes Satzes: setz sie im Satz-Balken auf der Tagging-Seite.',
+    },
     legend: {
       title: 'Was die Zahlen bedeuten',
       ratings:

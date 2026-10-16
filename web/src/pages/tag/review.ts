@@ -4,25 +4,32 @@
 //
 //   Enter accept · X reject · ←/→ move the start · Shift+←/→ move the end (0.25 s; with Alt
 //   one frame) · M merge with the next suggestion · S split at the playhead · U undo
+//   1 we serve · 2 they serve (again: no call) · W B T D O label a break (§10.3)
+//
+// The gap labels of the automatic scoring (warm-up, set break, timeout, stoppage, after the
+// match) are in the list too, in time order with the rallies; they are accepted, rejected,
+// relabelled and moved like rallies, but not merged or split.
 //
 // Answers are ordinary segment changes through the tagging store and its outbox (offline
-// queue, base versions, undo): accept sets review "confirmed", a moved boundary "corrected",
-// reject deletes the segment with review "rejected" (the server keeps it as a negative). Plain
-// TypeScript like the tagging controller, so a burst of keys always sees the last state.
+// queue, base versions, undo): accept sets review "confirmed", a moved boundary or another
+// label "corrected", reject deletes the segment with review "rejected" (the server keeps it as
+// a negative). A serve call sets `serving_manual`. Plain TypeScript like the tagging
+// controller, so a burst of keys always sees the last state.
 
 import type { Playhead } from '../../lib/playhead'
 import {
+  allProgress,
+  isGap,
   isModel,
-  isSuggestion,
+  isProposal,
   LOOP_PRE_MS,
   nextOpen,
   reviewItems,
-  reviewProgress,
   sureSuggestions,
   type ReviewProgress,
 } from '../../lib/suggestions'
 import { newId, segmentToIn, type TaggingStore } from '../../lib/taggingStore'
-import type { Review, Segment, SegmentIn } from '../../lib/types'
+import type { GapKind, Review, Segment, SegmentIn, Side } from '../../lib/types'
 import type { Change } from '../../lib/outbox'
 import { ownsKeys, type TagController } from './controller'
 
@@ -33,9 +40,19 @@ const END_PREVIEW_MS = 1500
 /** Nothing shorter is left by a split or a moved boundary. */
 export const MIN_RALLY_MS = 200
 
+/** The label keys for a break. */
+export const GAP_KEYS: Readonly<Record<string, GapKind>> = { w: 'warmup', b: 'set_break', t: 'timeout', d: 'stoppage', o: 'other_dead' }
+
 export type ReviewNoticeKey =
   | 'accepted'
   | 'rejected'
+  | 'gapAccepted'
+  | 'gapRejected'
+  | 'relabelled'
+  | 'serve'
+  | 'serveCleared'
+  | 'ralliesOnly'
+  | 'gapsOnly'
   | 'moved'
   | 'merged'
   | 'split'
@@ -63,8 +80,10 @@ export interface ReviewState {
   currentId: string | null
   /** Rallies split off in this session: manual rallies that wait for an answer like suggestions. */
   pending: ReadonlySet<string>
-  /** Proposals of this video seen in this session (also once rejected), for the progress. */
+  /** Rally proposals of this video seen in this session (also once rejected), for the progress. */
   seen: ReadonlySet<string>
+  /** Gap labels of this video seen in this session (also once rejected). */
+  seenGaps: ReadonlySet<string>
   /** Proposals rejected before this session (the tagging data no longer lists them). */
   rejectedBefore: number
   /** "Accept all remaining with confidence ≥ 90%" waits for its confirmation. */
@@ -89,16 +108,23 @@ export class ReviewController {
   private readonly playhead: Playhead
   private readonly tag: TagController
   private unsubscribe: () => void = () => {}
+  /** Something was changed since the review started (the scoring is then run again on leaving). */
+  private changed = false
+  private readonly onLeave: () => void
 
-  constructor(store: TaggingStore, playhead: Playhead, tag: TagController, { rejectedBefore = 0 } = {}) {
+  /** `onLeave`: the review ends after changes (the page asks the server to score again). */
+  constructor(store: TaggingStore, playhead: Playhead, tag: TagController, { rejectedBefore = 0, onLeave = () => {} } = {}) {
     this.store = store
     this.playhead = playhead
     this.tag = tag
+    this.onLeave = onLeave
+    const segments = store.getView().segments
     this.state = {
       active: false,
       currentId: null,
       pending: EMPTY,
-      seen: modelIds(store.getView().segments, EMPTY),
+      seen: modelIds(segments, EMPTY, 'rally'),
+      seenGaps: modelIds(segments, EMPTY, 'gap'),
       rejectedBefore,
       confirmAll: false,
       notice: null,
@@ -109,8 +135,10 @@ export class ReviewController {
   attach(): () => void {
     this.unsubscribe()
     this.unsubscribe = this.store.subscribe(() => {
-      const seen = modelIds(this.store.getView().segments, this.state.seen)
-      if (seen !== this.state.seen) this.set({ seen })
+      const segments = this.store.getView().segments
+      const seen = modelIds(segments, this.state.seen, 'rally')
+      const seenGaps = modelIds(segments, this.state.seenGaps, 'gap')
+      if (seen !== this.state.seen || seenGaps !== this.state.seenGaps) this.set({ seen, seenGaps })
     })
     return () => {
       this.unsubscribe()
@@ -121,7 +149,14 @@ export class ReviewController {
   /** A new analysis replaced the proposals: count afresh. */
   reset(rejectedBefore: number): void {
     this.marks.clear()
-    this.set({ seen: modelIds(this.store.getView().segments, EMPTY), rejectedBefore, pending: EMPTY, currentId: null })
+    const segments = this.store.getView().segments
+    this.set({
+      seen: modelIds(segments, EMPTY, 'rally'),
+      seenGaps: modelIds(segments, EMPTY, 'gap'),
+      rejectedBefore,
+      pending: EMPTY,
+      currentId: null,
+    })
     if (this.state.active) this.go(nextOpen(this.items(), this.state.pending, null))
   }
 
@@ -144,7 +179,7 @@ export class ReviewController {
 
   // What is on screen
 
-  /** The review list: the model's rallies and this session's split-off parts, in time order. */
+  /** The review list: the model's rallies and gap labels and this session's split-off parts, in time order. */
   items(): Segment[] {
     return reviewItems(this.store.getView().segments, this.state.pending)
   }
@@ -154,8 +189,9 @@ export class ReviewController {
     return id === null ? null : (this.store.getView().segments.find((s) => s.id === id) ?? null)
   }
 
+  /** Rallies and gap labels together. */
   progress(): ReviewProgress {
-    return reviewProgress(this.store.getView().segments, this.state.seen, this.state.rejectedBefore)
+    return allProgress(this.store.getView().segments, this.state.seen, this.state.seenGaps, this.state.rejectedBefore)
   }
 
   /** The open proposals "accept all" would accept. */
@@ -168,12 +204,16 @@ export class ReviewController {
   /** Review mode on: the first open suggestion in time order, unless one is on screen already. */
   start = (): void => {
     const current = this.current()
+    if (!this.state.active) this.changed = false
     this.set({ active: true, notice: null })
     this.go(current && this.items().some((s) => s.id === current.id) ? current : nextOpen(this.items(), this.state.pending, null))
   }
 
   stop = (): void => {
+    const leaving = this.state.active && this.changed
+    this.changed = false
     this.set({ active: false, confirmAll: false })
+    if (leaving) this.onLeave()
   }
 
   /** Shows an item: the player jumps to 1 s before it and plays (the loop is useLoopPlayback). */
@@ -215,6 +255,7 @@ export class ReviewController {
   private commit(changes: readonly Change[], pending: ReadonlySet<string> = this.state.pending): void {
     const mark: Mark = { currentId: this.state.currentId, pending: this.state.pending }
     if (changes.length > 0) {
+      this.changed = true
       const step = this.store.commit(changes)
       this.marks.set(step, mark)
       if (this.marks.size > 200) this.marks.delete(this.marks.keys().next().value as number)
@@ -229,10 +270,16 @@ export class ReviewController {
       this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
       return
     }
-    const changes: Change[] = isSuggestion(segment) ? [segmentChange(segment, { review: 'confirmed' })] : []
+    const changes: Change[] = isProposal(segment) ? [segmentChange(segment, { review: 'confirmed' })] : []
     this.commit(changes, without(this.state.pending, segment.id))
-    this.set({ notice: this.notify('accepted', { time: segment.start_ms }) })
+    this.set({ notice: this.answered(segment, 'accepted') })
     this.advance(segment)
+  }
+
+  /** The notice of an answer: "Accepted the rally at …", "Accepted the timeout at …". */
+  private answered(segment: Segment, key: 'accepted' | 'rejected'): ReviewNotice {
+    if (!isGap(segment.kind)) return this.notify(key, { time: segment.start_ms })
+    return this.notify(key === 'accepted' ? 'gapAccepted' : 'gapRejected', { time: segment.start_ms, kind: segment.kind })
   }
 
   /** X: not a rally. A proposal is rejected (kept by the server as a negative); a split-off part is deleted. */
@@ -243,8 +290,47 @@ export class ReviewController {
       return
     }
     this.commit([rejection(segment)], without(this.state.pending, segment.id))
-    this.set({ notice: this.notify('rejected', { time: segment.start_ms }) })
+    this.set({ notice: this.answered(segment, 'rejected') })
     this.advance(segment)
+  }
+
+  /**
+   * W B T D O: the break on screen is a warm-up, set break, timeout, stoppage or other break.
+   * Its own label accepts it; another one corrects it. Either way it is answered.
+   */
+  relabel = (kind: GapKind): void => {
+    const segment = this.current()
+    if (!segment) {
+      this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
+      return
+    }
+    if (!isGap(segment.kind)) {
+      this.set({ notice: this.notify('gapsOnly', undefined, 'error') })
+      return
+    }
+    if (kind === segment.kind) {
+      this.accept()
+      return
+    }
+    this.commit([segmentChange(segment, { kind })])
+    this.set({ notice: this.notify('relabelled', { time: segment.start_ms, kind }) })
+    this.advance(segment)
+  }
+
+  /** 1 / 2: we or they served this rally (the coach's call); the same key again takes the call back. */
+  serve = (side: Side): void => {
+    const segment = this.current()
+    if (!segment) {
+      this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
+      return
+    }
+    if (segment.kind !== 'rally') {
+      this.set({ notice: this.notify('ralliesOnly', undefined, 'error') })
+      return
+    }
+    const call = segment.serving_manual === side ? null : side
+    this.commit([segmentChange(segment, { serving_manual: call })])
+    this.set({ notice: call === null ? this.notify('serveCleared') : this.notify('serve', { side: call }) })
   }
 
   /** ←/→ (start) and Shift+←/→ (end): 0.25 s, or one frame with Alt. */
@@ -281,7 +367,11 @@ export class ReviewController {
       this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
       return
     }
-    const next = this.items().find((s) => s.start_ms > segment.start_ms && s.id !== segment.id)
+    if (segment.kind !== 'rally') {
+      this.set({ notice: this.notify('ralliesOnly', undefined, 'error') })
+      return
+    }
+    const next = this.items().find((s) => s.kind === 'rally' && s.start_ms > segment.start_ms && s.id !== segment.id)
     if (!next) {
       this.set({ notice: this.notify('noNext', undefined, 'error') })
       return
@@ -297,6 +387,10 @@ export class ReviewController {
     const segment = this.current()
     if (!segment) {
       this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
+      return
+    }
+    if (segment.kind !== 'rally') {
+      this.set({ notice: this.notify('ralliesOnly', undefined, 'error') })
       return
     }
     const at = this.tag.now()
@@ -418,6 +512,15 @@ export class ReviewController {
       case 'Escape':
         this.stop()
         return true
+      case '1':
+      case '2':
+        this.serve(key === '1' ? 'us' : 'them')
+        return true
+    }
+    const label = GAP_KEYS[key.toLowerCase()]
+    if (label) {
+      this.relabel(label)
+      return true
     }
     switch (key.toLowerCase()) {
       case 'x':
@@ -442,11 +545,12 @@ function pressable(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('button, a[href], [role="button"], [role="switch"], summary') !== null
 }
 
-/** The ids of the model's rallies, added to `seen` (the same set when nothing is new). */
-function modelIds(segments: readonly Segment[], seen: ReadonlySet<string>): ReadonlySet<string> {
+/** The ids of the model's rallies (or gap labels), added to `seen` (the same set when nothing is new). */
+function modelIds(segments: readonly Segment[], seen: ReadonlySet<string>, which: 'rally' | 'gap'): ReadonlySet<string> {
   let out: Set<string> | null = null
   for (const s of segments) {
-    if (s.kind !== 'rally' || !isModel(s) || seen.has(s.id)) continue
+    const kind = which === 'rally' ? s.kind === 'rally' : isGap(s.kind)
+    if (!kind || !isModel(s) || seen.has(s.id)) continue
     out ??= new Set(seen)
     out.add(s.id)
   }
@@ -460,11 +564,12 @@ function without(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
   return out
 }
 
-/** A change to a segment; a model's proposal with new boundaries is corrected (PLAN §11). */
+/** A change to a segment; a model's proposal with new boundaries or another label is corrected (PLAN §11). */
 function segmentChange(segment: Segment, patch: Partial<SegmentIn>): Change {
   const moved =
     (patch.start_ms !== undefined && patch.start_ms !== segment.start_ms) ||
-    (patch.end_ms !== undefined && patch.end_ms !== segment.end_ms)
+    (patch.end_ms !== undefined && patch.end_ms !== segment.end_ms) ||
+    (patch.kind !== undefined && patch.kind !== segment.kind)
   let review: Review = patch.review ?? segment.review
   if (isModel(segment) && moved) review = 'corrected'
   return { kind: 'segment', payload: { ...segmentToIn(segment), ...patch, review } }

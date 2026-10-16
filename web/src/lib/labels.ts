@@ -1,7 +1,7 @@
 // Display helpers for tagging: skill and grade names from the taxonomy's i18n keys, clock times.
 
 import type { TFunction } from 'i18next'
-import type { RosterEntry, SegmentKind, Side, TaxonomySkill } from './types'
+import type { RosterEntry, ScoreNote, SegmentKind, Side, TaxonomySkill } from './types'
 
 /** Volleyball's skills; their names double as the categories that have grade meanings. */
 const VOLLEYBALL = ['serve', 'reception', 'set', 'attack', 'block', 'dig', 'freeball'] as const
@@ -62,6 +62,11 @@ export function periodLabel(t: TFunction, sport: string, no: number): string {
 export function segmentKindLabel(t: TFunction, kind: SegmentKind, sport: string): string {
   if (sport === 'basketball' && kind === 'set_break') return t('tagging.basketball.quarterBreak')
   return t(`tagging.segment.kind.${kind}`)
+}
+
+/** Why the automatic scoring flags a rally, in words (needs the video strings, src/i18n/pages.ts). */
+export function scoreNoteText(t: TFunction, note: ScoreNote | null | undefined): string {
+  return note ? t(`tagging.scoring.notes.${note}`) : t('tagging.scoring.notes.unsure')
 }
 
 export function sideLabel(t: TFunction, side: Side | null | undefined): string {

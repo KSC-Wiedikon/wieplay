@@ -7,24 +7,38 @@ import { SuggestionChip } from '../../components/SuggestionChip'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
-import { formatClock, segmentKindLabel } from '../../lib/labels'
+import { formatClock, periodLabel, scoreNoteText, segmentKindLabel } from '../../lib/labels'
 import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
-import { formatPercent, isReviewedSuggestion, isSuggestion } from '../../lib/suggestions'
+import {
+  formatPercent,
+  GAP_KINDS,
+  isGap,
+  isGapSuggestion,
+  isProposal,
+  isReviewedProposal,
+  isSetSuggestion,
+  isSuggestion,
+  scoreAfter,
+} from '../../lib/suggestions'
 import type { Segment, SegmentKind, Side, Tag } from '../../lib/types'
 import { useReview, useUi, useView, useWorkspace } from './context'
 
 const SPANS = [30_000, 60_000, 120_000, 300_000] as const
 
-/** Nomal's open suggestions are outlined (dashed), not filled: they are not rallies yet. */
+/**
+ * Nomal's open suggestions are outlined (dashed), not filled: they are not rallies (or breaks)
+ * yet. A break Nomal labelled is a lighter, dashed band in its colour.
+ */
 function segmentClass(segment: Pick<Segment, 'kind' | 'source' | 'review'>): string {
   if (isSuggestion(segment)) return 'border-2 border-dashed border-accent bg-accent-soft'
+  if (isGapSuggestion(segment)) return suggestedGapClass(segment.kind)
   return kindClass(segment.kind)
 }
 
 function suggestionState(segment: Segment): string | undefined {
-  if (isSuggestion(segment)) return 'open'
-  return isReviewedSuggestion(segment) ? segment.review : undefined
+  if (isProposal(segment)) return 'open'
+  return isReviewedProposal(segment) ? segment.review : undefined
 }
 
 function kindClass(kind: SegmentKind): string {
@@ -36,8 +50,27 @@ function kindClass(kind: SegmentKind): string {
       return 'bg-danger/60'
     case 'set_break':
       return 'bg-muted/70'
+    case 'warmup':
+      return 'bg-link/50'
+    case 'stoppage':
+      return 'bg-fg/30'
     default:
       return 'bg-muted/40'
+  }
+}
+
+function suggestedGapClass(kind: SegmentKind): string {
+  switch (kind) {
+    case 'timeout':
+      return 'border border-dashed border-danger bg-danger/15'
+    case 'set_break':
+      return 'border border-dashed border-muted bg-muted/25'
+    case 'warmup':
+      return 'border border-dashed border-link bg-link/15'
+    case 'stoppage':
+      return 'border border-dashed border-fg/50 bg-fg/10'
+    default:
+      return 'border border-dashed border-muted bg-muted/10'
   }
 }
 
@@ -101,7 +134,12 @@ function Overview({ duration, span }: { duration: number; span: number }) {
         {view.periods.map((p, i) => (
           <div
             key={p.id}
-            className={cx('absolute top-0 h-1.5', i % 2 === 0 ? 'bg-fg/40' : 'bg-fg/25')}
+            data-set-start={p.no}
+            className={cx(
+              'absolute top-0 h-1.5 border-l-2',
+              // A set Nomal suggested: lighter, until a coach accepts it.
+              isSetSuggestion(p) ? 'border-dashed border-fg/40 bg-fg/15' : cx('border-fg', i % 2 === 0 ? 'bg-fg/40' : 'bg-fg/25'),
+            )}
             style={{ left: pct(p.start_ms), width: pct((p.end_ms ?? duration) - p.start_ms) }}
           />
         ))}
@@ -109,7 +147,11 @@ function Overview({ duration, span }: { duration: number; span: number }) {
           <div
             key={s.id}
             data-suggestion={suggestionState(s)}
-            className={cx('absolute top-2 bottom-3 min-w-px rounded-sm', isSuggestion(s) ? 'border border-dashed border-accent bg-accent-soft' : kindClass(s.kind))}
+            data-gap={isGap(s.kind) ? s.kind : undefined}
+            className={cx(
+              'absolute top-2 bottom-3 min-w-px rounded-sm',
+              isSuggestion(s) ? 'border border-dashed border-accent bg-accent-soft' : isGapSuggestion(s) ? suggestedGapClass(s.kind) : kindClass(s.kind),
+            )}
             style={{ left: pct(s.start_ms), width: pct(s.end_ms - s.start_ms) }}
           />
         ))}
@@ -191,6 +233,7 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
   const to = now + span / 2
   const x = (ms: number) => `${((ms - from) / span) * 100}%`
   const segments = view.segments.filter((s) => s.end_ms > from && s.start_ms < to)
+  const sets = view.periods.filter((p) => p.start_ms >= from && p.start_ms <= to)
   const tags = view.events.filter((e) => e.t_ms >= from && e.t_ms <= to)
   const step = tickStep(span)
   const ticks: number[] = []
@@ -230,30 +273,48 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
       ))}
       {from < 0 && <div className="absolute inset-y-0 left-0 bg-page" style={{ width: x(0) }} />}
       {to > duration && <div className="absolute inset-y-0 right-0 bg-page" style={{ left: x(duration) }} />}
+      {sets.map((p) => {
+        const suggested = isSetSuggestion(p)
+        const name = periodLabel(t, taxonomy.sport, p.no)
+        return (
+          <div
+            key={p.id}
+            data-set-start={p.no}
+            title={suggested ? t('tagging.markers.suggested', { label: name }) : name}
+            className={cx('absolute top-0 bottom-0 border-l-2', suggested ? 'border-dashed border-fg/40' : 'border-fg')}
+            style={{ left: x(p.start_ms) }}
+          >
+            <span className={cx('absolute bottom-0.5 left-1 rounded px-1 text-[10px] leading-4 font-bold whitespace-nowrap', suggested ? 'bg-surface text-muted italic' : 'bg-fg text-page')}>
+              {name}
+            </span>
+          </div>
+        )
+      })}
       {segments.map((s) => {
         const open = isSuggestion(s)
+        const gap = isGap(s.kind)
+        const score = s.kind === 'rally' ? scoreAfter(s) : null
+        const kind = segmentKindLabel(t, s.kind, taxonomy.sport)
         return (
           <div
             key={s.id}
             onClick={pickSegment(s)}
             data-suggestion={suggestionState(s)}
+            data-gap={gap ? s.kind : undefined}
+            title={isGapSuggestion(s) ? t('tagging.markers.suggested', { label: kind }) : s.score_conflict ? scoreNoteText(t, s.score_note) : undefined}
             className={cx(
               'absolute top-5 flex h-7 items-center gap-0.5 overflow-hidden rounded-md px-1 text-xs font-semibold whitespace-nowrap',
               segmentClass(s),
               open ? 'text-on-accent-soft' : s.kind === 'rally' || s.kind === 'possession' ? 'text-on-accent' : 'text-fg',
+              isGapSuggestion(s) && 'font-normal italic',
               selectedId === s.id && 'ring-2 ring-fg',
             )}
             style={{ left: x(Math.max(s.start_ms, from)), width: `${((Math.min(s.end_ms, to) - Math.max(s.start_ms, from)) / span) * 100}%` }}
           >
             {/* A suggestion that was accepted or corrected keeps a small marker. */}
-            {s.source === 'model' && s.kind === 'rally' && <SparkleIcon className="size-3 shrink-0" />}
-            {open
-              ? formatPercent(s.confidence)
-              : s.kind === 'rally'
-                ? s.score_us_after !== null && s.score_them_after !== null
-                  ? `${s.score_us_after}:${s.score_them_after}`
-                  : ''
-                : segmentKindLabel(t, s.kind, taxonomy.sport)}
+            {s.source === 'model' && (s.kind === 'rally' || gap) && <SparkleIcon className="size-3 shrink-0" />}
+            {s.score_conflict && <span aria-hidden="true" className="rounded-sm bg-danger px-0.5 text-[10px] leading-3 text-page">!</span>}
+            {open ? formatPercent(s.confidence) : s.kind === 'rally' ? <span className={cx(score?.suggested && 'italic opacity-80')}>{score?.text ?? ''}</span> : kind}
           </div>
         )
       })}
@@ -293,7 +354,10 @@ function Legend() {
   const { t } = useTranslation()
   const { controller, taxonomy } = useWorkspace()
   const view = useView()
-  const suggested = view.segments.some((s) => s.source === 'model')
+  const suggested = view.segments.some((s) => s.source === 'model' && s.kind === 'rally')
+  const gapSuggested = view.segments.some(isGapSuggestion)
+  // Warm-up, stoppage and other breaks only once there are some.
+  const more = GAP_KINDS.filter((k) => k !== 'timeout' && k !== 'set_break' && view.segments.some((s) => s.kind === k))
   const items: [string, string][] = [
     // Basketball marks no rallies (M4), so there is no dead time between them either.
     ...(controller.playsRallies
@@ -305,6 +369,9 @@ function Legend() {
       : []),
     ['bg-danger/60', t('tagging.segment.kind.timeout')],
     ['bg-muted/70', segmentKindLabel(t, 'set_break', taxonomy.sport)],
+    ...more.map((k): [string, string] => [kindClass(k), segmentKindLabel(t, k, taxonomy.sport)]),
+    ...(gapSuggested ? [['border border-dashed border-muted bg-muted/10', t('tagging.timeline.legend.gapSuggested')] as [string, string]] : []),
+    ...(view.periods.length > 0 ? [['rounded-none border-l-2 border-fg', t('tagging.timeline.legend.setStart')] as [string, string]] : []),
     ['bg-fg', t('tagging.timeline.legend.tagUs')],
     ['bg-muted', t('tagging.timeline.legend.tagThem')],
     ['bg-link rotate-45 scale-75', t('tagging.timeline.legend.comment')],
@@ -350,7 +417,7 @@ export function SegmentPanel({ id }: { id: string }) {
           <SuggestionChip segment={segment} />
         </h2>
         <span className="flex flex-wrap gap-2">
-          {isSuggestion(segment) && (
+          {isProposal(segment) && (
             <Button variant="primary" onClick={() => controller.acceptSegment(segment.id)}>
               {t('tagging.suggestions.accept')}
             </Button>

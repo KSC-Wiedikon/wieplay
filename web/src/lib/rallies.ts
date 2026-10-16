@@ -45,9 +45,12 @@ export function serveCodes(taxonomy: Taxonomy | null): Set<string> {
 }
 
 /**
- * The server's rescore, done locally: per set from its starting score; who served is a serve
- * tag in the rally, else the previous rally's winner, else the set's first server.
- * Returns new arrays; the inputs are not changed.
+ * The server's rescore, done locally: per set from its starting score. Who served is a fact
+ * only: a serve tag in the rally, else the coach's call (review keys 1/2), else the previous
+ * rally's winner when that is a fact (unknown otherwise), else (first rally) the set's first
+ * server. A rally's winner is the coach's, else the next rally's server (a fact), else the
+ * model's; the score line counts them all, `score_source` "model" from the first model winner
+ * of the set on. Returns new arrays; the inputs are not changed.
  */
 export function rescore(
   periods: readonly Period[],
@@ -68,34 +71,53 @@ export function rescore(
     list.push(rally)
     byPeriod.set(rally.period_id, list)
   }
+
+  // A serve tag in the rally, else the serve a coach called in the review.
+  const called = (rally: Segment): Side | null =>
+    serveTags.find((t) => rally.start_ms - SERVE_SLACK_MS <= t.t_ms && t.t_ms <= rally.end_ms)?.side ?? rally.serving_manual ?? null
+
   for (const rally of byPeriod.get(null) ?? []) {
     rally.score_us_after = rally.score_them_after = null
     rally.score_source = null
+    rally.serving = called(rally)
   }
-
-  const servedBy = (rally: Segment): Side | null =>
-    serveTags.find((t) => rally.start_ms - SERVE_SLACK_MS <= t.t_ms && t.t_ms <= rally.end_ms)?.side ?? null
 
   const finished = ordered.map((period) => {
     let us = period.start_us
     let them = period.start_them
     let serving = period.first_serve
+    let fromModel = false
     const played = byPeriod.get(period.id) ?? []
-    for (const rally of played) {
-      const derived = servedBy(rally) ?? serving
-      if (derived !== null) rally.serving = derived
-      if (rally.won_by === 'us') us += 1
-      else if (rally.won_by === 'them') them += 1
-      if (rally.won_by === null) {
+    const calls = played.map(called)
+    played.forEach((rally, n) => {
+      // Points the model thinks were played before it without a rally (one it missed).
+      if (rally.model_missed_us || rally.model_missed_them) {
+        us += rally.model_missed_us ?? 0
+        them += rally.model_missed_them ?? 0
+        fromModel = true
+      }
+      rally.serving = calls[n] ?? serving
+      // The winner: the coach's; else the next rally's server (a fact); else the model's.
+      let winner = rally.won_by ?? calls[n + 1] ?? null
+      const fact = winner !== null
+      if (winner === null && rally.model_won_by) {
+        winner = rally.model_won_by
+        fromModel = true
+      }
+      if (winner === 'us') us += 1
+      else if (winner === 'them') them += 1
+      if (winner === null) {
         rally.score_us_after = rally.score_them_after = null
         rally.score_source = null
       } else {
         rally.score_us_after = us
         rally.score_them_after = them
-        rally.score_source = 'tags'
-        serving = rally.won_by
+        rally.score_source = fromModel ? 'model' : 'tags'
       }
-    }
+      serving = fact ? winner : null
+    })
+    us += period.model_missed_us ?? 0
+    them += period.model_missed_them ?? 0
     return played.length > 0
       ? { ...period, final_us: us, final_them: them }
       : { ...period, final_us: null, final_them: null }
@@ -154,11 +176,14 @@ export interface ScoreState {
   them: number
   /** Who serves next (or serves in the rally being played). */
   serving: Side | null
+  /** The score counts a winner the model suggested (no coach decided that rally yet). */
+  suggested?: boolean
 }
 
 /**
  * The score of the set at a moment: from the last scored rally of that set that ended by
- * then, else the set's starting score. During a rally, that is the score before it.
+ * then, else the set's starting score. During a rally, that is the score before it. A rally
+ * without a coach's winner counts the model's, marked as suggested.
  */
 export function scoreBefore(
   t_ms: number,
@@ -171,21 +196,28 @@ export function scoreBefore(
   let us = period.start_us
   let them = period.start_them
   let serving = period.first_serve
+  let suggested = false
   for (const rally of ralliesOf(segments)) {
     if (rally.id === exclude || rally.end_ms > t_ms) continue
     if (periodAt(periods, rally.start_ms)?.id !== period.id) continue
-    if (rally.won_by && rally.score_us_after !== null && rally.score_them_after !== null) {
+    let winner: Side | null = rally.won_by ?? rally.model_won_by ?? null
+    if (rally.score_us_after !== null && rally.score_them_after !== null) {
+      // The score line's winner (it also knows winners the rally doesn't name: the next serve).
+      winner = rally.score_us_after > us ? 'us' : rally.score_them_after > them ? 'them' : winner
       us = rally.score_us_after
       them = rally.score_them_after
-      serving = rally.won_by
-    } else if (rally.won_by) {
+      suggested = rally.score_source === 'model'
+    } else if (winner) {
       // Not scored yet (e.g. sent but not rescored): count it.
-      if (rally.won_by === 'us') us += 1
+      if (winner === 'us') us += 1
       else them += 1
-      serving = rally.won_by
+      suggested = rally.won_by === null
+    } else {
+      continue
     }
+    if (winner) serving = winner
   }
-  return { period, us, them, serving }
+  return suggested ? { period, us, them, serving, suggested } : { period, us, them, serving }
 }
 
 /**

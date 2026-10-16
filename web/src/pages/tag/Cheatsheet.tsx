@@ -100,6 +100,8 @@ export function Cheatsheet() {
               [['←', '→'], t('tagging.keys.review.start')],
               [['Shift + ←', 'Shift + →'], t('tagging.keys.review.end')],
               [['Alt'], t('tagging.keys.review.frame')],
+              [['1', '2'], t('tagging.keys.review.serve')],
+              [['W', 'B', 'T', 'D', 'O'], t('tagging.keys.review.label')],
               [['M'], t('tagging.keys.review.merge')],
               [['S'], t('tagging.keys.review.split')],
               [['U'], t('tagging.keys.review.undo')],

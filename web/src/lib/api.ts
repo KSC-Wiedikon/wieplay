@@ -223,6 +223,8 @@ export const api = {
   analysis: (videoId: string, signal?: AbortSignal) =>
     apiRequest<Analysis>(`/api/videos/${videoId}/analysis`, { signal }),
   analyse: (videoId: string) => apiRequest<unknown>(`/api/videos/${videoId}/analyse`, { method: 'POST' }),
+  /** Scores the video again now (server, winner, score, sets, gaps; PLAN §10.3); 409 without scoring. */
+  scoring: (videoId: string) => apiRequest<Analysis>(`/api/videos/${videoId}/scoring`, { method: 'POST' }),
   setRalliesReviewed: (videoId: string, reviewed: boolean) =>
     apiRequest<{ rallies_reviewed_at?: string | null } | undefined>(`/api/videos/${videoId}/rallies-reviewed`, {
       method: 'POST',
