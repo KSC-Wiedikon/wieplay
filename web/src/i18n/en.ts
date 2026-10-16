@@ -255,7 +255,7 @@ export const en = {
     subtitle: 'Teams, filming rules and the machines that process the videos.',
     forbidden: 'This page is for admins only.',
     teams: 'Teams',
-    teamsHint: 'Teams of the current and the previous season. Members only see teams that use Nomal.',
+    teamsHint: 'Each season is its own team, with its own players, games and coaches. Members only see teams that use Nomal.',
     noTeams: 'No teams yet. Run a sync first.',
     usesNomal: 'Uses Nomal',
     usesNomalFor: '{{team}} uses Nomal',

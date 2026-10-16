@@ -1,8 +1,11 @@
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router'
 import { AdminShell } from '../components/AdminShell'
 import { SportBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
+import { Field, Select } from '../components/Field'
 import { SyncIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
 import { PageSpinner, Spinner } from '../components/Spinner'
@@ -17,14 +20,60 @@ import type { AdminTeam, SyncStatus } from '../lib/types'
 
 export function AdminTeamsPage() {
   const { t } = useTranslation()
+  const teams = useAdminTeams()
+  const [season, setSeason] = useSeason(teams.data ?? [])
   return (
     <AdminShell title={t('admin.title')}>
-      {/* Wide screens: the sync on the left, the teams beside it. */}
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] xl:items-start">
-        <SyncPanel />
-        <TeamsPanel />
+      <div className="flex flex-col gap-6">
+        <SeasonPicker teams={teams.data ?? []} season={season} onChange={setSeason} />
+        {/* Wide screens: the sync on the left, the teams beside it. */}
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] xl:items-start">
+          <SyncPanel />
+          <TeamsPanel season={season} />
+        </div>
       </div>
     </AdminShell>
+  )
+}
+
+/** Seasons that have teams, newest first. */
+function seasonsOf(teams: AdminTeam[]): string[] {
+  return [...new Set(teams.map((team) => team.season))].sort().reverse()
+}
+
+/** One season at a time: each season is its own team row (players, games and coaches change),
+ * so the page shows the chosen one, in the address (?season=2025/26), newest by default. */
+function useSeason(teams: AdminTeam[]): [string | null, (season: string) => void] {
+  const [params, setParams] = useSearchParams()
+  const seasons = seasonsOf(teams)
+  const wanted = params.get('season')
+  const season = wanted && seasons.includes(wanted) ? wanted : (seasons[0] ?? null)
+  return [season, (next) => setParams(next === seasons[0] ? {} : { season: next }, { replace: true })]
+}
+
+function SeasonPicker({
+  teams,
+  season,
+  onChange,
+}: {
+  teams: AdminTeam[]
+  season: string | null
+  onChange: (season: string) => void
+}) {
+  const { t } = useTranslation()
+  const id = useId()
+  const seasons = seasonsOf(teams)
+  if (!season) return null
+  return (
+    <Field label={t('columns.season')} htmlFor={id} className="sm:max-w-48">
+      <Select id={id} value={season} onChange={(e) => onChange(e.target.value)}>
+        {seasons.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </Select>
+    </Field>
   )
 }
 
@@ -93,7 +142,7 @@ function SyncDetails({ status }: { status: SyncStatus }) {
   )
 }
 
-function TeamsPanel() {
+function TeamsPanel({ season }: { season: string | null }) {
   const { t } = useTranslation()
   const teams = useAdminTeams()
 
@@ -116,7 +165,7 @@ function TeamsPanel() {
       ) : teams.data.length === 0 ? (
         <Message>{t('admin.noTeams')}</Message>
       ) : (
-        groupBySport(teams.data).map(({ sport, teams }) => (
+        groupBySport(teams.data.filter((team) => team.season === season)).map(({ sport, teams }) => (
           <div key={sport} className="flex flex-col gap-2">
             <h3 className="font-semibold">{t(`sport.${sport}`)}</h3>
             <Card className="overflow-hidden">
@@ -138,7 +187,6 @@ function AdminTeamTable({ teams, caption }: { teams: AdminTeam[]; caption: strin
         <tr>
           <Th>{t('columns.team')}</Th>
           <Th>{t('columns.league')}</Th>
-          <Th className="hidden sm:table-cell">{t('columns.season')}</Th>
           <Th className="text-right">{t('admin.usesNomal')}</Th>
         </tr>
       </THead>
@@ -150,10 +198,8 @@ function AdminTeamTable({ teams, caption }: { teams: AdminTeam[]; caption: strin
                 <SportBadge sport={team.sport} />
                 <span className="font-semibold">{team.name}</span>
               </span>
-              <span className="mt-1 block text-xs text-muted sm:hidden">{team.season}</span>
             </Td>
             <Td>{team.league || '–'}</Td>
-            <Td className="hidden whitespace-nowrap sm:table-cell">{team.season}</Td>
             <Td tight className="text-right">
               <Switch
                 checked={team.enabled}

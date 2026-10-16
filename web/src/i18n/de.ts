@@ -269,7 +269,7 @@ export const de: Messages<typeof en> = {
     subtitle: 'Teams, Filmregeln und die Maschinen, die die Videos verarbeiten.',
     forbidden: 'Diese Seite ist nur für Admins.',
     teams: 'Teams',
-    teamsHint: 'Teams der aktuellen und der letzten Saison. Mitglieder sehen nur Teams, die Nomal nutzen.',
+    teamsHint: 'Jede Saison ist ein eigenes Team, mit eigenen Spielern, Spielen und Coaches. Mitglieder sehen nur Teams, die Nomal nutzen.',
     noTeams: 'Noch keine Teams. Starte zuerst einen Abgleich.',
     usesNomal: 'Nutzt Nomal',
     usesNomalFor: '{{team}} nutzt Nomal',
