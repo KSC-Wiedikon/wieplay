@@ -388,7 +388,7 @@ def import_video(ctx: Context) -> dict[str, Any]:
     except importer.Refused as exc:
         raise PermanentError(str(exc)) from exc
     except importer.RateLimited as exc:
-        raise RetryLater(str(exc), importer.RATE_LIMIT_PAUSE_S) from exc
+        raise RetryLater(str(exc), exc.seconds) from exc
     except importer.Stopped as exc:
         raise ffmpeg.Cancelled() from exc
     finally:
