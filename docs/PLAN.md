@@ -649,7 +649,7 @@ analysis_track   id, video_id, model_run_id, kind 'serve'|'activity', step_ms, f
                  -- small series the API scores with (§10.3), tens of KB a video
 calibration      id, video_id, hall_name, image_points, court_points, homography (3×3),
                  method 'manual'|'auto'|'copied', reproj_error_cm, created_by, copied_from NULL
-                 -- built in 0007 (16.10.2026) with lineage_id, status 'confirmed'|'proposed'
+                 -- built in 0008 (16.10.2026) with lineage_id, status 'confirmed'|'proposed'
                  -- (the court finder's), landmarks, image_aspect, camera, max_error_cm,
                  -- confidence, model_run_id; one row per video and status
 scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
@@ -1432,7 +1432,7 @@ proposes the shot type.
   and undistorts before the homography.
 - Later: automatic line/keypoint detection initialised from the hall's last calibration.
 - **Bar**: reprojection error < 15 cm on held-out landmarks.
-- **Built 16.10.2026** (migration `0007`, `calibration` per video and status): the coach
+- **Built 16.10.2026** (migration `0008`, `calibration` per video and status): the coach
   clicks 4–10 landmarks (corners; centre and attack lines' ends stand in for corners out of
   the picture and check the fit) on the paused frame; the API fits the homography (DLT,
   pure Python), recovers the camera from it (focal length and position, principal point at
