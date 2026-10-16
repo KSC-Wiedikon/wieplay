@@ -343,6 +343,8 @@ def test_team_and_video_say_what_the_viewer_may_do(
     assert [player.get("/api/teams/9101").json()[f] for f in flags] == [False] * 3
     assert [coach.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [True] * 3
     assert [player.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [False] * 3
+    admin = club["admin"]
+    assert [admin.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [True] * 3
 
     listed = {t["id"]: t for t in coach.get("/api/teams").json()}
     assert listed[9101]["can_share"] and listed[9101]["lineage_id"]

@@ -97,3 +97,27 @@ def test_inbox_is_for_people_who_upload_somewhere() -> None:
     assert can_use_inbox(viewer(teams=[{"team": 92, "rel": ["coach"]}]), TEAMS)
     assert not can_use_inbox(viewer(roles=("admin",)), TEAMS)
     assert not can_use_inbox(viewer(teams=[{"team": 92, "rel": ["player"]}]), TEAMS)
+
+
+# Tagging (M2), sharing and export (M3): admins too since 16.10.2026.
+from nomal.core.permissions import can_export, can_share_with_team, can_tag  # noqa: E402
+
+TAG_MATRIX = [
+    # (who, team, may tag, share and export)
+    (viewer(roles=("superuser",)), H3_NOW, True),
+    (viewer(roles=("admin",)), HERREN1_NOW, True),
+    (viewer(roles=("admin",)), OFF_TEAM, False),  # not enabled
+    (viewer(sport_admin=("volleyball",)), H3_PREV, True),
+    (viewer(sport_admin=("volleyball",)), HERREN1_NOW, False),
+    (viewer(teams=[{"team": 12, "rel": ["coach"]}]), H3_NOW, True),  # any season of the team
+    (viewer(teams=[{"team": 92, "rel": ["player", "captain"]}]), H3_NOW, False),
+    (viewer(roles=("vorstand",)), H3_NOW, False),
+]
+
+
+def test_tag_permission_matrix() -> None:
+    for who, team, allowed in TAG_MATRIX:
+        leads = lead_lineages(who, TEAMS)
+        assert can_tag(who, team, leads) is allowed, (who, team)
+        assert can_share_with_team(who, team, leads) is allowed, (who, team)
+        assert can_export(who, team, leads) is allowed, (who, team)

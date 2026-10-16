@@ -150,8 +150,8 @@ def test_single_put_and_validation(ready: dict[str, Any], club: dict[str, TestCl
 def test_who_may_tag(ready: dict[str, Any], club: dict[str, TestClient], as_: Any) -> None:
     url = f"/api/videos/{ready['id']}/changes"
     assert as_("player-h3").post(url, json={"events": [tag("A", 1)]}).status_code == 403
-    assert club["admin"].post(url, json={"events": [tag("A", 1)]}).status_code == 403
     assert as_("vb-sport-admin").post(url, json={"events": [tag("A", 1)]}).status_code == 200
+    assert club["admin"].post(url, json={"events": [tag("A", 2)]}).status_code == 200
 
 
 def test_tags_of_one_video_cannot_be_moved_to_another(
