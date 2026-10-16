@@ -88,6 +88,9 @@ G = 9.81
 # Nominal camera (PLAN §7.1: centred behind the end line, 2.5-3 m high).
 NOMINAL = {"x": 4.5, "y": -4.0, "z": 2.75, "focal": 0.62}
 NET_TOP_M = 2.43
+MAX_CONTACT_M = 3.6  # no hand reaches higher
+STOP_RATIO = 0.2  # a fast ball that nearly stops: the top of a high ball, the net, a catch
+DEAD_SPEED = (3.0, 5.0)  # a slow ball low in the picture, slow out too: rolling, handed on
 FAR_TOP_M = 4.0  # contacts above this height are rare
 NET_BAND = 0.07  # a block's ball is within this of the net tape's row (image heights)
 # Floor point under the ball at the usual contact height of each skill (m).
@@ -159,6 +162,9 @@ class View:
     far: list[tuple[float, float]]  # the far half up to 4 m (+1.5 m around), in the image
     v_net: float  # image row of the net tape's middle
     v_net_floor: float  # image row of the centre line's middle
+    # The highest a contact shows in the picture: a jump serve at 3.6 m, a metre behind the
+    # near end line. A ball above it is in the air (the top of a high ball, the ceiling).
+    v_top: float = 0.2
 
     @classmethod
     def of(cls, camera: court.Camera, calibrated: bool) -> View:
@@ -171,12 +177,14 @@ class View:
                         corners.append(p)
         tape = camera.project(court.WIDTH_M / 2, court.NET_Y, NET_TOP_M)
         foot = camera.project(court.WIDTH_M / 2, court.NET_Y, 0.0)
+        top = camera.project(court.WIDTH_M / 2, -1.0, MAX_CONTACT_M)
         return cls(
             camera=camera,
             calibrated=calibrated,
             far=_hull(corners),
             v_net=tape[1] if tape else 0.45,
             v_net_floor=foot[1] if foot else 0.58,
+            v_top=max(0.05, top[1]) if top else 0.2,
         )
 
     def in_far(self, u: float, v: float) -> bool:
@@ -350,10 +358,30 @@ def candidates(track: tr.Track, view: View | None = None) -> list[Candidate]:
         if after is not None:
             c.depth_out = _flight_depth(track, c.frame, after, focal)
     if view is not None:
+        out = [c for c in out if plausible(c, view)]
         for c in out:
             c.in_far = view.in_far(c.x, c.y)
             c.p_near = side_evidence(c, view)
     return out
+
+
+def plausible(c: Candidate, view: View) -> bool:
+    """Whether a candidate can be a player's contact at all (the eyeball check on the first
+    real game found these four kinds of false ones):
+
+    - above any hand (the top of a high ball, the ceiling);
+    - a fast rising ball that nearly stops: the top of a steep high ball (the tracker's turn
+      is the deceleration), or a ball stopped by the net or caught;
+    - a ball low in the picture that comes in slowly and leaves slowly: rolling on the floor,
+      handed to the server, picked up after the point."""
+    if c.y < view.v_top - 0.02:
+        return False
+    if c.speed_in > 8.0 and c.speed_out < STOP_RATIO * c.speed_in:
+        return False
+    if c.vy_in < -1.0 and c.turn < 30 and c.speed_out < 0.45 * c.speed_in:
+        return False  # a rising ball slowing down without turning: the top of its flight
+    low = c.y > view.v_net_floor + 0.01
+    return not (low and c.speed_in < DEAD_SPEED[0] and c.speed_out < DEAD_SPEED[1])
 
 
 def _depth_split(view: View) -> float:
@@ -414,7 +442,7 @@ class Action:
 ROLES = ("S", "1", "2", "3", "B", "END")
 INF = 1e9
 ROLE_KIND = {  # cost of a role for a kind of candidate
-    "S": {BOUNCE: 1.5, LOW: 1.0, HIGH: 0.0, START: 0.0, GAP: 0.4},
+    "S": {BOUNCE: 2.5, LOW: 2.0, HIGH: 0.0, START: 0.0, GAP: 0.4},
     "1": {BOUNCE: 0.1, LOW: 0.0, HIGH: 0.5, START: 0.9, GAP: 0.3},
     "2": {BOUNCE: 0.8, LOW: 0.3, HIGH: 0.0, START: 0.8, GAP: 0.3},
     "3": {BOUNCE: 1.0, LOW: 0.7, HIGH: 0.0, START: 0.5, GAP: 0.3},
@@ -427,7 +455,8 @@ END_WINDOW_S = 2.5  # the floor bounce that ends a rally is in its last seconds
 PRE_SERVE_SKIP = 0.3  # candidates in the toss window before the serve skip cheaply
 TOSS_WINDOW_S = 2.5  # ... the first seconds of the rally
 SERVE_LATE_S = 3.0  # a serve later than this into the rally costs SERVE_LATE per second
-SERVE_LATE = 1.0
+SERVE_LATE = 2.0
+UNSEEN_SERVE = 1.6  # the rally starts without a serve the tracker saw (or the rally is a part)
 USE_BONUS = 0.7  # rallies are made of contacts: using a plausible candidate is preferred
 DEAD_TAIL_S = 0.5  # the rally finder closes a rally about a second after the ball is dead:
 FADE_S = 1.5  # ... the bonus fades out over this long before that
@@ -438,6 +467,8 @@ def contact_prior(c: Candidate) -> float:
     if c.kind == HIGH:
         ratio = (c.speed_out + 0.5) / (c.speed_in + 0.5)
         q = 0.35 + c.turn / 250 + 0.2 * abs(math.log(ratio))
+        if c.turn < 60 and max(c.speed_in, c.speed_out) < 4.5:
+            q = 0.25  # a slow ball turning a little: mostly a far flight's wobble
     elif c.kind == LOW:
         q = 0.6 + c.turn / 600
     elif c.kind == BOUNCE:
@@ -599,6 +630,13 @@ def decode(
                 cost[i][k] = before + e + late
                 continue
             best, arg = INF, None
+            if r in ("1", "2", "3"):
+                # The serve was not seen: the sequence starts with a touch of a side (the
+                # receivers', when the scoring knows who served).
+                start = pre[i] + UNSEEN_SERVE + (0.0 if r == "1" else 0.5)
+                if r == "1" and serve_near is not None:
+                    start += 0.5 * _side_cost(1 - serve_near, s)
+                best = start
             for j in range(i - 1, -1, -1):
                 gap_cost = pre[i] - pre[j + 1]
                 if gap_cost >= INF or gap_cost > 12:
