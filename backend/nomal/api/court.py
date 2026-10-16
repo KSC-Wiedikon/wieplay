@@ -4,12 +4,15 @@ GET    /api/videos/{id}/ball-track    the smoothed ball track with contacts and 
                                       (gzipped JSON, ETag; nomal/ml/trajectory.py has the
                                       format), for the "Trajectories" overlay and the court
                                       diagram; 404 until the trajectory job has run
-GET    /api/videos/{id}/court         the court model, the video's calibration, what pre-fills
-                                      the dialog (the court finder's, the team's last), the
-                                      ball track's state
+GET    /api/videos/{id}/court         the court model, the video's calibration (with the
+                                      camera's setups when it moved: `segments`, each a time
+                                      range with its own homography; whether a person
+                                      checked it), what pre-fills the dialog (the court job's,
+                                      the team's last), the ball track's and court job's state
 POST   /api/videos/{id}/court/solve   a calibration from clicked landmarks, not saved: the
                                       homography, the camera, the error, the lines to draw
-PUT    /api/videos/{id}/court         save it (whoever may tag)
+PUT    /api/videos/{id}/court         save it (whoever may tag); `segment`: one setup only,
+                                      the setups nobody set follow it
 DELETE /api/videos/{id}/court         remove it (whoever may tag)
 
 Whoever may watch the video may read; the court of a video is set by its taggers.
@@ -20,16 +23,17 @@ from __future__ import annotations
 import gzip
 import uuid
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from nomal.api.deps import DbDep, StoreDep, ViewerDep, audit
 from nomal.api.tagging import _readable
-from nomal.core import calibration, court
+from nomal.core import analysis, calibration, court
 from nomal.core.calibration import Calibration
-from nomal.core.models import Video
+from nomal.core.models import Job, Video
 from nomal.core.permissions import can_tag
 
 router = APIRouter(prefix="/api", tags=["court"])
@@ -61,8 +65,15 @@ class PointsIn(BaseModel):
 
 
 class SaveIn(PointsIn):
-    method: Literal["manual", "auto", "copied"] = "manual"
+    method: Literal["manual", "auto", "copied", "auto-hall"] = "manual"
     copied_from: uuid.UUID | None = None
+    # One of the camera's setups (an index into the calibration's `segments`); none: the
+    # court of the whole video.
+    segment: int | None = Field(default=None, ge=0, le=63)
+    # Where the coach paused to set it up (ms): which setup the points belong to.
+    at_ms: int | None = Field(default=None, ge=0)
+    # The setups nobody set follow this one (through the pictures' homographies).
+    propagate: bool = True
 
 
 class PointOut(BaseModel):
@@ -94,19 +105,56 @@ class SolveOut(BaseModel):
     lines: list[list[list[float]]]  # the court's lines in the image, as polylines (u, v)
 
 
+class SegmentOut(BaseModel):
+    """One of the camera's setups: from_ms (inclusive) to to_ms (exclusive; None: the end),
+    with its court (as a calibration's fields); none when the camera showed no court then."""
+
+    index: int
+    from_ms: int
+    to_ms: int | None
+    start: str  # start | bump (knocked) | drift (sagged slowly) | moved (to another view)
+    shift_px: float  # how far the picture moved from the setup before (at 1280x720)
+    view: int  # the camera carried elsewhere: another view of the hall
+    points: list[PointOut]
+    method: str  # manual | auto | auto-hall | copied | derived (carried from another setup)
+    checked: bool
+    main: bool  # the longest setup: the calibration's own fields are its
+    image_to_court: list[list[float]] | None
+    court_to_image: list[list[float]] | None
+    camera: CameraOut | None
+    error_cm: float | None
+    max_error_cm: float | None
+    lines: list[list[list[float]]]
+
+
 class CalibrationOut(SolveOut):
     id: uuid.UUID
     video_id: uuid.UUID
     status: str  # confirmed | proposed
-    method: str  # manual | auto | copied
+    method: str  # manual | auto | copied | auto-hall (from the hall's memory)
     points: list[PointOut]
     confidence: float | None
     copied_from: uuid.UUID | None
     updated_at: datetime
+    # False: the court job set it and nobody checked it yet.
+    checked: bool = True
+    at_ms: int | None = None
+    # The camera's setups when it moved during the match; None: one for the whole video.
+    segments: list[SegmentOut] | None = None
+
+
+class SetupOut(BaseModel):
+    """The camera's setups as the newest court job saw them (with or without a court)."""
+
+    from_ms: int
+    to_ms: int
+    start: str
+    shift_px: float
+    view: int = 0
 
 
 class SuggestionOut(BaseModel):
-    source: Literal["auto", "team"]
+    source: Literal["auto", "auto-hall", "team"]
     points: list[PointOut]
     confidence: float | None
     video_id: uuid.UUID
@@ -142,6 +190,9 @@ class CourtOut(BaseModel):
     ball_track: BallTrackOut
     landmarks: list[LandmarkOut]
     lines: list[list[float]]  # x1, y1, x2, y2 in metres
+    # none | queued | running | done | failed: the newest court job of the video
+    court_job: str = "none"
+    setups: list[SetupOut] = Field(default_factory=list)
 
 
 STATUS = {"queued": "queued", "leased": "running", "running": "running", "succeeded": "done"}
@@ -171,6 +222,33 @@ def _solve_out(solution: court.Solution) -> SolveOut:
     )
 
 
+def _lines(to_image: court.Mat3) -> list[list[list[float]]]:
+    return [[[round(u, 5), round(v, 5)] for u, v in line] for line in court.project_lines(to_image)]
+
+
+def _segment_out(index: int, seg: dict[str, Any]) -> SegmentOut:
+    to_court = court.from_lists(seg["homography"]) if seg.get("homography") else None
+    to_image = court.invert(to_court) if to_court is not None else None
+    return SegmentOut(
+        index=index,
+        from_ms=int(seg["from_ms"]),
+        to_ms=seg["to_ms"],
+        start=str(seg.get("start") or "start"),
+        shift_px=float(seg.get("shift_px") or 0.0),
+        view=int(seg.get("view") or 0),
+        points=_points(seg["landmarks"], seg["image_points"]),
+        method=str(seg.get("method") or "manual"),
+        checked=bool(seg.get("checked")),
+        main=bool(seg.get("main")),
+        image_to_court=court.as_lists(to_court) if to_court is not None else None,
+        court_to_image=court.as_lists(to_image) if to_image is not None else None,
+        camera=CameraOut.model_validate(seg["camera"]) if seg.get("camera") else None,
+        error_cm=seg.get("reproj_error_cm"),
+        max_error_cm=seg.get("max_error_cm"),
+        lines=_lines(to_image) if to_image is not None else [],
+    )
+
+
 def _calibration_out(row: Calibration) -> CalibrationOut:
     to_court = court.from_lists(row.homography)
     to_image = court.invert(to_court)
@@ -181,9 +259,7 @@ def _calibration_out(row: Calibration) -> CalibrationOut:
         error_cm=row.reproj_error_cm,
         max_error_cm=row.max_error_cm,
         residuals_cm={},
-        lines=[
-            [[round(u, 5), round(v, 5)] for u, v in line] for line in court.project_lines(to_image)
-        ],
+        lines=_lines(to_image),
         id=row.id,
         video_id=row.video_id,
         status=row.status,
@@ -192,7 +268,43 @@ def _calibration_out(row: Calibration) -> CalibrationOut:
         confidence=row.confidence,
         copied_from=row.copied_from,
         updated_at=row.updated_at,
+        checked=row.checked,
+        at_ms=row.at_ms,
+        segments=(
+            [_segment_out(k, seg) for k, seg in enumerate(row.segments)] if row.segments else None
+        ),
     )
+
+
+def _court_job(db: DbDep, video: Video) -> str:
+    job = calibration.active_court_job(db, video.id)
+    if job is not None:
+        return STATUS.get(job.status, job.status)
+    last = db.scalars(
+        select(Job)
+        .where(Job.kind == "court", Job.video_id == video.id)
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    ).first()
+    if last is None:
+        return "none"
+    return STATUS.get(last.status, last.status)
+
+
+def _setups(db: DbDep, video: Video) -> list[SetupOut]:
+    frames = calibration.latest_court_frames(db, video.id)
+    if frames is None:
+        return []
+    return [
+        SetupOut(
+            from_ms=int(s["from_ms"]),
+            to_ms=int(s["to_ms"]),
+            start=str(s.get("start") or "start"),
+            shift_px=float(s.get("shift_px") or 0.0),
+            view=int(s.get("view") or 0),
+        )
+        for s in (frames.stats or {}).get("setups", [])
+    ]
 
 
 def _ball_track(db: DbDep, video: Video) -> BallTrackOut:
@@ -248,7 +360,9 @@ def ball_track(
 def get_court(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> CourtOut:
     video, access = _readable(db, viewer, video_id)
     row = calibration.current(db, video.id)
-    found = calibration.suggestions(db, video) if row is None else []
+    found = calibration.suggestions(db, video) if row is None or not row.checked else []
+    if row is not None:  # the court job's own guess is the calibration already
+        found = [s for s in found if s.source == "team"]
     return CourtOut(
         video_id=video.id,
         can_edit=can_tag(viewer, access.ref, access.leads) and video.status == "ready",
@@ -272,6 +386,8 @@ def get_court(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> CourtOut:
             for k, (x, y) in court.LANDMARKS.items()
         ],
         lines=[list(line) for line in court.LINES],
+        court_job=_court_job(db, video),
+        setups=_setups(db, video),
     )
 
 
@@ -310,16 +426,38 @@ def save(video_id: uuid.UUID, body: SaveIn, viewer: ViewerDep, db: DbDep) -> Cal
         source = db.get(Calibration, body.copied_from)
         if source is None or source.lineage_id != video.lineage_id:
             raise HTTPException(422, "Copied from an unknown calibration")
-    row = calibration.save(
-        db,
-        video,
-        {p.landmark: (p.u, p.v) for p in body.points},
-        solution,
-        status="confirmed",
-        method=body.method,
-        actor=viewer.member_id,
-        copied_from=body.copied_from,
-    )
+    points: dict[str, court.Point] = {p.landmark: (p.u, p.v) for p in body.points}
+    row = calibration.current(db, video.id)
+    if body.segment is not None:
+        if row is None or body.segment >= len(calibration.segments_of(row)):
+            raise HTTPException(422, "No such camera setup")
+        try:
+            row = calibration.save_segment(
+                db,
+                video,
+                row,
+                body.segment,
+                points,
+                solution,
+                method=body.method,
+                actor=viewer.member_id,
+                propagate=body.propagate,
+            )
+        except court.CourtError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    else:
+        row = calibration.save(
+            db,
+            video,
+            points,
+            solution,
+            status="confirmed",
+            method=body.method,
+            actor=viewer.member_id,
+            copied_from=body.copied_from,
+            at_ms=body.at_ms,
+        )
+        calibration.after_save(db, video, row, analysis.analysis_subdir(db, video))
     audit(
         db,
         viewer.member_id,
@@ -329,6 +467,7 @@ def save(video_id: uuid.UUID, body: SaveIn, viewer: ViewerDep, db: DbDep) -> Cal
         method=body.method,
         points=len(body.points),
         error_cm=row.reproj_error_cm,
+        segment=body.segment,
     )
     db.commit()
     db.refresh(row)

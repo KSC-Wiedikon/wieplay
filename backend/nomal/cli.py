@@ -10,6 +10,8 @@ python -m nomal.cli train-rallies              train the rally finder now
 python -m nomal.cli rally-eval [--run ID]      per-game scores of v0 and v1 (latest training)
 python -m nomal.cli score --video ID | --all-ready   score again: servers, winners, sets, gaps
 python -m nomal.cli trajectories [--force]     ball tracks and court proposals for analysed videos
+python -m nomal.cli court --video ID | --all-ready [--force]   find the court (hall memory, setups)
+python -m nomal.cli court-eval [--json]        the court job against the coaches' calibrations
 """
 
 from __future__ import annotations
@@ -330,6 +332,104 @@ def trajectories(force: bool, dry_run: bool) -> int:
     return 0
 
 
+def court_jobs(video: str | None, all_ready: bool, force: bool, dry_run: bool) -> int:
+    """Queue the court job (the camera's setups, the court through the hall's memory or the
+    finder; PLAN §10.6): the backfill for videos from before it existed. Videos it ran for
+    are skipped unless --force; a coach's calibration is never replaced (it gains setups)."""
+    from nomal.core import analysis, calibration
+    from nomal.core.models import AnalysisArtifact, Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        query = select(Video).where(Video.status == "ready", Video.sport == "volleyball")
+        if video:
+            query = query.where(Video.id == uuid.UUID(video))
+        elif not all_ready:
+            print("name --video or --all-ready", file=sys.stderr)
+            return 2
+        done = set(
+            db.scalars(
+                select(AnalysisArtifact.video_id).where(AnalysisArtifact.kind == "court_frames")
+            )
+        )
+        queued = 0
+        for row in db.scalars(query.order_by(Video.recorded_on)):
+            if row.id in done and not force:
+                continue
+            label = f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id})"
+            if dry_run:
+                print(f"would queue {label}")
+                continue
+            job = calibration.queue_court(db, row, analysis.analysis_subdir(db, row))
+            if job is not None:
+                queued += 1
+                refs = len(job.params.get("references") or [])
+                print(f"queued {label}: job {job.id}, {refs} hall pictures")
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        print(f"{queued} queued")
+    return 0
+
+
+def court_eval(as_json: bool) -> int:
+    """Per video, the newest court job's result: how it found the court, how sure, the
+    camera's setups, and on videos a coach calibrated the job's court against the coach's
+    (held out: the job never uses the video's own calibration). Then the success rate."""
+    import json
+
+    from nomal.core.models import ModelRun, Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        rows = db.execute(
+            select(ModelRun, Video.title, Video.recorded_on)
+            .join(Video, Video.id == ModelRun.video_id)
+            .where(ModelRun.kind == "court")
+            .order_by(ModelRun.created_at.desc())
+        ).all()
+        latest: dict[uuid.UUID, tuple[ModelRun, str | None, Any]] = {}
+        for row in rows:
+            if row[0].video_id is not None and row[0].video_id not in latest:
+                latest[row[0].video_id] = (row[0], row[1], row[2])
+        out: list[dict[str, Any]] = []
+        for run, title, recorded_on in latest.values():
+            m = run.metrics or {}
+            found = m.get("court") or {}
+            out.append(
+                {
+                    "video": str(run.video_id),
+                    "title": title,
+                    "date": f"{recorded_on:%d.%m.%Y}" if recorded_on else None,
+                    "method": found.get("method"),
+                    "confidence": found.get("confidence"),
+                    "setups": len(m.get("setups") or []),
+                    "bumps": sum(1 for s in m.get("setups") or [] if s.get("start") == "bump"),
+                    "vs_coach": m.get("vs_coach"),
+                }
+            )
+    if as_json:
+        print(json.dumps(out, indent=1))
+        return 0
+    for r in sorted(out, key=lambda r: r["date"] or ""):
+        vs = r["vs_coach"]
+        print(
+            f"{r['date'] or '-':>10}  {(r['title'] or '')[:36]:36}  {r['method'] or 'none':9}  "
+            f"{_pct(r['confidence'])} %  setups {r['setups']} (bumps {r['bumps']})  "
+            f"vs coach {f'{vs["rms_cm"]} cm rms, {vs["max_cm"]} max' if vs else '-'}"
+        )
+    found = [r for r in out if r["method"]]
+    held = [r for r in out if r["vs_coach"]]
+    good = [r for r in held if r["vs_coach"]["rms_cm"] <= 15]
+    print(
+        f"{len(found)} of {len(out)} videos with a court; {len(good)} of {len(held)} within 15 cm"
+    )
+    return 0
+
+
 def _pct(value: Any) -> str:
     return f"{100 * float(value):5.1f}" if isinstance(value, int | float) else "    -"
 
@@ -420,7 +520,21 @@ def main(argv: list[str] | None = None) -> int:
     track_cmd = sub.add_parser("trajectories", help="ball tracks and court proposals")
     track_cmd.add_argument("--force", action="store_true", help="also videos that have one")
     track_cmd.add_argument("--dry-run", action="store_true")
+    court_cmd = sub.add_parser("court", help="find the court: hall memory, camera setups")
+    court_scope = court_cmd.add_mutually_exclusive_group(required=True)
+    court_scope.add_argument("--video", help="one video id")
+    court_scope.add_argument(
+        "--all-ready", action="store_true", help="every ready volleyball video"
+    )
+    court_cmd.add_argument("--force", action="store_true", help="also videos it ran for")
+    court_cmd.add_argument("--dry-run", action="store_true")
+    court_eval_cmd = sub.add_parser("court-eval", help="the court job against the coaches")
+    court_eval_cmd.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "court":
+        return court_jobs(args.video, args.all_ready, args.force, args.dry_run)
+    if args.command == "court-eval":
+        return court_eval(args.json)
     if args.command == "trajectories":
         return trajectories(args.force, args.dry_run)
     if args.command == "score":

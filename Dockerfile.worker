@@ -1,8 +1,8 @@
 # Nomal media worker image (Lenovo server): ffmpeg with VAAPI for the Radeon iGPU, and
 # Deno for yt-dlp's YouTube JavaScript challenges (imports, PLAN §7.2.2): yt-dlp needs
 # Deno >= 2.3 (or Node >= 22); Debian's Node 20 is too old and YouTube then answers 403.
-# The `analysis` extra (numpy, ONNX Runtime CPU, scikit-learn) runs the automatic analysis
-# (PLAN §10.1); the API image does without it.
+# The `analysis` extra (numpy, ONNX Runtime CPU, scikit-learn, OpenCV headless for the
+# court: PLAN §10.6) runs the automatic analysis (PLAN §10.1); the API image does without it.
 #   docker build -f Dockerfile.worker -t nomal-worker:<tag> .
 # Runs `python -m nomal.worker`; settings come from NOMAL_WORKER_* (deploy/lenovo/).
 

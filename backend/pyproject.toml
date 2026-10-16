@@ -21,6 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 analysis = [
     "numpy>=2.3",
+    "opencv-python-headless==4.14.0.94",
     "onnxruntime>=1.22",
     "scikit-learn>=1.7",
 ]
