@@ -127,6 +127,7 @@ def import_batch(path: str, by: str, spacing_min: int, dry_run: bool) -> int:
     from datetime import timedelta
 
     from nomal.core import batch
+    from nomal.core.filming import CLUB_TZ
     from nomal.core.models import WdMember
     from nomal.core.sync import HttpBridgeClient
 
@@ -169,7 +170,7 @@ def import_batch(path: str, by: str, spacing_min: int, dry_run: bool) -> int:
         for p, video, start in queued:
             print(
                 f"line {p.line.number}: queued {p.title} ({p.line.on:%d.%m.%Y}), "
-                f"starts {start.astimezone():%H:%M}, video {video.id}"
+                f"starts {start.astimezone(CLUB_TZ):%H:%M}, video {video.id}"
             )
         print(f"{len(queued)} queued, {len(planned) - len(queued)} skipped")
     return 0

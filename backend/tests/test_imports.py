@@ -454,3 +454,19 @@ def test_the_worker_reports_youtubes_bot_check(
             progress=lambda f: None,
             cancel=threading.Event(),
         )
+
+
+def test_a_restarted_worker_gets_its_left_over_job_back_without_losing_an_attempt(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    allow_luca(club["admin"])
+    link_video(club["coach"])
+    w = worker_client(app, club["admin"], IMPORT_CAPS)
+    [job] = claim(w, IMPORT_CAPS)  # then the worker restarts before running it
+    assert job["attempt"] == 1
+    again = w.post(
+        "/api/worker/claim", json={"caps": IMPORT_CAPS, "wait": False, "restarted": True}
+    )
+    assert again.status_code == 200, again.text
+    [same] = again.json()["jobs"]
+    assert (same["id"], same["attempt"]) == (job["id"], 1)

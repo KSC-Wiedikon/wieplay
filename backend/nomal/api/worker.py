@@ -52,6 +52,8 @@ class ClaimIn(BaseModel):
     max: int = Field(default=1, ge=1, le=4)
     version: str | None = Field(default=None, max_length=64)
     wait: bool = True
+    # The worker's first claim since it started: it runs nothing, its old leases are free.
+    restarted: bool = False
 
 
 class JobOut(BaseModel):
@@ -128,8 +130,16 @@ async def claim(
     """Lease runnable jobs; waits up to 25 s for one to appear (long poll)."""
     if body.version:
         worker.version = body.version
+    if body.restarted and (freed := jobs.release(db, worker)):
+        log.info("worker %s restarted: %d job(s) queued again", worker.name, freed)
+        db.commit()
     deadline = asyncio.get_running_loop().time() + (LONG_POLL_SECONDS if body.wait else 0)
+    first = True
     while True:
+        # A worker that went away (restart, deploy) must not be handed a job it never sees.
+        if not first and await request.is_disconnected():
+            return ClaimOut(jobs=[], paused=False)
+        first = False
         if worker.paused:
             worker.last_seen_at = datetime.now(UTC)
             db.commit()
@@ -139,8 +149,6 @@ async def claim(
         )
         if leased or asyncio.get_running_loop().time() >= deadline:
             return ClaimOut(jobs=[_job_out(j) for j in leased], paused=False)
-        if await request.is_disconnected():
-            return ClaimOut(jobs=[], paused=False)
         await asyncio.sleep(POLL_EVERY_SECONDS)
         db.expire_all()
 

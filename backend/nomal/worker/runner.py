@@ -108,9 +108,11 @@ class Worker:
             "worker %s up: caps %s, encoder %s", __version__, ",".join(caps), self.settings.encoder
         )
         delay = 5.0
+        restarted = True  # until the API has heard it once
         while not self.stopping.is_set():
             try:
-                jobs, paused = self.api.claim(caps)
+                jobs, paused = self.api.claim(caps, restarted=restarted)
+                restarted = False
                 delay = 5.0
             except (ApiUnavailable, NotLeased) as exc:
                 log.warning("claim failed: %s (retrying in %.0fs)", exc, delay)

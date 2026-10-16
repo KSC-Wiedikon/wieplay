@@ -102,6 +102,23 @@ def claim(
     return jobs
 
 
+def release(db: Session, worker: Worker) -> int:
+    """A worker that just started runs nothing: its leases are left over from before the
+    restart (or from a claim answered after it went away). Queue them again at once, and the
+    stop does not count as an attempt."""
+    left = db.scalars(
+        select(Job).where(Job.status == "running", Job.lease_owner == worker.id)
+    ).all()
+    for job in left:
+        job.status = "queued"
+        job.lease_owner = None
+        job.lease_expires_at = None
+        job.not_before = None
+        job.attempts = max(0, job.attempts - 1)
+        job.error = "the worker restarted"
+    return len(left)
+
+
 def owned_running(db: Session, job_id: uuid.UUID, worker: Worker) -> Job | None:
     job = db.get(Job, job_id, with_for_update=True)
     if job is None or job.status != "running" or job.lease_owner != worker.id:
