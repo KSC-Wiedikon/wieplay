@@ -12,8 +12,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from nomal.api.deps import AdminDep, DbDep, audit
-from nomal.core import jobs
-from nomal.core.models import Job, SyncState, TeamLineage, TeamPolicy, Video, WdTeam, Worker
+from nomal.core import imports, jobs
+from nomal.core.models import (
+    ImportChannel,
+    Job,
+    SyncState,
+    TeamLineage,
+    TeamPolicy,
+    Video,
+    WdTeam,
+    Worker,
+)
 from nomal.core.sync import BridgeError, run_sync
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -117,6 +126,7 @@ def sync_now(request: Request, viewer: AdminDep, db: DbDep) -> SyncStateOut:
 KNOWN_CAPS = frozenset(
     {
         "ingest",
+        "import",
         "inbox",
         "transcode",
         "thumbs",
@@ -155,7 +165,9 @@ class WorkerCreatedOut(BaseModel):
 
 
 class WorkerUpdateIn(BaseModel):
-    paused: bool
+    paused: bool | None = None
+    # Replaces the worker's capabilities, e.g. to add "import" to an existing worker.
+    caps: list[str] | None = Field(default=None, min_length=1, max_length=16)
 
 
 class JobAdminOut(BaseModel):
@@ -244,7 +256,7 @@ def update_worker(
     worker = db.get(Worker, worker_id)
     if worker is None:
         raise HTTPException(404, "Worker not found")
-    if worker.paused != body.paused:
+    if body.paused is not None and worker.paused != body.paused:
         worker.paused = body.paused
         audit(
             db,
@@ -253,7 +265,23 @@ def update_worker(
             "worker",
             str(worker.id),
         )
-        db.commit()
+    if body.caps is not None:
+        unknown = set(body.caps) - KNOWN_CAPS
+        if unknown:
+            raise HTTPException(422, f"Unknown capabilities: {', '.join(sorted(unknown))}")
+        caps = sorted(set(body.caps))
+        if caps != sorted(worker.caps):
+            audit(
+                db,
+                viewer.member_id,
+                "worker_caps_changed",
+                "worker",
+                str(worker.id),
+                before=sorted(worker.caps),
+                after=caps,
+            )
+            worker.caps = caps
+    db.commit()
     return _worker_out(worker)
 
 
@@ -400,3 +428,82 @@ def retry_job(job_id: uuid.UUID, viewer: AdminDep, db: DbDep) -> JobAdminOut:
     )
     db.commit()
     return next(r for r in list_jobs(viewer, db, None, 200) if r.id == job.id)
+
+
+# --- Import channels: the allow-list for YouTube and Twitch links (PLAN §7.2.2) --------------
+
+
+class ImportChannelIn(BaseModel):
+    channel: str = Field(min_length=2, max_length=300)  # link, @handle or UC… id
+    label: str = Field(min_length=1, max_length=200)
+
+
+class ImportChannelOut(BaseModel):
+    id: uuid.UUID
+    platform: str
+    ref: str
+    label: str
+    added_at: datetime
+
+
+def _channel_out(c: ImportChannel) -> ImportChannelOut:
+    return ImportChannelOut(
+        id=c.id, platform=c.platform, ref=c.ref, label=c.label, added_at=c.added_at
+    )
+
+
+@router.get("/import-channels", response_model=list[ImportChannelOut])
+def list_import_channels(_: AdminDep, db: DbDep) -> list[ImportChannelOut]:
+    rows = db.scalars(select(ImportChannel).order_by(ImportChannel.label))
+    return [_channel_out(c) for c in rows]
+
+
+@router.post("/import-channels", response_model=ImportChannelOut, status_code=201)
+def add_import_channel(body: ImportChannelIn, viewer: AdminDep, db: DbDep) -> ImportChannelOut:
+    try:
+        platform, ref = imports.parse_channel(body.channel)
+    except imports.NotImportable as exc:
+        raise HTTPException(422, str(exc)) from exc
+    existing = db.scalar(
+        select(ImportChannel).where(ImportChannel.platform == platform, ImportChannel.ref == ref)
+    )
+    if existing is not None:
+        raise HTTPException(409, f"Already on the list as {existing.label}")
+    channel = ImportChannel(
+        id=uuid.uuid4(),
+        platform=platform,
+        ref=ref,
+        label=body.label.strip(),
+        added_by=viewer.member_id,
+        added_at=datetime.now(UTC),
+    )
+    db.add(channel)
+    audit(
+        db,
+        viewer.member_id,
+        "import_channel_added",
+        "import_channel",
+        str(channel.id),
+        platform=platform,
+        ref=ref,
+    )
+    db.commit()
+    return _channel_out(channel)
+
+
+@router.delete("/import-channels/{channel_id}", status_code=204)
+def remove_import_channel(channel_id: uuid.UUID, viewer: AdminDep, db: DbDep) -> None:
+    channel = db.get(ImportChannel, channel_id)
+    if channel is None:
+        raise HTTPException(404, "Channel not found")
+    audit(
+        db,
+        viewer.member_id,
+        "import_channel_removed",
+        "import_channel",
+        str(channel.id),
+        platform=channel.platform,
+        ref=channel.ref,
+    )
+    db.delete(channel)
+    db.commit()

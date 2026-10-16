@@ -230,8 +230,9 @@ class Video(Base):
     title: Mapped[str] = mapped_column(String(255))
     sport: Mapped[str] = mapped_column(String(16))
     recorded_on: Mapped[date] = mapped_column(Date)
-    source: Mapped[str] = mapped_column(String(16), default="file")  # file | inbox
-    # uploading | queued | processing | ready | failed | refused (filming rules) | deleted
+    source: Mapped[str] = mapped_column(String(16), default="file")  # file | inbox | import
+    # uploading | importing | queued | processing | ready | failed | refused (filming rules)
+    # | deleted
     status: Mapped[str] = mapped_column(String(16), index=True)
     duration_ms: Mapped[int | None] = mapped_column(BigInteger)
     fps_num: Mapped[int | None] = mapped_column(Integer)
@@ -265,6 +266,22 @@ class Video(Base):
         order_by="VideoRendition.height.desc()",
         cascade="all, delete-orphan",
     )
+
+
+class ImportChannel(Base):
+    """A YouTube or Twitch channel whose videos may be imported (PLAN §7.2.2): the club's own
+    channel and members' own channels. `ref` is a YouTube channel id (UC…), a YouTube handle
+    without the @, or a Twitch login, lower case except channel ids."""
+
+    __tablename__ = "import_channel"
+    __table_args__ = (UniqueConstraint("platform", "ref", name="uq_import_channel_platform_ref"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    platform: Mapped[str] = mapped_column(String(16))  # youtube | twitch
+    ref: Mapped[str] = mapped_column(String(128))
+    label: Mapped[str] = mapped_column(String(200))
+    added_by: Mapped[int | None] = mapped_column(Integer)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class VideoSourceFile(Base):

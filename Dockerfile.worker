@@ -1,4 +1,5 @@
-# Nomal media worker image (Lenovo server): ffmpeg with VAAPI for the Radeon iGPU.
+# Nomal media worker image (Lenovo server): ffmpeg with VAAPI for the Radeon iGPU, and
+# Node.js for yt-dlp's YouTube JavaScript challenges (imports, PLAN §7.2.2).
 #   docker build -f Dockerfile.worker -t nomal-worker:<tag> .
 # Runs `python -m nomal.worker`; settings come from NOMAL_WORKER_* (deploy/lenovo/).
 
@@ -9,7 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg mesa-va-drivers \
+ && apt-get install -y --no-install-recommends ffmpeg mesa-va-drivers nodejs \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.11.11 /uv /usr/local/bin/uv
 WORKDIR /app
