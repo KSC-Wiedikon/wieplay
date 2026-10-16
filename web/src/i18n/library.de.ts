@@ -165,6 +165,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
       bothSides: 'Beide',
       skills: 'Elemente',
       grades: 'Bewertungen',
+      noGrade: 'Ohne Bewertung',
       preview: 'Vorschau',
       updating: 'Aktualisiert…',
       previewEmpty: 'Keine getaggten Szenen passen.',

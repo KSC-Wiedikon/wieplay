@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Tagging, TeamDetail, Video } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
+import { boxScore, statRow, teamLine, videoStats } from '../test/stats'
 import { bundle, period, rally, tag } from '../test/tagging'
 import { VideoPage } from './VideoPage'
 
@@ -65,6 +66,7 @@ function show(body: Video | null, status = 200, extra: Record<string, { status?:
       [`/api/videos/${ID}`]: { status, body: body ?? { detail: 'Video not found' } },
       '/api/teams/92': { body: team },
       '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
+      [`/api/videos/${ID}/stats`]: { body: videoStats() },
       ...extra,
     }),
   )
@@ -316,6 +318,106 @@ describe('VideoPage', () => {
       await screen.findByRole('heading', { level: 1 })
       await waitFor(() => expect(screen.queryByText(/tags ·/)).not.toBeInTheDocument())
       expect(screen.queryByRole('link', { name: 'Tag this video' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('stats', () => {
+    const set1 = period({ no: 1, start_ms: 0, first_serve: 'us', final_us: 1, final_them: 1 })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, serving: 'us', won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })
+    const r2 = rally({ start_ms: 60_000, end_ms: 70_000, serving: 'us', won_by: 'them', period_id: set1.id, score_us_after: 1, score_them_after: 1 })
+    const kill = tag({ t_ms: 15_000, code: 'A', number: 7, attributes: { grade: '#' }, segment_id: r1.id })
+    const error = tag({ t_ms: 65_000, code: 'A', number: 7, attributes: { grade: '=' }, segment_id: r2.id })
+    const tagging = bundle({ can_tag: false, periods: [set1], segments: [r1, r2], events: [kill, error] })
+    const attack = { points: 1, att_ta: 2, att_kill: 1, att_err: 1, att_blocked: 0, att_hit: 0, att_kill_pct: 0.5, att_err_pct: 0.5 }
+    const box = boxScore({
+      players: [statRow({ kind: 'player', number: 7, member_id: 107, name: 'Luca Brunner', filter: { side: 'us', number: 7 }, values: attack })],
+      team: statRow({ kind: 'team', values: attack }),
+      summary: teamLine({ rallies: 2, won: 1, lost: 1, break_point_won: 1, break_point_of: 2, break_point_pct: 0.5 }),
+    })
+    const stats = videoStats({ tags: 2, rallies: 2, match: box, sets: [{ ...box, no: 1, score_us: 1, score_them: 1 }] })
+
+    function showStats(patch: { tagging?: Tagging; stats?: unknown; video?: Partial<Video> } = {}) {
+      return show(video(patch.video ?? {}), 200, {
+        [`/api/videos/${ID}/tagging`]: { body: patch.tagging ?? tagging },
+        [`/api/videos/${ID}/stats`]: { body: patch.stats ?? stats },
+      })
+    }
+
+    beforeEach(() => {
+      window.localStorage.clear()
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+    })
+
+    it('shows the box score in groups, with a dash where nothing was tried', async () => {
+      showStats()
+      const table = await screen.findByRole('table', { name: 'Box score' })
+      expect(within(table).getByRole('columnheader', { name: 'Attack' })).toHaveAttribute('colspan', '7')
+      expect(within(table).getByRole('columnheader', { name: 'Serve' })).toBeInTheDocument()
+      const row = within(table).getByRole('rowheader', { name: /#7/ }).closest('tr') as HTMLTableRowElement
+      const cells = within(row).getAllByRole('cell').map((c) => c.textContent)
+      expect(cells.slice(0, 3)).toEqual(['1', '–', '–']) // points, then no serves
+      expect(cells.slice(12, 19)).toEqual(['2', '1', '1', '0', '0.0%', '50.0%', '50.0%']) // attack
+      // Only numbers with moments behind them are buttons.
+      expect(within(row).queryByRole('button', { name: /Attacks blocked/ })).not.toBeInTheDocument()
+      expect(within(table).getByRole('rowheader', { name: 'Team' })).toBeInTheDocument()
+      expect(within(table).getByRole('rowheader', { name: 'Opponent' })).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/videos/${ID}/stats.csv?lang=en`)
+      expect(screen.getByText('What the numbers mean')).toBeInTheDocument()
+    })
+
+    it("plays a number's moments one after another, and leads back to the stats", async () => {
+      showStats()
+      const button = await screen.findByRole('button', { name: 'Play #7 Luca Brunner, Attacks: 2' })
+      fireEvent.click(button)
+      expect(button).toHaveAttribute('aria-pressed', 'true')
+      const player = document.querySelector('video') as HTMLVideoElement
+      expect(player.currentTime).toBe(12) // the attack 3 s before
+      expect(screen.getByText('Playing #7 Luca Brunner · Attack · # Kill · 0:15')).toBeInTheDocument()
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+
+      Object.defineProperty(player, 'paused', { configurable: true, get: () => false })
+      player.currentTime = 17.2
+      fireEvent(player, new Event('play'))
+      expect(player.currentTime).toBe(62)
+      expect(screen.getByText('Playing #7 Luca Brunner · Attack · = Error · 1:05')).toBeInTheDocument()
+
+      const scroll = vi.fn()
+      const section = document.getElementById('video-stats') as HTMLElement
+      section.scrollIntoView = scroll
+      fireEvent.click(screen.getByRole('button', { name: 'Back to the stats' }))
+      expect(scroll).toHaveBeenCalled()
+    })
+
+    it('narrows the box score to a set; team numbers play their rallies', async () => {
+      showStats()
+      const sets = await screen.findByRole('group', { name: 'Box score of' })
+      fireEvent.click(within(sets).getByRole('button', { name: 'Set 1' }))
+      expect(within(sets).getByRole('button', { name: 'Set 1' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByRole('table', { name: 'Box score · Set 1' })).toBeInTheDocument()
+
+      const team = screen.getByRole('table', { name: 'Points, side-out and break-point' })
+      expect(within(team).getAllByRole('row').map((r) => r.firstElementChild?.textContent)).toEqual(['Set', 'Set 1', 'Match'])
+      fireEvent.click(within(team).getByRole('button', { name: 'Play Set 1, Rallies lost: 1' }))
+      expect((document.querySelector('video') as HTMLVideoElement).currentTime).toBe(58)
+      expect(screen.getByText('Playing Rally 2 · 1:1')).toBeInTheDocument()
+      // Nothing behind a zero: no side-outs to play.
+      expect(within(team).queryByRole('button', { name: /Side-outs: rallies we received and won/ })).not.toBeInTheDocument()
+    })
+
+    it('says when there is nothing to count yet', async () => {
+      showStats({ tagging: bundle({ can_tag: true }), stats: videoStats() })
+      expect(await screen.findByText('No stats yet')).toBeInTheDocument()
+      expect(screen.getByText(/Tag the match and the numbers fill in here/)).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Download CSV' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'See the stats' })).not.toBeInTheDocument()
+    })
+
+    it('has no stats for basketball yet', async () => {
+      const { fetch } = showStats({ video: { sport: 'basketball' }, tagging: bundle({ sport: 'basketball' }) })
+      await screen.findByRole('heading', { level: 1 })
+      await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/videos/${ID}/tagging`, expect.anything()))
+      expect(screen.queryByRole('heading', { name: 'Stats' })).not.toBeInTheDocument()
+      expect(fetch).not.toHaveBeenCalledWith(`/api/videos/${ID}/stats`, expect.anything())
     })
   })
 })

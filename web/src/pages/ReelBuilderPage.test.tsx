@@ -87,6 +87,19 @@ beforeEach(() => {
 })
 
 describe('ReelBuilderPage', () => {
+  it('opens with the query of a number in the season stats, ungraded tags included', async () => {
+    const { previews } = show({ url: '/reels/new?team=92&season=2026%2F27&side=them&codes=S&grades=%2B,!,-,%2F,none' })
+    await waitFor(() =>
+      expect(previews.at(-1)).toEqual({ lineage_id: LINEAGE, season: '2026/27', side: 'them', codes: ['S'], grades: ['+', '!', '-', '/', null], limit: 200 }),
+    )
+    expect(screen.getByLabelText('Side')).toHaveValue('them')
+    expect(screen.getByRole('button', { name: 'Serve' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'No grade' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '# Ace' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'No grade' }))
+    await waitFor(() => expect(previews.at(-1)?.grades).toEqual(['+', '!', '-', '/']))
+  })
+
   it('previews the query as it is built, then saves it as a smart reel for the team', async () => {
     const { previews, fetch, router } = show()
     // The team and its current season to begin with.

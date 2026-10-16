@@ -306,3 +306,13 @@ export function HistoryIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** Bars on axes: statistics. */
+export function ChartIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 3v16a2 2 0 0 0 2 2h16" />
+      <path d="M18 17V9M13 17V5M8 17v-3" />
+    </Icon>
+  )
+}

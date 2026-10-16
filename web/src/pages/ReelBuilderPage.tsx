@@ -30,6 +30,7 @@ import {
 import { useMe, useTeam, useTeams, useTeamSeasons } from '../lib/queries'
 import { reelTimeline } from '../lib/reelPlayer'
 import { compareTeams } from '../lib/teams'
+import { NO_GRADE } from '../lib/stats'
 import { useToast } from '../lib/toast'
 import type { Clip, Piece, Reel, ReelIn, ReelQuery, Side, Taxonomy, Visibility } from '../lib/types'
 import { isUuid } from '../lib/video'
@@ -69,6 +70,9 @@ export function ReelBuilderPage() {
   if (params.get('kind') === 'manual') return <ManualBuilder reel={null} />
   const team = Number(params.get('team'))
   const member = Number(params.get('member'))
+  const side = params.get('side')
+  // From a number in the season stats: ?codes=A&grades=%23,none&side=them
+  const list = (name: string) => (params.get(name) ?? '').split(',').filter(Boolean).slice(0, 10)
   return (
     <SmartBuilder
       reel={null}
@@ -76,9 +80,9 @@ export function ReelBuilderPage() {
         teamId: Number.isInteger(team) && team > 0 ? team : null,
         season: params.get('season'),
         member: Number.isInteger(member) && member > 0 ? member : null,
-        codes: [],
-        grades: [],
-        side: null,
+        codes: list('codes'),
+        grades: list('grades').map((g) => (g === NO_GRADE ? null : g)),
+        side: side === 'us' || side === 'them' ? side : null,
       }}
     />
   )
@@ -90,7 +94,8 @@ interface Initial {
   season: string | null
   member: number | null
   codes: string[]
-  grades: string[]
+  /** null: tags without a grade. */
+  grades: (string | null)[]
   side: Side | null
 }
 
@@ -157,7 +162,7 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   const [member, setMember] = useState<number | null>(initial.member)
   const [side, setSide] = useState<Side | null>(initial.side)
   const [codes, setCodes] = useState<string[]>(initial.codes)
-  const [grades, setGrades] = useState<string[]>(initial.grades)
+  const [grades, setGrades] = useState<(string | null)[]>(initial.grades)
   const taxonomy = useTaxonomy(detail?.sport ?? null)
   const { people } = useTeamPeople(detail)
   const meId = me.data?.member.id
@@ -193,7 +198,7 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   const suggested = [
     player?.name ?? detail?.name,
     codes.map((c) => skillLabel(t, taxonomy.data ? skillByCode(taxonomy.data, c) : null, c)).join(', '),
-    grades.map((g) => (skill ? `${g} ${gradeLabel(t, skill, g)}` : g)).join(', '),
+    grades.map((g) => (g === null ? t('reels.builder.noGrade') : skill ? `${g} ${gradeLabel(t, skill, g)}` : g)).join(', '),
     effectiveSeason,
   ]
     .filter(Boolean)
@@ -281,9 +286,12 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
               />
               <Chips
                 label={t('reels.builder.grades')}
-                value={grades}
-                onChange={setGrades}
-                options={taxonomy.data.grades.map((g) => ({ value: g, label: skill ? `${g} ${gradeLabel(t, skill, g)}` : g }))}
+                value={grades.map((g) => g ?? NO_GRADE)}
+                onChange={(picked) => setGrades(picked.map((g) => (g === NO_GRADE ? null : g)))}
+                options={[
+                  ...taxonomy.data.grades.map((g) => ({ value: g, label: skill ? `${g} ${gradeLabel(t, skill, g)}` : g })),
+                  { value: NO_GRADE, label: t('reels.builder.noGrade') },
+                ]}
               />
             </>
           )}

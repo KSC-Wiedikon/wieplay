@@ -13,7 +13,7 @@ from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from nomal.core.models import Event, Segment, Video, WdTeam
@@ -32,7 +32,8 @@ class ReelQuery(BaseModel):
     member_id: int | None = None
     side: Literal["us", "them"] | None = None
     codes: list[str] = Field(default_factory=list, max_length=10)
-    grades: list[str] = Field(default_factory=list, max_length=6)
+    # None stands for a tag without a grade (the stats' "in play" and "touches" count those).
+    grades: list[str | None] = Field(default_factory=list, max_length=7)
     limit: int = Field(default=200, ge=1, le=500)
 
 
@@ -99,7 +100,11 @@ def evaluate(db: Session, visible_team_ids: set[int], query: ReelQuery) -> list[
     if query.codes:
         stmt = stmt.where(Event.code.in_(query.codes))
     if query.grades:
-        stmt = stmt.where(Event.attributes["grade"].astext.in_(query.grades))
+        grade = Event.attributes["grade"].astext
+        named = [g for g in query.grades if g is not None]
+        stmt = stmt.where(
+            or_(grade.in_(named), grade.is_(None)) if None in query.grades else grade.in_(named)
+        )
     stmt = stmt.order_by(Video.recorded_on, Video.created_at, Event.t_ms).limit(query.limit)
     pieces = []
     for event, video in db.execute(stmt).all():

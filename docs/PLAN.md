@@ -1118,6 +1118,39 @@ underlying tags:
 A **regrade queue** (Hudl-style: the list advances, number keys set the grade, `U` undoes)
 makes grading passes or attacks after a quick first tagging pass fast.
 
+**Built so far (branch `feat/stats`, 16.10.2026)**: the box score, side-out and break-point %,
+and the CSV export, computed on read from the tags (`backend/nomal/core/stats.py`, no table).
+`GET /api/videos/{id}/stats` (the match and each set) and `GET /api/teams/{id}/stats` (every
+ready match of that team row; counts are summed, ratios recomputed), each also as `.csv`
+(`?lang=de` for German headers). Whoever may watch the video or see the team reads them. On
+the video page a number plays its tags one after another; on the team page it opens the smart
+reel builder with that query. Volleyball only.
+
+How the grades are read (the meanings the tagging screen shows per skill; TA = every tag of
+the skill, an ungraded tag counts as an attempt that is neither a point nor an error):
+
+| Grade | Serve | Reception | Attack | Block |
+|---|---|---|---|---|
+| `#` | ace, rating 3 | perfect, rating 3 | kill | point |
+| `+` | positive, 2 | good, 2 | in play | touch |
+| `!` | OK, 2 | OK, 2 | in play (covered) | touch (back to the attacker) |
+| `-` | negative (they passed perfectly), 1 | poor, 1 | in play | touch |
+| `/` | overpass forced, 3 | overpass, 0 | blocked | error (invasion) |
+| `=` | error, 0 | error, 0 | error | error (or touch out) |
+
+- Serve: aces, errors, in play = TA − aces − errors, efficiency = (aces − errors) / TA, rating
+  = mean of the graded serves on the scale above (0–3).
+- Reception: errors, perfect % = `#` / TA, positive % = (`#` + `+`) / TA, pass rating 0–3.
+- Attack: kills, errors, blocked, hitting % = (K − E − B) / TA, kill % = K / TA, error % =
+  (E + B) / TA (so hitting % = kill % − error %).
+- Block: points, touches (`+ ! -` and ungraded), errors (`= /`). Dig, set, freeball: counts.
+- Points per player: kills + aces + block points.
+- Team: points won and lost (rallies), side-out % = rallies we received and won / received,
+  break-point % = rallies we served and won / served (only rallies with a known server and
+  winner). A tag counts for the set of its rally.
+- Not yet: rotation numbers (sets carry no starting rotation), zone heatmaps, the search bar,
+  saved filters and the regrade queue.
+
 ---
 
 ## 10. Automatic analysis (tier 2)

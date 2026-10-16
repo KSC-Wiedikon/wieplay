@@ -32,6 +32,9 @@ export const keys = {
   reelPreview: (query: unknown) => ['reels', 'preview', query] as const,
   exports: ['exports'] as const,
   taxonomy: (sport: string) => ['taxonomy', sport] as const,
+  // M3b: stats
+  videoStats: (id: string) => ['videos', id, 'stats'] as const,
+  teamStats: (id: number) => ['teams', id, 'stats'] as const,
 }
 
 function shouldRetry(failureCount: number, error: Error): boolean {

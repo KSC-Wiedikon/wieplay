@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Clip, Comment, Reel, Tagging, Video, VideoPerson } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
+import { videoStats } from '../test/stats'
 import { bundle, rally } from '../test/tagging'
 import { VideoPage } from './VideoPage'
 
@@ -119,6 +120,7 @@ function show({ video: v = video(), tagging = bundle({ can_tag: false }), clips 
       [`/api/videos/${ID}/clips`]: { body: clips },
       [`/api/videos/${ID}/comments`]: { body: comments },
       [`/api/videos/${ID}/people`]: { body: people },
+      [`/api/videos/${ID}/stats`]: { body: videoStats() },
       '/api/reels': { body: reels },
       ...routes,
   })

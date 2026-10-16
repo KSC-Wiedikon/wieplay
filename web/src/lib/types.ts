@@ -546,7 +546,8 @@ export interface ReelQuery {
   member_id?: number | null
   side?: Side | null
   codes?: string[]
-  grades?: string[]
+  /** A null stands for a tag without a grade. */
+  grades?: (string | null)[]
   /** 1..500, default 200. */
   limit?: number
 }
