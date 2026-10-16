@@ -10,11 +10,11 @@ export interface Team {
   league: string | null
   /** The user's relations to the team (player, coach, captain, team_responsible). Empty for admins. */
   rel: string[]
+  /** The same team across seasons (D1 2026/27 was D2 in 2025/26). */
+  lineage_id: string
 }
 
 export interface TeamDetail extends Team {
-  /** Same team across seasons (UUID). */
-  lineage_id: string
   /** Coach or team manager of this season's team, or sport admin. */
   can_upload: boolean
 }

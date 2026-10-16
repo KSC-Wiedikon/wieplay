@@ -33,6 +33,8 @@ export const en = {
   home: {
     title: 'Your teams',
     empty: 'None of your teams uses Nomal yet.',
+    showEarlier: 'Show earlier seasons of {{name}}',
+    hideEarlier: 'Hide earlier seasons of {{name}}',
   },
   columns: {
     team: 'Team',

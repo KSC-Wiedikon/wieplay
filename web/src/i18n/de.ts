@@ -38,6 +38,8 @@ export const de: Messages<typeof en> = {
   home: {
     title: 'Deine Teams',
     empty: 'Noch keines deiner Teams nutzt Nomal.',
+    showEarlier: 'Frühere Saisons von {{name}} anzeigen',
+    hideEarlier: 'Frühere Saisons von {{name}} ausblenden',
   },
   columns: {
     team: 'Team',
