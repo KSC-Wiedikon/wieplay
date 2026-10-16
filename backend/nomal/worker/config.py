@@ -12,8 +12,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 class WorkerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOMAL_WORKER_", extra="ignore")
 
-    # The API over the tailnet, e.g. http://100.124.42.52:8090 (worker routes refuse
-    # requests that come through Cloudflare).
+    # The API through the SSH tunnel on the worker host, e.g. http://172.17.0.1:18090
+    # (deploy/lenovo/nomal-api-tunnel.service; worker routes refuse requests that come
+    # through Cloudflare).
     api_url: str
     token: str = ""
     token_file: Path | None = None

@@ -126,7 +126,7 @@ flowchart LR
 
   OS[(Hetzner Object Storage<br/>renditions, staging, exports, analysis copies)]
 
-  subgraph Home[Home LAN / tailnet]
+  subgraph Home[Home LAN]
     LS[Lenovo server<br/>media worker]
     FW[Framework 16, RTX 5070<br/>internal GPU worker, dev + training]
     NAS[(Synology NAS<br/>raw originals, datasets, models)]
@@ -143,8 +143,8 @@ flowchart LR
   API --- PG
   DX --- PG
   API -- "sync rosters/games (localhost)" --> DX
-  LS -- "claim jobs (tailnet)" --> API
-  FW -- "claim GPU jobs (tailnet)" --> API
+  LS -- "claim jobs (SSH tunnel)" --> API
+  FW -. "claim GPU jobs (path not set up yet)" .-> API
   LS <-- "signed PUT/GET" --> OS
   LS <--> NAS
   FW <--> NAS
@@ -162,11 +162,11 @@ the Lenovo server and the GPU.
 | Component | Runs on | Does | Tech |
 |---|---|---|---|
 | **nomal-web** | Built into the `nomal-api` image, served at `nomal.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
-| **nomal-api** | Hetzner VPS, Docker, bound to `127.0.0.1`, reached via the existing Cloudflare Tunnel; worker routes only over the tailnet | Auth, permissions, metadata, upload orchestration, media redirects, job queue, audit log, budget ledger | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
+| **nomal-api** | Hetzner VPS (the club's account), Docker, bound to `127.0.0.1`, reached via the existing Cloudflare Tunnel; worker routes only through an SSH tunnel from the worker host (§8.1) | Auth, permissions, metadata, upload orchestration, media redirects, job queue, audit log, budget ledger | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
 | **Postgres `nomal`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All Nomal state incl. the job queue | Postgres 16 |
 | **Object storage** | Hetzner Object Storage, same region as the VPS, private bucket | HLS renditions, thumbnails, upload staging, exports, temporary analysis copies | S3 API |
 | **Media worker** | **Lenovo server** (always on; Ryzen 7 PRO 8700GE 8C/16T, 30 GB RAM, Radeon 780M with VAAPI H.264 encode, ~690 GB free) | Ingest (NAS inbox + browser uploads), transcode, thumbnails, audio, CPU analysis (whistles, motion, scoreboard OCR), analysis copies, clip/reel export, retention | `nomal-worker` container, ffmpeg. **CPU-capped** (it also runs the LAN's DNS and other services) |
-| **GPU worker (now)** | **Framework 16** at home (RTX 5070 Laptop GPU, 8 GB; always on) | Pulls GPU jobs from the queue over the tailnet and runs `nomal-ml run <spec>` locally; busy guard (§8.2) | `nomal-worker` + `nomal-ml` image (CUDA 12.8+, PyTorch), NVIDIA Container Toolkit |
+| **GPU worker (now)** | **Framework 16** at home (RTX 5070 Laptop GPU, 8 GB; always on) | Pulls GPU jobs from the queue and runs `nomal-ml run <spec>` locally; busy guard (§8.2). Not set up yet: needs its own path to the API (§8.1) | `nomal-worker` + `nomal-ml` image (CUDA 12.8+, PyTorch), NVIDIA Container Toolkit |
 | **GPU dispatcher (later)** | Same container on the Lenovo server | Hands GPU jobs to an EU or Swiss provider once that backend is switched on (§8.6); enforces the CHF cap | Part of `nomal-worker` |
 | **Framework 16 (dev)** | Same machine | Development, model training/fine-tuning, local test runs; a training run pauses the GPU worker | Blackwell GPU: needs a PyTorch build with CUDA 12.8 or later |
 | **NAS** | Synology at home (≈18 TB free) | Raw originals (master copies), ML datasets, model weights, weekly mirror of the bucket | NFS/SMB share `nomal` |
@@ -869,8 +869,8 @@ follows redirects. **Test on an iPhone in M1.**
 ### 8.1 Queue in Postgres, workers pull
 
 No message broker. The `job` table *is* the queue; only `nomal-api` touches it. Workers call
-four endpoints over the **tailnet** (worker routes are refused when a request arrives through
-Cloudflare):
+four endpoints through an **SSH tunnel** to the VPS (worker routes are refused when a request
+arrives through Cloudflare):
 
 | Endpoint | Does |
 |---|---|
@@ -882,12 +882,32 @@ Cloudflare):
 A reaper returns expired leases to the queue (`attempts+1`, back-off) or fails them after
 `max_attempts`. Each worker has its own token (hashed in `worker`), revocable from the admin page.
 
+**How workers reach the API (16.10.2026: SSH tunnel instead of the tailnet).** The VPS was on
+the owner's private tailnet and published the API on its tailnet address too
+(`NOMAL_TAILNET_IP`). On 16.10.2026 it moved to the club's own Hetzner account and left that
+tailnet; it is on no tailnet now. The path since then:
+
+- On the VPS, `NOMAL_TAILNET_IP` is unset, so the APIs listen on loopback only
+  (`127.0.0.1:8090` dev, `:8091` prod).
+- The Lenovo server connects out with the systemd unit `nomal-api-tunnel.service`
+  (`deploy/lenovo/`; install steps in its header). It runs `ssh -N` with two local forwards
+  and publishes the APIs on the Docker bridge, where the worker containers reach them:
+  `NOMAL_WORKER_API_URL=http://172.17.0.1:18090` (dev), `…:18091` (prod).
+- ufw on the Lenovo server lets only Docker networks reach those two ports
+  (`ufw allow proto tcp from 172.16.0.0/12 to 172.17.0.1 port 18090,18091`).
+- The tunnel carries no `CF-Connecting-IP`, so the worker routes accept its requests. The
+  security idea is unchanged: the worker routes are not reachable from the internet, only a
+  machine with SSH access to the VPS can reach them, and the VPS has no access to the home
+  network.
+- The Framework 16 GPU worker (§8.2) is not set up yet. It will need its own path to the API
+  (for example its own SSH tunnel), decided when it is set up.
+
 ### 8.2 Workers
 
 | Worker | Caps | Notes |
 |---|---|---|
-| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists) | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. |
-| **Framework 16** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, always on. **Busy guard**: stops claiming jobs while a training run or other GPU-heavy work uses the GPU (checked from free VRAM, plus a `nomal-worker pause` switch); optionally only at night. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so a pause or reboot loses at most one chunk. Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. A dev agent (`--env dev`) runs beside it, off by default. |
+| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists) | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. Reaches the API through `nomal-api-tunnel.service` (§8.1). |
+| **Framework 16** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, always on. **Busy guard**: stops claiming jobs while a training run or other GPU-heavy work uses the GPU (checked from free VRAM, plus a `nomal-worker pause` switch); optionally only at night. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so a pause or reboot loses at most one chunk. Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. A dev agent (`--env dev`) runs beside it, off by default. Not set up yet: it needs its own path to the API (§8.1). |
 
 ### 8.3 The GPU interface (backend-agnostic)
 
@@ -916,10 +936,10 @@ container entrypoint:  nomal-ml run --spec spec.json   -> writes outputs, exits 
 | `fake` | Returns canned outputs | CI |
 
 The `nomal-ml` container never calls Nomal's API: inputs and outputs are URIs in the spec, and
-the agent or the dispatcher relays progress and results over the tailnet. Moving to a provider
-touches only the adapter. For a provider, the analysis-copy input URLs are the only long-ish
-signed URLs in the system: they point at a temporary object no user ever sees, deleted when the
-job ends.
+the agent or the dispatcher relays progress and results to the worker routes (§8.1). Moving to
+a provider touches only the adapter. For a provider, the analysis-copy input URLs are the only
+long-ish signed URLs in the system: they point at a temporary object no user ever sees, deleted
+when the job ends.
 
 **Budget guard.** Every run records GPU, CPU and memory seconds and an estimated cost in
 `compute_usage` (electricity for `local-agent`). For a provider backend, the dispatcher checks
@@ -1454,6 +1474,7 @@ nomal/
   deploy/
     hetzner/compose.yaml     nomal-api (prod + dev)
     lenovo/compose.yaml      media worker (+ provider dispatcher later)
+    lenovo/nomal-api-tunnel.service  SSH tunnel from the Lenovo server to the APIs (§8.1)
     gpu/compose.yaml         internal GPU worker (local-agent, NVIDIA runtime)
     ml/Dockerfile            nomal-ml (CUDA) image
   .github/workflows/         lint, test, build images, release
@@ -1500,6 +1521,8 @@ Everything goes to dev first, as in Wiedisync.
   - Then it runs Alembic, restarts, and checks `/api/health`.
 - Container limits on the VPS (it also runs prod Directus): API `mem_limit: 512m`, `cpus: 1.0`.
 - Lenovo server: `docker compose pull && up -d` (systemd timer for the tag in a `stable` file).
+  - Once: `deploy/lenovo/nomal-api-tunnel.service` and its ufw rule, so the workers reach the
+    APIs (§8.1).
 
 ### 14.5 Testing
 
@@ -1627,8 +1650,9 @@ from 3. Liga and renamed (16 of 19 players stayed).
   - the same files through the NAS inbox.
 - In the worker image, VAAPI encodes about 5.8× real time.
 - On dev since 15.10.2026: the M1 API (video off until the bucket exists), the media worker
-  on the Lenovo server (VAAPI, reaching the API over the tailnet, data on local disk until
-  the NAS share exists), and the DU23-1 policy "trainings only".
+  on the Lenovo server (VAAPI; reaching the API over the tailnet, since 16.10.2026 through an
+  SSH tunnel, §8.1; data on local disk until the NAS share exists), and the DU23-1 policy
+  "trainings only".
 - **Wiedisync's adult check on real (dev) rosters, 15.10.2026**: H3, D1 and Herren 1 pass.
   DU23-1 fails because 6 of its 15 rostered people are under 18. So DU23-1 trainings are
   blocked too, as long as minors are on that roster.

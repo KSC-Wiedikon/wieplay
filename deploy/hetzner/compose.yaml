@@ -8,7 +8,9 @@ services:
     env_file: .env
     ports:
       - "127.0.0.1:${NOMAL_PORT:?NOMAL_PORT must be set in .env}:8000"
-      # Workers reach the API over the tailnet (PLAN §8.1). Unset = loopback only.
+      # Unused since 16.10.2026: the VPS is on no tailnet and NOMAL_TAILNET_IP is unset, so
+      # this binds 127.0.0.2 (loopback only). Workers reach the API through an SSH tunnel to
+      # 127.0.0.1 (deploy/lenovo/nomal-api-tunnel.service, PLAN §8.1).
       - "${NOMAL_TAILNET_IP:-127.0.0.2}:${NOMAL_PORT}:8000"
     networks: [kscw]
     # The VPS also runs prod Directus: Nomal stays small.
