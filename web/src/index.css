@@ -47,6 +47,12 @@
   --color-link-line: var(--link-line);
   --shadow-card: var(--card-shadow);
   --shadow-raised: var(--raised-shadow);
+  /* Court diagram: outcomes of serves and attacks (point, error, rally goes on), the floor. */
+  --color-outcome-win: var(--outcome-win);
+  --color-outcome-error: var(--outcome-error);
+  --color-outcome-play: var(--outcome-play);
+  --color-court-floor: var(--court-floor);
+  --color-court-line: var(--court-line);
 }
 
 /* Contrast rules: white on blue, navy on yellow and orange; never yellow or
@@ -73,6 +79,11 @@
   --appbar: var(--color-navy);
   --card-shadow: 0 1px 2px rgb(19 32 58 / 0.05), 0 1px 3px rgb(19 32 58 / 0.04);
   --raised-shadow: 0 10px 24px -8px rgb(19 32 58 / 0.18), 0 2px 6px -2px rgb(19 32 58 / 0.08);
+  --outcome-win: var(--color-vb-blue);
+  --outcome-error: var(--danger);
+  --outcome-play: #6b7486;
+  --court-floor: #f4ead9;
+  --court-line: rgb(19 32 58 / 0.55);
 }
 
 :root[data-sport='bb'] {
@@ -106,6 +117,12 @@
   --appbar: #0c1629;
   --card-shadow: 0 1px 2px rgb(0 0 0 / 0.22);
   --raised-shadow: 0 12px 28px -10px rgb(0 0 0 / 0.6), 0 2px 6px -2px rgb(0 0 0 / 0.3);
+  /* Blue on navy is too dark to read: a lighter blue for points. */
+  --outcome-win: #7fb2ff;
+  --outcome-error: var(--danger);
+  --outcome-play: #a3adbd;
+  --court-floor: #22365a;
+  --court-line: rgb(238 241 245 / 0.6);
 }
 
 :root.dark[data-sport='bb'] {

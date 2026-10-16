@@ -1,6 +1,6 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { AnalysisStatus } from '../../components/AnalysisStatus'
@@ -12,6 +12,8 @@ import { SuggestedValue } from '../../components/ScoringMarks'
 import { PageSpinner } from '../../components/Spinner'
 import { Segmented } from '../../components/Segmented'
 import { Switch } from '../../components/Switch'
+import { TrajectoryLayer, TrajectoryToggle } from '../../components/Trajectories'
+import { useTrajectories } from '../../lib/trajectories'
 import { VideoPlayer } from '../../components/VideoPlayer'
 import { analysisQuery, isBusy, useAnalysis } from '../../lib/analysis'
 import { api } from '../../lib/api'
@@ -281,6 +283,7 @@ function DeskLayout({
   const reviewing = review.active
 
   const rallies = useMemo(() => ralliesOf(view.segments), [view.segments])
+  const trajectories = useTrajectories(video.id, controller.playsRallies)
   const windows = useMemo(() => playWindows(rallies, { duration_ms: video.duration_ms }), [rallies, video.duration_ms])
   // While reviewing, the suggestion on screen plays in a loop instead.
   useCondensedPlayback(element, windows, ui.skip && !reviewing)
@@ -336,8 +339,14 @@ function DeskLayout({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         {/* The video stays short enough to keep the sets bar and the timeline on screen. */}
         <div className={cx('flex min-w-0 flex-col gap-2', !narrow && 'max-w-[calc((100dvh-27rem)*16/9)] flex-[100_1_0%]')}>
-          <VideoPlayer video={video} videoRef={setElement} keyboard={false} onFrameRate={controller.setFps} />
-          <Transport />
+          <VideoPlayer
+            video={video}
+            videoRef={setElement}
+            keyboard={false}
+            onFrameRate={controller.setFps}
+            overlay={trajectories.available && trajectories.on ? <TrajectoryLayer state={trajectories} video={element} /> : undefined}
+          />
+          <Transport tools={<TrajectoryToggle state={trajectories} />} />
         </div>
         {/* About 22rem until the video reaches its height limit; then the panel takes the rest. */}
         {reviewing ? (
@@ -441,7 +450,7 @@ function WorkspaceClipDialog() {
   )
 }
 
-function Transport() {
+function Transport({ tools }: { tools?: ReactNode }) {
   const { t } = useTranslation()
   const { controller, playhead, video, review: reviewer, narrow } = useWorkspace()
   const ui = useUi()
@@ -476,6 +485,7 @@ function Transport() {
           <span aria-hidden="true">{t('tagging.condensed.skip')}</span>
         </label>
       )}
+      {tools}
       <div className="ml-auto flex items-center gap-1">
         <Button variant="ghost" size="icon" disabled={!view.canUndo} onClick={reviewing ? reviewer.undo : controller.undo} aria-label={t('tagging.transport.undo')} title={t('tagging.transport.undo')}>
           <UndoIcon />

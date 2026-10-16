@@ -11,6 +11,7 @@ import { ClipDialog } from '../components/ClipDialog'
 import { ClipBar, ClipsSection } from '../components/ClipsSection'
 import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { CourtTools } from '../components/CourtTools'
 import { ExportButton } from '../components/ExportButton'
 import { AnalysisStatus } from '../components/AnalysisStatus'
 import { AlertIcon, CheckIcon, ChevronRightIcon, PlayIcon, TrashIcon } from '../components/icons'
@@ -20,6 +21,9 @@ import { PageHeader } from '../components/PageHeader'
 import { ProgressBar } from '../components/ProgressBar'
 import { RallyPanel } from '../components/RallyPanel'
 import { PageSpinner } from '../components/Spinner'
+import { Tendencies } from '../components/Tendencies'
+import { TrajectoryLayer } from '../components/Trajectories'
+import { useTrajectories } from '../lib/trajectories'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { UploadProgress } from '../components/UploadProgress'
 import { VideoStatusBadge } from '../components/VideoBadges'
@@ -244,6 +248,8 @@ function Ready({ video }: { video: Video }) {
   const [fromStats, setFromStats] = useState(false)
   const [marks, setMarks] = useState<{ in: number | null; out: number | null }>({ in: null, out: null })
   const [draft, setDraft] = useState<ClipDraft | null>(null)
+  const volleyball = video.sport === 'volleyball'
+  const trajectories = useTrajectories(video.id, volleyball)
   useEffect(() => {
     playhead.attach(element)
     return () => playhead.detach()
@@ -359,7 +365,12 @@ function Ready({ video }: { video: Video }) {
       {/* Wide screens: the player and its tools on the left, rallies, clips and comments beside it. */}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_34rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_38rem]">
         <div className="flex min-w-0 flex-col gap-3">
-          <VideoPlayer video={video} videoRef={setElement} />
+          <VideoPlayer
+            video={video}
+            videoRef={setElement}
+            overlay={trajectories.available && trajectories.on ? <TrajectoryLayer state={trajectories} video={element} /> : undefined}
+          />
+          {volleyball && <CourtTools video={video} element={element} trajectories={trajectories} />}
           {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null) || breaks.length > 0 || starts.length > 0) ? (
             <MomentsStrip
               duration_ms={duration}
@@ -494,6 +505,7 @@ function Ready({ video }: { video: Video }) {
         />
       </div>
       {video.sport === 'volleyball' && <VideoStats video={video} tagging={data} onPlay={playStats} />}
+      {volleyball && <Tendencies video={video} tagging={data} onPlay={playStats} />}
     </>
   )
 }

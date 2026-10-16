@@ -1,10 +1,11 @@
 import type Hls from 'hls.js'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Video } from '../lib/types'
 import { Button } from './Button'
 import { Select } from './Field'
 import { Message } from './Message'
+import { useFullscreen } from '../lib/trajectories'
 
 const HLS_TYPE = 'application/vnd.apple.mpegurl'
 const SEEK_SECONDS = 5
@@ -35,6 +36,11 @@ interface VideoPlayerProps {
   keyboard?: boolean
   /** Frame rate of the rendition playing now. */
   onFrameRate?: (fps: number) => void
+  /**
+   * Drawn over the picture (the ball's path). With it, full screen is the player's box (our
+   * button) rather than the bare video, so the overlay comes along.
+   */
+  overlay?: ReactNode
 }
 
 /**
@@ -42,10 +48,13 @@ interface VideoPlayerProps {
  * (also iOS 17.1+), native HLS otherwise (older iPhones). Segment requests
  * are answered with short-lived redirects to object storage.
  */
-export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate }: VideoPlayerProps) {
+export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate, overlay }: VideoPlayerProps) {
   const { t } = useTranslation()
   const id = useId()
   const ref = useRef<HTMLVideoElement>(null)
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  const full = useFullscreen(box)
+  const canFull = overlay !== undefined && typeof document !== 'undefined' && document.fullscreenEnabled === true
   const setRef = useCallback(
     (element: HTMLVideoElement | null) => {
       ref.current = element
@@ -179,7 +188,10 @@ export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate }: V
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="overflow-hidden rounded-card bg-navy">
+      <div
+        ref={setBox}
+        className={full ? 'relative flex items-center justify-center bg-black' : 'relative overflow-hidden rounded-card bg-navy'}
+      >
         <video
           ref={setRef}
           controls
@@ -187,8 +199,27 @@ export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate }: V
           preload="metadata"
           poster={video.has_thumbs ? `/api/media/${video.id}/poster.jpg` : undefined}
           aria-label={video.title}
-          className="aspect-video w-full"
+          // With an overlay, full screen goes through the button below (the box, overlay included).
+          controlsList={canFull ? 'nofullscreen' : undefined}
+          className={full ? 'h-full w-full' : 'aspect-video w-full'}
         />
+        {overlay}
+        {canFull && (
+          <button
+            type="button"
+            onClick={() => {
+              if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+              else void box?.requestFullscreen().catch(() => {})
+            }}
+            aria-label={full ? t('court.exitFullscreen') : t('court.fullscreen')}
+            title={full ? t('court.exitFullscreen') : t('court.fullscreen')}
+            className="absolute top-2 right-2 grid size-11 cursor-pointer place-items-center rounded-control bg-navy/60 text-white opacity-80 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:size-9"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {full ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+            </svg>
+          </button>
+        )}
       </div>
       {mode === 'unsupported' && <Message>{t('video.player.unsupported')}</Message>}
       {mode === 'error' && (
