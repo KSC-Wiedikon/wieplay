@@ -21,6 +21,14 @@ function Icon({ children, ...props }: IconProps) {
   )
 }
 
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </Icon>
+  )
+}
+
 export function SunIcon(props: IconProps) {
   return (
     <Icon {...props}>

@@ -31,10 +31,11 @@ class TeamOut(BaseModel):
     season: str
     league: str | None
     rel: list[str]
+    # The same team across seasons (D1 2026/27 was D2 in 2025/26): the start page groups by it.
+    lineage_id: uuid.UUID
 
 
 class TeamDetailOut(TeamOut):
-    lineage_id: uuid.UUID
     # Coach/team manager of this season's team or sport admin: upload videos.
     can_upload: bool
 
@@ -86,6 +87,7 @@ def _team_out(team: WdTeam, viewer: Viewer) -> TeamOut:
         season=team.season,
         league=team.league,
         rel=sorted(viewer.team_rels.get(team.id, frozenset())),
+        lineage_id=team.lineage_id,
     )
 
 
@@ -116,11 +118,7 @@ def list_teams(viewer: ViewerDep, db: DbDep) -> list[TeamOut]:
 def get_team(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamDetailOut:
     team = _get_visible_team(db, viewer, team_id)
     ref = TeamRef(team.id, team.sport, team.lineage_id, team.lineage.enabled)
-    return TeamDetailOut(
-        **_team_out(team, viewer).model_dump(),
-        lineage_id=team.lineage_id,
-        can_upload=can_upload(viewer, ref),
-    )
+    return TeamDetailOut(**_team_out(team, viewer).model_dump(), can_upload=can_upload(viewer, ref))
 
 
 @router.get("/teams/{team_id}/games", response_model=list[GameOut])
