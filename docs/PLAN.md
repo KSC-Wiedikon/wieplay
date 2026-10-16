@@ -51,14 +51,15 @@ watch clips, highlight reels and condensed matches without dead time, all behind
 existing Wiedisync login. Volleyball first; basketball is in the first batch of teams, so
 everything sport-specific is data (taxonomies), not code.
 
-**First teams (season 2026/27)**: about 75 matches (H3, D1, Herren 1) plus DU23-1 trainings.
+**First teams (season 2026/27)**: about 75 matches (H3, D1, Herren 1); DU23-1 is switched off
+for now (§5.3).
 The budget still assumes 100 videos per season.
 
 | Team in Wiedisync | Sport | League | Note |
 |---|---|---|---|
 | H3 | Volleyball | 2. Liga | |
 | D1 | Volleyball | 2. Liga | Not the basketball "Lions D1" |
-| DU23-1 | Volleyball | U23 | **Trainings only** (decided): U23 opponents may be under 18, §5.3 |
+| DU23-1 | Volleyball | U23 | **Switched off for now** (15.10.2026): 6 of 15 rostered under 18; its matches are not filmed either (U23 opponents may be under 18), §5.3 |
 | Herren 1 | Basketball | 1. Liga regional A (`H1LRA`) | Called "H1" in conversation; Wiedisync also has a *volleyball* H1 (2. Liga), which is not in scope |
 
 ### Tiers
@@ -335,6 +336,12 @@ Enforced in code, not just stated:
    leagues have no under-18 opponents, so adult-league matches are filmed without a per-upload
    confirmation. Opponents appear by jersey number only, their data stays team-internal, and
    footage is deleted or trimmed on request. Recorded in `docs/PRIVACY.md`.
+
+**DU23-1: switched off for now** (decided 15.10.2026, evening). On the real rosters 6 of its
+15 people are under 18, so the team fails the hard check, and with matches only (below) and its
+matches not allowed it has nothing to film for Nomal anyway. Switching it off also stops Nomal
+from mirroring their names. Switch it back on (Admin → Teams) once its roster passes, e.g. next
+season; its stored policy below (no matches) still applies then.
 
 **DU23-1: trainings only** (decided 15.10.2026). Its opponents are U23 teams that very likely
 field under-18 players, which Nomal cannot check, so DU23-1 matches are not filmed for Nomal.
