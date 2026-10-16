@@ -216,7 +216,7 @@ function SetForm({ initial, isNew, periods, texts, basketball, onSave, onCancel,
 
   return (
     <form
-      className="flex flex-col gap-3 rounded-2xl border border-hairline bg-surface p-4"
+      className="flex flex-col gap-3 rounded-card border border-hairline bg-surface shadow-card p-4"
       aria-label={isNew ? texts.newTitle(value.no) : texts.edit(value.no)}
       onSubmit={(e) => {
         e.preventDefault()

@@ -179,7 +179,7 @@ export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate }: V
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="overflow-hidden rounded-2xl bg-navy">
+      <div className="overflow-hidden rounded-card bg-navy">
         <video
           ref={setRef}
           controls

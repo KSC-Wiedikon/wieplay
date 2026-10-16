@@ -18,8 +18,21 @@ export function Badge({ tone = 'neutral', className, ...props }: ComponentProps<
   return (
     <span
       className={cx(
-        'inline-flex items-center rounded-md px-1.5 py-0.5 text-xs leading-4 font-bold ring-1 ring-inset',
+        'inline-flex items-center rounded-md px-1.5 py-0.5 text-xs leading-4 font-bold whitespace-nowrap ring-1 ring-inset',
         tones[tone],
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
+/** A rounded label, e.g. the viewer's roles in a team. */
+export function Chip({ className, ...props }: ComponentProps<'span'>) {
+  return (
+    <span
+      className={cx(
+        'inline-flex items-center rounded-full bg-sunken px-2.5 py-0.5 text-xs leading-5 font-semibold text-fg ring-1 ring-hairline ring-inset',
         className,
       )}
       {...props}

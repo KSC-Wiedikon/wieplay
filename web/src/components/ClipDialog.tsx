@@ -130,7 +130,7 @@ function ClipForm({ draft, canShare, duration_ms, onClose, onSaved }: ClipDialog
           maxLength={2000}
           rows={3}
           onChange={(e) => setNote(e.target.value)}
-          className="w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-sm text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className="w-full rounded-control border border-hairline-strong bg-surface px-3 py-2 text-sm text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         />
       </Field>
       {showWho ? (

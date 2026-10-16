@@ -89,7 +89,7 @@ export function EntryPanel() {
   const at = entry && parsed ? Math.max(0, entry.t_ms - (parsed.skill?.lead_ms ?? 0)) : null
 
   return (
-    <section aria-label={t('tagging.entry.title')} className="flex flex-col gap-2 rounded-2xl border border-hairline bg-surface px-4 py-3">
+    <section aria-label={t('tagging.entry.title')} className="flex flex-col gap-2 rounded-card border border-hairline bg-surface shadow-card px-4 py-3">
       <div className="flex items-center gap-2">
         <div
           className={cx(

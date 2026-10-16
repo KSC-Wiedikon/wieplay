@@ -34,25 +34,43 @@ function links(): string[] {
 }
 
 describe('Header', () => {
-  it('shows players clips and reels', () => {
+  it('shows players home, clips and reels', () => {
     renderRoute(<Header me={me({})} />, { url: '/clips', path: '/clips' })
-    expect(links()).toEqual(['Clips', 'Reels'])
+    expect(links()).toEqual(['Home', 'Clips', 'Reels'])
     const [menu] = screen.getAllByRole('navigation', { name: 'Main' })
     expect(within(menu as HTMLElement).getByRole('link', { name: 'Clips' })).toHaveAttribute('aria-current', 'page')
+    expect(within(menu as HTMLElement).getByRole('link', { name: 'Home' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('marks home as current on team and video pages', () => {
+    renderRoute(<Header me={me({})} />, { url: '/teams/92', path: '/teams/:id' })
+    for (const menu of screen.getAllByRole('navigation', { name: 'Main' })) {
+      expect(within(menu).getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page')
+    }
+  })
+
+  it('shows the member as initials with the name, and a log out button', () => {
+    renderRoute(<Header me={me({})} />)
+    const chip = screen.getByTitle('Luca Brunner')
+    expect(chip).toHaveTextContent('LB')
+    expect(within(chip).getByText('Luca Brunner')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Auf Deutsch wechseln' })).toBeInTheDocument()
   })
 
   it('adds downloads where the server allows them (coaches, team managers, sport admins)', () => {
     renderRoute(<Header me={me({ teams: [team(), team({ id: 93, rel: ['team_responsible'], can_tag: true, can_share: true, can_export: true })] })} />)
-    expect(links()).toEqual(['Clips', 'Reels', 'Downloads'])
+    expect(links()).toEqual(['Home', 'Clips', 'Reels', 'Downloads'])
   })
 
   it('shows the admin link to admins', () => {
     renderRoute(<Header me={me({ teams: [team({ rel: [], can_tag: true, can_share: true, can_export: true })], sport_admin: ['volleyball'], is_admin: true })} />)
-    expect(links()).toEqual(['Clips', 'Reels', 'Downloads', 'Admin'])
+    expect(links()).toEqual(['Home', 'Clips', 'Reels', 'Downloads', 'Admin'])
   })
 
   it('shows no downloads to an admin who leads no team', () => {
     renderRoute(<Header me={me({ teams: [team({ rel: [] })], is_admin: true })} />)
-    expect(links()).toEqual(['Clips', 'Reels', 'Admin'])
+    expect(links()).toEqual(['Home', 'Clips', 'Reels', 'Admin'])
   })
 })

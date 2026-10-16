@@ -78,7 +78,7 @@ function Dialog({
         aria-labelledby={`${id}-title`}
         aria-describedby={children ? `${id}-body` : undefined}
         onKeyDown={onKeyDown}
-        className="flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-hairline bg-surface p-5 shadow-lg"
+        className="flex w-full max-w-sm flex-col gap-4 rounded-card border border-hairline bg-surface p-5 shadow-lg"
       >
         <h2 id={`${id}-title`} className="text-lg font-semibold">
           {title}

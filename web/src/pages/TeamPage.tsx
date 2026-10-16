@@ -1,11 +1,12 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 import { SportBadge } from '../components/Badge'
 import { ButtonLink } from '../components/Button'
-import { PlayIcon } from '../components/icons'
+import { ChevronRightIcon, PlayIcon } from '../components/icons'
 import { Card } from '../components/Card'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader, SectionHeader } from '../components/PageHeader'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { ForbiddenError, NotFoundError } from '../lib/api'
@@ -40,27 +41,38 @@ function TeamView({ teamId }: { teamId: number }) {
   const { name, league, season, sport } = team.data
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8 sm:gap-10">
       <title>{`${name} · nomal`}</title>
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <SportBadge sport={sport} />
-          <h1 className="text-2xl font-bold">{name}</h1>
-        </div>
-        <p className="text-muted">{[league, season].filter(Boolean).join(' · ')}</p>
-      </div>
+      <PageHeader
+        eyebrow={
+          <>
+            <Link to="/" className="link">
+              {t('home.title')}
+            </Link>
+            <ChevronRightIcon className="size-4" />
+            <SportBadge sport={sport} />
+            <span>{t(`sport.${sport}`)}</span>
+          </>
+        }
+        title={name}
+        subtitle={[league, season].filter(Boolean).join(' · ')}
+      />
 
       <VideosSection team={team.data} />
       {team.data.rel.includes('player') && <HighlightsSection teamId={teamId} />}
-      <FilmingSection teamId={teamId} />
 
-      <Section title={t('team.upcomingGames')} query={games}>
-        {(data) => <UpcomingGames games={splitGames(data, today).upcoming} />}
-      </Section>
-      <Section title={t('team.playedGames')} query={games}>
-        {(data) => <PlayedGames games={splitGames(data, today).played} />}
-      </Section>
-
+      {/* Wide screens: what's coming on the left, what was played on the right. */}
+      <div className="grid gap-8 sm:gap-10 xl:grid-cols-2 xl:items-start">
+        <div className="flex min-w-0 flex-col gap-8 sm:gap-10">
+          <FilmingSection teamId={teamId} />
+          <Section title={t('team.upcomingGames')} query={games}>
+            {(data) => <UpcomingGames games={splitGames(data, today).upcoming} />}
+          </Section>
+        </div>
+        <Section title={t('team.playedGames')} query={games}>
+          {(data) => <PlayedGames games={splitGames(data, today).played} />}
+        </Section>
+      </div>
     </div>
   )
 }
@@ -69,17 +81,22 @@ function TeamView({ teamId }: { teamId: number }) {
 function HighlightsSection({ teamId }: { teamId: number }) {
   const { t } = useTranslation()
   return (
-    <section aria-labelledby="team-highlights" className="flex flex-col gap-3">
-      <h2 id="team-highlights" className="text-lg font-semibold">
-        {t('team.highlights')}
-      </h2>
-      <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+    <section
+      aria-labelledby="team-highlights"
+      className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-card border border-hairline bg-accent-soft p-4 sm:p-5"
+    >
+      <span className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-on-accent">
+        <PlayIcon className="size-5" />
+      </span>
+      <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
+        <h2 id="team-highlights" className="font-semibold">
+          {t('team.highlights')}
+        </h2>
         <p className="text-sm text-muted">{t('team.highlightsHint')}</p>
-        <ButtonLink to={`/teams/${teamId}/highlights`} variant="primary">
-          <PlayIcon className="size-4" />
-          {t('team.highlightsWatch')}
-        </ButtonLink>
-      </Card>
+      </div>
+      <ButtonLink to={`/teams/${teamId}/highlights`} variant="primary">
+        {t('team.highlightsWatch')}
+      </ButtonLink>
     </section>
   )
 }
@@ -92,9 +109,10 @@ interface SectionQuery<T> {
 }
 
 function Section<T>({ title, query, children }: { title: string; query: SectionQuery<T>; children: (data: T) => ReactNode }) {
+  const id = useId()
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">{title}</h2>
+    <section aria-labelledby={id} className="flex flex-col gap-3">
+      <SectionHeader id={id} title={title} />
       {query.isPending ? (
         <Spinner />
       ) : query.isError || query.data === undefined ? (

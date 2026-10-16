@@ -79,84 +79,90 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
   if (pieces.length === 0) return null
   const videoClass = 'aspect-video w-full'
   return (
-    <section aria-label={t('reels.player.label')} className="flex flex-col gap-3">
-      <div className="relative overflow-hidden rounded-2xl bg-navy">
-        {([0, 1] as const).map((no) => (
-          <video
-            key={no}
-            ref={no === 0 ? ref0 : ref1}
-            controls={state.active === no}
-            playsInline
-            preload="auto"
-            aria-label={title}
-            aria-hidden={state.active !== no}
-            className={state.active === no ? videoClass : 'hidden'}
-          />
-        ))}
-        {state.waiting && (
-          <div className="absolute inset-0 grid place-items-center bg-navy/60 text-light">
-            <span className="flex items-center gap-2 text-sm font-semibold">
-              <Spinner className="text-light" label={t('reels.player.loading')} />
-              {t('reels.player.loading')}
-            </span>
-          </div>
-        )}
-        {state.error && !state.waiting && (
-          <div role="alert" className="absolute inset-x-0 bottom-0 bg-navy/80 p-3 text-sm text-light">
-            {t('reels.player.error')}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="icon" onClick={engine.previous} disabled={state.index === 0 && state.t_ms <= (piece?.start_ms ?? 0) + 3000} aria-label={t('reels.player.previous')}>
-          <SkipBackIcon />
-        </Button>
-        <Button variant="primary" size="icon" onClick={engine.toggle} aria-label={state.playing ? t('reels.player.pause') : t('reels.player.play')}>
-          {state.playing ? <PauseIcon /> : <PlayIcon />}
-        </Button>
-        <Button size="icon" onClick={engine.next} disabled={state.index + 1 >= pieces.length} aria-label={t('reels.player.next')}>
-          <SkipForwardIcon />
-        </Button>
-        <p className="text-sm font-semibold tabular-nums">{t('reels.player.position', { n: state.index + 1, total: pieces.length })}</p>
-        <p className="ml-auto text-sm text-muted tabular-nums">
-          {t('reels.player.time', { time: formatDuration(elapsed), total: formatDuration(timeline.total_ms) })}
-        </p>
-      </div>
-      {/* Mouse and touch shortcut; the list below is the keyboard way to the same places. */}
-      <div
-        className="relative h-3 cursor-pointer overflow-hidden rounded-full bg-sunken ring-1 ring-hairline ring-inset"
-        onClick={onBar}
-        title={t('reels.player.progress')}
-        aria-hidden="true"
-      >
-        <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${timeline.total_ms ? (elapsed / timeline.total_ms) * 100 : 0}%` }} />
-        {timeline.starts.slice(1).map((start, i) => (
-          <div key={i} className="absolute inset-y-0 w-px bg-surface" style={{ left: `${(start / timeline.total_ms) * 100}%` }} />
-        ))}
-      </div>
-
-      {piece && (
-        <div className="flex flex-col gap-0.5" aria-live="polite">
-          <p className="font-semibold wrap-break-word">{label(piece)}</p>
-          <p className="text-sm text-muted">
-            {[
-              piece.video_title,
-              piece.recorded_on ? formatDate(piece.recorded_on) : null,
-              score?.period && data ? `${periodLabel(t, data.sport, score.period.no)} · ${score.us}:${score.them}` : null,
-              t('reels.player.inVideo', { time: formatClock(at, { tenths: false }) }),
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          {state.ended && <p className="text-sm font-semibold">{t('reels.player.finished')}</p>}
+    // Wide screens: the player on the left, the list of moments beside it.
+    <section
+      aria-label={t('reels.player.label')}
+      className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_30rem] xl:items-start xl:gap-6 2xl:grid-cols-[minmax(0,1fr)_34rem]"
+    >
+      <div className="flex min-w-0 flex-col gap-3">
+        <div className="relative overflow-hidden rounded-card bg-navy">
+          {([0, 1] as const).map((no) => (
+            <video
+              key={no}
+              ref={no === 0 ? ref0 : ref1}
+              controls={state.active === no}
+              playsInline
+              preload="auto"
+              aria-label={title}
+              aria-hidden={state.active !== no}
+              className={state.active === no ? videoClass : 'hidden'}
+            />
+          ))}
+          {state.waiting && (
+            <div className="absolute inset-0 grid place-items-center bg-navy/60 text-light">
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                <Spinner className="text-light" label={t('reels.player.loading')} />
+                {t('reels.player.loading')}
+              </span>
+            </div>
+          )}
+          {state.error && !state.waiting && (
+            <div role="alert" className="absolute inset-x-0 bottom-0 bg-navy/80 p-3 text-sm text-light">
+              {t('reels.player.error')}
+            </div>
+          )}
         </div>
-      )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="icon" onClick={engine.previous} disabled={state.index === 0 && state.t_ms <= (piece?.start_ms ?? 0) + 3000} aria-label={t('reels.player.previous')}>
+            <SkipBackIcon />
+          </Button>
+          <Button variant="primary" size="icon" onClick={engine.toggle} aria-label={state.playing ? t('reels.player.pause') : t('reels.player.play')}>
+            {state.playing ? <PauseIcon /> : <PlayIcon />}
+          </Button>
+          <Button size="icon" onClick={engine.next} disabled={state.index + 1 >= pieces.length} aria-label={t('reels.player.next')}>
+            <SkipForwardIcon />
+          </Button>
+          <p className="text-sm font-semibold tabular-nums">{t('reels.player.position', { n: state.index + 1, total: pieces.length })}</p>
+          <p className="ml-auto text-sm text-muted tabular-nums">
+            {t('reels.player.time', { time: formatDuration(elapsed), total: formatDuration(timeline.total_ms) })}
+          </p>
+        </div>
+        {/* Mouse and touch shortcut; the list below is the keyboard way to the same places. */}
+        <div
+          className="relative h-3 cursor-pointer overflow-hidden rounded-full bg-sunken ring-1 ring-hairline ring-inset"
+          onClick={onBar}
+          title={t('reels.player.progress')}
+          aria-hidden="true"
+        >
+          <div className="absolute inset-y-0 left-0 bg-accent" style={{ width: `${timeline.total_ms ? (elapsed / timeline.total_ms) * 100 : 0}%` }} />
+          {timeline.starts.slice(1).map((start, i) => (
+            <div key={i} className="absolute inset-y-0 w-px bg-surface" style={{ left: `${(start / timeline.total_ms) * 100}%` }} />
+          ))}
+        </div>
+
+        {piece && (
+          <div className="flex flex-col gap-0.5" aria-live="polite">
+            <p className="font-semibold wrap-break-word">{label(piece)}</p>
+            <p className="text-sm text-muted">
+              {[
+                piece.video_title,
+                piece.recorded_on ? formatDate(piece.recorded_on) : null,
+                score?.period && data ? `${periodLabel(t, data.sport, score.period.no)} · ${score.us}:${score.them}` : null,
+                t('reels.player.inVideo', { time: formatClock(at, { tenths: false }) }),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+            {state.ended && <p className="text-sm font-semibold">{t('reels.player.finished')}</p>}
+          </div>
+        )}
+      </div>
 
       <Card className="overflow-hidden">
-        <div ref={list} className="relative max-h-80 overflow-y-auto">
+        <div ref={list} className="relative max-h-80 overflow-y-auto xl:max-h-[calc(100dvh-16rem)]">
           <Table caption={t('reels.player.moments')}>
-            <THead className="sticky top-0 z-10 bg-surface">
+            <THead className="sticky top-0 z-10">
               <tr>
                 <Th className="w-0">#</Th>
                 <Th>{t('reels.player.moments')}</Th>
@@ -175,7 +181,7 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
                     data-piece={index}
                     onActivate={() => void engine.show(index, true)}
                     aria-current={current ? 'true' : undefined}
-                    className={cx(current && 'bg-sunken')}
+                    className={cx(current && 'bg-accent-soft')}
                   >
                     <Td className="text-muted tabular-nums">{index + 1}</Td>
                     <Td tight>
@@ -184,7 +190,7 @@ export function ReelPlayer({ pieces, title, taxonomy: fallback = null }: ReelPla
                         onClick={() => void engine.show(index, true)}
                         aria-label={t('reels.player.playMoment', { n: index + 1 })}
                         className={cx(
-                          'min-h-11 cursor-pointer rounded-lg px-1 text-left font-semibold text-link underline-offset-2 hover:underline sm:min-h-9',
+                          'min-h-11 cursor-pointer rounded-lg px-1 text-left font-semibold link sm:min-h-9',
                           current && 'text-fg',
                         )}
                       >

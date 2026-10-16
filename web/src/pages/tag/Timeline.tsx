@@ -310,7 +310,7 @@ export function SegmentPanel({ id }: { id: string }) {
   const nudge = (field: 'start_ms' | 'end_ms', ms: number) => move(field, segment[field] + ms)
 
   return (
-    <section aria-labelledby={`${htmlId}-title`} className="flex flex-col gap-3 rounded-2xl border border-hairline bg-surface p-4">
+    <section aria-labelledby={`${htmlId}-title`} className="flex flex-col gap-3 rounded-card border border-hairline bg-surface shadow-card p-4">
       <div className="flex items-center justify-between gap-2">
         <h2 id={`${htmlId}-title`} className="font-semibold">
           {t('tagging.segment.title', { kind: kindLabel(segment.kind) })}

@@ -1,4 +1,4 @@
-import type { SportName } from './types'
+import type { Me, SportName, Team } from './types'
 
 export const SPORTS: readonly SportName[] = ['volleyball', 'basketball']
 
@@ -31,4 +31,20 @@ export function groupBySport<T extends { sport: SportName; season: string; name:
     sport,
     teams: teams.filter((t) => t.sport === sport).sort(compareTeams),
   })).filter((group) => group.teams.length > 0)
+}
+
+/**
+ * Whether the viewer may upload for this team row, as the API decides it
+ * (core/permissions.can_upload): its coaches and team managers, and sport admins. Only used to
+ * offer the upload; the upload page asks the server (`can_upload`).
+ */
+export function mayUpload(team: Team, me: Pick<Me, 'sport_admin'>): boolean {
+  return me.sport_admin.includes(team.sport) || team.rel.some((rel) => rel === 'coach' || rel === 'team_responsible')
+}
+
+/** Volleyball first, then basketball; within a sport one entry per team, newest season first. */
+export function teamEntries<T extends { sport: SportName; lineage_id: string; season: string; name: string }>(
+  teams: readonly T[],
+): { latest: T; earlier: T[] }[] {
+  return groupBySport(teams).flatMap((group) => groupBySeasons(group.teams))
 }

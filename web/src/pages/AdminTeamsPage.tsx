@@ -19,7 +19,8 @@ export function AdminTeamsPage() {
   const { t } = useTranslation()
   return (
     <AdminShell title={t('admin.title')}>
-      <div className="flex flex-col gap-8">
+      {/* Wide screens: the sync on the left, the teams beside it. */}
+      <div className="grid gap-8 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] xl:items-start">
         <SyncPanel />
         <TeamsPanel />
       </div>
@@ -80,9 +81,9 @@ function SyncDetails({ status }: { status: SyncStatus }) {
           </>
         )}
       </dl>
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <dl className="grid grid-cols-3 gap-3">
         {counts.map(([label, value]) => (
-          <div key={label} className="flex flex-col-reverse rounded-xl bg-sunken px-3 py-2">
+          <div key={label} className="flex flex-col-reverse rounded-control border border-hairline bg-sunken px-3 py-2.5">
             <dt className="text-xs text-muted">{label}</dt>
             <dd className="text-xl font-bold tabular-nums">{value}</dd>
           </div>

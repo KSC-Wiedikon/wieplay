@@ -6,6 +6,7 @@ import { Button, ButtonLink } from '../components/Button'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ExportButton } from '../components/ExportButton'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader } from '../components/PageHeader'
 import { ReelPlayer } from '../components/ReelPlayer'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { NotFoundError } from '../lib/api'
@@ -37,28 +38,34 @@ export function ReelPage() {
   return (
     <div className="flex flex-col gap-6">
       <title>{`${reel.title} · nomal`}</title>
-      <div className="flex flex-col gap-2">
-        <Link to="/reels" className="text-sm font-semibold text-link underline-offset-2 hover:underline">
-          {t('reels.back')}
-        </Link>
-        <h1 className="text-2xl font-bold wrap-break-word">{reel.title}</h1>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge>{t(`reels.kind.${reel.kind}`)}</Badge>
-          <Badge tone={reel.visibility === 'team' ? 'accent' : 'neutral'}>{t(`reels.shared.${reel.visibility}`)}</Badge>
-          <span className="text-sm text-muted tabular-nums">{`${t('reels.count', { count: item_count })} · ${formatDuration(total_ms)}`}</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {item_count > 0 && <ExportButton request={{ kind: 'reel', reel_id: reel.id }} />}
-          {reel.mine && (
-            <>
-              <ButtonLink to={`/reels/${reel.id}/edit`}>{t('reels.edit')}</ButtonLink>
-              <Button variant="ghostDanger" onClick={() => setConfirm(true)}>
-                {t('reels.delete')}
-              </Button>
-            </>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        eyebrow={
+          <Link to="/reels" className="font-semibold link">
+            {t('reels.back')}
+          </Link>
+        }
+        title={reel.title}
+        subtitle={
+          <span className="flex flex-wrap items-center gap-2">
+            <Badge>{t(`reels.kind.${reel.kind}`)}</Badge>
+            <Badge tone={reel.visibility === 'team' ? 'accent' : 'neutral'}>{t(`reels.shared.${reel.visibility}`)}</Badge>
+            <span className="text-sm tabular-nums">{`${t('reels.count', { count: item_count })} · ${formatDuration(total_ms)}`}</span>
+          </span>
+        }
+        actions={
+          <>
+            {item_count > 0 && <ExportButton request={{ kind: 'reel', reel_id: reel.id }} />}
+            {reel.mine && (
+              <>
+                <ButtonLink to={`/reels/${reel.id}/edit`}>{t('reels.edit')}</ButtonLink>
+                <Button variant="ghostDanger" onClick={() => setConfirm(true)}>
+                  {t('reels.delete')}
+                </Button>
+              </>
+            )}
+          </>
+        }
+      />
       {items.isPending ? (
         <Spinner />
       ) : items.isError ? (

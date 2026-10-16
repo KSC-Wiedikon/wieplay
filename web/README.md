@@ -50,8 +50,19 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
 ## How the UI is put together
 
 - **Colours** are tokens in `src/index.css`. Tailwind's default palette is switched off;
-  components use the semantic tokens (`bg-page`, `bg-surface`, `text-fg`, `text-muted`,
-  `bg-accent`, `text-on-accent`, `text-link`, `border-hairline`, `outline-ring`, `text-danger`).
+  components use the semantic tokens (`bg-page`, `bg-surface`, `bg-sunken`, `text-fg`,
+  `text-muted`, `bg-accent`, `text-on-accent`, `bg-accent-soft` with `text-on-accent-soft` for
+  selected and current states, `text-link`, `border-hairline`, `border-hairline-strong`,
+  `bg-hover`, `outline-ring`, `text-danger`), the shadows `shadow-card` and `shadow-raised`
+  (hover), and the radii `rounded-control` (buttons, inputs, nav) and `rounded-card` (cards).
+  Text links use the `link` utility: the link colour with a light underline that firms up on
+  hover (in basketball's light mode the link is navy with an orange underline).
+- **Layout**: every page uses the window up to `max-w-[110rem]` with 16/24/32 px gutters; forms
+  (upload, reel builder) keep a readable width of their own. The app bar is navy in both themes
+  (`.appbar` switches its tokens to the dark ones) with the mark-on-dark; from `lg` the menu is
+  in the bar, below that it is a row of tabs under it. Page tops use `PageHeader` (optional line
+  above the title, title, subtitle, actions), sections `SectionHeader`. The video page and the
+  reel player put the list beside the player from `xl`.
 - **Sport accent**: `data-sport="vb|bb"` on `<html>` (default `vb`). The team page sets it from
   the team with `useSportAccent()` (`src/lib/sport.ts`), which also swaps the favicon and the
   header mark. Volleyball uses blue fills with white text in light mode and yellow in dark mode;
@@ -65,10 +76,19 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
   logged out; a 401 anywhere else invalidates the `me` query, which brings back the login
   screen. Login is a navigation to `/api/auth/login?next=…`, never a fetch. Query hooks live in
   `src/lib/queries.ts`.
-- **Components** (`src/components/`): `Button` (44 px tall on phones, 36 px from `sm`), `Card`
-  (rounded-2xl, hairline border), `Table` (lists of records are always tables; hide secondary
-  columns on phones with `hidden sm:table-cell`), `Badge`, `Spinner`, `Switch` and the toast
-  provider. No native `alert`/`confirm`/`prompt` (ESLint `no-alert`); ask with `ConfirmDialog`.
+- **Components** (`src/components/`): `Button`/`ButtonLink` (`primary`, `secondary`, `ghost`,
+  `danger`, `ghostDanger`; 44 px tall on phones, 36 px from `sm`; `buttonClasses()` gives the
+  same look to a file input's label or a plain download link), `Card` (card radius, hairline
+  border, soft shadow), `Table` (lists of records are always tables; tinted header, rows light
+  up on hover; hide secondary columns on phones with `hidden sm:table-cell`), `Badge`, `Chip`,
+  `Message` (notices, with an optional icon), `EmptyState` (icon, title, a helpful line, an
+  action), `VideoPoster`, `Spinner`, `Switch` and the toast provider. No native
+  `alert`/`confirm`/`prompt` (ESLint `no-alert`); ask with `ConfirmDialog`.
+- **Start page** (`src/pages/HomePage.tsx`, `src/pages/home/`): a greeting, the actions (upload
+  for coaches, team managers and sport admins, as `mayUpload` in `src/lib/teams.ts` mirrors the
+  API), a card per team (its newest season; earlier seasons behind a disclosure) with the
+  poster of its latest ready video, and the newest videos of those teams. The videos come from
+  one `GET /api/teams/{id}/videos` per team (newest season and the one before).
 - **Uploads** (`src/lib/upload.ts`): S3 multipart straight from the browser to the bucket. Parts
   of all files share 4 parallel PUTs (XMLHttpRequest, for progress); part URLs are signed by the
   API a few parts ahead, so none expires in a long queue; each part is retried with back-off, and

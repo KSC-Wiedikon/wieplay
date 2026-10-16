@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '../components/Badge'
 import { Button } from '../components/Button'
+import { buttonClasses } from '../components/buttonStyles'
 import { Card } from '../components/Card'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { AlertIcon, DownloadIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader } from '../components/PageHeader'
 import { ProgressBar } from '../components/ProgressBar'
 import { PageSpinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
@@ -32,10 +34,10 @@ export function ExportsPage() {
   return (
     <div className="flex flex-col gap-6">
       <title>{`${t('exports.title')} · nomal`}</title>
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold">{t('exports.title')}</h1>
-        <p className="flex items-start gap-2 rounded-xl border border-hairline bg-surface p-3 text-sm">
-          <AlertIcon className="mt-0.5 size-4 shrink-0" />
+      <div className="flex flex-col gap-4">
+        <PageHeader title={t('exports.title')} />
+        <p className="flex max-w-4xl items-start gap-3 rounded-card border border-hairline bg-accent-soft p-4 text-sm">
+          <AlertIcon className="mt-0.5 size-4 shrink-0 text-on-accent-soft" />
           {t('exports.rules')}
         </p>
       </div>
@@ -44,7 +46,7 @@ export function ExportsPage() {
       ) : exports.isError ? (
         <LoadError onRetry={() => void exports.refetch()} />
       ) : exports.data.length === 0 ? (
-        <Message>{t('exports.empty')}</Message>
+        <Message icon={<DownloadIcon />}>{t('exports.empty')}</Message>
       ) : (
         <Card className="overflow-hidden">
           <Table caption={t('exports.title')}>
@@ -105,7 +107,7 @@ export function ExportsPage() {
                         <a
                           href={downloadUrl(item.id)}
                           aria-label={t('exports.getFor', { title: item.title })}
-                          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:min-h-9"
+                          className={buttonClasses({ variant: 'primary' })}
                         >
                           <DownloadIcon className="size-4" />
                           <span className="hidden sm:inline">{t('exports.get')}</span>

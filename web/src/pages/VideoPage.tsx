@@ -5,15 +5,17 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Badge } from '../components/Badge'
 import { Button, ButtonLink } from '../components/Button'
+import { buttonClasses } from '../components/buttonStyles'
 import { Card } from '../components/Card'
 import { ClipDialog } from '../components/ClipDialog'
 import { ClipBar, ClipsSection } from '../components/ClipsSection'
 import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ExportButton } from '../components/ExportButton'
-import { AlertIcon, CheckIcon } from '../components/icons'
+import { AlertIcon, CheckIcon, ChevronRightIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
 import { MomentsStrip } from '../components/MomentsStrip'
+import { PageHeader } from '../components/PageHeader'
 import { ProgressBar } from '../components/ProgressBar'
 import { RallyPanel } from '../components/RallyPanel'
 import { PageSpinner } from '../components/Spinner'
@@ -87,21 +89,33 @@ function VideoView({ videoId }: { videoId: string }) {
   return (
     <div className="flex flex-col gap-6">
       <title>{`${v.title} · nomal`}</title>
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-2">
-          {kind && <Badge>{kind}</Badge>}
-          {v.status !== 'ready' && <VideoStatusBadge status={v.status} />}
-        </div>
-        <h1 className="text-2xl font-bold wrap-break-word">{v.title}</h1>
-        <p className="text-muted">
-          <span className="tabular-nums">{formatDate(v.recorded_on)}</span>
-          {' · '}
-          <Link to={`/teams/${v.team_id}`} className="font-semibold text-link underline-offset-2 hover:underline">
-            {`${v.team_name} ${v.team_season}`}
-          </Link>
-        </p>
-        {v.imported_from && <ImportOrigin origin={v.imported_from} />}
-      </div>
+      <PageHeader
+        eyebrow={
+          <>
+            <Link to={`/teams/${v.team_id}`} className="font-semibold link">
+              {`${v.team_name} ${v.team_season}`}
+            </Link>
+            <ChevronRightIcon className="size-4" />
+            {kind && <Badge>{kind}</Badge>}
+            {v.status !== 'ready' && <VideoStatusBadge status={v.status} />}
+          </>
+        }
+        title={v.title}
+        actions={
+          v.can_delete && v.status !== 'uploading' ? (
+            <Button variant="ghostDanger" onClick={() => setConfirmDelete(true)}>
+              <TrashIcon className="size-4" />
+              {t('video.delete')}
+            </Button>
+          ) : null
+        }
+        subtitle={
+          <div className="flex flex-col gap-1">
+            <span className="tabular-nums">{formatDate(v.recorded_on)}</span>
+            {v.imported_from && <ImportOrigin origin={v.imported_from} />}
+          </div>
+        }
+      />
 
       {v.status === 'uploading' ? (
         <UploadingPanel video={v} enabled={enabled} />
@@ -128,13 +142,6 @@ function VideoView({ videoId }: { videoId: string }) {
         <Message>{t('video.notConfigured')}</Message>
       )}
 
-      {v.can_delete && v.status !== 'uploading' && (
-        <div>
-          <Button variant="ghostDanger" onClick={() => setConfirmDelete(true)}>
-            {t('video.delete')}
-          </Button>
-        </div>
-      )}
       <ConfirmDialog
         open={confirmDelete}
         title={t('video.deleteTitle')}
@@ -166,7 +173,7 @@ function ImportOrigin({ origin }: { origin: ImportedFrom }) {
           target="_blank"
           rel="noreferrer noopener"
           title={origin.title ?? undefined}
-          className="text-link underline-offset-2 hover:underline"
+          className="link"
         >
           {text}
         </a>
@@ -300,101 +307,106 @@ function Ready({ video }: { video: Video }) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <VideoPlayer video={video} videoRef={setElement} />
-      {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
-        <MomentsStrip
-          duration_ms={duration}
-          ranges={(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' }))}
-          marks={commentMoments(comments.data ?? [])}
-          playhead={playhead}
-          onSeek={(ms) => playhead.seek(ms)}
-        />
-      ) : null}
-      {current && (
-        <p className="flex flex-wrap items-center gap-2 text-sm" role="status">
-          <span className="font-semibold">{t('clips.nowPlaying', { title: current.label })}</span>
-          {queue && queue.ranges.length > 1 && (
-            <span className="text-muted tabular-nums">{t('clips.queuePosition', { n: queue.index + 1, total: queue.ranges.length })}</span>
-          )}
-          <Button
-            variant="ghost"
-            onClick={() => {
-              element?.pause()
-              setQueue(null)
-            }}
-          >
-            {t('clips.stop')}
-          </Button>
-        </p>
-      )}
-      {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
-      <ClipBar
-        playhead={playhead}
-        clipIn={marks.in}
-        clipOut={marks.out}
-        onMark={(which, t_ms) => setMarks((m) => ({ ...m, [which]: t_ms }))}
-        onClear={() => setMarks({ in: null, out: null })}
-        onSave={saveMarks}
-      />
-      {showSummary && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-semibold tabular-nums">
-            {/* Basketball marks no rallies. */}
-            {data.sport === 'basketball'
-              ? t('tagging.tagCount', { count: tagCount })
-              : `${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
-          </p>
-          {data.can_tag && (
-            // Tagging is a keyboard task: desktop only (PLAN §9.1).
-            <div className="hidden lg:block">
-              <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
-                {t('tagging.tagThis')}
-              </ButtonLink>
-            </div>
-          )}
-        </div>
-      )}
-      {video.meets_standard === false && (
-        <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
-          <p className="flex flex-wrap items-center gap-2 font-semibold">
-            <AlertIcon className="size-4" />
-            {t('video.belowStandard')}
-            {video.standard_issues.map((issue) => (
-              <Badge key={issue}>{issue}</Badge>
-            ))}
-          </p>
-          <p className="text-muted">{t('video.belowStandardNote')}</p>
-        </div>
-      )}
-      {data && rallyCount > 0 && (
-        <div className="mt-3">
-          <RallyPanel
-            tagging={data}
-            duration_ms={video.duration_ms}
-            element={element}
+    // Wide screens: the player and its tools on the left, rallies, clips and comments beside it.
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_34rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_38rem]">
+      <div className="flex min-w-0 flex-col gap-3">
+        <VideoPlayer video={video} videoRef={setElement} />
+        {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
+          <MomentsStrip
+            duration_ms={duration}
+            ranges={(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' }))}
+            marks={commentMoments(comments.data ?? [])}
             playhead={playhead}
-            suspended={current !== null}
-            action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
+            onSeek={(ms) => playhead.seek(ms)}
+          />
+        ) : null}
+        {current && (
+          <p className="flex flex-wrap items-center gap-2 text-sm" role="status">
+            <span className="font-semibold">{t('clips.nowPlaying', { title: current.label })}</span>
+            {queue && queue.ranges.length > 1 && (
+              <span className="text-muted tabular-nums">{t('clips.queuePosition', { n: queue.index + 1, total: queue.ranges.length })}</span>
+            )}
+            <Button
+              variant="ghost"
+              onClick={() => {
+                element?.pause()
+                setQueue(null)
+              }}
+            >
+              {t('clips.stop')}
+            </Button>
+          </p>
+        )}
+        {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
+        <ClipBar
+          playhead={playhead}
+          clipIn={marks.in}
+          clipOut={marks.out}
+          onMark={(which, t_ms) => setMarks((m) => ({ ...m, [which]: t_ms }))}
+          onClear={() => setMarks({ in: null, out: null })}
+          onSave={saveMarks}
+        />
+        {showSummary && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-semibold tabular-nums">
+              {/* Basketball marks no rallies. */}
+              {data.sport === 'basketball'
+                ? t('tagging.tagCount', { count: tagCount })
+                : `${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
+            </p>
+            {data.can_tag && (
+              // Tagging is a keyboard task: desktop only (PLAN §9.1).
+              <div className="hidden lg:block">
+                <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
+                  {t('tagging.tagThis')}
+                </ButtonLink>
+              </div>
+            )}
+          </div>
+        )}
+        {video.meets_standard === false && (
+          <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
+            <p className="flex flex-wrap items-center gap-2 font-semibold">
+              <AlertIcon className="size-4" />
+              {t('video.belowStandard')}
+              {video.standard_issues.map((issue) => (
+                <Badge key={issue}>{issue}</Badge>
+              ))}
+            </p>
+            <p className="text-muted">{t('video.belowStandardNote')}</p>
+          </div>
+        )}
+      </div>
+      <div className="flex min-w-0 flex-col gap-6 xl:gap-8">
+        {data && rallyCount > 0 && (
+          <div>
+            <RallyPanel
+              tagging={data}
+              duration_ms={video.duration_ms}
+              element={element}
+              playhead={playhead}
+              suspended={current !== null}
+              action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
+            />
+          </div>
+        )}
+        <div>
+          <ClipsSection
+            clips={clips}
+            canManage={video.can_delete}
+            canExport={video.can_export}
+            playingId={current?.key ?? null}
+            onPlay={(list, index, all) => {
+              const items = list.map(clipItem)
+              if (all) play(items, index)
+              else play(items.slice(index, index + 1), 0)
+            }}
+            onEdit={(clip) => setDraft(draftOf(clip))}
           />
         </div>
-      )}
-      <div className="mt-3">
-        <ClipsSection
-          clips={clips}
-          canManage={video.can_delete}
-          canExport={video.can_export}
-          playingId={current?.key ?? null}
-          onPlay={(list, index, all) => {
-            const items = list.map(clipItem)
-            if (all) play(items, index)
-            else play(items.slice(index, index + 1), 0)
-          }}
-          onEdit={(clip) => setDraft(draftOf(clip))}
-        />
-      </div>
-      <div className="mt-3">
-        <CommentsSection videoId={video.id} meId={me.data?.member.id ?? 0} playhead={playhead} onSeek={seekTo} />
+        <div>
+          <CommentsSection videoId={video.id} meId={me.data?.member.id ?? 0} playhead={playhead} onSeek={seekTo} />
+        </div>
       </div>
       <ClipDialog
         draft={draft}
@@ -524,7 +536,7 @@ function UploadingPanel({ video, enabled }: { video: Video; enabled: boolean }) 
               </h2>
               <Card className="flex flex-col gap-3 p-5">
                 <p className="text-sm text-muted">{t('video.resumeHint')}</p>
-                <label className="inline-flex min-h-11 cursor-pointer items-center justify-center self-start rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent hover:brightness-95 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring sm:min-h-9">
+                <label className={buttonClasses({ variant: 'primary' }, 'self-start')}>
                   <input
                     type="file"
                     multiple

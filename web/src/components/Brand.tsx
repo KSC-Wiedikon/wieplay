@@ -1,14 +1,17 @@
 import { cx } from '../lib/cx'
-import { useSport } from '../lib/sport'
+import { useSport, type Sport } from '../lib/sport'
 import { useTheme } from '../lib/theme'
 
-/** The logo mark for the current sport; the dark variant has light trail dots. */
-export function Mark({ className }: { className?: string }) {
-  const sport = useSport()
-  const dark = useTheme() === 'dark'
+/**
+ * The logo mark for the current sport (or the given one); the dark variant has light trail dots.
+ * `onDark` is for navy backgrounds in either theme, such as the app bar.
+ */
+export function Mark({ className, sport, onDark }: { className?: string; sport?: Sport; onDark?: boolean }) {
+  const current = useSport()
+  const dark = useTheme() === 'dark' || onDark === true
   return (
     <img
-      src={`/brand/nomal-mark-${sport}${dark ? '-dark' : ''}.svg`}
+      src={`/brand/nomal-mark-${sport ?? current}${dark ? '-dark' : ''}.svg`}
       alt=""
       width={512}
       height={512}

@@ -5,8 +5,9 @@ import { Badge } from '../components/Badge'
 import { Button, ButtonLink } from '../components/Button'
 import { Card } from '../components/Card'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { PencilIcon, PlusIcon, TrashIcon } from '../components/icons'
+import { PencilIcon, PlusIcon, ReelIcon, TrashIcon, UsersIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader, SectionHeader } from '../components/PageHeader'
 import { PageSpinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead, Tr } from '../components/Table'
 import { formatDate } from '../lib/format'
@@ -27,22 +28,22 @@ export function ReelsPage() {
   return (
     <div className="flex flex-col gap-8">
       <title>{`${t('reels.title')} · nomal`}</title>
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold">{t('reels.title')}</h1>
-          <p className="text-sm text-muted">{t('reels.hint')}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <ButtonLink to="/reels/new" variant="primary">
-            <PlusIcon className="size-4" />
-            {t('reels.newSmart')}
-          </ButtonLink>
-          <ButtonLink to="/reels/new?kind=manual">
-            <PlusIcon className="size-4" />
-            {t('reels.newManual')}
-          </ButtonLink>
-        </div>
-      </div>
+      <PageHeader
+        title={t('reels.title')}
+        subtitle={<p className="max-w-3xl">{t('reels.hint')}</p>}
+        actions={
+          <>
+            <ButtonLink to="/reels/new" variant="primary">
+              <PlusIcon className="size-4" />
+              {t('reels.newSmart')}
+            </ButtonLink>
+            <ButtonLink to="/reels/new?kind=manual">
+              <PlusIcon className="size-4" />
+              {t('reels.newManual')}
+            </ButtonLink>
+          </>
+        }
+      />
       {reels.isPending ? (
         <PageSpinner />
       ) : reels.isError ? (
@@ -50,16 +51,12 @@ export function ReelsPage() {
       ) : (
         <>
           <section className="flex flex-col gap-3" aria-labelledby="reels-mine">
-            <h2 id="reels-mine" className="text-lg font-semibold">
-              {t('reels.mine')}
-            </h2>
-            {mine.length === 0 ? <Message>{t('reels.empty')}</Message> : <ReelTable reels={mine} caption={t('reels.mine')} onDelete={setDeleting} />}
+            <SectionHeader id="reels-mine" title={t('reels.mine')} />
+            {mine.length === 0 ? <Message icon={<ReelIcon />}>{t('reels.empty')}</Message> : <ReelTable reels={mine} caption={t('reels.mine')} onDelete={setDeleting} />}
           </section>
           <section className="flex flex-col gap-3" aria-labelledby="reels-team">
-            <h2 id="reels-team" className="text-lg font-semibold">
-              {t('reels.team')}
-            </h2>
-            {team.length === 0 ? <Message>{t('reels.teamEmpty')}</Message> : <ReelTable reels={team} caption={t('reels.team')} onDelete={setDeleting} />}
+            <SectionHeader id="reels-team" title={t('reels.team')} />
+            {team.length === 0 ? <Message icon={<UsersIcon />}>{t('reels.teamEmpty')}</Message> : <ReelTable reels={team} caption={t('reels.team')} onDelete={setDeleting} />}
           </section>
         </>
       )}
@@ -105,7 +102,7 @@ function ReelTable({ reels, caption, onDelete }: { reels: Reel[]; caption: strin
           {reels.map((reel) => (
             <Tr key={reel.id} onActivate={() => void navigate(`/reels/${reel.id}`)}>
               <Td>
-                <Link to={`/reels/${reel.id}`} className="font-semibold text-link underline-offset-2 hover:underline">
+                <Link to={`/reels/${reel.id}`} className="font-semibold link">
                   {reel.title}
                 </Link>
                 <span className="mt-1 flex flex-wrap gap-1">

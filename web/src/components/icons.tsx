@@ -212,3 +212,97 @@ export function ChevronUpIcon(props: IconProps) {
     </Icon>
   )
 }
+
+export function HomeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+      <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </Icon>
+  )
+}
+
+export function UsersIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+    </Icon>
+  )
+}
+
+/** A list with a play triangle: reels. */
+export function ReelIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 12H3M16 6H3M12 18H3" />
+      <path d="m16 12 5 3-5 3z" />
+    </Icon>
+  )
+}
+
+/** Sliders: the admin area. */
+export function SlidersIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 7h-9M14 17H5" />
+      <circle cx="17" cy="17" r="3" />
+      <circle cx="7" cy="7" r="3" />
+    </Icon>
+  )
+}
+
+export function LogOutIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m16 17 5-5-5-5M21 12H9M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    </Icon>
+  )
+}
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m9 18 6-6-6-6" />
+    </Icon>
+  )
+}
+
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5 12h14M12 5l7 7-7 7" />
+    </Icon>
+  )
+}
+
+export function CalendarIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2v4M16 2v4" />
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M3 10h18" />
+    </Icon>
+  )
+}
+
+/** A video camera: recordings, filming. */
+export function VideoIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" />
+      <rect x="2" y="6" width="14" height="12" rx="2" />
+    </Icon>
+  )
+}
+
+/** A clock turning back: earlier seasons. */
+export function HistoryIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5M12 7v5l4 2" />
+    </Icon>
+  )
+}

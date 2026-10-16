@@ -127,14 +127,14 @@ export function ClipsSection({ clips, canManage, canExport, playingId, onPlay, o
                     key={clip.id}
                     onActivate={() => onPlay(list, index, all)}
                     aria-current={playing ? 'true' : undefined}
-                    className={cx(playing && 'bg-sunken')}
+                    className={cx(playing && 'bg-accent-soft')}
                   >
                     <Td tight>
                       <button
                         type="button"
                         onClick={() => onPlay(list, index, all)}
                         aria-label={t('clips.play', { title: clip.title })}
-                        className="min-h-11 cursor-pointer rounded-lg px-1 text-left font-semibold text-link underline-offset-2 hover:underline sm:min-h-9"
+                        className="min-h-11 cursor-pointer rounded-lg px-1 text-left font-semibold link sm:min-h-9"
                       >
                         {clip.title}
                       </button>
