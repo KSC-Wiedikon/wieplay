@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     job_lease_seconds: int = 300
     reaper_interval_seconds: int = 60
 
+    # Automatic analysis (PLAN §10.1): analyse every volleyball video once it is ready, and
+    # train the rally finder this long after a coach marked a game's rallies done (one run
+    # after a burst of games).
+    analysis_auto: bool = True
+    analysis_train_delay_seconds: int = 600
+
     @model_validator(mode="after")
     def _check(self) -> Settings:
         if self.dev_bridge and self.env != "local":

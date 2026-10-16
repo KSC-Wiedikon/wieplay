@@ -257,6 +257,10 @@ class Video(Base):
     # Bucket objects of a deleted video are removed again after the job lease window
     # (late segment uploads); set once that sweep found nothing left.
     purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # A coach says the video's rally list is complete and right: from then on its rallies
+    # train the rally finder (PLAN §10.1) and Nomal stops proposing rallies for it.
+    rallies_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rallies_reviewed_by: Mapped[int | None] = mapped_column(Integer)
 
     files: Mapped[list[VideoSourceFile]] = relationship(
         back_populates="video", order_by="VideoSourceFile.part_no", cascade="all, delete-orphan"
@@ -510,7 +514,9 @@ class Segment(Base):
     import_ref: Mapped[str | None] = mapped_column(String(128))
     model_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
     confidence: Mapped[float | None] = mapped_column(Float)
+    # unreviewed | confirmed | corrected | rejected | merged (into merged_into)
     review: Mapped[str] = mapped_column(String(16), default="unreviewed")
+    merged_into: Mapped[uuid.UUID | None] = mapped_column(UUID)
     created_by: Mapped[int | None] = mapped_column(Integer)
     updated_by: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -709,3 +715,53 @@ class VideoExport(Base):
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --- Tier 2: ML provenance (PLAN §6.9, §10, §11) -----------------------------------------------
+
+
+class ModelRun(Base):
+    """One run of an analysis model: the analyse job of a video (signals and rally proposals)
+    or a training of the rally finder. Everything a model writes points back here, with the
+    code version, parameters, timing and metrics (PLAN §11: provenance)."""
+
+    __tablename__ = "model_run"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(String(32), index=True)  # analyse | train_rallies
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
+    video_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    model_name: Mapped[str] = mapped_column(String(128))
+    model_version: Mapped[str] = mapped_column(String(64))  # git sha of the code
+    weights_sha256: Mapped[str | None] = mapped_column(String(64))
+    dataset_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    # Per-video results under "videos": {video id: {finder, proposed, eval, ...}}.
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    timing: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AnalysisArtifact(Base):
+    """A file a model run wrote on the NAS (PLAN §6.9): per-frame signals of a video, or a
+    trained rally model. Per-frame data never goes into Postgres."""
+
+    __tablename__ = "analysis_artifact"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    video_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    model_run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("model_run.id", ondelete="CASCADE"), index=True
+    )
+    kind: Mapped[str] = mapped_column(String(32))  # features | rally_model
+    nas_path: Mapped[str] = mapped_column(String(1024))  # relative to the analysis root
+    format: Mapped[str] = mapped_column(String(16))  # npz | pickle
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    sha256: Mapped[str] = mapped_column(String(64))
+    bytes: Mapped[int] = mapped_column(BigInteger)
+    stats: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

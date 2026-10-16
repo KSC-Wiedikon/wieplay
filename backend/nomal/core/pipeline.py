@@ -359,6 +359,11 @@ def finish_if_done(db: Session, video: Video, now: datetime | None = None) -> bo
 
 def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]) -> None:
     """Validate a worker's result and write it. Raises ValueError on a bad result."""
+    from nomal.core import analysis
+
+    if job.kind in analysis.KINDS:
+        analysis.complete(db, video, job, payload)
+        return
     if job.kind == "purge":
         jobs.succeed(job, payload)
         return
@@ -390,7 +395,11 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
     """A job failed for good: the video failed, its other jobs stop. A failed export only
-    fails that export."""
+    fails that export. Failed analysis leaves the video as it is: it plays without it."""
+    from nomal.core import analysis
+
+    if job.kind in analysis.KINDS:
+        return
     if job.kind == "export":
         export = db.get(VideoExport, uuid.UUID(job.params["export_id"]))
         if export is not None:
@@ -431,6 +440,12 @@ def _ingest_job(db: Session, video: Video) -> Job | None:
     ).first()
 
 
+def raw_folder(db: Session, video: Video) -> str | None:
+    """The video's folder under the raw root, as its ingest wrote it."""
+    job = _ingest_job(db, video)
+    return str(job.params["raw_subdir"]) if job is not None else None
+
+
 def ingest_started(db: Session, video: Video) -> bool:
     """A worker picked up the ingest: files may sit in the video's raw folder by now."""
     job = _ingest_job(db, video)
@@ -452,6 +467,8 @@ def purge_raw(db: Session, video: Video) -> Job | None:
             "video_id": str(video.id),
             "raw_subdir": job.params["raw_subdir"],
             "nas_paths": [f.nas_path for f in video.files if f.nas_path],
+            # Signals of the automatic analysis (PLAN §5.5: they go with the video).
+            "analysis_subdir": f"videos/{job.params['raw_subdir']}",
         },
     )
 

@@ -17,6 +17,8 @@
 # ML artefacts
 *.pt
 *.onnx
+# ... except the vendored ball tracker (50 KB, MIT; README next to it)
+!backend/nomal/ml/weights/*.onnx
 *.parquet
 datasets/
 runs/

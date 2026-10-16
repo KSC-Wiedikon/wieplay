@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nomal.api.deps import BridgeDep, DbDep, SettingsDep, audit
-from nomal.core import jobs, pipeline
+from nomal.core import analysis, jobs, pipeline
 from nomal.core.filming import CAMERA_DATE_WINDOW_DAYS, camera_day, check_filming
 from nomal.core.models import InboxFile, Job, Video, WdTeam, Worker
 from nomal.core.storage import ObjectStore
@@ -54,6 +54,9 @@ class ClaimIn(BaseModel):
     wait: bool = True
     # The worker's first claim since it started: it runs nothing, its old leases are free.
     restarted: bool = False
+    # Only these job kinds (a worker's background lane takes the long analysis jobs, so
+    # they never hold up an ingest or a transcode).
+    kinds: list[str] | None = Field(default=None, max_length=32)
 
 
 class JobOut(BaseModel):
@@ -145,7 +148,7 @@ async def claim(
             db.commit()
             return ClaimOut(jobs=[], paused=True)
         leased = await asyncio.to_thread(
-            jobs.claim, db, worker, body.caps, body.max, _lease(settings)
+            jobs.claim, db, worker, body.caps, body.max, _lease(settings), kinds=body.kinds
         )
         if leased or asyncio.get_running_loop().time() >= deadline:
             return ClaimOut(jobs=[_job_out(j) for j in leased], paused=False)
@@ -233,9 +236,26 @@ def _check_camera_day(db: Session, bridge: BridgeClient | None, video: Video) ->
     )
 
 
+@router.post("/jobs/{job_id}/inputs")
+def job_inputs(job_id: uuid.UUID, worker: WorkerDep, db: DbDep) -> dict[str, Any]:
+    """What an analysis job needs from the database, as of now: the current rally model,
+    and for a training the reviewed games with their rallies (PLAN §10.1)."""
+    job = _running(db, job_id, worker)
+    if job.kind not in analysis.KINDS:
+        raise HTTPException(404, "This job has no inputs")
+    out = analysis.job_inputs(db, job)
+    db.rollback()
+    return out
+
+
 @router.post("/jobs/{job_id}/complete", status_code=204)
 def complete(
-    job_id: uuid.UUID, body: dict[str, Any], worker: WorkerDep, db: DbDep, bridge: BridgeDep
+    job_id: uuid.UUID,
+    body: dict[str, Any],
+    worker: WorkerDep,
+    db: DbDep,
+    bridge: BridgeDep,
+    settings: SettingsDep,
 ) -> Response:
     job = _running(db, job_id, worker)
     video = db.get(Video, job.video_id, with_for_update=True) if job.video_id else None
@@ -253,6 +273,7 @@ def complete(
         _check_camera_day(db, bridge, video)
     if video is not None and pipeline.finish_if_done(db, video):
         audit(db, None, "video_ready", "video", str(video.id), worker=worker.name)
+        analysis.on_video_ready(db, video, settings.analysis_auto)
     worker.last_seen_at = datetime.now(UTC)
     db.commit()
     return Response(status_code=204)

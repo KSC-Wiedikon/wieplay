@@ -151,6 +151,8 @@ class VideoOut(BaseModel):
     can_share: bool
     can_export: bool
     files: list[FileOut]
+    # The rally list is complete and right (a coach said so); PLAN §10.1.
+    rallies_reviewed_at: datetime | None = None
 
 
 class FileIn(BaseModel):
@@ -290,6 +292,7 @@ def _video_out(
         can_tag=can_tag(viewer, access.ref, access.leads),
         can_share=can_share_with_team(viewer, access.ref, access.leads),
         can_export=can_export(viewer, access.ref, access.leads),
+        rallies_reviewed_at=video.rallies_reviewed_at,
         files=[
             FileOut(
                 id=f.id,

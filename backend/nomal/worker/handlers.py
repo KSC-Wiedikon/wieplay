@@ -1,4 +1,5 @@
-"""Job handlers: ingest, transcode, thumbs, purge (PLAN §8.4)."""
+"""Job handlers: ingest, transcode, thumbs, purge, export, import (PLAN §8.4); the analysis
+jobs are in analyse.py."""
 
 from __future__ import annotations
 
@@ -54,7 +55,7 @@ class Context:
         return path
 
 
-def _inside(root: Path, path: Path) -> Path:
+def inside(root: Path, path: Path) -> Path:
     resolved = path.resolve()
     if not resolved.is_relative_to(root.resolve()):
         raise PermanentError(f"path outside {root}: {path}")
@@ -92,17 +93,17 @@ def _download(url: str, target: Path, size: int, ctx: Context, done: list[int], 
     return digest.hexdigest()
 
 
-def _raw_inputs(ctx: Context) -> list[str]:
+def raw_inputs(ctx: Context) -> list[str]:
     """The job's input files, each confined to the raw originals on the NAS."""
     root = ctx.settings.raw_root
-    return [str(_inside(root, Path(item))) for item in ctx.job.params["inputs"]]
+    return [str(inside(root, Path(item))) for item in ctx.job.params["inputs"]]
 
 
 def ingest(ctx: Context) -> dict[str, Any]:
     """Uploaded or inbox files → originals on the NAS, probed and checksummed."""
     params = ctx.job.params
     raw_root = ctx.settings.raw_root
-    raw_dir = _inside(raw_root, raw_root / params["raw_subdir"])
+    raw_dir = inside(raw_root, raw_root / params["raw_subdir"])
     raw_dir.mkdir(parents=True, exist_ok=True)
     files = sorted(params["files"], key=lambda f: f["part_no"])
     total = sum(int(f["bytes"]) for f in files)
@@ -117,7 +118,7 @@ def ingest(ctx: Context) -> dict[str, Any]:
         if f.get("inbox_path"):
             if ctx.settings.inbox_root is None:
                 raise PermanentError("inbox file but no inbox configured on this worker")
-            source = _inside(ctx.settings.inbox_root, ctx.settings.inbox_root / f["inbox_path"])
+            source = inside(ctx.settings.inbox_root, ctx.settings.inbox_root / f["inbox_path"])
             if source.exists():
                 shutil.move(source, target)  # same share: a rename, no copy
             elif not target.exists():
@@ -214,7 +215,7 @@ def transcode(ctx: Context) -> dict[str, Any]:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    concat = ffmpeg.concat_list(_raw_inputs(ctx), ctx.scratch / "inputs.ffconcat")
+    concat = ffmpeg.concat_list(raw_inputs(ctx), ctx.scratch / "inputs.ffconcat")
     src = params["source"]
     height = int(spec["height"])
     width = ffmpeg.even(src["width"] * height / src["height"])
@@ -280,7 +281,7 @@ def thumbs(ctx: Context) -> dict[str, Any]:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    concat = ffmpeg.concat_list(_raw_inputs(ctx), ctx.scratch / "inputs.ffconcat")
+    concat = ffmpeg.concat_list(raw_inputs(ctx), ctx.scratch / "inputs.ffconcat")
     src = params["source"]
     tile_w = int(params["tile_w"])
     tile_h = ffmpeg.even(tile_w * src["height"] / src["width"])
@@ -295,7 +296,7 @@ def thumbs(ctx: Context) -> dict[str, Any]:
         cancel=ctx.cancel,
         cwd=out,
     )
-    first = _raw_inputs(ctx)[0]
+    first = raw_inputs(ctx)[0]
     first_ms = ffmpeg.probe(Path(first)).duration_ms
     ffmpeg.run(
         ffmpeg.poster_args(source=Path(first), at_s=min(60.0, first_ms / 1000 * 0.1)),
@@ -321,18 +322,25 @@ def thumbs(ctx: Context) -> dict[str, Any]:
 
 
 def purge(ctx: Context) -> dict[str, Any]:
-    """Delete a deleted video's originals from the NAS (PLAN §5.5)."""
+    """Delete a deleted video's originals and analysis signals from the NAS (PLAN §5.5)."""
     removed = 0
+    analysis_root = ctx.settings.analysis_root
+    analysis_dir = ctx.job.params.get("analysis_subdir")
+    if analysis_root is not None and analysis_dir:
+        folder = inside(analysis_root, analysis_root / analysis_dir)
+        if folder != analysis_root.resolve() and folder.is_dir():
+            removed += sum(1 for p in folder.rglob("*") if p.is_file())
+            shutil.rmtree(folder)
     root = ctx.settings.raw_root
     subdir = ctx.job.params.get("raw_subdir")
     if subdir:
         # The whole folder: it may also hold files of an ingest that never finished.
-        folder = _inside(root, root / subdir)
+        folder = inside(root, root / subdir)
         if folder != root.resolve() and folder.is_dir():
             removed += sum(1 for p in folder.rglob("*") if p.is_file())
             shutil.rmtree(folder)
     for raw in ctx.job.params.get("nas_paths", []):
-        path = _inside(root, Path(raw))
+        path = inside(root, Path(raw))
         if path.exists():
             path.unlink()
             removed += 1
@@ -358,7 +366,7 @@ def import_video(ctx: Context) -> dict[str, Any]:
     if source.url != params["url"] or source.platform != params["platform"]:
         raise PermanentError("unexpected import address")
     raw_root = ctx.settings.raw_root
-    raw_dir = _inside(raw_root, raw_root / params["raw_subdir"])
+    raw_dir = inside(raw_root, raw_root / params["raw_subdir"])
     raw_dir.mkdir(parents=True, exist_ok=True)
     target = raw_dir / f"01_{safe_file_name(params['file_name'])}"
     work = ctx.scratch
@@ -410,7 +418,7 @@ def export(ctx: Context) -> dict[str, Any]:
             end = min(int(piece["end_ms"]), offset + length)
             if end - start < 40:  # less than two frames of this file
                 continue
-            source = _inside(root, Path(part["path"]))
+            source = inside(root, Path(part["path"]))
             name = f"piece_{len(parts):03d}.mp4"
             base, cut_ms = done_ms, end - start
 
@@ -461,6 +469,18 @@ def export(ctx: Context) -> dict[str, Any]:
     return {"bytes": size, "duration_ms": total_ms}
 
 
+def analyse(ctx: Context) -> dict[str, Any]:
+    from nomal.worker import analyse as analysis  # numpy, onnxruntime: the worker image only
+
+    return analysis.analyse(ctx)
+
+
+def train_rallies(ctx: Context) -> dict[str, Any]:
+    from nomal.worker import analyse as analysis
+
+    return analysis.train_rallies(ctx)
+
+
 HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "import": import_video,
     "ingest": ingest,
@@ -468,4 +488,8 @@ HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "thumbs": thumbs,
     "purge": purge,
     "export": export,
+    "analyse": analyse,
+    "train_rallies": train_rallies,
 }
+# Long CPU jobs that run on a worker's background lane (runner.py), next to the media jobs.
+BACKGROUND_KINDS = ("analyse", "train_rallies")

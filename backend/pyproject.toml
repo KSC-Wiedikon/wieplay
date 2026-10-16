@@ -18,6 +18,13 @@ dependencies = [
     "yt-dlp[default]==2026.8.19",
 ]
 
+[project.optional-dependencies]
+analysis = [
+    "numpy>=2.3",
+    "onnxruntime>=1.22",
+    "scikit-learn>=1.7",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -39,6 +46,7 @@ ignore = ["S101"]  # assert is fine in tests
 # ffmpeg/ffprobe from PATH with argument lists, never a shell.
 "nomal/worker/ffmpeg.py" = ["S603", "S607"]
 "tests/test_worker_ffmpeg.py" = ["S603", "S607"]
+"tests/test_worker_analyse.py" = ["S603", "S607"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -50,8 +58,14 @@ strict = true
 plugins = ["pydantic.mypy"]
 packages = ["nomal"]
 
+[[tool.mypy.overrides]]
+# The analysis extra ships no type information.
+module = ["onnxruntime", "onnxruntime.*", "scipy.*", "sklearn", "sklearn.*", "threadpoolctl"]
+ignore_missing_imports = true
+
 [dependency-groups]
 dev = [
+    "nomal[analysis]",
     "boto3-stubs[s3]>=1.43.114",
     "mypy>=2.4.0",
     "pytest>=9.1.1",

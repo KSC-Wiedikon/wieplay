@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from nomal.core import tagging
 from nomal.core.models import Event, Segment, Video, WdTeam
 from nomal.core.taxonomy import SPORTS_WITH_TAXONOMY, load
 
@@ -154,6 +155,7 @@ def condensed(db: Session, video: Video) -> list[Piece]:
             Segment.video_id == video.id,
             Segment.kind.in_(("rally", "possession")),
             Segment.deleted_at.is_(None),
+            tagging.stands(),
         )
         .order_by(Segment.start_ms)
     )

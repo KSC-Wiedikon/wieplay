@@ -30,7 +30,9 @@ from nomal.core.models import (
 from nomal.core.taxonomy import Taxonomy
 
 Side = Literal["us", "them"]
-Review = Literal["unreviewed", "confirmed", "corrected", "rejected"]
+# merged: a model's proposal a coach merged into another one (merged_into); it is neither
+# a rally nor a "not a rally" for training, the surviving one carries the label.
+Review = Literal["unreviewed", "confirmed", "corrected", "rejected", "merged"]
 # A serve tag may sit slightly before the rally marker (the toss).
 SERVE_SLACK_MS = 2000
 SegmentKind = Literal[
@@ -77,6 +79,8 @@ class SegmentIn(_Change):
     # Who served is derived (serve tag, previous winner, the set's first server).
     won_by: Side | None = None
     review: Review = "unreviewed"
+    # With review "merged": the segment of the same video it was merged into.
+    merged_into: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _order(self) -> SegmentIn:
@@ -104,6 +108,13 @@ class PeriodIn(_Change):
 
 class TaggingError(ValueError):
     pass
+
+
+def stands() -> Any:
+    """Segments that count as what happened: everything but a model's proposal nobody has
+    accepted yet (PLAN §10: nothing a model made is shown as fact until it is reviewed).
+    Stats and condensed playback use only these; the tagging page shows all of them."""
+    return ~((Segment.source == "model") & Segment.review.in_(("unreviewed", "rejected", "merged")))
 
 
 IN_USE = "this id is already in use"
@@ -186,7 +197,7 @@ EVENT_FIELDS = (
     "code", "t_ms", "frame", "time_precision", "side", "number", "attributes",
     "clip_pre_ms", "clip_post_ms", "note", "review",
 )  # fmt: skip
-SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review")
+SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review", "merged_into")
 PERIOD_FIELDS = (
     "no", "start_ms", "end_ms", "start_us", "start_them", "first_serve",
     "our_court_side_at_start", "side_switch_at_score",
@@ -306,14 +317,55 @@ def upsert_segment(
     if row is None:
         row = Segment(id=item.id, video_id=video.id, version=0, created_by=actor, source="manual")
         db.add(row)
+    if item.merged_into is not None:
+        target = db.get(Segment, item.merged_into)
+        if target is None or target.video_id != video.id or target.id == item.id:
+            raise TaggingError("merged_into must be another segment of this video")
+    review = _model_review(row, item)
     row.kind, row.start_ms, row.end_ms = item.kind, item.start_ms, item.end_ms
-    row.won_by, row.review = item.won_by, item.review
+    row.won_by, row.review = item.won_by, review
+    row.merged_into = item.merged_into if review == "merged" else None
     _stamp(row, item.deleted, now)
     after = _snapshot(row, SEGMENT_FIELDS)
     if before != after:
         row.updated_by = actor
     _bump(row, before, after)
     return row
+
+
+def _model_review(row: Segment, item: SegmentIn) -> str:
+    """Review state of a model's proposal after a person's change (PLAN §11: corrections are
+    data; the revision tables keep before and after).
+
+    A client that names another state than the segment has gets it: accept ("confirmed"),
+    correct ("corrected"), reopen ("unreviewed", the undo of any of these, with the fields
+    as they were). Confirming while changing a boundary, the kind or the winner is a
+    correction. A delete is a rejection ("rejected", kept as a hard negative), unless the
+    client says "merged" (merged into another proposal: no label either way). Undoing a
+    delete reopens the proposal.
+
+    A client that passes the state through unchanged (one that does not know about reviews,
+    like the tagging page) still leaves a trace: an edit corrects, a delete rejects.
+    Manual and imported segments keep whatever the client sends."""
+    if row.source != "model":
+        return item.review
+    if item.deleted:
+        return "merged" if item.review == "merged" else "rejected"
+    if row.deleted_at is not None:  # undo of a rejection or a merge
+        return "unreviewed" if item.review in ("rejected", "merged") else item.review
+    edited = (row.kind, row.start_ms, row.end_ms, row.won_by) != (
+        item.kind,
+        item.start_ms,
+        item.end_ms,
+        item.won_by,
+    )
+    if edited and item.review == "confirmed":
+        return "corrected"
+    if item.review != row.review:
+        return item.review  # an explicit review action
+    if edited and item.review == "unreviewed":
+        return "corrected"
+    return item.review
 
 
 def upsert_period(db: Session, video: Video, item: PeriodIn, actor: int, now: datetime) -> Period:

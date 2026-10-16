@@ -20,6 +20,7 @@ import type { Worker, WorkerCreated } from '../lib/types'
 const KNOWN_CAPS = [
   'ingest',
   'import',
+  'analyse',
   'inbox',
   'transcode',
   'thumbs',

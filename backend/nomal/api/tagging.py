@@ -71,6 +71,9 @@ class EventOut(BaseModel):
     clip_post_ms: int | None
     note: str | None
     source: str
+    # Model proposals (PLAN §10): how sure the model is, and which run made it.
+    confidence: float | None
+    model_run_id: uuid.UUID | None
     review: str
     version: int
     updated_at: datetime
@@ -88,8 +91,13 @@ class SegmentOut(BaseModel):
     score_us_after: int | None
     score_them_after: int | None
     score_source: str | None
+    # manual | model | import; a model's rally proposal carries its confidence and run.
     source: str
+    confidence: float | None
+    model_run_id: uuid.UUID | None
+    # unreviewed | confirmed | corrected | rejected | merged
     review: str
+    merged_into: uuid.UUID | None = None
     version: int
     deleted_at: datetime | None
 
@@ -122,6 +130,8 @@ class TaggingOut(BaseModel):
     official_sets: list[list[int]] | None
     # The game's official final result as [us, them] (both sports), when played.
     official_final: list[int] | None
+    # A coach marked the rally list complete and right (POST .../rallies-reviewed).
+    rallies_reviewed_at: datetime | None = None
 
 
 class ChangesIn(BaseModel):
@@ -285,6 +295,7 @@ def get_tagging(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> TaggingOut
         events=_events(db, video),
         official_sets=_official_sets(db, video),
         official_final=_official_final(db, video),
+        rallies_reviewed_at=video.rallies_reviewed_at,
     )
 
 
