@@ -70,8 +70,27 @@ export interface VideoConfig {
 
 /** Nomal handles matches only (decided 16.10.2026). */
 export type VideoKind = 'match'
-/** `refused`: the filming rules turned the video down after the upload; it can't be retried. */
-export type VideoStatus = 'uploading' | 'queued' | 'processing' | 'ready' | 'failed' | 'refused'
+/**
+ * `importing`: a worker fetches the video from its YouTube or Twitch link, before the ingest.
+ * `refused`: the filming rules (or, for an import, the channel allow-list) turned the video
+ * down after the upload; it can't be retried.
+ */
+export type VideoStatus = 'uploading' | 'importing' | 'queued' | 'processing' | 'ready' | 'failed' | 'refused'
+
+/** Where imported videos come from (PLAN §7.2.2). */
+export type ImportPlatform = 'youtube' | 'twitch'
+
+/** An imported video's origin; set once the import is done. */
+export interface ImportedFrom {
+  /** An ImportPlatform. */
+  platform: string
+  /** The canonical address Nomal fetched. */
+  url: string
+  /** The channel's name as the platform shows it. */
+  channel: string | null
+  /** The video's title on the platform. */
+  title: string | null
+}
 
 export interface Rendition {
   name: string
@@ -103,7 +122,9 @@ export interface Video {
   title: string
   /** yyyy-mm-dd */
   recorded_on: string
+  /** file | inbox | import */
   source: string
+  imported_from: ImportedFrom | null
   status: VideoStatus
   duration_ms: number | null
   width: number | null
@@ -130,8 +151,10 @@ export interface VideoCreate {
   game_id?: number
   recorded_on?: string
   title?: string
+  /** Exactly one source: files to upload, inbox files or a YouTube/Twitch link. */
   files?: { name: string; size: number; type: string }[]
   inbox_file_ids?: string[]
+  import_url?: string
 }
 
 export interface PartUrl {
@@ -233,4 +256,15 @@ export interface Policy {
 export interface PolicyUpdate {
   matches_allowed: boolean
   reason: string | null
+}
+
+/** A channel on the import allow-list. */
+export interface ImportChannel {
+  id: string
+  /** An ImportPlatform. */
+  platform: string
+  /** YouTube channel id (UC…), YouTube handle without the @ (lower case), or Twitch login. */
+  ref: string
+  label: string
+  added_at: string
 }

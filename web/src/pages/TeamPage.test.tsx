@@ -27,6 +27,7 @@ const video = (patch: Partial<Video>): Video => ({
   title: 'KSCW – Volley Näfels',
   recorded_on: '2026-10-11',
   source: 'file',
+  imported_from: null,
   status: 'ready',
   duration_ms: 5_530_000,
   width: 1920,
@@ -110,6 +111,15 @@ describe('TeamPage videos', () => {
     expect(match.querySelector('img')).toHaveAttribute('src', '/api/media/00000000-0000-4000-8000-000000000001/poster.jpg')
 
     expect(within(section).getByRole('link', { name: /Upload video/ })).toHaveAttribute('href', '/teams/92/upload')
+  })
+
+  it('shows a video being imported from a link as importing', async () => {
+    stub(team({ can_upload: true, rel: ['coach'] }), [
+      video({ title: 'Cup vs. VBC Zürich', source: 'import', status: 'importing', has_thumbs: false, duration_ms: null }),
+    ])
+    const table = await screen.findByRole('table', { name: 'Videos' })
+    const [row] = within(table).getAllByRole('row').slice(1) as [HTMLElement]
+    expect(within(row).getByText('Importing')).toBeInTheDocument()
   })
 
   it('still lists a training video from before Nomal handled matches only', async () => {

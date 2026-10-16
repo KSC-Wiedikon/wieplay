@@ -3,6 +3,7 @@ import type {
   Blocker,
   FilmingCheck,
   Game,
+  ImportChannel,
   InboxFile,
   Job,
   Me,
@@ -208,4 +209,11 @@ export const api = {
   policies: (signal?: AbortSignal) => apiRequest<Policy[]>('/api/admin/policies', { signal }),
   setPolicy: (lineageId: string, body: PolicyUpdate) =>
     apiRequest<Policy>(`/api/admin/policies/${lineageId}`, { method: 'PUT', body }),
+
+  // Admin: channels whose videos may be imported from a link
+  importChannels: (signal?: AbortSignal) => apiRequest<ImportChannel[]>('/api/admin/import-channels', { signal }),
+  addImportChannel: (channel: string, label: string) =>
+    apiRequest<ImportChannel>('/api/admin/import-channels', { method: 'POST', body: { channel, label } }),
+  removeImportChannel: (id: string) =>
+    apiRequest<undefined>(`/api/admin/import-channels/${id}`, { method: 'DELETE' }),
 }

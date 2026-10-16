@@ -6,6 +6,7 @@ import { AlertIcon, CheckIcon } from './icons'
 
 const statusTone = {
   uploading: 'accent',
+  importing: 'accent',
   queued: 'accent',
   processing: 'accent',
   ready: 'neutral',
