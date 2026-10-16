@@ -159,11 +159,23 @@ def test_match_csv(ready: dict[str, Any], club: dict[str, TestClient]) -> None:
 
 def test_season_stats(ready: dict[str, Any], club: dict[str, TestClient], as_: Any) -> None:
     tag_a_set(club["coach"], ready["id"])
-    body = as_("player-h3").get(f"/api/teams/{H3}/stats").json()
+    ungraded = tag("S", 30_000)  # a serve without a grade: in play
+    club["coach"].post(f"/api/videos/{ready['id']}/changes", json={"events": [ungraded]})
+    player = as_("player-h3")
+    body = player.get(f"/api/teams/{H3}/stats").json()
     assert (body["team_id"], body["videos"], body["tagged"]) == (H3, 1, 1)
     season = body["season_box"]
     seven = next(r for r in season["players"] if r["number"] == 7)
     assert seven["filter"] == {"side": "us", "member_id": 101} and seven["matches"] == 1
+    assert (seven["values"]["serve_ta"], seven["values"]["serve_in"]) == (3, 2)
+    # A season number opens a smart reel with the same query; null stands for "no grade".
+    serve_in = next(c for c in body["columns"] if c["key"] == "serve_in")
+    query = {"lineage_id": body["lineage_id"], "season": body["season"], "member_id": 101,
+             "codes": serve_in["codes"], "grades": serve_in["grades"]}  # fmt: skip
+    pieces = player.post("/api/reels/preview", json=query).json()
+    assert [(p["code"], p["grade"]) for p in pieces] == [("S", "+"), ("S", None)]
+    kills = player.post("/api/reels/preview", json={**query, "grades": ["#"]}).json()
+    assert kills == []
     assert season["team"]["matches"] == 1 and season["summary"]["won"] == 1
     (match,) = body["matches"]
     assert match["video_id"] == ready["id"] and match["tagged"] is True
