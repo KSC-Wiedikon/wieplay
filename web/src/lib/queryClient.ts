@@ -17,6 +17,7 @@ export const keys = {
   workers: ['admin', 'workers'] as const,
   jobs: (status: string | null) => ['admin', 'jobs', status] as const,
   policies: ['admin', 'policies'] as const,
+  importChannels: ['admin', 'import-channels'] as const,
 }
 
 function shouldRetry(failureCount: number, error: Error): boolean {

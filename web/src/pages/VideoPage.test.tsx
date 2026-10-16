@@ -28,6 +28,7 @@ const video = (patch: Partial<Video>): Video => ({
   title: 'KSCW H3 – Volley Näfels',
   recorded_on: '2026-10-11',
   source: 'file',
+  imported_from: null,
   status: 'ready',
   duration_ms: 5_530_000,
   width: 1920,
@@ -150,5 +151,63 @@ describe('VideoPage', () => {
     const wrong = new File(['x'.repeat(14)], 'GX020042.MP4')
     fireEvent.change(screen.getByLabelText('Select files'), { target: { files: [wrong] } })
     expect(await screen.findByRole('alert')).toHaveTextContent("These files don't belong to this video: GX020042.MP4.")
+  })
+
+  it('shows an import in progress', async () => {
+    show(video({ status: 'importing', source: 'import', progress: null, has_thumbs: false, duration_ms: null }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Importing' })).toBeInTheDocument()
+    expect(screen.getAllByText('Importing')).toHaveLength(2) // the badge and the heading
+    expect(screen.getByRole('progressbar', { name: 'Importing' })).not.toHaveAttribute('aria-valuenow')
+    expect(screen.getByText(/fetching the video from its link/)).toBeInTheDocument()
+    expect(document.querySelector('video')).toBeNull()
+  })
+
+  it('links an imported video to where it came from', async () => {
+    show(
+      video({
+        source: 'import',
+        imported_from: {
+          platform: 'youtube',
+          url: 'https://www.youtube.com/watch?v=NXNsZ_UNM6w',
+          channel: 'Luca Zbinden Volley',
+          title: 'Herren Volleyball 2. Liga',
+        },
+      }),
+    )
+    const link = await screen.findByRole('link', { name: 'Imported from YouTube · Luca Zbinden Volley' })
+    expect(link).toHaveAttribute('href', 'https://www.youtube.com/watch?v=NXNsZ_UNM6w')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener')
+  })
+
+  it('never links anything but a video address', async () => {
+    show(
+      video({
+        source: 'import',
+        imported_from: { platform: 'twitch', url: 'javascript:alert(1)', channel: null, title: null },
+      }),
+    )
+    expect(await screen.findByText('Imported from Twitch')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Imported from/ })).not.toBeInTheDocument()
+  })
+
+  it('says when an import failed or its channel was refused', async () => {
+    show(
+      video({
+        status: 'failed',
+        source: 'import',
+        error: 'import: The channel X is not on the import allow-list',
+        can_delete: true,
+      }),
+    )
+    expect(await screen.findByText('Import failed')).toBeInTheDocument()
+    expect(screen.getByText("The video couldn't be fetched from its link.")).toBeInTheDocument()
+    expect(screen.getByText('import: The channel X is not on the import allow-list')).toBeInTheDocument()
+  })
+
+  it('words a refused import apart from the filming rules alone', async () => {
+    show(video({ status: 'refused', source: 'import', error: "The video's channel is not on the import allow-list" }))
+    expect(await screen.findByText('Not imported')).toBeInTheDocument()
+    expect(screen.getByText(/channel or the filming rules did not allow it/)).toBeInTheDocument()
   })
 })

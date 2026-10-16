@@ -33,6 +33,7 @@ const created: Video = {
   title: 'KSCW H3 – Volley Näfels',
   recorded_on: gameDate,
   source: 'file',
+  imported_from: null,
   status: 'uploading',
   duration_ms: null,
   width: null,
@@ -364,6 +365,153 @@ describe('UploadPage', () => {
       recorded_on: friendlyDate,
       title: 'Friendly vs. VBC Zürich',
       files: [{ name: 'GX010042.MP4', size: 25, type: 'video/mp4' }],
+    })
+  })
+
+  describe('from a link', () => {
+    const imported = { ...created, source: 'import', status: 'importing', files: [] }
+
+    type Answer = { status?: number; body?: unknown }
+
+    function linkApi(answer: Answer, extra: Record<string, Answer> = {}) {
+      return vi.fn(
+        stubFetch({
+          '/api/teams/92': { body: team },
+          '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
+          '/api/teams/92/games': { body: [game] },
+          '/api/inbox': { status: 403, body: { detail: 'Coaches and sport admins only' } },
+          [`/api/teams/92/filming?on=${gameDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
+          'POST /api/teams/92/videos': answer,
+          ...extra,
+        }),
+      )
+    }
+
+    function createBody(fetch: ReturnType<typeof linkApi>): unknown {
+      const call = fetch.mock.calls.find(([path, init]) => path === '/api/teams/92/videos' && init?.method === 'POST')
+      return JSON.parse(String(call?.[1]?.body))
+    }
+
+    async function pickGameAndLink(link: string) {
+      fireEvent.change(await screen.findByLabelText('Match'), { target: { value: '501' } })
+      expect(await screen.findByText(`Filming is allowed on ${formatDate(gameDate)}.`)).toBeInTheDocument()
+      fireEvent.click(screen.getByLabelText('From a link'))
+      fireEvent.change(screen.getByLabelText('Link to the video'), { target: { value: link } })
+    }
+
+    it('recognises the link, imports it for the game and opens the video', async () => {
+      const fetch = linkApi({ status: 201, body: imported })
+      vi.stubGlobal('fetch', fetch)
+      const { router } = renderRoute(<UploadPage />, {
+        path: '/teams/:id/upload',
+        url: '/teams/92/upload',
+        routes: [{ path: '/videos/:id', element: <p>Video page</p> }],
+      })
+
+      // Offered next to this device even without the NAS inbox.
+      await pickGameAndLink('https://www.youtube.com/@lucazbindenvolley2500')
+      expect(screen.queryByText('From the NAS inbox')).not.toBeInTheDocument()
+      expect(screen.getByText(/Paste the link of one video/)).toBeInTheDocument()
+      const start = screen.getByRole('button', { name: 'Import video' })
+      expect(start).toBeDisabled()
+
+      const input = screen.getByLabelText('Link to the video')
+      fireEvent.change(input, { target: { value: 'javascript:alert(1)' } })
+      expect(start).toBeDisabled()
+      fireEvent.change(input, { target: { value: ' https://youtu.be/NXNsZ_UNM6w?si=abc ' } })
+      expect(screen.getByText('YouTube video NXNsZ_UNM6w')).toBeInTheDocument()
+      expect(screen.queryByText(/Paste the link of one video/)).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('Choose files')).not.toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText('Title (optional)'), { target: { value: 'Heimspiel' } })
+      fireEvent.click(start)
+      await waitFor(() => expect(router.state.location.pathname).toBe(`/videos/${VIDEO_ID}`))
+      expect(createBody(fetch)).toEqual({
+        game_id: 501,
+        title: 'Heimspiel',
+        import_url: 'https://youtu.be/NXNsZ_UNM6w?si=abc',
+      })
+    })
+
+    it('imports an other match with its date and title, and reminds that Twitch deletes broadcasts', async () => {
+      const fetch = linkApi({ status: 201, body: { ...imported, game_id: null } })
+      vi.stubGlobal('fetch', fetch)
+      const { router } = renderRoute(<UploadPage />, {
+        path: '/teams/:id/upload',
+        url: '/teams/92/upload',
+        routes: [{ path: '/videos/:id', element: <p>Video page</p> }],
+      })
+      fireEvent.change(await screen.findByLabelText('Match'), { target: { value: 'other' } })
+      fireEvent.change(screen.getByLabelText('Date'), { target: { value: gameDate } })
+      fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Cup vs. VBC Zürich' } })
+      expect(await screen.findByText(`Filming is allowed on ${formatDate(gameDate)}.`)).toBeInTheDocument()
+      fireEvent.click(screen.getByLabelText('From a link'))
+      fireEvent.change(screen.getByLabelText('Link to the video'), { target: { value: 'twitch.tv/videos/2245678901' } })
+      expect(screen.getByText('Twitch video 2245678901')).toBeInTheDocument()
+      expect(screen.getByText(/Twitch deletes past broadcasts/)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Import video' }))
+      await waitFor(() => expect(router.state.location.pathname).toBe(`/videos/${VIDEO_ID}`))
+      expect(createBody(fetch)).toEqual({
+        recorded_on: gameDate,
+        title: 'Cup vs. VBC Zürich',
+        import_url: 'twitch.tv/videos/2245678901',
+      })
+    })
+
+    const noChannel = {
+      status: 409,
+      body: { detail: 'No Youtube channel is allowed for imports yet; an admin adds them under Admin → Import channels' },
+    }
+    const me = (isAdmin: boolean) => ({
+      '/api/me': {
+        body: { member: { id: 7, uuid: 'u7', name: 'Luca' }, roles: [], is_admin: isAdmin, sport_admin: [], teams: [] },
+      },
+    })
+
+    it('says when no channel is allowed yet, and takes admins to the allow-list', async () => {
+      vi.stubGlobal('fetch', linkApi(noChannel, me(true)))
+      const { router } = renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
+      await pickGameAndLink('https://www.youtube.com/watch?v=NXNsZ_UNM6w')
+      fireEvent.click(screen.getByRole('button', { name: 'Import video' }))
+
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent(
+        'No YouTube channel is allowed for imports yet. An admin adds them under Admin → Import channels.',
+      )
+      expect(within(alert).getByRole('link', { name: 'Add import channels' })).toHaveAttribute(
+        'href',
+        '/admin/import-channels',
+      )
+      expect(router.state.location.pathname).toBe('/teams/92/upload')
+    })
+
+    it('shows the same message without the admin link to coaches', async () => {
+      vi.stubGlobal('fetch', linkApi(noChannel, me(false)))
+      renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
+      await pickGameAndLink('https://www.youtube.com/watch?v=NXNsZ_UNM6w')
+      fireEvent.click(screen.getByRole('button', { name: 'Import video' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('No YouTube channel is allowed for imports yet.')
+      expect(screen.queryByRole('link', { name: 'Add import channels' })).not.toBeInTheDocument()
+    })
+
+    it("shows the API's reason when it refuses the link", async () => {
+      vi.stubGlobal(
+        'fetch',
+        linkApi({
+          status: 422,
+          body: { detail: 'Only YouTube videos (youtube.com/watch?v=…, youtu.be/…) and Twitch videos (twitch.tv/videos/…) can be imported' },
+        }),
+      )
+      renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
+      await pickGameAndLink('https://www.youtube.com/shorts/NXNsZ_UNM6w')
+      fireEvent.click(screen.getByRole('button', { name: 'Import video' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        "Couldn't start the import: Only YouTube videos (youtube.com/watch?v=…, youtu.be/…) and Twitch videos",
+      )
+      // Editing the link clears the message.
+      fireEvent.change(screen.getByLabelText('Link to the video'), { target: { value: 'https://youtu.be/NXNsZ_UNM6w' } })
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     })
   })
 })

@@ -16,13 +16,21 @@ import { api, ApiError, blockersOf, ForbiddenError, NotFoundError } from '../lib
 import { cx } from '../lib/cx'
 import { addDaysIso, formatBytes, formatDate, formatDateTime, formatDuration, todayIso } from '../lib/format'
 import { opponentOf } from '../lib/games'
-import { useFilming, useInbox, useTeam, useTeamGames, useVideoConfig } from '../lib/queries'
+import { useFilming, useInbox, useMe, useTeam, useTeamGames, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
 import { useToast } from '../lib/toast'
 import type { InboxFile, TeamDetail, Video, VideoConfig, VideoCreate } from '../lib/types'
 import { matchFiles, sortByName, useUpload, type FilePair } from '../lib/upload'
-import { inboxFolder, inTeamFolder, isVideoFileName, VIDEO_ACCEPT, VIDEO_EXTENSIONS } from '../lib/video'
+import {
+  inboxFolder,
+  inTeamFolder,
+  isVideoFileName,
+  parseVideoLink,
+  platformName,
+  VIDEO_ACCEPT,
+  VIDEO_EXTENSIONS,
+} from '../lib/video'
 import { NotFoundPage } from './NotFoundPage'
 
 /** How far back a game can be picked. */
@@ -31,8 +39,11 @@ const RECENT_DAYS = 60
 const OLDEST_DAYS = 400
 /** A match that is not in Wiedisync (friendly, tournament, cup): a date and a title instead of a game. */
 const OTHER_MATCH = 'other'
+/** Placeholder of the link field. */
+const LINK_EXAMPLE = 'https://www.youtube.com/watch?v=…'
 
-type Source = 'device' | 'inbox'
+/** Files from this device, files in the NAS inbox, or a YouTube/Twitch link the worker fetches. */
+type Source = 'device' | 'inbox' | 'link'
 
 export function UploadPage() {
   const { id } = useParams()
@@ -102,11 +113,13 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const [source, setSource] = useState<Source>('device')
   const [files, setFiles] = useState<File[]>([])
   const [inboxIds, setInboxIds] = useState<ReadonlySet<string>>(new Set())
+  const [link, setLink] = useState('')
   const [title, setTitle] = useState('')
   const [pairs, setPairs] = useState<FilePair[]>([])
 
   const games = useTeamGames(team.id)
   const inbox = useInbox(true)
+  const me = useMe()
 
   const choices = useMemo<Choice[]>(
     () =>
@@ -132,7 +145,8 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const folder = inboxFolder(team)
   const inboxFiles = (inbox.data ?? []).filter((f) => inTeamFolder(f.path, folder))
   const inboxAvailable = inbox.isSuccess
-  const chosenSource = inboxAvailable ? source : 'device'
+  const chosenSource = source === 'inbox' && !inboxAvailable ? 'device' : source
+  const videoLink = parseVideoLink(link)
   const sortedFiles = useMemo(() => sortByName(files), [files])
   const pickedInbox = sortByName(
     inboxFiles.filter((f) => inboxIds.has(f.id)).map((f) => ({ ...f, name: f.path })),
@@ -148,6 +162,9 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
 
   const create = useMutation({ mutationFn: (body: VideoCreate) => api.createVideo(team.id, body) })
   const blockers = blockersOf(create.error)
+  // The only 409 for a link without blockers: no channel of that platform is allow-listed yet.
+  const noChannel =
+    chosenSource === 'link' && !blockers && create.error instanceof ApiError && create.error.status === 409
 
   const state = upload.snapshot?.state
   const doneVideo = state === 'done' ? upload.snapshot?.video : null
@@ -186,7 +203,11 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
     on !== null &&
     (!other || otherTitle.trim() !== '') &&
     filming.data?.allowed === true &&
-    (chosenSource === 'device' ? files.length > 0 && !fileError : inboxIds.size > 0) &&
+    (chosenSource === 'device'
+      ? files.length > 0 && !fileError
+      : chosenSource === 'inbox'
+        ? inboxIds.size > 0
+        : videoLink !== null) &&
     !create.isPending
 
   const onStart = (formEvent: FormEvent) => {
@@ -201,13 +222,16 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
       if (title.trim()) body.title = title.trim()
     }
     if (chosenSource === 'device') body.files = sortedFiles.map((f) => ({ name: f.name, size: f.size, type: f.type }))
-    else body.inbox_file_ids = pickedInbox.map((f) => f.id)
+    else if (chosenSource === 'inbox') body.inbox_file_ids = pickedInbox.map((f) => f.id)
+    // The text as typed: the API parses it again and fetches only its canonical address.
+    else body.import_url = link.trim()
 
     create.mutate(body, {
       onSuccess: (video: Video) => {
         void client.invalidateQueries({ queryKey: keys.teamVideos(team.id) })
-        if (chosenSource === 'inbox') {
-          void client.invalidateQueries({ queryKey: keys.inbox })
+        // Nothing to upload from the browser: the worker takes it from here.
+        if (chosenSource !== 'device') {
+          if (chosenSource === 'inbox') void client.invalidateQueries({ queryKey: keys.inbox })
           void navigate(`/videos/${video.id}`)
           return
         }
@@ -292,19 +316,29 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
       {on && filming.data?.allowed && (
         <>
           <Card className="flex flex-col gap-4 p-5">
-            {inboxAvailable && (
-              <Segmented
-                legend={t('upload.source')}
-                name={`${id}-source`}
-                value={source}
-                onChange={setSource}
-                options={[
-                  { value: 'device', label: t('upload.device') },
-                  { value: 'inbox', label: t('upload.inbox') },
-                ]}
+            <Segmented
+              legend={t('upload.sourceLegend')}
+              name={`${id}-source`}
+              value={chosenSource}
+              onChange={(next) => {
+                setSource(next)
+                create.reset()
+              }}
+              options={[
+                { value: 'device', label: t('upload.device') },
+                ...(inboxAvailable ? [{ value: 'inbox' as const, label: t('upload.inbox') }] : []),
+                { value: 'link', label: t('upload.link') },
+              ]}
+            />
+            {chosenSource === 'link' ? (
+              <LinkPicker
+                value={link}
+                onChange={(value) => {
+                  setLink(value)
+                  create.reset()
+                }}
               />
-            )}
-            {chosenSource === 'device' ? (
+            ) : chosenSource === 'device' ? (
               <DevicePicker
                 files={sortedFiles}
                 error={fileError}
@@ -351,9 +385,23 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
                     <p className="font-semibold text-danger">{t('upload.blocked')}</p>
                     <BlockerList blockers={blockers} />
                   </>
+                ) : noChannel ? (
+                  <>
+                    <p className="text-danger">
+                      {t('upload.noChannel', { platform: platformName(videoLink?.platform ?? '') })}
+                    </p>
+                    {me.data?.is_admin && (
+                      <Link
+                        to="/admin/import-channels"
+                        className="self-start font-semibold text-link underline-offset-2 hover:underline"
+                      >
+                        {t('upload.addChannels')}
+                      </Link>
+                    )}
+                  </>
                 ) : (
                   <p className="text-danger">
-                    {t('upload.failed', {
+                    {t(chosenSource === 'link' ? 'upload.importFailed' : 'upload.failed', {
                       detail: create.error instanceof ApiError ? create.error.detail : t('upload.networkError'),
                     })}
                   </p>
@@ -361,7 +409,13 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
               </div>
             )}
             <Button type="submit" variant="primary" className="self-start" disabled={!ready}>
-              {create.isPending ? t('upload.creating') : chosenSource === 'inbox' ? t('upload.startInbox') : t('upload.start')}
+              {create.isPending
+                ? t('upload.creating')
+                : chosenSource === 'inbox'
+                  ? t('upload.startInbox')
+                  : chosenSource === 'link'
+                    ? t('upload.startLink')
+                    : t('upload.start')}
             </Button>
           </Card>
         </>
@@ -505,6 +559,46 @@ function DevicePicker({
           {error}
         </p>
       )}
+    </div>
+  )
+}
+
+/** A YouTube or Twitch video link, recognised while it is typed. */
+function LinkPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useTranslation()
+  const id = useId()
+  const link = parseVideoLink(value)
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-muted">{t('upload.linkHint')}</p>
+      <Field label={t('upload.linkLabel')} htmlFor={id}>
+        <TextInput
+          id={id}
+          value={value}
+          inputMode="url"
+          maxLength={500}
+          autoComplete="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder={LINK_EXAMPLE}
+          aria-describedby={`${id}-status`}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {/* Always rendered, so screen readers announce what the link turned out to be. */}
+        <div id={`${id}-status`} role="status" className="flex flex-col gap-1 text-sm">
+          {link ? (
+            <>
+              <p className="flex items-center gap-2 font-semibold">
+                <CheckIcon className="size-4" />
+                {t('upload.linkRecognized', { platform: platformName(link.platform), id: link.id })}
+              </p>
+              {link.platform === 'twitch' && <p className="text-muted">{t('upload.linkTwitchSoon')}</p>}
+            </>
+          ) : (
+            value.trim() !== '' && <p className="text-muted">{t('upload.linkUnknown')}</p>
+          )}
+        </div>
+      </Field>
     </div>
   )
 }

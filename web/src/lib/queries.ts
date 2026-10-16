@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError, UnauthorizedError } from './api'
 import { keys } from './queryClient'
 import { useToast } from './toast'
-import type { AdminTeam, Job, Policy, PolicyUpdate, Video, Worker } from './types'
+import type { AdminTeam, ImportChannel, Job, Policy, PolicyUpdate, Video, Worker } from './types'
 
 export function useMe() {
   return useQuery({ queryKey: keys.me, queryFn: ({ signal }) => api.me(signal), staleTime: 5 * 60_000 })
@@ -101,13 +101,13 @@ export function useRunSync() {
 
 // Videos
 
-const BUSY: ReadonlySet<Video['status']> = new Set(['queued', 'processing'])
+const BUSY: ReadonlySet<Video['status']> = new Set(['importing', 'queued', 'processing'])
 
 export function useVideoConfig() {
   return useQuery({ queryKey: keys.videoConfig, queryFn: ({ signal }) => api.videoConfig(signal), staleTime: 5 * 60_000 })
 }
 
-/** Refreshes every 10 s while a video of the team is being processed. */
+/** Refreshes every 10 s while a video of the team is being imported or processed. */
 export function useTeamVideos(teamId: number) {
   return useQuery({
     queryKey: keys.teamVideos(teamId),
@@ -116,7 +116,7 @@ export function useTeamVideos(teamId: number) {
   })
 }
 
-/** Refreshes every 5 s while the video is queued or processing. */
+/** Refreshes every 5 s while the video is importing, queued or processing. */
 export function useVideo(id: string) {
   return useQuery({
     queryKey: keys.video(id),
@@ -241,5 +241,35 @@ export function useSetPolicy() {
       await client.invalidateQueries({ queryKey: keys.teams })
     },
     onError: (_error, { policy }) => toast.error(t('admin.saveFailed', { team: policy.label })),
+  })
+}
+
+// Admin: the import allow-list
+
+export function useImportChannels() {
+  return useQuery({ queryKey: keys.importChannels, queryFn: ({ signal }) => api.importChannels(signal) })
+}
+
+export function useAddImportChannel() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ channel, label }: { channel: string; label: string }) => api.addImportChannel(channel, label),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.importChannels })
+    },
+  })
+}
+
+export function useRemoveImportChannel() {
+  const client = useQueryClient()
+  const toast = useToast()
+  const { t } = useTranslation()
+  return useMutation({
+    mutationFn: (channel: ImportChannel) => api.removeImportChannel(channel.id),
+    onSuccess: async (_data, channel) => {
+      toast.success(t('admin.importChannels.removed', { label: channel.label }))
+      await client.invalidateQueries({ queryKey: keys.importChannels })
+    },
+    onError: (_error, channel) => toast.error(t('admin.importChannels.removeFailed', { label: channel.label })),
   })
 }

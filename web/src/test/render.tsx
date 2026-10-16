@@ -1,18 +1,27 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router'
+import { createMemoryRouter, Outlet, RouterProvider, type RouteObject } from 'react-router'
 import { ToastProvider } from '../components/ToastProvider'
 import { createQueryClient } from '../lib/queryClient'
+import type { Session } from '../lib/session'
+import type { Me } from '../lib/types'
 
-/** Renders a route element with the app's providers, at the given URL. `routes` adds other pages to navigate to. */
+/**
+ * Renders a route element with the app's providers, at the given URL. `routes` adds other pages
+ * to navigate to; `me` puts them below a layout that provides the session, as AppLayout does.
+ */
 export function renderRoute(
   element: ReactElement,
-  { path = '/', url = '/', routes = [] }: { path?: string; url?: string; routes?: RouteObject[] } = {},
+  { path = '/', url = '/', routes = [], me }: { path?: string; url?: string; routes?: RouteObject[]; me?: Me } = {},
 ) {
   const queryClient: QueryClient = createQueryClient()
   queryClient.setDefaultOptions({ queries: { retry: false } })
-  const router = createMemoryRouter([{ path, element }, ...routes], { initialEntries: [url] })
+  const pages: RouteObject[] = [{ path, element }, ...routes]
+  const router = createMemoryRouter(
+    me ? [{ element: <Outlet context={{ me } satisfies Session} />, children: pages }] : pages,
+    { initialEntries: [url] },
+  )
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>

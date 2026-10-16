@@ -28,7 +28,7 @@ from nomal.api.deps import (
     audit,
 )
 from nomal.api.media import permission_cache
-from nomal.core import pipeline
+from nomal.core import imports, pipeline
 from nomal.core.config import Settings
 from nomal.core.filming import (
     Blocker,
@@ -103,6 +103,13 @@ class FileOut(BaseModel):
     uploaded: bool
 
 
+class ImportedFromOut(BaseModel):
+    platform: str
+    url: str
+    channel: str | None
+    title: str | None
+
+
 class VideoOut(BaseModel):
     id: uuid.UUID
     team_id: int
@@ -114,6 +121,8 @@ class VideoOut(BaseModel):
     title: str
     recorded_on: date
     source: str
+    # For an imported video: where it came from (PLAN §7.2.2).
+    imported_from: ImportedFromOut | None = None
     status: str
     duration_ms: int | None
     width: int | None
@@ -149,6 +158,8 @@ class VideoCreateIn(BaseModel):
     title: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
     files: list[FileIn] = Field(default_factory=list, max_length=50)
     inbox_file_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
+    # A YouTube or Twitch video of an allow-listed channel (PLAN §7.2.2).
+    import_url: str | None = Field(default=None, min_length=5, max_length=500)
 
 
 class PartsIn(BaseModel):
@@ -186,7 +197,7 @@ def _manages(viewer: Viewer, access: TeamAccess) -> bool:
     return can_upload(viewer, access.ref) or can_delete_video(viewer, access.ref, access.leads)
 
 
-IN_PROGRESS = ("uploading", "queued", "processing")
+IN_PROGRESS = ("uploading", "importing", "queued", "processing")
 
 
 def _progress(db: Session, videos: list[Video]) -> dict[uuid.UUID, float]:
@@ -205,6 +216,18 @@ def _progress(db: Session, videos: list[Video]) -> dict[uuid.UUID, float]:
                 1.0 if status == "succeeded" else (progress or 0.0)
             )
     return {k: round(sum(v) / len(v), 3) for k, v in done.items()}
+
+
+def _imported_from(video: Video) -> ImportedFromOut | None:
+    origin = (video.capture or {}).get("import")
+    if video.source != "import" or not isinstance(origin, dict):
+        return None
+    return ImportedFromOut(
+        platform=str(origin.get("platform") or ""),
+        url=str(origin.get("url") or ""),
+        channel=origin.get("channel"),
+        title=origin.get("title"),
+    )
 
 
 def _video_out(
@@ -231,6 +254,7 @@ def _video_out(
         title=video.title,
         recorded_on=video.recorded_on,
         source=video.source,
+        imported_from=_imported_from(video),
         status=video.status,
         duration_ms=video.duration_ms,
         width=video.width,
@@ -371,8 +395,9 @@ def _resolve_match(db: Session, team: WdTeam, body: VideoCreateIn) -> tuple[date
 
 
 def _check_files(body: VideoCreateIn, settings: Settings) -> None:
-    if bool(body.files) == bool(body.inbox_file_ids):
-        raise HTTPException(422, "Give either files to upload or inbox files, not both")
+    sources = [bool(body.files), bool(body.inbox_file_ids), body.import_url is not None]
+    if sum(sources) != 1:
+        raise HTTPException(422, "Give files to upload, inbox files or a link, one of them")
     count = len(body.files) or len(body.inbox_file_ids)
     if count > settings.max_files_per_video:
         raise HTTPException(422, f"At most {settings.max_files_per_video} files per video")
@@ -396,12 +421,26 @@ def create_video(
     request: Request,
 ) -> VideoOut:
     store: ObjectStore | None = request.app.state.store
-    if store is None and body.files:
+    if store is None and (body.files or body.import_url is not None):
         raise HTTPException(503, "Video storage is not configured")
     access = visible_team(db, viewer, team_id)
     if not can_upload(viewer, access.ref):
         raise HTTPException(403, "Only the team's coaches and sport admins upload videos")
     _check_files(body, settings)
+    link: imports.ImportSource | None = None
+    allowed: set[str] = set()
+    if body.import_url is not None:
+        try:
+            link = imports.parse_link(body.import_url)
+        except imports.NotImportable as exc:
+            raise HTTPException(422, str(exc)) from exc
+        allowed = imports.allowed_refs(db, link.platform)
+        if not allowed:
+            raise HTTPException(
+                409,
+                f"No {link.platform.capitalize()} channel is allowed for imports yet; "
+                "an admin adds them under Admin → Import channels",
+            )
     on, title, game_id = _resolve_match(db, access.team, body)
     if on > club_today():
         raise HTTPException(422, "The recording date is in the future")
@@ -448,7 +487,7 @@ def create_video(
         title=title,
         sport=access.team.sport,
         recorded_on=on,
-        source="inbox" if inbox else "file",
+        source="import" if link else "inbox" if inbox else "file",
         status="uploading",
         created_by=viewer.member_id,
     )
@@ -488,9 +527,19 @@ def create_video(
         )
         item.status = "assigned"
         item.video_id = video.id
+    if link is not None:
+        # Where it comes from is known now; the import adds channel and title.
+        video.capture = {
+            "import": {"platform": link.platform, "id": link.external_id, "url": link.url}
+        }
+        video.files.append(
+            VideoSourceFile(part_no=1, file_name=link.file_name, bytes=0, content_type="video/mp4")
+        )
     db.flush()
     if inbox:
         pipeline.start_ingest(db, video, access.team)
+    if link is not None:
+        pipeline.start_import(db, video, access.team, link, allowed)
     audit(
         db,
         viewer.member_id,
@@ -500,6 +549,7 @@ def create_video(
         team=team_id,
         kind=body.kind,
         source=video.source,
+        link=link.url if link else None,
         files=len(video.files),
         bytes=sum(f.bytes for f in video.files),
     )

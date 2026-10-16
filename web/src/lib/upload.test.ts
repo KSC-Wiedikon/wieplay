@@ -39,6 +39,7 @@ function video(files: VideoFile[], status: Video['status'] = 'uploading'): Video
     title: 'KSCW – Volley Näfels',
     recorded_on: '2026-10-11',
     source: 'file',
+    imported_from: null,
     status,
     duration_ms: null,
     width: null,

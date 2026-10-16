@@ -17,8 +17,9 @@ from typing import Any
 
 import httpx
 
+from nomal.core import imports
 from nomal.core.storage import content_type_for, safe_file_name
-from nomal.worker import ffmpeg
+from nomal.worker import ffmpeg, importer
 from nomal.worker.client import ApiClient, ClaimedJob
 from nomal.worker.config import WorkerSettings
 
@@ -335,7 +336,48 @@ def purge(ctx: Context) -> dict[str, Any]:
     return {"removed": removed}
 
 
+def import_video(ctx: Context) -> dict[str, Any]:
+    """A YouTube or Twitch link → the video's raw folder on the NAS (PLAN §7.2.2). The
+    ingest that the API queues next finds the file there, checksums and probes it."""
+    params = ctx.job.params
+    # The API built this address from a parsed id; parse it again before fetching anything.
+    try:
+        source = imports.parse_link(params["url"])
+    except imports.NotImportable as exc:
+        raise PermanentError(str(exc)) from exc
+    if source.url != params["url"] or source.platform != params["platform"]:
+        raise PermanentError("unexpected import address")
+    raw_root = ctx.settings.raw_root
+    raw_dir = _inside(raw_root, raw_root / params["raw_subdir"])
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    target = raw_dir / f"01_{safe_file_name(params['file_name'])}"
+    work = ctx.scratch
+    try:
+        path, info = importer.fetch(
+            source.url,
+            source.platform,
+            params.get("channels", []),
+            work,
+            max_seconds=int(params["max_seconds"]),
+            max_bytes=int(params["max_bytes"]),
+            progress=lambda f: ctx.report(0.95 * f, "downloading"),
+            cancel=ctx.cancel,
+        )
+        ctx.report(0.97, "copying to the NAS")
+        partial = target.with_name(target.name + ".part")
+        shutil.copyfile(path, partial)
+        os.replace(partial, target)
+    except importer.Refused as exc:
+        raise PermanentError(str(exc)) from exc
+    except importer.Stopped as exc:
+        raise ffmpeg.Cancelled() from exc
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return {"file_name": params["file_name"], "bytes": target.stat().st_size, "info": info}
+
+
 HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
+    "import": import_video,
     "ingest": ingest,
     "transcode": transcode,
     "thumbs": thumbs,

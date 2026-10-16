@@ -20,9 +20,9 @@ import { useDeleteVideo, useVideo, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
 import { useToast } from '../lib/toast'
-import type { Video } from '../lib/types'
+import type { ImportedFrom, Video } from '../lib/types'
 import { matchFiles, useUpload, type FilePair } from '../lib/upload'
-import { isUuid, kindLabel, VIDEO_ACCEPT, videoFacts } from '../lib/video'
+import { isUuid, kindLabel, parseVideoLink, platformName, VIDEO_ACCEPT, videoFacts } from '../lib/video'
 
 export function VideoPage() {
   const { id } = useParams()
@@ -87,28 +87,28 @@ function VideoView({ videoId }: { videoId: string }) {
             {`${v.team_name} ${v.team_season}`}
           </Link>
         </p>
+        {v.imported_from && <ImportOrigin origin={v.imported_from} />}
       </div>
 
       {v.status === 'uploading' ? (
         <UploadingPanel video={v} enabled={enabled} />
-      ) : v.status === 'queued' || v.status === 'processing' ? (
+      ) : v.status === 'importing' || v.status === 'queued' || v.status === 'processing' ? (
         <Card className="flex flex-col gap-3 p-5">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="font-semibold">{t(`video.status.${v.status}`)}</h2>
             {v.progress !== null && <span className="tabular-nums">{Math.floor(v.progress * 100)} %</span>}
           </div>
           <ProgressBar value={v.progress} label={t(`video.status.${v.status}`)} />
-          <p className="text-sm text-muted">{v.status === 'queued' ? t('video.queuedBody') : t('video.processingBody')}</p>
+          <p className="text-sm text-muted">
+            {v.status === 'importing'
+              ? t('video.importingBody')
+              : v.status === 'queued'
+                ? t('video.queuedBody')
+                : t('video.processingBody')}
+          </p>
         </Card>
       ) : v.status === 'failed' || v.status === 'refused' ? (
-        <Card className="flex flex-col gap-2 p-5">
-          <h2 className="flex items-center gap-2 font-semibold text-danger">
-            <AlertIcon />
-            {v.status === 'refused' ? t('video.refusedTitle') : t('video.failedTitle')}
-          </h2>
-          <p className="text-sm">{v.status === 'refused' ? t('video.refusedBody') : t('video.failedBody')}</p>
-          {v.error && <p className="text-sm wrap-anywhere whitespace-pre-wrap text-muted">{v.error}</p>}
-        </Card>
+        <Problem video={v} />
       ) : enabled ? (
         <Ready video={v} />
       ) : (
@@ -134,6 +134,65 @@ function VideoView({ videoId }: { videoId: string }) {
         {t('video.deleteBody')}
       </ConfirmDialog>
     </div>
+  )
+}
+
+/** "Imported from YouTube · KSC Wiedikon", linking to the original. */
+function ImportOrigin({ origin }: { origin: ImportedFrom }) {
+  const { t } = useTranslation()
+  const text = [t('video.importedFrom', { platform: platformName(origin.platform) }), origin.channel]
+    .filter(Boolean)
+    .join(' · ')
+  // Only a canonical YouTube or Twitch video address becomes a link, never other text.
+  const href = parseVideoLink(origin.url)?.url
+  return (
+    <p className="text-sm text-muted">
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          title={origin.title ?? undefined}
+          className="text-link underline-offset-2 hover:underline"
+        >
+          {text}
+        </a>
+      ) : (
+        text
+      )}
+    </p>
+  )
+}
+
+/** A failed or refused video; an import that failed or was refused says so. */
+function Problem({ video }: { video: Video }) {
+  const { t } = useTranslation()
+  const refused = video.status === 'refused'
+  // A failed job's error starts with its kind (pipeline.on_failed).
+  const importFailed = !refused && video.error?.startsWith('import:') === true
+  const title = refused
+    ? video.source === 'import'
+      ? t('video.refusedImportTitle')
+      : t('video.refusedTitle')
+    : importFailed
+      ? t('video.importFailedTitle')
+      : t('video.failedTitle')
+  const body = refused
+    ? video.source === 'import'
+      ? t('video.refusedImportBody')
+      : t('video.refusedBody')
+    : importFailed
+      ? t('video.importFailedBody')
+      : t('video.failedBody')
+  return (
+    <Card className="flex flex-col gap-2 p-5">
+      <h2 className="flex items-center gap-2 font-semibold text-danger">
+        <AlertIcon />
+        {title}
+      </h2>
+      <p className="text-sm">{body}</p>
+      {video.error && <p className="text-sm wrap-anywhere whitespace-pre-wrap text-muted">{video.error}</p>}
+    </Card>
   )
 }
 

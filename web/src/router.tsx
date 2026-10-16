@@ -37,6 +37,11 @@ const routes: RouteObject[] = [
         path: 'admin/jobs',
         lazy: () => import('./pages/AdminJobsPage').then((m) => ({ Component: m.AdminJobsPage })),
       },
+      {
+        path: 'admin/import-channels',
+        lazy: () =>
+          import('./pages/AdminImportChannelsPage').then((m) => ({ Component: m.AdminImportChannelsPage })),
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

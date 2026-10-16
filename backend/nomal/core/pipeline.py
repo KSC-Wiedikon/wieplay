@@ -1,5 +1,6 @@
 """A video's way from upload to "ready" (PLAN §7.3).
 
+    imported link ──import──┐
     uploaded files ──ingest──▶ raw originals on the NAS ──transcode 1080p, 540p──▶ HLS
                                                          └─thumbs──▶ sprites + poster
 
@@ -18,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from nomal.core import jobs
+from nomal.core import imports, jobs
 from nomal.core.media import (
     CODECS,
     SEGMENT_NAME,
@@ -34,6 +35,7 @@ from nomal.core.media import (
 from nomal.core.models import Job, Video, VideoRendition, WdTeam
 
 INGEST_CAPS = ("ingest", "nas")
+IMPORT_CAPS = ("import", "nas")
 TRANSCODE_CAPS = ("transcode", "nas")
 THUMBS_CAPS = ("thumbs", "nas")
 PURGE_CAPS = ("nas",)
@@ -56,6 +58,13 @@ class IngestResult(BaseModel):
     fps_den: int = Field(gt=0)
     has_audio: bool
     capture: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImportResult(BaseModel):
+    file_name: str = Field(pattern=r"^(youtube|twitch)-[A-Za-z0-9_-]{5,15}\.mp4$")
+    bytes: int = Field(gt=0)
+    # A few fields of yt-dlp's metadata: channel, title, upload date (PLAN §7.2.2).
+    info: dict[str, Any] = Field(default_factory=dict)
 
 
 class TranscodeResult(BaseModel):
@@ -145,6 +154,66 @@ def start_ingest(db: Session, video: Video, team: WdTeam) -> Job:
     )
 
 
+def start_import(
+    db: Session, video: Video, team: WdTeam, source: imports.ImportSource, allowed: set[str]
+) -> Job:
+    """Fetch a YouTube or Twitch video into the video's raw folder; ingest follows."""
+    video.status = "importing"
+    return jobs.enqueue(
+        db,
+        "import",
+        caps=IMPORT_CAPS,
+        video_id=video.id,
+        priority=10,
+        params={
+            "video_id": str(video.id),
+            "url": source.url,
+            "platform": source.platform,
+            "external_id": source.external_id,
+            "raw_subdir": raw_subdir(video, team),
+            "file_name": source.file_name,
+            "channels": sorted(allowed),
+            "max_seconds": imports.MAX_SECONDS,
+            "max_bytes": imports.MAX_BYTES,
+        },
+    )
+
+
+def _short(value: Any, limit: int = 200) -> str | None:
+    return value[:limit] if isinstance(value, str) and value else None
+
+
+def _on_import(db: Session, video: Video, job: Job, result: ImportResult) -> None:
+    platform = job.params["platform"]
+    if result.file_name != job.params["file_name"] or len(video.files) != 1:
+        raise ValueError("import result does not match the job")
+    # The worker checked the channel before downloading; the list may have changed since.
+    if not imports.channel_allowed(platform, result.info, imports.allowed_refs(db, platform)):
+        video.status = "refused"
+        video.error = "The video's channel is not on the import allow-list"
+        purge_raw(db, video)
+        return
+    [source] = video.files
+    source.bytes = result.bytes
+    source.uploaded_at = datetime.now(UTC)
+    refs = sorted(imports.info_refs(platform, result.info))
+    video.capture = {
+        **(video.capture or {}),
+        "import": {
+            "platform": platform,
+            "id": job.params["external_id"],
+            "url": job.params["url"],
+            "channel": _short(result.info.get("channel") or result.info.get("uploader")),
+            "channel_ref": refs[0] if refs else None,
+            "title": _short(result.info.get("title")),
+            "published": _short(result.info.get("upload_date"), 8),
+        },
+    }
+    team = db.get(WdTeam, video.team_id)
+    assert team is not None
+    start_ingest(db, video, team)
+
+
 def _on_ingest(db: Session, video: Video, job: Job, result: IngestResult) -> None:
     by_id = {f.file_id: f for f in result.files}
     if set(by_id) != {f.id for f in video.files}:
@@ -172,7 +241,9 @@ def _on_ingest(db: Session, video: Video, job: Job, result: IngestResult) -> Non
     video.width, video.height = result.width, result.height
     video.fps_num, video.fps_den = result.fps_num, result.fps_den
     video.has_audio = result.has_audio
-    video.capture = result.capture
+    # Camera metadata from the probe; an import keeps where it came from.
+    origin = (video.capture or {}).get("import")
+    video.capture = {**result.capture, **({"import": origin} if origin else {})}
     video.standard_issues = standard_issues(result.width, result.height, fps)
     video.meets_standard = not video.standard_issues
     video.status = "processing"
@@ -273,7 +344,9 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
         return
     if video is None:
         raise ValueError("job has no video")
-    if job.kind == "ingest":
+    if job.kind == "import":
+        _on_import(db, video, job, ImportResult.model_validate(payload))
+    elif job.kind == "ingest":
         _on_ingest(db, video, job, IngestResult.model_validate(payload))
     elif job.kind == "transcode":
         _on_transcode(db, video, job, TranscodeResult.model_validate(payload))
@@ -309,8 +382,11 @@ def may_sign(job: Job, op: str, key: str) -> bool:
 
 
 def _ingest_job(db: Session, video: Video) -> Job | None:
+    """The first job that writes into the video's raw folder: its import, else its ingest."""
     return db.scalars(
-        select(Job).where(Job.video_id == video.id, Job.kind == "ingest").order_by(Job.created_at)
+        select(Job)
+        .where(Job.video_id == video.id, Job.kind.in_(("import", "ingest")))
+        .order_by(Job.created_at)
     ).first()
 
 

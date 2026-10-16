@@ -19,6 +19,7 @@ import type { Worker, WorkerCreated } from '../lib/types'
 /** What a worker can be given (backend/nomal/worker). */
 const KNOWN_CAPS = [
   'ingest',
+  'import',
   'inbox',
   'transcode',
   'thumbs',

@@ -10,6 +10,7 @@ const sections = [
   { to: '/admin/policies', key: 'policies' },
   { to: '/admin/workers', key: 'workers' },
   { to: '/admin/jobs', key: 'jobs' },
+  { to: '/admin/import-channels', key: 'importChannels' },
 ] as const
 
 export function AdminNav() {
