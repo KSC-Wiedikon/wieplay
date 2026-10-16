@@ -1,18 +1,28 @@
 # Filming guide
 
 For coaches and team managers of the teams that use Nomal. German version:
-[FILMING_GUIDE.de.md](FILMING_GUIDE.de.md). Technical background: `docs/PLAN.md` §5.3 and §7.1.
+[FILMING_GUIDE.de.md](FILMING_GUIDE.de.md). Technical background: `docs/PLAN.md` §5.3, §5.4,
+§7.1 and §7.2.
 
 ## 1. Before you set up the camera
 
-- **Check Nomal.** Open your team in Nomal. Under *Filming*, every game and training of the
-  next three weeks shows **Filming allowed** or **Filming blocked** with the reason.
-  **Blocked means no camera.** Nomal also refuses the upload afterwards.
+- **Matches only.** Nomal takes matches: the team's games in Wiedisync, and other matches
+  (friendlies, tournaments, cup games) with their date and a title. Trainings are not filmed
+  for Nomal for now.
+- **Check Nomal.** Open your team in Nomal. Under *Filming*, every game of the next 21 days
+  shows **Filming allowed** or **Filming blocked** with the reason. **Blocked means no
+  camera.** Nomal also refuses the upload afterwards. Other matches are not listed there; the
+  same rules apply, and Nomal checks them when you upload the video with its date.
 - **Everyone is an adult.** Nomal only takes footage when every person on the team's
   roster is 18 or older on that day and has a birthdate in Wiedisync. This is checked
   automatically; you cannot override it.
-- **Everyone agreed.** Every player of the team has agreed to filming in Nomal (or on the
-  paper form, which you record on the team page). One missing answer blocks filming.
+- **The team's filming rule.** An admin can switch off filming for a team. Nomal then shows
+  *Matches are not filmed for this team.*
+- **No consent form.** Players are not asked one by one. Swiss Volley's rules allow anyone to
+  record a match (Volleyballreglement 2026/27, Art. 86), and the club films its matches for
+  Nomal on that basis. Players learn about it from Nomal's privacy page. Anyone who does not
+  want to be in a video tells a coach or a Nomal admin, who deletes the video or removes the
+  person from its tags.
 - **Opponents.** In adult leagues the club films without asking each opponent. Opponents
   appear by shirt number only. If an opponent asks, the footage is trimmed or deleted.
 
@@ -26,6 +36,8 @@ For coaches and team managers of the teams that use Nomal. German version:
 - **Fixed zoom.** Do not move, pan or zoom the camera during the match.
 - **No wide-angle or fisheye mode.**
 - Scoreboard in the picture if that is possible without losing court.
+- **Away matches**: the home team provides a camera spot behind the court, centred, about
+  3 m high (Volleyballreglement, Art. 86). Ask for it before the warm-up.
 
 ### Basketball (Herren 1): side of the court
 
@@ -42,12 +54,12 @@ For coaches and team managers of the teams that use Nomal. German version:
 | Not 60 fps | **50 fps** | Hall lights flicker at 50 Hz; 60 fps can show it |
 | Shutter | **1/500 s or faster**; slower only if the picture shows flicker bands | Motion blur makes the ball invisible |
 | Exposure, focus, white balance | **Locked (manual)** | Auto modes pump during play |
-| Audio | **On** | Whistles mark the rallies |
+| Audio | **On** | Nomal uses the whistles to find the rallies |
 
 Nomal reads all of this from the file. A video below the standard (say 25 fps or 720p)
-still plays and can be tagged, but automatic analysis will skip it.
+still plays and can be tagged, but the automatic analysis skips it.
 
-## 4. During the match or training
+## 4. During the match
 
 - Start at the **warm-up** and film **continuously**. Do not pause between sets.
 - Cameras split long recordings into several files. That is fine: upload all of them as
@@ -58,33 +70,47 @@ still plays and can be tagged, but automatic analysis will skip it.
 
 ## 5. Getting the video into Nomal
 
-Choose one:
+On your team's page: *Upload video* → pick the match, or *Other match (friendly, tournament,
+cup)* with its date and a title → choose where the video comes from:
 
-- **Upload in the browser.** On your team's page: *Upload video* → match or training →
-  pick the game → choose all files of the recording → *Start upload*. Keep the page open
-  until it says done. An interrupted upload continues when you select the same files
+- **From this device.** Choose all files of the recording → *Start upload*. Keep the page
+  open until it says done. An interrupted upload continues when you select the same files
   again on the video page.
-- **NAS at home** (club admins). Copy the camera files into the team's folder in the
-  `nomal` share, `inbox/<team>` (for example `inbox/vb-H3`). After a few minutes they
-  appear in Nomal under *Upload video → From the NAS inbox*. Pick the game there.
+- **From the NAS inbox** (for people with access to the club NAS). Copy the camera files
+  into your team's folder in the `nomal-inbox` share (for example `vb-H3`). After a few
+  minutes they appear under *From the NAS inbox*. Pick them → *Add video*. They are not
+  uploaded again.
+- **From a link.** Is the match already on YouTube or Twitch, on the club's channel or a
+  member's own channel? Paste the link of the video → *Import video*, and Nomal fetches it
+  itself. Only channels on the club's list work (an admin adds them under *Admin → Import
+  channels*). Put videos on YouTube as *Unlisted*: anyone with the YouTube link can watch
+  them there. Twitch deletes past broadcasts after 7 to 60 days, so import them soon after
+  the match. The camera's original files are better quality, if you have them.
 
-Nomal processes the video (about 20 to 30 minutes for a 2-hour match). Keep the original
-files until the video shows as ready.
+Nomal then processes the video on the club's own server. It plays as soon as the first
+quality (540p) is ready; full quality (1080p) follows. For a 2-hour match that takes about
+half an hour in total (measured: 540p in 9 minutes, 1080p in 23 minutes). Keep the original
+files until the video shows as *Ready*.
+
+**Volleyball: rallies found automatically.** After that, Nomal looks for the rallies itself
+(from the ball, the movement on court and the whistles) and suggests them on the tagging page
+under *Review suggestions*. Accept, correct or reject each one, then mark the rallies
+reviewed: Nomal learns from every game a coach has checked.
 
 ## 6. Rules that always apply
 
 - Nomal videos are for the team. **Never post them** or share screen recordings outside
   Nomal.
-- Delete requests (from a player, an opponent, a parent): tell a Nomal admin; footage is
-  trimmed or deleted.
+- Delete requests (from a player, an opponent, anyone filmed): tell a coach or a Nomal
+  admin; the footage is trimmed or deleted, or the person is removed from the tags.
 - If someone under 18 ended up in the picture anyway (a ball kid, a visitor on the court):
   tell a Nomal admin before uploading.
 
 ## Checklist
 
-- [ ] Nomal says *Filming allowed* for this game or training
+- [ ] It is a match, and Nomal says *Filming allowed* for it (other matches: checked at upload)
 - [ ] Camera behind the end line (volleyball) or at the half-court line (basketball), high, fixed
 - [ ] Whole court and the far corners in the picture, fixed zoom, no fisheye
 - [ ] 1080p or 4K at **50 fps**, shutter 1/500 s, exposure/focus/white balance locked, audio on
 - [ ] Battery and card checked; filming from the warm-up, no pauses
-- [ ] Uploaded in Nomal (or copied to the NAS inbox); originals kept until *ready*
+- [ ] Uploaded in Nomal (or copied to the NAS inbox, or imported from a link); originals kept until *Ready*
