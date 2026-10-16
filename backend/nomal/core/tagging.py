@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from nomal.core.models import (
@@ -434,14 +434,6 @@ def rescore(db: Session, video: Video) -> None:
 
 def now_utc() -> datetime:
     return datetime.now(UTC)
-
-
-def unlink_member(db: Session, member_id: int) -> int:
-    """A withdrawn consent turns the member's tags into "#number" (PLAN §5.4): the tags
-    stay, the link to the person goes, here and in every roster snapshot."""
-    result = db.execute(update(Event).where(Event.member_id == member_id).values(member_id=None))
-    db.execute(update(VideoRoster).where(VideoRoster.member_id == member_id).values(member_id=None))
-    return int(getattr(result, "rowcount", 0) or 0)
 
 
 def check_limits(

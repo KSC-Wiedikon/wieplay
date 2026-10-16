@@ -40,7 +40,7 @@ export function sideLabel(t: TFunction, side: Side | null | undefined): string {
 
 /**
  * A player's name. For a tag pass its member_id: the name then comes from the roster entry of
- * that member, so a tag whose link was removed (withdrawn consent) shows no name.
+ * that member, so a tag whose link was removed shows no name.
  */
 export function playerName(
   roster: readonly RosterEntry[],

@@ -419,7 +419,6 @@ class CandidateOut(BaseModel):
     member_id: int
     name: str
     number: int | None
-    consent: str | None  # accepted | withdrawn | None (not answered)
 
 
 @router.get("/videos/{video_id}/roster/candidates", response_model=list[CandidateOut])
@@ -428,8 +427,6 @@ def roster_candidates(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list
     video, access = _readable(db, viewer, video_id)
     if not can_tag(viewer, access.ref, access.leads):
         raise HTTPException(403, "Only the team's coaches and sport admins edit the roster")
-    from nomal.core.filming import current_consent
-
     members = list(
         db.scalars(
             select(WdMember)
@@ -439,14 +436,5 @@ def roster_candidates(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list
             .distinct()
         )
     )
-    consent = current_consent(db, [m.id for m in members])
-    out = [
-        CandidateOut(
-            member_id=m.id,
-            name=m.display_name,
-            number=m.number,
-            consent=consent[m.id].status if m.id in consent else None,
-        )
-        for m in members
-    ]
+    out = [CandidateOut(member_id=m.id, name=m.display_name, number=m.number) for m in members]
     return sorted(out, key=lambda c: (c.number is None, c.number or 0, c.name))

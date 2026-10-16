@@ -134,7 +134,7 @@ export function useTagging(id: string, enabled: boolean) {
   })
 }
 
-/** The team's players (any season) with their consent, for the roster editor (coaches, sport admins). */
+/** The team's players (any season), for the roster editor (coaches, sport admins). */
 export function useRosterCandidates(videoId: string) {
   return useQuery({
     queryKey: keys.rosterCandidates(videoId),

@@ -466,8 +466,6 @@ export interface RosterCandidate {
   member_id: number
   name: string
   number: number | null
-  /** Only 'accepted' can be added. */
-  consent: 'accepted' | 'withdrawn' | null
 }
 
 export interface EventRevision {

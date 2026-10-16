@@ -92,10 +92,10 @@ function fakeServer(initial: Tagging) {
 }
 
 const candidates: RosterCandidate[] = [
-  { member_id: 103, name: 'Mia Keller', number: 3, consent: 'accepted' },
-  { member_id: 115, name: 'Sara Frei', number: 15, consent: 'accepted' },
-  { member_id: 116, name: 'Tim Huber', number: 16, consent: 'withdrawn' },
-  { member_id: 117, name: 'Lea Graf', number: null, consent: null },
+  { member_id: 103, name: 'Mia Keller', number: 3 },
+  { member_id: 115, name: 'Sara Frei', number: 15 },
+  { member_id: 116, name: 'Tim Huber', number: 16 },
+  { member_id: 117, name: 'Lea Graf', number: null },
 ]
 
 function show(
@@ -405,17 +405,17 @@ describe('TagPage', () => {
     expect(screen.getAllByText(/Official score/)).toHaveLength(1)
   })
 
-  it("edits the roster: only the team's players who agreed to filming can be added", async () => {
+  it("edits the roster: any of the team's players can be added", async () => {
     const { fetch } = show()
     await ready()
     fireEvent.click(within(screen.getByRole('region', { name: 'Roster' })).getByRole('button', { name: 'Edit' }))
     const dialog = screen.getByRole('dialog', { name: 'Roster of this video' })
     const add = within(dialog).getByLabelText('Add')
     await within(dialog).findByRole('option', { name: '#15 Sara Frei' })
-    // Mia is on the list already; the others are shown with the reason, not selectable.
+    // Mia is on the list already; every other player of the team can be added (no consent to ask).
     expect(within(dialog).queryByRole('option', { name: '#3 Mia Keller' })).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('option', { name: '#16 Tim Huber: consent withdrawn' })).toBeDisabled()
-    expect(within(dialog).getByRole('option', { name: 'Lea Graf: has not agreed to filming' })).toBeDisabled()
+    expect(within(dialog).getByRole('option', { name: '#16 Tim Huber' })).toBeEnabled()
+    expect(within(dialog).getByRole('option', { name: 'Lea Graf' })).toBeEnabled()
 
     fireEvent.change(add, { target: { value: '115' } })
     expect(within(dialog).getByText('Sara Frei')).toBeInTheDocument()

@@ -531,7 +531,7 @@ export const de: Messages<typeof en> = {
       startTag: '{{player}} taggen',
       editorTitle: 'Kader dieses Videos',
       editorHint:
-        'Gilt nur für dieses Video. Tags behalten ihre Nummer und gehören zu der Person, die diese Nummer hat. Hinzufügen lassen sich nur Spieler des Teams, die dem Filmen zugestimmt haben.',
+        'Gilt nur für dieses Video. Tags behalten ihre Nummer und gehören zu der Person, die diese Nummer hat. Hinzufügen lässt sich jeder Spieler des Teams.',
       number: 'Nr.',
       name: 'Name',
       noName: 'Ohne Namen',
@@ -543,9 +543,6 @@ export const de: Messages<typeof en> = {
       choose: 'Auswählen…',
       numberOnly: 'Eine Nummer ohne Namen',
       teamPlayers: 'Spieler des Teams',
-      notAvailable: 'Nicht möglich',
-      consentWithdrawn: 'Zustimmung zurückgezogen',
-      consentMissing: 'hat dem Filmen nicht zugestimmt',
       candidatesFailed: 'Die Spieler des Teams konnten nicht geladen werden. Nummern ohne Namen lassen sich trotzdem hinzufügen.',
       themTitle: 'Nummern des Gegners',
       themHint: 'Zahlen von 0 bis 99, getrennt durch Leerschläge oder Kommas.',

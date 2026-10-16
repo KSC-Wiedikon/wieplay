@@ -104,11 +104,9 @@ function RosterEditor({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState('')
 
-  // The team's players (any season) not on the list yet; only those who agreed to filming can be added.
+  // The team's players (any season) not on the list yet.
   const linked = new Set(rows.map((r) => r.member_id).filter((m) => m !== null))
-  const others = (candidates.data ?? []).filter((p) => !linked.has(p.member_id))
-  const available = others.filter((p) => p.consent === 'accepted')
-  const unavailable = others.filter((p) => p.consent !== 'accepted')
+  const available = (candidates.data ?? []).filter((p) => !linked.has(p.member_id))
   const label = (p: RosterCandidate) => (p.number === null ? p.name : `#${p.number} ${p.name}`)
 
   const patch = (key: string, change: Partial<Row>) => setRows((list) => list.map((r) => (r.key === key ? { ...r, ...change } : r)))
@@ -253,15 +251,6 @@ function RosterEditor({ onClose }: { onClose: () => void }) {
                 {available.map((p) => (
                   <option key={p.member_id} value={p.member_id}>
                     {label(p)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {unavailable.length > 0 && (
-              <optgroup label={t('tagging.roster.notAvailable')}>
-                {unavailable.map((p) => (
-                  <option key={p.member_id} value={`no-${p.member_id}`} disabled>
-                    {`${label(p)}: ${p.consent === 'withdrawn' ? t('tagging.roster.consentWithdrawn') : t('tagging.roster.consentMissing')}`}
                   </option>
                 ))}
               </optgroup>

@@ -284,19 +284,6 @@ def test_rescoring_writes_no_revisions(
     assert actions == ["create"]  # the score the server added is not someone's edit
 
 
-def test_withdrawing_consent_turns_tags_into_numbers(
-    ready: dict[str, Any], club: dict[str, TestClient], as_: Any
-) -> None:
-    url = f"/api/videos/{ready['id']}/changes"
-    mine = tag("A", 1_000, number=7, grade="#")  # Alex Muster, member 101
-    club["coach"].post(url, json={"events": [mine]})
-    as_("player-h3").put("/api/me/consent", json={"status": "withdrawn"})
-    bundle = club["coach"].get(f"/api/videos/{ready['id']}/tagging").json()
-    event = next(e for e in bundle["events"] if e["id"] == mine["id"])
-    assert event["member_id"] is None and event["number"] == 7
-    assert all(r["member_id"] != 101 for r in bundle["roster"])
-
-
 def test_simultaneous_first_opens_take_one_snapshot(
     ready: dict[str, Any], as_: Any, db_engine: Engine
 ) -> None:
@@ -339,8 +326,7 @@ def test_roster_candidates_are_the_teams_players(
 ) -> None:
     url = f"/api/videos/{ready['id']}/roster/candidates"
     people = club["coach"].get(url).json()
-    assert [(c["number"], c["consent"]) for c in people] == [
-        (1, "accepted"), (3, "accepted"), (7, "accepted"), (11, "accepted"),
-    ]  # fmt: skip
+    assert [c["number"] for c in people] == [1, 3, 7, 11]  # every player: no consent to ask
+    assert set(people[0]) == {"member_id", "name", "number"}
     assert as_("vb-sport-admin").get(url).status_code == 200
     assert as_("player-h3").get(url).status_code == 403

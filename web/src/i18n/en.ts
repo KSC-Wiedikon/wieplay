@@ -517,7 +517,7 @@ export const en = {
       startTag: 'Tag {{player}}',
       editorTitle: 'Roster of this video',
       editorHint:
-        'Applies to this video only. Tags keep their numbers and are linked to whoever has the number. Only players of the team who agreed to filming can be added.',
+        'Applies to this video only. Tags keep their numbers and are linked to whoever has the number. Any player of the team can be added.',
       number: 'No.',
       name: 'Name',
       noName: 'No name',
@@ -529,9 +529,6 @@ export const en = {
       choose: 'Choose…',
       numberOnly: 'A number without a name',
       teamPlayers: 'Players of the team',
-      notAvailable: 'Not available',
-      consentWithdrawn: 'consent withdrawn',
-      consentMissing: 'has not agreed to filming',
       candidatesFailed: "Couldn't load the team's players. Numbers without a name can still be added.",
       themTitle: 'Opponent numbers',
       themHint: 'Numbers from 0 to 99, separated by spaces or commas.',
