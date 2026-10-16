@@ -274,7 +274,7 @@ export function TeamTable({
     <tr key={row.key} className={cx(row.total && 'bg-sunken font-semibold')}>
       <th
         scope="row"
-        className={cx(STICKY, 'max-w-44 border-r border-hairline px-3 py-2.5 text-left font-normal first:pl-4 sm:max-w-80', row.total ? 'bg-sunken' : 'bg-surface', 'in-[tr:hover]:tint-hover')}
+        className={cx(STICKY, 'max-w-44 border-r border-hairline px-3 py-2.5 text-left font-normal whitespace-nowrap first:pl-4 sm:max-w-80', row.total ? 'bg-sunken' : 'bg-surface', 'in-[tr:hover]:tint-hover')}
       >
         {row.label}
       </th>
