@@ -213,6 +213,7 @@ export function ReviewPanel() {
 /** Every suggestion is answered: the way to "rallies reviewed", which teaches Nomal. */
 function Done({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   const { t } = useTranslation()
+  const { reload } = useWorkspace()
   const mark = useSetRalliesReviewed(videoId)
   return (
     <EmptyState
@@ -220,7 +221,7 @@ function Done({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
       title={t('tagging.review.doneTitle')}
       action={
         reviewed ? undefined : (
-          <Button variant="primary" size="touch" disabled={mark.isPending} onClick={() => mark.mutate(true)}>
+          <Button variant="primary" size="touch" disabled={mark.isPending} onClick={() => mark.mutate(true, { onSuccess: reload })}>
             {t('tagging.analysis.markReviewed')}
           </Button>
         )

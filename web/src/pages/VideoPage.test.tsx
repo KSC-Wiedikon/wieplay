@@ -365,10 +365,14 @@ describe('VideoPage', () => {
       expect(screen.getByText('0 tags · 2 rallies')).toBeInTheDocument()
       const list = screen.getByRole('table', { name: 'Rallies' })
       expect(within(list).getAllByRole('row').slice(1)).toHaveLength(2)
-      // Not yet: Nomal learns from reviewed games only.
+      // Marking the rallies reviewed now accepts the open suggestion: asked first.
       const reviewed = screen.getByRole('switch', { name: 'Rallies reviewed' })
-      expect(reviewed).toBeDisabled()
-      expect(reviewed).toHaveAccessibleDescription('Review the last open suggestion first: Nomal learns from reviewed games only.')
+      expect(reviewed).toHaveAccessibleDescription(/the open suggestion is then accepted as it is/)
+      fireEvent.click(reviewed)
+      const dialog = screen.getByRole('alertdialog', { name: 'Mark the rallies reviewed?' })
+      expect(dialog).toHaveTextContent('The suggestion still open is accepted as it is')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      expect(reviewed).toHaveAttribute('aria-checked', 'false')
     })
 
     it('analyses on request, and shows the analysis queued, running and failed', async () => {

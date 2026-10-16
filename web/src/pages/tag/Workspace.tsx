@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { AnalysisStatus } from '../../components/AnalysisStatus'
@@ -158,9 +158,15 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }
   const [controller] = useState(() => new TagController(store, playhead, taxonomy, { duration_ms: video.duration_ms }))
   const [review] = useState(() => new ReviewController(store, playhead, controller, { rejectedBefore }))
   const [element, setElement] = useState<HTMLVideoElement | null>(null)
+  const reload = useCallback(() => {
+    api
+      .tagging(video.id)
+      .then((fresh) => store.replaceBase(fresh))
+      .catch(() => {})
+  }, [store, video.id])
   const parts = useMemo<WorkspaceParts>(
-    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow }),
-    [video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow],
+    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow, reload }),
+    [video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow, reload],
   )
   const reviewing = useSyncedReview(review)
 
@@ -247,7 +253,7 @@ function DeskLayout({
   setElement: (element: HTMLVideoElement | null) => void
 }) {
   const { t } = useTranslation()
-  const { video, controller, narrow } = useWorkspace()
+  const { video, controller, narrow, reload } = useWorkspace()
   const view = useView()
   const ui = useUi()
   const sync = useSync()
@@ -266,7 +272,7 @@ function DeskLayout({
   const byHand = rallies.length - suggestionCount(view.segments)
   // The review is offered once Nomal suggested something (volleyball: basketball marks no rallies).
   const canReview = controller.playsRallies && (progress.total > 0 || reviewing)
-  const status = controller.playsRallies && video.can_tag ? <AnalysisStatus video={video} rallies={byHand} live={live} /> : null
+  const status = controller.playsRallies && video.can_tag ? <AnalysisStatus video={video} rallies={byHand} live={live} onReviewed={reload} /> : null
 
   // Without IndexedDB, unsent changes are lost with the page: ask before leaving.
   useEffect(() => {

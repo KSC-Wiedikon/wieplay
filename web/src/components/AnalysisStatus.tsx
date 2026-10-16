@@ -1,5 +1,5 @@
 import '../i18n/pages'
-import { useId, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { isBusy, proposalTotal, useAnalyse, useAnalysis, useSetRalliesReviewed } from '../lib/analysis'
 import { cx } from '../lib/cx'
@@ -8,6 +8,7 @@ import { formatPercent } from '../lib/suggestions'
 import type { Video } from '../lib/types'
 import { Button, ButtonLink } from './Button'
 import { Card } from './Card'
+import { ConfirmDialog } from './ConfirmDialog'
 import { AlertIcon, CheckIcon, SparkleIcon } from './icons'
 import { Switch } from './Switch'
 
@@ -26,6 +27,8 @@ interface AnalysisStatusProps {
   live?: LiveCounts
   /** Where to review the suggestions (the video page links to the tagging page's review). */
   reviewHref?: string
+  /** After "rallies reviewed" was saved: the server accepted the open suggestions itself. */
+  onReviewed?: () => void
   className?: string
 }
 
@@ -44,7 +47,7 @@ function Spinning() {
  * failed, how well the suggestions matched the coach's own rallies, and "Rallies reviewed",
  * which tells Nomal to learn from the game.
  */
-export function AnalysisStatus({ video, rallies, live, reviewHref, className }: AnalysisStatusProps) {
+export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, className }: AnalysisStatusProps) {
   const { t } = useTranslation()
   const analysis = useAnalysis(video.id, true)
   const analyse = useAnalyse(video.id)
@@ -122,17 +125,19 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, className }: 
         )}
       </div>
       {!isBusy(data) && (total > 0 || rallies > 0 || video.rallies_reviewed_at) ? (
-        <Reviewed video={video} open={open} total={total} />
+        <Reviewed video={video} open={open} total={total} onReviewed={onReviewed} />
       ) : null}
     </Card>
   )
 }
 
 /** "Rallies reviewed": a switch with what it does, or a nudge once every suggestion is answered. */
-function Reviewed({ video, open, total }: { video: Video; open: number; total: number }) {
+function Reviewed({ video, open, total, onReviewed }: { video: Video; open: number; total: number; onReviewed?: () => void }) {
   const { t } = useTranslation()
   const id = useId()
   const mark = useSetRalliesReviewed(video.id)
+  const [asking, setAsking] = useState(false)
+  const save = (on: boolean) => mark.mutate(on, { onSuccess: () => onReviewed?.() })
   const at = video.rallies_reviewed_at ?? null
   const reviewed = at !== null
 
@@ -146,7 +151,7 @@ function Reviewed({ video, open, total }: { video: Video; open: number; total: n
             <p className="text-sm">{t('tagging.analysis.allDoneBody')}</p>
           </div>
         </div>
-        <Button variant="primary" disabled={mark.isPending} onClick={() => mark.mutate(true)}>
+        <Button variant="primary" disabled={mark.isPending} onClick={() => save(true)}>
           {t('tagging.analysis.markReviewed')}
         </Button>
       </div>
@@ -162,10 +167,11 @@ function Reviewed({ video, open, total }: { video: Video; open: number; total: n
     <div className="flex min-w-0 flex-[1_1_20rem] items-start gap-2 border-t border-hairline pt-3 md:border-t-0 md:border-l md:pt-0 md:pl-5">
       <Switch
         checked={reviewed}
-        disabled={mark.isPending || (!reviewed && open > 0)}
+        disabled={mark.isPending}
         label={t('tagging.analysis.reviewed')}
         describedBy={`${id}-hint`}
-        onChange={(on) => mark.mutate(on)}
+        // Open suggestions are accepted as they are by the server: ask first.
+        onChange={(on) => (on && open > 0 ? setAsking(true) : save(on))}
       />
       <div className="flex min-w-0 flex-col gap-0.5 pt-2.5 sm:pt-1.5">
         <p className="font-semibold" aria-hidden="true">
@@ -175,6 +181,18 @@ function Reviewed({ video, open, total }: { video: Video; open: number; total: n
           {hint}
         </p>
       </div>
+      <ConfirmDialog
+        open={asking}
+        title={t('tagging.analysis.confirmTitle')}
+        confirmLabel={t('tagging.analysis.markReviewed')}
+        onCancel={() => setAsking(false)}
+        onConfirm={() => {
+          setAsking(false)
+          save(true)
+        }}
+      >
+        {t('tagging.analysis.confirmBody', { count: open })}
+      </ConfirmDialog>
     </div>
   )
 }

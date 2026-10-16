@@ -17,6 +17,8 @@ export interface WorkspaceParts {
   review: ReviewController
   /** A narrow screen (tablet, phone): only the review of suggestions, by touch. */
   narrow: boolean
+  /** Reloads the server's data under the queued changes (after the server changed rallies itself). */
+  reload: () => void
 }
 
 export const WorkspaceContext = createContext<WorkspaceParts | null>(null)

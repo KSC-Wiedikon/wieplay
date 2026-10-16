@@ -137,7 +137,8 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     analysis state from `GET /api/videos/{id}/analysis` (polled while queued or running),
     "Analyse" (`POST …/analyse`) when there is none or it failed, the F1 against the coach's own
     rallies, and "Rallies reviewed" (`POST …/rallies-reviewed`), which makes Nomal learn from the
-    game; it waits until no suggestion is open, and asks for it once all are answered.
+    game; with suggestions still open it asks first (the server accepts them as they are), and it
+    is offered prominently once every suggestion is answered.
 - **Clips, reels, comments, downloads** (M3; API calls and hooks in `src/lib/library.ts`):
   - A clip is a time range. On the video page "Clip in" / "Clip out" mark it at the playhead
     (`[`, `]`, then `C` in the tagging workspace; `Shift+C` still sets the selected tag's clip
