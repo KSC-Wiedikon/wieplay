@@ -336,11 +336,14 @@ def _on_thumbs(video: Video, result: ThumbsResult) -> None:
 
 
 def finish_if_done(db: Session, video: Video, now: datetime | None = None) -> bool:
-    """Mark the video ready once nothing is left to do and it has something to play."""
+    """Mark the video ready as soon as it can be watched: thumbnails and one rendition, with
+    nothing else left to do but further renditions. The small one comes first, so a backlog
+    of matches becomes playable one by one instead of all at the end; the master playlist
+    lists each rendition as it arrives."""
     active = db.scalar(
         select(func.count())
         .select_from(Job)
-        .where(Job.video_id == video.id, Job.status.in_(jobs.ACTIVE))
+        .where(Job.video_id == video.id, Job.status.in_(jobs.ACTIVE), Job.kind != "transcode")
     )
     if video.status != "processing" or active:
         return False
@@ -395,6 +398,8 @@ def on_failed(db: Session, video: Video | None, job: Job) -> None:
         return
     if video is None or video.status in {"deleted", "refused"}:
         return
+    if video.status == "ready" and job.kind == "transcode":
+        return  # a further rendition failed: the video still plays in the ones it has
     video.status = "failed"
     video.error = f"{job.kind}: {job.error or 'failed'}"[:2000]
     jobs.cancel_active(db, video.id, f"{job.kind} failed")

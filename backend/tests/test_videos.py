@@ -307,6 +307,51 @@ def test_lower_resolution_video_is_flagged_and_gets_only_540p(
     assert got["meets_standard"] is False and got["standard_issues"] == ["720p", "25fps"]
 
 
+def test_a_video_plays_after_its_first_rendition(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, as_: Any
+) -> None:
+    """A backlog of matches becomes playable one by one: the small rendition makes a video
+    ready, 1080p joins the master playlist later, and a failed 1080p leaves it playable."""
+    coach = club["coach"]
+    w = worker_client(app, club["admin"], MEDIA_CAPS)
+    first = upload_all(coach, store, create_match(coach).json())
+    [ingest] = claim(w, MEDIA_CAPS)
+    w.post(f"/api/worker/jobs/{ingest['id']}/complete", json=ingest_result(ingest))
+    done: list[str] = []
+    while (got := coach.get(f"/api/videos/{first['id']}").json())["status"] != "ready":
+        [job] = claim(w, MEDIA_CAPS)
+        body = transcode_result(job) if job["kind"] == "transcode" else THUMBS
+        assert w.post(f"/api/worker/jobs/{job['id']}/complete", json=body).status_code == 204
+        done.append(job["params"].get("rendition", {}).get("name", job["kind"]))
+    assert done == ["thumbs", "540p"]
+    assert [r["name"] for r in got["renditions"]] == ["540p"] and got["has_thumbs"] is True
+    master = as_("player-h3").get(f"/api/media/{first['id']}/master.m3u8").text
+    assert "540p/index.m3u8" in master and "1080p" not in master
+
+    [hd] = claim(w, MEDIA_CAPS)
+    assert hd["params"]["rendition"]["name"] == "1080p"
+    assert (
+        w.post(f"/api/worker/jobs/{hd['id']}/complete", json=transcode_result(hd)).status_code
+        == 204
+    )
+    got = coach.get(f"/api/videos/{first['id']}").json()
+    assert got["status"] == "ready" and [r["name"] for r in got["renditions"]] == ["1080p", "540p"]
+    assert "1080p/index.m3u8" in as_("player-h3").get(f"/api/media/{first['id']}/master.m3u8").text
+
+    second = upload_all(coach, store, create_match(coach).json())
+    [ingest] = claim(w, MEDIA_CAPS)
+    w.post(f"/api/worker/jobs/{ingest['id']}/complete", json=ingest_result(ingest))
+    for _ in range(2):  # thumbs, 540p
+        [job] = claim(w, MEDIA_CAPS)
+        body = transcode_result(job) if job["kind"] == "transcode" else THUMBS
+        w.post(f"/api/worker/jobs/{job['id']}/complete", json=body)
+    [hd] = claim(w, MEDIA_CAPS)
+    failed = w.post(f"/api/worker/jobs/{hd['id']}/fail", json={"error": "gpu", "retryable": False})
+    assert failed.status_code == 204
+    got = coach.get(f"/api/videos/{second['id']}").json()
+    assert got["status"] == "ready" and [r["name"] for r in got["renditions"]] == ["540p"]
+
+
 def test_bad_results_and_expired_leases_fail_the_video(
     app: FastAPI, club: dict[str, TestClient], store: FakeStore, db_engine: Engine
 ) -> None:
