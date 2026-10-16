@@ -276,9 +276,10 @@ def queue_actions(
 
 
 def after_trajectory(db: Session, video: Video | None, job: Job) -> None:
-    """A new ball track (and maybe a court): the actions follow."""
-    if video is not None and job.kind == "trajectory" and job.status == "succeeded":
-        queue_actions(db, video, reason="trajectory")
+    """A new ball track, or a court found (its floor positions): the actions follow (a job
+    still queued is reused)."""
+    if video is not None and job.kind in ("trajectory", "court") and job.status == "succeeded":
+        queue_actions(db, video, reason=job.kind)
 
 
 def after_scoring(db: Session, video: Video, reason: str) -> None:

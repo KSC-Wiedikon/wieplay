@@ -1425,7 +1425,7 @@ proposes the shot type.
 ### 10.4a Suggested actions (volleyball)
 
 **Built 17.10.2026** (`nomal/ml/actions.py`, `nomal/core/actions.py`, the `actions` and
-`train_actions` jobs; migration `0009`). Per rally (a proposal or a coach's), Nomal suggests
+`train_actions` jobs; migration `0010`). Per rally (a proposal or a coach's), Nomal suggests
 the serve, receptions, sets, attacks, blocks, digs and freeballs at the ball's contacts, as
 tags with `source='model'`, `review='unreviewed'`, a `confidence` and their `model_run_id`.
 Each one carries what the player attribution (§10.5) needs to attach a player later: the

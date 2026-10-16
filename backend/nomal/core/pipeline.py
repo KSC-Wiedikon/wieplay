@@ -374,6 +374,7 @@ def complete(
         return
     if job.kind == "court":
         calibration.complete_court(db, video, job, payload)
+        actions.after_trajectory(db, video, job)  # the actions' floor positions follow
         return
     if job.kind in calibration.KINDS:
         calibration.complete(db, video, job, payload)

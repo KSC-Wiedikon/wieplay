@@ -181,7 +181,7 @@ an `actions` job (seconds, same `analyse` capability and lane) follows every tra
 and, 90 s later, every scoring a coach causes (sets, serve calls, rallies done). It reads the
 video's signals and asks the API for the rest: the rallies with their servers, winners and
 sides, the court (the coach's calibration, or the court finder's when confident), the current
-model. Deploy the API first (migration `0009`), then the worker. Videos analysed before:
+model. Deploy the API first (migration `0010`), then the worker. Videos analysed before:
 
 ```bash
 python -m nomal.cli actions --all-ready --dry-run
