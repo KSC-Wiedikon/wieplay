@@ -127,6 +127,7 @@ KNOWN_CAPS = frozenset(
     {
         "ingest",
         "import",
+        "analyse",
         "inbox",
         "transcode",
         "thumbs",

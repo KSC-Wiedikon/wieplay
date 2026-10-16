@@ -13,7 +13,18 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from nomal import __version__
-from nomal.api import admin, auth, library, media, stats, tagging, teams, videos, worker
+from nomal.api import (
+    admin,
+    analysis,
+    auth,
+    library,
+    media,
+    stats,
+    tagging,
+    teams,
+    videos,
+    worker,
+)
 from nomal.core.config import Settings, get_settings
 from nomal.core.db import make_engine, make_sessionmaker
 from nomal.core.storage import ObjectStore, make_store
@@ -138,6 +149,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tagging.router)
     app.include_router(library.router)
     app.include_router(stats.router)
+    app.include_router(analysis.router)
 
     if settings.web_dist:
         _mount_web(app, Path(settings.web_dist))

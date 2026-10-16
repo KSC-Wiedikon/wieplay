@@ -306,14 +306,45 @@ def upsert_segment(
     if row is None:
         row = Segment(id=item.id, video_id=video.id, version=0, created_by=actor, source="manual")
         db.add(row)
+    review = _model_review(row, item)
     row.kind, row.start_ms, row.end_ms = item.kind, item.start_ms, item.end_ms
-    row.won_by, row.review = item.won_by, item.review
+    row.won_by, row.review = item.won_by, review
     _stamp(row, item.deleted, now)
     after = _snapshot(row, SEGMENT_FIELDS)
     if before != after:
         row.updated_by = actor
     _bump(row, before, after)
     return row
+
+
+def _model_review(row: Segment, item: SegmentIn) -> str:
+    """Review state of a model's proposal after a person's change (PLAN §11: corrections are
+    data; the revision tables keep before and after), also when the client does not say:
+
+    - accept: the client sends "confirmed" and changes nothing else → confirmed;
+    - edit: a boundary, the kind or the winner changes → corrected (also when sent with
+      "confirmed": the proposal was not right as it was);
+    - reject: a delete → rejected, kept as a soft-deleted hard negative; undoing it makes
+      the proposal open again.
+
+    Manual and imported segments keep whatever the client sends."""
+    if row.source != "model":
+        return item.review
+    if item.deleted:
+        return "rejected"
+    if row.deleted_at is not None and item.review in ("unreviewed", "rejected"):
+        return "unreviewed"  # undo of a rejection
+    edited = (row.kind, row.start_ms, row.end_ms, row.won_by) != (
+        item.kind,
+        item.start_ms,
+        item.end_ms,
+        item.won_by,
+    )
+    if edited and item.review in ("unreviewed", "confirmed"):
+        return "corrected"
+    if item.review == "unreviewed":
+        return row.review  # a client that does not know about reviews changes nothing
+    return item.review
 
 
 def upsert_period(db: Session, video: Video, item: PeriodIn, actor: int, now: datetime) -> Period:

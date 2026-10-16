@@ -69,22 +69,26 @@ def claim(
     max_jobs: int,
     lease: timedelta,
     now: datetime | None = None,
+    *,
+    kinds: Sequence[str] | None = None,
 ) -> list[Job]:
-    """Lease up to `max_jobs` runnable jobs for this worker. Commits."""
+    """Lease up to `max_jobs` runnable jobs for this worker (only `kinds`, when given).
+    Commits."""
     now = now or datetime.now(UTC)
     usable = sorted(set(caps) & set(worker.caps))
     dep = aliased(Job)
     blocked = exists().where(dep.id == any_(Job.depends_on), dep.status != "succeeded")
+    query = select(Job).where(
+        Job.status == "queued",
+        or_(Job.not_before.is_(None), Job.not_before <= now),
+        Job.required_caps.contained_by(usable),
+        ~blocked,
+    )
+    if kinds is not None:
+        query = query.where(Job.kind.in_(list(kinds)))
     jobs = list(
         db.scalars(
-            select(Job)
-            .where(
-                Job.status == "queued",
-                or_(Job.not_before.is_(None), Job.not_before <= now),
-                Job.required_caps.contained_by(usable),
-                ~blocked,
-            )
-            .order_by(Job.priority.desc(), Job.created_at)
+            query.order_by(Job.priority.desc(), Job.created_at)
             .limit(max_jobs)
             .with_for_update(skip_locked=True, of=Job)
         )
