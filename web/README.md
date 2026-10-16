@@ -139,6 +139,16 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     watermarked export; the rules are shown once per device. `/downloads` lists them; the
     download is a plain link to `/api/exports/{id}/download`, which redirects to a 5-minute
     signed URL.
+- **Stats** (M3b, volleyball; `src/lib/stats.ts`, `src/components/StatsTable.tsx`): the server
+  computes the box score (`GET /api/videos/{id}/stats`, `/api/teams/{id}/stats`). Each number's
+  moments are the tags matching its row's `filter`, its column's `codes` and `grades` and the
+  set; `statTags` mirrors the server's counting. On the video page (`VideoStats.tsx`, below the
+  player and the lists) a number plays its moments one after another in the player, and team
+  numbers play their rallies; on the team page (`SeasonStats.tsx`, loaded on demand) a number
+  opens the reel builder with that query (`?codes=A&grades=%23,none&side=them`; `none` is an
+  ungraded tag). The name column is sticky, the table scrolls sideways inside its card on
+  phones, percentages are de-CH (`33.3%`), "–" means no attempts, and the CSV is a plain link
+  to `…/stats.csv?lang=en|de`.
 - Text is English first, in sentence case. German strings are in `src/i18n/de.ts` (Swiss
   spelling, informal "du"); the type of `de` makes both files keep the same keys. The strings
   of the pages loaded on demand (video page and tagging: `video.*.ts`; clips, reels,

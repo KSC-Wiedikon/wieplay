@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react'
+import { lazy, Suspense, useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 import { SportBadge } from '../components/Badge'
@@ -17,6 +17,9 @@ import { sportOf, useSportAccent } from '../lib/sport'
 import type { Game } from '../lib/types'
 import { NotFoundPage } from './NotFoundPage'
 import { FilmingSection, VideosSection } from './TeamSections'
+
+// The season's numbers are a wide table with strings of their own: loaded when shown.
+const SeasonStats = lazy(() => import('./SeasonStats').then((m) => ({ default: m.SeasonStats })))
 
 export function TeamPage() {
   const { id } = useParams()
@@ -60,6 +63,11 @@ function TeamView({ teamId }: { teamId: number }) {
 
       <VideosSection team={team.data} />
       {team.data.rel.includes('player') && <HighlightsSection teamId={teamId} />}
+      {sport === 'volleyball' && (
+        <Suspense fallback={<Spinner />}>
+          <SeasonStats team={team.data} />
+        </Suspense>
+      )}
 
       {/* Wide screens: what's coming on the left, what was played on the right. */}
       <div className="grid gap-8 sm:gap-10 xl:grid-cols-2 xl:items-start">

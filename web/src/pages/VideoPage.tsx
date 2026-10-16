@@ -23,6 +23,7 @@ import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { UploadProgress } from '../components/UploadProgress'
 import { VideoStatusBadge } from '../components/VideoBadges'
 import { VideoPlayer } from '../components/VideoPlayer'
+import { VIDEO_STATS_ID, VideoStats } from '../components/VideoStats'
 import { ApiError, blockersOf } from '../lib/api'
 import { clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
 import { commentMoments } from '../lib/comments'
@@ -33,6 +34,7 @@ import { Playhead } from '../lib/playhead'
 import { useDeleteVideo, useMe, useTagging, useVideo, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
+import type { StatPlay } from '../lib/stats'
 import { useRangePlayback } from '../lib/useRangePlayback'
 import { useToast } from '../lib/toast'
 import type { Clip, ImportedFrom, Video } from '../lib/types'
@@ -235,6 +237,8 @@ function Ready({ video }: { video: Video }) {
   const [element, setElement] = useState<HTMLVideoElement | null>(null)
   const [playhead] = useState(() => new Playhead())
   const [queue, setQueue] = useState<RangeQueue<PlayItem> | null>(null)
+  // The playing moments came from a number in the stats: offer the way back to them.
+  const [fromStats, setFromStats] = useState(false)
   const [marks, setMarks] = useState<{ in: number | null; out: number | null }>({ in: null, out: null })
   const [draft, setDraft] = useState<ClipDraft | null>(null)
   useEffect(() => {
@@ -292,6 +296,15 @@ function Ready({ video }: { video: Video }) {
     element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
   }
 
+  const scrollToStats = () => document.getElementById(VIDEO_STATS_ID)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+
+  const playStats = (plays: StatPlay[]) => {
+    if (plays.length === 0) return
+    setFromStats(true)
+    play(plays, 0)
+    element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }
+
   const saveMarks = () => {
     const range = clipRange(marks.in, marks.out, playhead.getState().t_ms, video.duration_ms)
     if (!range) return
@@ -307,117 +320,131 @@ function Ready({ video }: { video: Video }) {
   }
 
   return (
-    // Wide screens: the player and its tools on the left, rallies, clips and comments beside it.
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_34rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_38rem]">
-      <div className="flex min-w-0 flex-col gap-3">
-        <VideoPlayer video={video} videoRef={setElement} />
-        {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
-          <MomentsStrip
-            duration_ms={duration}
-            ranges={(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' }))}
-            marks={commentMoments(comments.data ?? [])}
-            playhead={playhead}
-            onSeek={(ms) => playhead.seek(ms)}
-          />
-        ) : null}
-        {current && (
-          <p className="flex flex-wrap items-center gap-2 text-sm" role="status">
-            <span className="font-semibold">{t('clips.nowPlaying', { title: current.label })}</span>
-            {queue && queue.ranges.length > 1 && (
-              <span className="text-muted tabular-nums">{t('clips.queuePosition', { n: queue.index + 1, total: queue.ranges.length })}</span>
-            )}
-            <Button
-              variant="ghost"
-              onClick={() => {
-                element?.pause()
-                setQueue(null)
-              }}
-            >
-              {t('clips.stop')}
-            </Button>
-          </p>
-        )}
-        {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
-        <ClipBar
-          playhead={playhead}
-          clipIn={marks.in}
-          clipOut={marks.out}
-          onMark={(which, t_ms) => setMarks((m) => ({ ...m, [which]: t_ms }))}
-          onClear={() => setMarks({ in: null, out: null })}
-          onSave={saveMarks}
-        />
-        {showSummary && (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-semibold tabular-nums">
-              {/* Basketball marks no rallies. */}
-              {data.sport === 'basketball'
-                ? t('tagging.tagCount', { count: tagCount })
-                : `${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
-            </p>
-            {data.can_tag && (
-              // Tagging is a keyboard task: desktop only (PLAN §9.1).
-              <div className="hidden lg:block">
-                <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
-                  {t('tagging.tagThis')}
-                </ButtonLink>
-              </div>
-            )}
-          </div>
-        )}
-        {video.meets_standard === false && (
-          <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
-            <p className="flex flex-wrap items-center gap-2 font-semibold">
-              <AlertIcon className="size-4" />
-              {t('video.belowStandard')}
-              {video.standard_issues.map((issue) => (
-                <Badge key={issue}>{issue}</Badge>
-              ))}
-            </p>
-            <p className="text-muted">{t('video.belowStandardNote')}</p>
-          </div>
-        )}
-      </div>
-      <div className="flex min-w-0 flex-col gap-6 xl:gap-8">
-        {data && rallyCount > 0 && (
-          <div>
-            <RallyPanel
-              tagging={data}
-              duration_ms={video.duration_ms}
-              element={element}
+    <>
+      {/* Wide screens: the player and its tools on the left, rallies, clips and comments beside it. */}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_34rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_38rem]">
+        <div className="flex min-w-0 flex-col gap-3">
+          <VideoPlayer video={video} videoRef={setElement} />
+          {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
+            <MomentsStrip
+              duration_ms={duration}
+              ranges={(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' }))}
+              marks={commentMoments(comments.data ?? [])}
               playhead={playhead}
-              suspended={current !== null}
-              action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
+              onSeek={(ms) => playhead.seek(ms)}
+            />
+          ) : null}
+          {current && (
+            <p className="flex flex-wrap items-center gap-2 text-sm" role="status">
+              <span className="font-semibold">{t('clips.nowPlaying', { title: current.label })}</span>
+              {queue && queue.ranges.length > 1 && (
+                <span className="text-muted tabular-nums">{t('clips.queuePosition', { n: queue.index + 1, total: queue.ranges.length })}</span>
+              )}
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  element?.pause()
+                  setQueue(null)
+                }}
+              >
+                {t('clips.stop')}
+              </Button>
+              {fromStats && (
+                <button type="button" onClick={scrollToStats} className="min-h-11 cursor-pointer px-2 font-semibold link sm:min-h-9">
+                  {t('stats.backToStats')}
+                </button>
+              )}
+            </p>
+          )}
+          {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
+          <ClipBar
+            playhead={playhead}
+            clipIn={marks.in}
+            clipOut={marks.out}
+            onMark={(which, t_ms) => setMarks((m) => ({ ...m, [which]: t_ms }))}
+            onClear={() => setMarks({ in: null, out: null })}
+            onSave={saveMarks}
+          />
+          {showSummary && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="flex flex-wrap items-center gap-x-3 text-sm font-semibold tabular-nums">
+                {/* Basketball marks no rallies. */}
+                {data.sport === 'basketball'
+                  ? t('tagging.tagCount', { count: tagCount })
+                  : `${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
+                {video.sport === 'volleyball' && tagCount > 0 && (
+                  <button type="button" onClick={scrollToStats} className="min-h-11 cursor-pointer link sm:min-h-9">
+                    {t('stats.jump')}
+                  </button>
+                )}
+              </p>
+              {data.can_tag && (
+                // Tagging is a keyboard task: desktop only (PLAN §9.1).
+                <div className="hidden lg:block">
+                  <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
+                    {t('tagging.tagThis')}
+                  </ButtonLink>
+                </div>
+              )}
+            </div>
+          )}
+          {video.meets_standard === false && (
+            <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
+              <p className="flex flex-wrap items-center gap-2 font-semibold">
+                <AlertIcon className="size-4" />
+                {t('video.belowStandard')}
+                {video.standard_issues.map((issue) => (
+                  <Badge key={issue}>{issue}</Badge>
+                ))}
+              </p>
+              <p className="text-muted">{t('video.belowStandardNote')}</p>
+            </div>
+          )}
+        </div>
+        <div className="flex min-w-0 flex-col gap-6 xl:gap-8">
+          {data && rallyCount > 0 && (
+            <div>
+              <RallyPanel
+                tagging={data}
+                duration_ms={video.duration_ms}
+                element={element}
+                playhead={playhead}
+                suspended={current !== null}
+                action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
+              />
+            </div>
+          )}
+          <div>
+            <ClipsSection
+              clips={clips}
+              canManage={video.can_delete}
+              canExport={video.can_export}
+              playingId={current?.key ?? null}
+              onPlay={(list, index, all) => {
+                setFromStats(false)
+                const items = list.map(clipItem)
+                if (all) play(items, index)
+                else play(items.slice(index, index + 1), 0)
+              }}
+              onEdit={(clip) => setDraft(draftOf(clip))}
             />
           </div>
-        )}
-        <div>
-          <ClipsSection
-            clips={clips}
-            canManage={video.can_delete}
-            canExport={video.can_export}
-            playingId={current?.key ?? null}
-            onPlay={(list, index, all) => {
-              const items = list.map(clipItem)
-              if (all) play(items, index)
-              else play(items.slice(index, index + 1), 0)
-            }}
-            onEdit={(clip) => setDraft(draftOf(clip))}
-          />
+          <div>
+            <CommentsSection videoId={video.id} meId={me.data?.member.id ?? 0} playhead={playhead} onSeek={seekTo} />
+          </div>
         </div>
-        <div>
-          <CommentsSection videoId={video.id} meId={me.data?.member.id ?? 0} playhead={playhead} onSeek={seekTo} />
-        </div>
+        <ClipDialog
+          draft={draft}
+          canShare={video.can_share}
+          duration_ms={video.duration_ms}
+          onClose={() => setDraft(null)}
+          onSaved={(clip) => {
+            if (clip.id && draft?.id === null) setMarks({ in: null, out: null })
+          }}
+        />
       </div>
-      <ClipDialog
-        draft={draft}
-        canShare={video.can_share}
-        duration_ms={video.duration_ms}
-        onClose={() => setDraft(null)}
-        onSaved={(clip) => {
-          if (clip.id && draft?.id === null) setMarks({ in: null, out: null })
-        }}
-      />
-    </div>
+      {video.sport === 'volleyball' && <VideoStats video={video} tagging={data} onPlay={playStats} />}
+    </>
   )
 }
 
