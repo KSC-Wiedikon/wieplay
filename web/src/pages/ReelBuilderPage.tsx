@@ -30,7 +30,7 @@ import { useMe, useTeam, useTeams, useTeamSeasons } from '../lib/queries'
 import { reelTimeline } from '../lib/reelPlayer'
 import { compareTeams } from '../lib/teams'
 import { useToast } from '../lib/toast'
-import type { Clip, Piece, Reel, ReelIn, ReelQuery, Side, Taxonomy, VideoKind, Visibility } from '../lib/types'
+import type { Clip, Piece, Reel, ReelIn, ReelQuery, Side, Taxonomy, Visibility } from '../lib/types'
 import { isUuid } from '../lib/video'
 
 const LIMIT = 200
@@ -78,7 +78,6 @@ export function ReelBuilderPage() {
         codes: [],
         grades: [],
         side: null,
-        kind: null,
       }}
     />
   )
@@ -92,7 +91,6 @@ interface Initial {
   codes: string[]
   grades: string[]
   side: Side | null
-  kind: VideoKind | null
 }
 
 function SmartEdit({ reel }: { reel: Reel }) {
@@ -109,7 +107,6 @@ function SmartEdit({ reel }: { reel: Reel }) {
         codes: query.codes ?? [],
         grades: query.grades ?? [],
         side: query.side ?? null,
-        kind: query.kind ?? null,
       }}
     />
   )
@@ -160,7 +157,6 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   const [side, setSide] = useState<Side | null>(initial.side)
   const [codes, setCodes] = useState<string[]>(initial.codes)
   const [grades, setGrades] = useState<string[]>(initial.grades)
-  const [kind, setKind] = useState<VideoKind | null>(initial.kind)
   const taxonomy = useTaxonomy(detail?.sport ?? null)
   const { people } = useTeamPeople(detail)
   const meId = me.data?.member.id
@@ -184,7 +180,6 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
         ...(member !== null ? { member_id: member } : side ? { side } : {}),
         ...(codes.length > 0 ? { codes } : {}),
         ...(grades.length > 0 ? { grades } : {}),
-        ...(kind ? { kind } : {}),
         limit: LIMIT,
       }
     : null
@@ -271,13 +266,6 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
                 </Select>
               </Field>
             )}
-            <Field label={t('reels.builder.kind')} htmlFor={`${id}-kind`}>
-              <Select id={`${id}-kind`} value={kind ?? ''} onChange={(e) => setKind(e.target.value ? (e.target.value as VideoKind) : null)}>
-                <option value="">{t('reels.builder.allKinds')}</option>
-                <option value="match">{t('video.kind.match')}</option>
-                <option value="training">{t('video.kind.training')}</option>
-              </Select>
-            </Field>
           </div>
           {taxonomy.data && (
             <>

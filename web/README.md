@@ -119,8 +119,6 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     watermarked export; the rules are shown once per device. `/downloads` lists them; the
     download is a plain link to `/api/exports/{id}/download`, which redirects to a 5-minute
     signed URL.
-  - Trainings: drills are segments with a label, marked in the workspace and listed on the
-    video page.
 - Text is English first, in sentence case. German strings are in `src/i18n/de.ts` (Swiss
   spelling, informal "du"); the type of `de` makes both files keep the same keys. The strings
   of the pages loaded on demand (video page and tagging: `video.*.ts`; clips, reels,

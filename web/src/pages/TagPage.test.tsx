@@ -64,7 +64,7 @@ function fakeServer(initial: Tagging) {
     for (const s of input.segments) {
       const version = (segments.get(s.id)?.version ?? 0) + 1
       segments.set(s.id, {
-        id: s.id, kind: s.kind, label: s.label ?? null, start_ms: s.start_ms, end_ms: s.end_ms, period_id: null, serving: null, won_by: s.won_by ?? null,
+        id: s.id, kind: s.kind, start_ms: s.start_ms, end_ms: s.end_ms, period_id: null, serving: null, won_by: s.won_by ?? null,
         score_us_after: null, score_them_after: null, score_source: null, source: 'manual', review: 'unreviewed', version, deleted_at: stamp(s.deleted),
       } satisfies Segment)
     }
@@ -615,36 +615,10 @@ describe('TagPage', () => {
     })
   })
 
-  it('marks a drill in a training: start and end at the playhead, with a name', async () => {
-    const { server } = show(bundle(), { videoPatch: { kind: 'training', game_id: null, training_id: 601 } })
-    const player = await ready()
-    const drills = screen.getByRole('region', { name: 'Drills' })
-    expect(within(drills).getByText('No drills marked yet.')).toBeInTheDocument()
-    player.currentTime = 60
-    fireEvent.click(within(drills).getByRole('button', { name: 'Drill starts here' }))
-    expect(within(drills).getByText('Started at 1:00.0')).toBeInTheDocument()
-    fireEvent.change(within(drills).getByLabelText('Name of the drill'), { target: { value: 'Serve receive 3v3' } })
-    player.currentTime = 300
-    fireEvent.click(within(drills).getByRole('button', { name: 'Drill ends here' }))
-    expect(screen.getByText('Drill saved: Serve receive 3v3.')).toBeInTheDocument()
-    expect(within(drills).getByRole('button', { name: 'Go to Serve receive 3v3' })).toBeInTheDocument()
-    expect(within(drills).getByText('1:00–5:00')).toBeInTheDocument()
-
-    await waitFor(() => expect(server.posts).toHaveLength(1), { timeout: 3000 })
-    expect(server.posts[0]?.segments).toEqual([
-      expect.objectContaining({ kind: 'drill', label: 'Serve receive 3v3', start_ms: 60_000, end_ms: 300_000, base_version: 0 }),
-    ])
-    // Its name can be changed below the timeline.
-    fireEvent.click(within(drills).getByRole('button', { name: 'Go to Serve receive 3v3' }))
-    const panel = screen.getByRole('region', { name: 'Drill' })
-    fireEvent.change(within(panel).getByLabelText('Name'), { target: { value: 'Serve receive 4v4' } })
-    fireEvent.blur(within(panel).getByLabelText('Name'))
-    expect(within(drills).getByRole('button', { name: 'Go to Serve receive 4v4' })).toBeInTheDocument()
-  })
-
-  it('has no drills in matches', async () => {
-    show()
+  it('has no drills, not even on a training video from before matches only', async () => {
+    show(bundle(), { videoPatch: { kind: 'training', game_id: null } })
     await ready()
     expect(screen.queryByRole('region', { name: 'Drills' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Drill/ })).not.toBeInTheDocument()
   })
 })

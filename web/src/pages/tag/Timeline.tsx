@@ -1,7 +1,7 @@
 import { useId, useMemo, useState, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
-import { Select, TextInput } from '../../components/Field'
+import { Select } from '../../components/Field'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
@@ -22,8 +22,6 @@ function segmentClass(kind: SegmentKind): string {
       return 'bg-danger/60'
     case 'set_break':
       return 'bg-muted/70'
-    case 'drill':
-      return 'bg-link/35'
     default:
       return 'bg-muted/40'
   }
@@ -226,9 +224,7 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
             ? s.score_us_after !== null && s.score_them_after !== null
               ? `${s.score_us_after}:${s.score_them_after}`
               : ''
-            : s.kind === 'drill' && s.label
-              ? s.label
-              : t(`tagging.segment.kind.${s.kind}`)}
+            : t(`tagging.segment.kind.${s.kind}`)}
         </div>
       ))}
       {open && now > open.start_ms && (
@@ -265,7 +261,6 @@ function TagMarker({ tag, left, selected, onClick }: { tag: Tag; left: string; s
 
 function Legend() {
   const { t } = useTranslation()
-  const { video } = useWorkspace()
   const items: [string, string][] = [
     ['bg-accent', t('tagging.timeline.legend.rally')],
     ['bg-sunken ring-1 ring-hairline', t('tagging.timeline.legend.dead')],
@@ -273,7 +268,6 @@ function Legend() {
     ['bg-muted/70', t('tagging.segment.kind.set_break')],
     ['bg-fg', t('tagging.timeline.legend.tagUs')],
     ['bg-muted', t('tagging.timeline.legend.tagThem')],
-    ...(video.kind === 'training' ? [['bg-link/35', t('tagging.timeline.legend.drill')] as [string, string]] : []),
     ['bg-link rotate-45 scale-75', t('tagging.timeline.legend.comment')],
   ]
   return (
@@ -288,7 +282,7 @@ function Legend() {
   )
 }
 
-const KINDS: SegmentKind[] = ['rally', 'timeout', 'set_break', 'warmup', 'stoppage', 'other_dead', 'drill']
+const KINDS: SegmentKind[] = ['rally', 'timeout', 'set_break', 'warmup', 'stoppage', 'other_dead']
 
 /** The selected rally, timeout or break: kind, start, end, point; nudge or set to the playhead. */
 export function SegmentPanel({ id }: { id: string }) {
@@ -342,25 +336,6 @@ export function SegmentPanel({ id }: { id: string }) {
             </span>
           </div>
         ))}
-        {segment.kind === 'drill' && (
-          <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${htmlId}-label`}>
-            {t('tagging.segment.label')}
-            <TextInput
-              id={`${htmlId}-label`}
-              inline
-              className="w-56"
-              maxLength={80}
-              defaultValue={segment.label ?? ''}
-              onBlur={(e) => {
-                const label = e.target.value.trim()
-                if (label !== (segment.label ?? '')) update({ label: label || null })
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-            />
-          </label>
-        )}
         {segment.kind === 'rally' && (
           <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor={`${htmlId}-won`}>
             {t('tagging.segment.point')}

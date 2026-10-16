@@ -26,7 +26,6 @@ import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
 import { WorkspaceContext, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
 import { Cheatsheet } from './Cheatsheet'
-import { DrillPanel } from './DrillPanel'
 import { TagController } from './controller'
 import { EntryPanel } from './EntryPanel'
 import { EventTable } from './EventTable'
@@ -203,7 +202,6 @@ function DeskLayout({
         <aside className="flex min-w-80 flex-[1_0_22rem] flex-col gap-2" aria-label={t('tagging.panel')}>
           <StatePanel />
           <EntryPanel />
-          {video.kind === 'training' && <DrillPanel />}
           <RosterPanel />
         </aside>
       </div>
@@ -343,7 +341,7 @@ function SyncStatus() {
 
 function describe(t: TFunction, item: OutboxItem): string {
   if (item.kind === 'event') return formatEntry({ ...item.payload, number: item.payload.number ?? null })
-  if (item.kind === 'segment') return item.payload.label || t(`tagging.segment.kind.${item.payload.kind}`)
+  if (item.kind === 'segment') return t(`tagging.segment.kind.${item.payload.kind}`)
   return t('tagging.setNo', { no: item.payload.no })
 }
 

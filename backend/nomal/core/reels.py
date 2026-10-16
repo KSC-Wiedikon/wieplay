@@ -33,7 +33,6 @@ class ReelQuery(BaseModel):
     side: Literal["us", "them"] | None = None
     codes: list[str] = Field(default_factory=list, max_length=10)
     grades: list[str] = Field(default_factory=list, max_length=6)
-    kind: Literal["match", "training"] | None = None
     limit: int = Field(default=200, ge=1, le=500)
 
 
@@ -101,8 +100,6 @@ def evaluate(db: Session, visible_team_ids: set[int], query: ReelQuery) -> list[
         stmt = stmt.where(Event.code.in_(query.codes))
     if query.grades:
         stmt = stmt.where(Event.attributes["grade"].astext.in_(query.grades))
-    if query.kind:
-        stmt = stmt.where(Video.kind == query.kind)
     stmt = stmt.order_by(Video.recorded_on, Video.created_at, Event.t_ms).limit(query.limit)
     pieces = []
     for event, video in db.execute(stmt).all():

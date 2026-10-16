@@ -34,7 +34,7 @@ Review = Literal["unreviewed", "confirmed", "corrected", "rejected"]
 # A serve tag may sit slightly before the rally marker (the toss).
 SERVE_SLACK_MS = 2000
 SegmentKind = Literal[
-    "rally", "possession", "timeout", "set_break", "warmup", "stoppage", "other_dead", "drill"
+    "rally", "possession", "timeout", "set_break", "warmup", "stoppage", "other_dead"
 ]
 
 
@@ -72,7 +72,6 @@ class EventIn(_Change):
 
 class SegmentIn(_Change):
     kind: SegmentKind
-    label: str | None = Field(default=None, max_length=80)  # a drill's name
     start_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
     end_ms: int = Field(ge=0, le=MAX_MEDIA_MS)
     # Who served is derived (serve tag, previous winner, the set's first server).
@@ -185,7 +184,7 @@ EVENT_FIELDS = (
     "code", "t_ms", "frame", "time_precision", "side", "number", "attributes",
     "clip_pre_ms", "clip_post_ms", "note", "review",
 )  # fmt: skip
-SEGMENT_FIELDS = ("kind", "label", "start_ms", "end_ms", "won_by", "review")
+SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review")
 PERIOD_FIELDS = (
     "no", "start_ms", "end_ms", "start_us", "start_them", "first_serve",
     "our_court_side_at_start", "side_switch_at_score",
@@ -306,7 +305,6 @@ def upsert_segment(
         row = Segment(id=item.id, video_id=video.id, version=0, created_by=actor, source="manual")
         db.add(row)
     row.kind, row.start_ms, row.end_ms = item.kind, item.start_ms, item.end_ms
-    row.label = (item.label or "").strip() or None
     row.won_by, row.review = item.won_by, item.review
     _stamp(row, item.deleted, now)
     after = _snapshot(row, SEGMENT_FIELDS)

@@ -246,13 +246,13 @@ def test_a_failed_export_fails_alone(
     assert club["coach"].get(f"/api/videos/{tagged['id']}").json()["status"] == "ready"
 
 
-def test_drill_segments_carry_a_label(tagged: dict[str, Any], club: dict[str, TestClient]) -> None:
-    drill = {"id": str(uuid.uuid4()), "kind": "drill", "label": "Serve receive 6v6",
-             "start_ms": 40_000, "end_ms": 50_000}  # fmt: skip
+def test_no_drill_segments(tagged: dict[str, Any], club: dict[str, TestClient]) -> None:
+    """Matches only (16.10.2026): no trainings, so no drills to mark."""
+    drill = {"id": str(uuid.uuid4()), "kind": "drill", "start_ms": 40_000, "end_ms": 50_000}
     r = club["coach"].post(f"/api/videos/{tagged['id']}/changes", json={"segments": [drill]})
-    assert r.status_code == 200
-    labels = [s["label"] for s in r.json()["segments"] if s["kind"] == "drill"]
-    assert labels == ["Serve receive 6v6"]
+    assert r.status_code == 422
+    segments = club["coach"].get(f"/api/videos/{tagged['id']}/tagging").json()["segments"]
+    assert segments and all(s["kind"] != "drill" and "label" not in s for s in segments)
 
 
 def test_reel_pieces_name_the_player_and_the_score(tagged: dict[str, Any], as_: Any) -> None:

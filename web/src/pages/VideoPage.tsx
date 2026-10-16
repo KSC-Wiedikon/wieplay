@@ -1,6 +1,6 @@
 import '../i18n/pages'
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Badge } from '../components/Badge'
@@ -10,7 +10,6 @@ import { ClipDialog } from '../components/ClipDialog'
 import { ClipBar, ClipsSection } from '../components/ClipsSection'
 import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { DrillsSection } from '../components/DrillsSection'
 import { ExportButton } from '../components/ExportButton'
 import { AlertIcon, CheckIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
@@ -23,7 +22,7 @@ import { UploadProgress } from '../components/UploadProgress'
 import { VideoStatusBadge } from '../components/VideoBadges'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { ApiError, blockersOf } from '../lib/api'
-import { byStart, clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
+import { clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
 import { commentMoments } from '../lib/comments'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
 import { formatClock } from '../lib/labels'
@@ -236,7 +235,7 @@ function Ready({ video }: { video: Video }) {
     return () => playhead.detach()
   }, [playhead, element])
 
-  // Clips and drills play from their start to their end, then stop or go on with the next one.
+  // Clips play from their start to their end, then stop or go on with the next one.
   const current = queue ? (queue.ranges[queue.index] ?? null) : null
   const play = useCallback(
     (ranges: readonly PlayItem[], index: number) => {
@@ -279,7 +278,6 @@ function Ready({ video }: { video: Video }) {
   const rallyCount = data?.segments.filter((s) => s.kind === 'rally').length ?? 0
   const tagCount = data?.events.length ?? 0
   const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
-  const drills = useMemo(() => byStart((data?.segments ?? []).filter((s) => s.kind === 'drill')), [data?.segments])
   const duration = video.duration_ms ?? playhead.getState().duration_ms
 
   const seekTo = (t_ms: number) => {
@@ -304,13 +302,10 @@ function Ready({ video }: { video: Video }) {
   return (
     <div className="flex flex-col gap-3">
       <VideoPlayer video={video} videoRef={setElement} />
-      {duration && ((clips.data?.length ?? 0) > 0 || drills.length > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
+      {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
         <MomentsStrip
           duration_ms={duration}
-          ranges={[
-            ...(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' })),
-            ...drills.map((d) => ({ id: d.id, start_ms: d.start_ms, end_ms: d.end_ms })),
-          ]}
+          ranges={(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' }))}
           marks={commentMoments(comments.data ?? [])}
           playhead={playhead}
           onSeek={(ms) => playhead.seek(ms)}
@@ -378,15 +373,6 @@ function Ready({ video }: { video: Video }) {
             playhead={playhead}
             suspended={current !== null}
             action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
-          />
-        </div>
-      )}
-      {video.kind === 'training' && drills.length > 0 && (
-        <div className="mt-3">
-          <DrillsSection
-            drills={drills}
-            playingId={current?.key ?? null}
-            onPlay={(drill) => play([{ key: drill.id, label: drill.label || t('drills.label'), start_ms: drill.start_ms, end_ms: drill.end_ms }], 0)}
           />
         </div>
       )}

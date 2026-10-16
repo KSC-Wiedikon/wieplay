@@ -31,7 +31,7 @@ interface RallyPanelProps {
   duration_ms: number | null
   element: HTMLVideoElement | null
   playhead: Playhead
-  /** While a clip or drill plays, skipping dead time waits. */
+  /** While a clip plays, skipping dead time waits. */
   suspended?: boolean
   /** Next to the switch, e.g. "Download as MP4" for coaches. */
   action?: ReactNode

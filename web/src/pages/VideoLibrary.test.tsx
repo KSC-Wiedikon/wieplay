@@ -1,4 +1,4 @@
-// The video page's clips, comments, downloads and drills (M3).
+// The video page's clips, comments and downloads (M3).
 
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -562,17 +562,5 @@ describe('downloads', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save clip' }))
     const dialog = screen.getByRole('dialog', { name: 'Save clip' })
     expect(within(dialog).queryByLabelText('The whole team')).not.toBeInTheDocument()
-  })
-})
-
-describe('drills', () => {
-  it('lists the drills of a training and plays one', async () => {
-    const drill = { ...rally({ start_ms: 20_000, end_ms: 80_000 }), kind: 'drill' as const, label: 'Serve receive 3v3' }
-    show({ video: video({ kind: 'training', game_id: null, training_id: 601 }), tagging: bundle({ can_tag: false, segments: [drill] }) })
-    const table = await screen.findByRole('table', { name: 'Drills' })
-    expect(within(table).getByText('0:20–1:20')).toBeInTheDocument()
-    fireEvent.click(within(table).getByRole('button', { name: 'Play Serve receive 3v3' }))
-    expect(player().currentTime).toBe(20)
-    expect(screen.getByText('Playing Serve receive 3v3')).toBeInTheDocument()
   })
 })

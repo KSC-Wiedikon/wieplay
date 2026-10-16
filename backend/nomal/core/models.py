@@ -491,9 +491,10 @@ class Segment(Base):
         ForeignKey("video.id", ondelete="CASCADE"), index=True
     )
     period_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
-    # rally | possession | timeout | set_break | warmup | stoppage | other_dead | drill
+    # rally | possession | timeout | set_break | warmup | stoppage | other_dead
     kind: Mapped[str] = mapped_column(String(16))
-    label: Mapped[str | None] = mapped_column(String(80))  # a drill's name in a training
+    # Unused since 16.10.2026 (matches only: no drills); dropped with the training tables later.
+    label: Mapped[str | None] = mapped_column(String(80))
     start_ms: Mapped[int] = mapped_column(BigInteger)
     end_ms: Mapped[int] = mapped_column(BigInteger)
     serving: Mapped[str | None] = mapped_column(String(8))

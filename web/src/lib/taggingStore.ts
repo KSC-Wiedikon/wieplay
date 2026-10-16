@@ -48,7 +48,6 @@ export function segmentToIn(segment: Segment): SegmentIn {
     id: segment.id,
     base_version: segment.version,
     kind: segment.kind,
-    ...(segment.label != null ? { label: segment.label } : {}),
     start_ms: segment.start_ms,
     end_ms: segment.end_ms,
     won_by: segment.won_by,
@@ -105,7 +104,6 @@ function segmentFromIn(p: SegmentIn, prev: Segment | undefined): Segment {
   return {
     id: p.id,
     kind: p.kind,
-    label: p.label ?? null,
     start_ms: p.start_ms,
     end_ms: p.end_ms,
     period_id: prev?.period_id ?? null,

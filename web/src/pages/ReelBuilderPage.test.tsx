@@ -99,10 +99,11 @@ describe('ReelBuilderPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Attack' }))
     expect(screen.getByRole('button', { name: 'Attack' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: '# Kill' }))
-    fireEvent.change(screen.getByLabelText('Videos'), { target: { value: 'match' } })
+    // Matches only (16.10.2026): no choice between matches and trainings.
+    expect(screen.queryByLabelText('Videos')).not.toBeInTheDocument()
 
     await waitFor(() =>
-      expect(previews.at(-1)).toEqual({ lineage_id: LINEAGE, season: '2026/27', member_id: 107, codes: ['A'], grades: ['#'], kind: 'match', limit: 200 }),
+      expect(previews.at(-1)).toEqual({ lineage_id: LINEAGE, season: '2026/27', member_id: 107, codes: ['A'], grades: ['#'], limit: 200 }),
     )
     expect(await screen.findByText('2 moments · 0:10')).toBeInTheDocument()
     const moments = screen.getByRole('table', { name: 'Moments' })
@@ -120,7 +121,7 @@ describe('ReelBuilderPage', () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       title: 'Luca Brunner · Attack · # Kill · 2026/27',
       kind: 'smart',
-      query: { lineage_id: LINEAGE, season: '2026/27', member_id: 107, codes: ['A'], grades: ['#'], kind: 'match', limit: 200 },
+      query: { lineage_id: LINEAGE, season: '2026/27', member_id: 107, codes: ['A'], grades: ['#'], limit: 200 },
       visibility: 'team',
       lineage_id: LINEAGE,
     })

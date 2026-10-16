@@ -32,9 +32,6 @@ export type NoticeKey =
   | 'clipSet'
   | 'clipOrder'
   | 'noClip'
-  | 'drillStarted'
-  | 'drillSaved'
-  | 'drillOrder'
   | 'snapped'
   | 'deleted'
 
@@ -66,8 +63,6 @@ export interface UiState {
   clipOut: number | null
   /** C was pressed: the clip to save (the dialog asks for its title). */
   clipRequest: ClipRequest | null
-  /** A drill being marked (trainings): its start. */
-  drillStart: number | null
   skip: boolean
   cheatsheet: boolean
   notice: Notice | null
@@ -82,7 +77,6 @@ const INITIAL: UiState = {
   clipIn: null,
   clipOut: null,
   clipRequest: null,
-  drillStart: null,
   skip: false,
   cheatsheet: false,
   notice: null,
@@ -485,31 +479,6 @@ export class TagController {
   /** The clip dialog closed; a saved clip clears the marks. */
   closeClip = (saved: boolean): void => {
     this.set(saved ? { clipRequest: null, clipIn: null, clipOut: null } : { clipRequest: null })
-  }
-
-  // Drills (trainings)
-
-  startDrill = (): void => {
-    const start_ms = this.now()
-    this.set({ drillStart: start_ms, notice: this.notify('drillStarted', { time: start_ms }) })
-  }
-
-  cancelDrill = (): void => this.set({ drillStart: null })
-
-  /** Ends the drill being marked at the playhead and saves it with its name. */
-  endDrill = (label: string): boolean => {
-    const start_ms = this.ui.drillStart
-    if (start_ms === null) return false
-    const end_ms = this.now()
-    if (end_ms <= start_ms) {
-      this.set({ notice: this.notify('drillOrder', undefined, { tone: 'error' }) })
-      return false
-    }
-    const name = label.trim().slice(0, 80)
-    const id = newId()
-    this.commit([{ kind: 'segment', payload: { id, base_version: 0, kind: 'drill', label: name || null, start_ms, end_ms } }])
-    this.set({ drillStart: null, notice: this.notify('drillSaved', { label: name }) })
-    return true
   }
 
   markClip = (which: 'in' | 'out'): void => {

@@ -7,7 +7,7 @@ import { PlayheadMark } from './RallyPanel'
 
 interface MomentsStripProps {
   duration_ms: number
-  /** Clips (and drills) as bands. */
+  /** Clips as bands. */
   ranges: readonly { id: string; start_ms: number; end_ms: number; shared?: boolean }[]
   /** Comments pinned to a moment, as markers. */
   marks: readonly { id: string; t_ms: number }[]

@@ -292,16 +292,7 @@ export interface ImportChannel {
 export type Side = 'us' | 'them'
 export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
 export type TimePrecision = 'live' | 'adjusted' | 'frame'
-export type SegmentKind =
-  | 'rally'
-  | 'possession'
-  | 'timeout'
-  | 'set_break'
-  | 'warmup'
-  | 'stoppage'
-  | 'other_dead'
-  /** A training drill, with a label (M3). */
-  | 'drill'
+export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
 
 export interface TaxonomySkill {
   /** One letter for volleyball (S R E A B D F). */
@@ -357,8 +348,6 @@ export interface Period {
 export interface Segment {
   id: string
   kind: SegmentKind
-  /** A drill's name (trainings); null for everything else. */
-  label?: string | null
   start_ms: number
   end_ms: number
   /** Computed by the server: the set this segment is in. */
@@ -448,8 +437,6 @@ export interface EventIn extends ChangeBase {
 /** Who served is always derived by the server. */
 export interface SegmentIn extends ChangeBase {
   kind: SegmentKind
-  /** A drill's name, at most 80 characters. */
-  label?: string | null
   start_ms: number
   end_ms: number
   won_by?: Side | null
@@ -554,7 +541,6 @@ export interface ReelQuery {
   side?: Side | null
   codes?: string[]
   grades?: string[]
-  kind?: VideoKind | null
   /** 1..500, default 200. */
   limit?: number
 }
