@@ -1226,9 +1226,13 @@ proposes the shot type.
 
 ### 10.4 Ball tracking
 
-- TrackNet-family heatmap model (TrackNetV3 or later; check licence) on 3-frame stacks,
-  fine-tuned on our footage on the Framework 16. Labels: a "click the ball" tool on sampled
-  frames (target 3–5 k frames across halls and lighting), plus negatives.
+- TrackNet-family heatmap model on 3-frame stacks at 30 fps, fine-tuned on our footage on the
+  Framework 16. **Baseline since spike S0: VballNet-Fast** (MIT, TrackNetV4-based, trained on
+  indoor volleyball from behind the back line), **WASB** (MIT) as a second opinion; both work
+  on our footage as downloaded ([S0 report](research/spike-s0-2026-10.md)). Labels: a "click
+  the ball" tool on sampled frames (target 3–5 k frames across halls and lighting), plus
+  negatives; first from the halls where S0 found the models weakest (distant or very wide
+  cameras).
 - Post-processing: outlier removal, gap interpolation, trajectory fitting; contact and bounce
   candidates from direction changes.
 - Runs only on live segments of the analysis copy.
@@ -1281,7 +1285,11 @@ at home and the GPU sees only the live part of the match:
 | **Total** | | **≈ 0.4–0.6 L4-h**, design cap **0.8 L4-h** |
 
 Spike S0 (§17) measures the real number on the Framework 16's RTX 5070 Laptop GPU (expected to
-be roughly L4-class for these models) and on one shortlisted provider. With 8 GB of VRAM the
+be roughly L4-class for these models) and on one shortlisted provider. **Measured 16.10.2026**
+([S0 report](research/spike-s0-2026-10.md)): VballNet-Fast runs at 125 frames/s on the Lenovo's
+CPU, so **ball tracking moves to the Lenovo** (free) and leaves the GPU for players and
+fine-tuning; YOLO11m unbatched does ~40 frames/s on the laptop GPU (players at 25 fps over the
+live part ≈ 25 min, to bring down with batching in M8). The provider benchmark is still open. With 8 GB of VRAM the
 models run one after another in FP16 with small batches. The L4 figures also matter for the
 later move (§8.6, §16.2).
 
@@ -1489,7 +1497,7 @@ nomal/
     PLAN.md                  this file
     adr/                     one file per decision change
     brand/                   logo assets (provided), generated icons
-    research/                competitor and GPU-provider research (2026-10)
+    research/                competitor and GPU-provider research, spike reports (2026-10)
     ARCHITECTURE.md          written in M0 from §3–§8, kept current
     PRIVACY.md               processing record, processors, retention, rights, residual risks
     FILMING_GUIDE.md         §7.1 for coaches, one page per camera model
@@ -1505,6 +1513,7 @@ nomal/
   web/                       React app (Vite), built into the API image
   taxonomies/                volleyball.yaml, basketball.yaml
   scripts/brand/             icon generation
+  spikes/                    throwaway spike code kept for reproducibility (s0/: models on our footage)
   deploy/
     hetzner/compose.yaml     nomal-api (prod + dev)
     lenovo/compose.yaml      media worker (+ provider dispatcher later)
@@ -1699,7 +1708,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
-| **S0** | Spike (before M1) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court, run a draft `ml_analyse` and **measure GPU-hours per video**; one benchmark run on Infomaniak or OVHcloud (test-GPU line). Whistle detection on its audio. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured on the Framework 16 and one provider |
+| **S0** | Spike (before M1); **run 16.10.2026 on H3's YouTube games** ([report](research/spike-s0-2026-10.md)) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court, run a draft `ml_analyse` and **measure GPU-hours per video**; one benchmark run on Infomaniak or OVHcloud (test-GPU line). Whistle detection on its audio. Done: ball trackers, YOLO, whistles; open: provider run, 4K originals, a whole match. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured on the Framework 16 and one provider |
 | **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the Nomal brand (icons already in `docs/brand/icons/`); Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `nomal-dev.kscw.ch` with a Wiedisync dev account and see your Nomal-enabled teams and games |
 | **M1** | Video in, video out | Job queue + Lenovo media worker; NAS inbox + browser multipart upload (split files); ingest + transcode + thumbnails; HLS with per-segment signing; adult hard gate + *filming allowed/blocked*; consent (dropped 16.10.2026, §5.4); audit log; DU23 decision applied | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403; a blocked team cannot upload |
 | **M2** | Tagging + condensed playback | Volleyball taxonomy; roster snapshot; grammar + hotkeys; timeline + event table; rally key + rally/score from tags; **skip dead time (manual)** with timeout/set-break keys; set boundaries + starting score; rally list filters (player, action, outcome, set); outbox; revision triggers | A full match tagged in ≤ 1.5× its length; condensed playback works; pulling the network cable loses nothing |
