@@ -291,10 +291,10 @@ the team's **lineage** (§6.3) unless a season is named.
 |---|---|---|---|---|---|
 | Watch team videos, tags, clips | own seasons³ | ✓ | ✓ all seasons | ✓ | ✓ (logged, banner) |
 | Create own private reels, comment on clips | ✓ | ✓ | ✓ | ✓ | |
-| Share a reel with the team | | ✓ | ✓ | ✓ | |
+| Share a reel with the team | | ✓ | ✓ | ✓ | ✓⁴ |
 | Upload / link a video, edit roster snapshot | | ✓ | ✓ | ✓ | |
-| Tag, mark rallies, correct scores and model output | | ✓ | ✓ | ✓ | |
-| Download / export MP4 (watermarked) | | | ✓ | ✓ | |
+| Tag, mark rallies, correct scores and model output | | ✓ | ✓ | ✓ | ✓⁴ |
+| Download / export MP4 (watermarked) | | | ✓ | ✓ | ✓⁴ |
 | Delete a video | | | ✓ | ✓ | ✓ |
 | Grant analyst | | | ✓ | ✓ | |
 | Enable a team for Nomal | | | | | in Wiedisync |
@@ -302,6 +302,7 @@ the team's **lineage** (§6.3) unless a season is named.
 ¹ A player a coach picks to help tag; Nomal-local grant per team lineage.
 ² Board members without an admin scope get no access.
 ³ Players see the seasons they were rostered in; they lose access when they leave.
+⁴ Owner, 16.10.2026: admins do the first tagging, so they tag, share and export too.
 
 The rules live in **one module** (`nomal/core/permissions.py`) with a table-driven test
 that enumerates this matrix. Every API route goes through it.
