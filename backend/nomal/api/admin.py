@@ -414,7 +414,7 @@ def retry_job(job_id: uuid.UUID, viewer: AdminDep, db: DbDep) -> JobAdminOut:
     for j in again:
         j.status, j.attempts, j.not_before, j.error, j.finished_at = "queued", 0, None, None, None
     if video is not None and video.status == "failed":
-        video.status = "queued" if job.kind == "ingest" else "processing"
+        video.status = {"import": "importing", "ingest": "queued"}.get(job.kind, "processing")
         video.error = None
     audit(
         db,

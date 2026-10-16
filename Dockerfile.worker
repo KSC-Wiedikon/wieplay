@@ -18,6 +18,10 @@ COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY backend/ ./
 RUN uv sync --frozen --no-dev && useradd --system --uid 10001 --create-home nomal
+# Scratch space (the `work` volume in deploy/lenovo/compose.yaml). The worker runs as the
+# host user that owns the NAS share (any uid), so the folder is world-writable and sticky;
+# a new named volume copies this mode, an existing one needs `chmod 1777` once.
+RUN mkdir -p /work && chmod 1777 /work
 ENV PATH="/app/.venv/bin:$PATH"
 USER nomal
 CMD ["python", "-m", "nomal.worker"]
