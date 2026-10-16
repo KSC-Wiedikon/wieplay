@@ -181,7 +181,7 @@ describe('TeamPage highlights', () => {
   })
 
   it('has no highlights section for coaches', async () => {
-    stub(team({ rel: ['coach'], can_upload: true }), [], { '/api/teams/92/consent': { body: [] } })
+    stub(team({ rel: ['coach'], can_upload: true }), [])
     await screen.findByRole('region', { name: 'Videos' })
     expect(screen.queryByRole('region', { name: 'My highlights' })).not.toBeInTheDocument()
   })

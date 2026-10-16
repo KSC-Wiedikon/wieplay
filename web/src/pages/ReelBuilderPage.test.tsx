@@ -51,13 +51,15 @@ function show({ me = coach, team = detail, url = '/reels/new', routes = {} }: { 
           { team_id: 61, name: 'H3', season: '2025/26' },
         ],
       },
-      '/api/teams/92/consent': {
+      // The team's people come with its newest ready video.
+      '/api/teams/92/videos': { body: [{ id: VIDEO, status: 'ready', recorded_on: '2026-10-11', created_at: '2026-10-11T22:00:00Z' }] },
+      [`/api/videos/${VIDEO}/people`]: {
         body: [
-          { member_id: 107, name: 'Luca Brunner', number: 7, status: 'accepted', accepted_version: '1', via: 'nomal', at: null },
-          { member_id: 103, name: 'Mia Keller', number: 3, status: 'accepted', accepted_version: '1', via: 'nomal', at: null },
+          { member_id: 107, name: 'Luca Brunner', number: 7, roles: ['player'] },
+          { member_id: 103, name: 'Mia Keller', number: 3, roles: ['player'] },
+          { member_id: 7, name: 'Coach Test', number: null, roles: ['coach'] },
         ],
       },
-      '/api/teams/92/videos': { body: [] },
       '/api/taxonomies/volleyball': { body: volleyball },
       '/api/reels': { body: [] },
       [`/api/videos/${VIDEO}/tagging`]: { status: 404 },
@@ -140,9 +142,14 @@ describe('ReelBuilderPage', () => {
 
   it('starts from the link of "My highlights" and keeps players to private reels', async () => {
     const player: Me = { ...coach, member: { id: 107, uuid: 'u', name: 'Luca Brunner' }, teams: [playerTeam] }
-    const { previews } = show({ me: player, team: { ...playerTeam, can_upload: false }, url: '/reels/new?team=92&member=107&season=2026%2F27' })
+    const { previews } = show({
+      me: player,
+      team: { ...playerTeam, can_upload: false },
+      url: '/reels/new?team=92&member=107&season=2026%2F27',
+      routes: { '/api/teams/92/videos': { body: [] } },
+    })
     await waitFor(() => expect(previews).toContainEqual({ lineage_id: LINEAGE, season: '2026/27', member_id: 107, limit: 200 }))
-    // Without a video to read a roster from, a player can still pick themselves.
+    // Without a video to read the team's people from, a player can still pick themselves.
     expect(screen.getByLabelText('Player')).toHaveValue('107')
     expect(within(screen.getByLabelText('Player')).getByRole('option', { name: 'Luca Brunner' })).toBeInTheDocument()
     expect(screen.queryByLabelText(/The team/)).not.toBeInTheDocument()

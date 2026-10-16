@@ -2,7 +2,7 @@
 // end and stops, or moves on to the next one in a list. Pure helpers; the hook that drives the
 // <video> element is useRangePlayback.ts.
 
-import type { Clip, RosterEntry, Visibility } from './types'
+import type { Clip, Visibility } from './types'
 
 /** The API's limit. */
 export const MAX_CLIP_MS = 10 * 60_000
@@ -83,20 +83,11 @@ export function byStart<T extends PlayRange>(ranges: readonly T[]): T[] {
   return [...ranges].sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms)
 }
 
-/** Who a comment or highlight can name: the roster's players with a member and a name. */
+/** Who a comment or highlight can name: a member of the team, with a name. */
 export interface Person {
   member_id: number
   name: string
   number: number | null
-}
-
-export function peopleOf(roster: readonly RosterEntry[]): Person[] {
-  const seen = new Map<number, Person>()
-  for (const entry of roster) {
-    if (entry.side !== 'us' || entry.member_id === null || !entry.name) continue
-    if (!seen.has(entry.member_id)) seen.set(entry.member_id, { member_id: entry.member_id, name: entry.name, number: entry.number })
-  }
-  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, 'de-CH'))
 }
 
 /** A clip to save: a new one (id null) or an existing one of mine. */

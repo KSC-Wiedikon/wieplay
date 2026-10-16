@@ -5,8 +5,8 @@
 import '../i18n/pages'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, apiRequest } from './api'
-import { peopleOf, type Person } from './clips'
-import { useTagging, useTeamConsent, useTeams } from './queries'
+import type { Person } from './clips'
+import { useTeams } from './queries'
 import { keys } from './queryClient'
 import { compareTeams } from './teams'
 import { newestFirst } from './video'
@@ -282,26 +282,26 @@ export function useTaxonomy(sport: string | null) {
 // People and teams for the reel builder
 
 /**
- * The players of a team, for pickers: the coaches' consent list (all players of the season),
- * else the roster of the team's newest ready video (players can read that one).
+ * The players of a team, for pickers: the team's people (every season) as the server lists
+ * them for the team's newest ready video. Coaches and players read the same list.
  */
 export function useTeamPeople(team: TeamDetail | undefined): { people: Person[]; pending: boolean } {
-  const lead = team?.can_upload ?? false
-  const consent = useTeamConsent(team?.id ?? 0, team !== undefined && lead)
   const videos = useQuery({
     queryKey: keys.teamVideos(team?.id ?? 0),
     queryFn: ({ signal }) => api.teamVideos(team?.id ?? 0, signal),
-    enabled: team !== undefined && !lead,
+    enabled: team !== undefined,
   })
   const newest = newestFirst((videos.data ?? []).filter((v) => v.status === 'ready'))[0]
-  const tagging = useTagging(newest?.id ?? '', !lead && newest !== undefined)
-  if (lead) {
-    const people = (consent.data ?? [])
-      .map((p) => ({ member_id: p.member_id, name: p.name, number: p.number }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'de-CH'))
-    return { people, pending: consent.isPending }
-  }
-  return { people: peopleOf(tagging.data?.roster ?? []), pending: videos.isPending || (newest !== undefined && tagging.isPending) }
+  const people = useQuery({
+    queryKey: keys.videoPeople(newest?.id ?? ''),
+    queryFn: ({ signal }) => libraryApi.videoPeople(newest?.id ?? '', signal),
+    enabled: newest !== undefined,
+  })
+  const players = (people.data ?? [])
+    .filter((p) => p.roles.includes('player'))
+    .map((p) => ({ member_id: p.member_id, name: p.name, number: p.number }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'de-CH'))
+  return { people: players, pending: videos.isPending || (newest !== undefined && people.isPending) }
 }
 
 /** The team row (newest season) of a lineage, among the teams I see; for editing a saved reel. */

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { clipProblem, clipRange, draftOf, newestFirst, nextInQueue, peopleOf, rangeStep } from './clips'
+import { clipProblem, clipRange, draftOf, newestFirst, nextInQueue, rangeStep } from './clips'
 import type { Clip } from './types'
-import { roster } from '../test/tagging'
 
 const clip = (patch: Partial<Clip>): Clip => ({
   id: 'c1',
@@ -85,12 +84,4 @@ it('makes a draft of a saved clip', () => {
     event_id: null,
     visibility: 'team',
   })
-})
-
-it('lists the roster players with a member and a name, by name', () => {
-  expect(peopleOf(roster)).toEqual([
-    { member_id: 107, name: 'Luca Brunner', number: 7 },
-    { member_id: 103, name: 'Mia Keller', number: 3 },
-    { member_id: 111, name: 'Noah Meier', number: 11 },
-  ])
 })
