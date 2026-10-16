@@ -142,17 +142,18 @@ def test_v0_ignores_warmup_and_short_bursts() -> None:
     assert [(round(p.start_ms / 1000), round(p.end_ms / 1000)) for p in found] == [(230, 245)]
 
 
-def test_v0_splits_activity_at_whistles() -> None:
-    # Two rallies with no dead time between them as far as the ball is concerned.
-    sig = synthetic_signals([(10.0, 22.0), (22.0, 34.0)], 60.0, seed=5)
-    t = np.arange(sig.frames) / sig.fps
-    gap = (t >= 20) & (t < 24)
-    sig.ball_vis[gap] = 1
-    sig.ball_x[gap] = 200 + 100 * np.sin(t[gap] * 2)
-    sig.ball_y[gap] = 150.0
+def test_v0_with_a_referee_ignores_squeaks_and_balls_thrown_back() -> None:
+    """What the first real match showed: a shoe squeak must not split a rally, and the ball
+    thrown back to the server after the whistle is no rally."""
+    true, duration = league_rallies(20, seed=8)
+    sig = synthetic_signals(true, duration, seed=9, throws=True, squeaks=True)
     found = rallies.find_v0(sig)
-    assert len(found) == 2
-    assert abs(found[0].end_ms - 21_700) <= 1000
+    m = metrics.evaluate([p.span for p in found], to_ms(true))
+    assert len(found) == 20 and m["rally"]["f1"] == 1.0
+    assert m["end"]["f1"] == 1.0  # at the end whistle
+    # Without the whistles the throws are too short to pass as rallies.
+    silent = synthetic_signals(true, duration, seed=9, throws=True, whistles=False, audio=False)
+    assert len(rallies.find_v0(silent)) == 20
 
 
 # --- v1 ------------------------------------------------------------------------------------

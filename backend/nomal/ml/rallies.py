@@ -86,27 +86,47 @@ class V0Params:
     edge: float = 0.1  # a half-second with this share of tracked frames has the ball in play
     gap_s: float = 3.0  # ball lost for a moment (high balls, occlusion)
     min_s: float = 3.0
+    # Without a referee, short bursts are mostly balls thrown back to the server; the
+    # whistle-anchored rallies of a league match are rarely shorter (spike data, 16.10.2026).
+    min_s_ball_only: float = 4.5
     max_s: float = 90.0
     min_activity: float = 0.15  # mean tracked share over the rally
     # The coach's rally starts at the toss (the tagging page opens it 2 s before the serve
     # tag) and ends about when the referee whistles (1.5 s after the last tag).
     lead_s: float = 1.0
     tail_s: float = 1.0
-    whistle_rate: float = 0.8  # per minute: a referee is whistling, whistles are boundaries
-    snap_before_s: float = 1.5  # an end whistle up to this long before the ball is lost
-    snap_after_s: float = 3.0  # ... or this long after
-    serve_window_s: float = 10.0  # a serve whistle this long before the first ball activity
+    # A referee: enough whistles per minute and at least this many serve whistles.
+    whistle_rate: float = 0.8
+    min_serves: int = 10
+    whistle_s: float = 0.3  # shorter tones are shoe squeaks
+    pitch_hz: float = 350.0  # our referee's whistles lie this close to their median pitch
+    quiet_s: float = 3.0  # a serve whistle follows a dead ball; an end whistle a live one
+    quiet: float = 0.1
+    serve_window_s: float = 10.0  # the serve follows its whistle within 8 s
+    # Play without a serve whistle (a missed one) counts when it is long and clear, and does
+    # not start right after an end whistle (players throwing the ball back).
+    unanchored_s: float = 4.0
+    unanchored_activity: float = 0.3
+    after_end_s: float = 4.0
 
     def as_dict(self) -> dict[str, float]:
         return dict(self.__dict__)
 
 
+@dataclass(frozen=True)
+class _Piece:
+    first: int  # first step with the ball in play
+    end: float  # end, in steps
+    by_whistle: bool  # ended by the referee's whistle
+    anchored: bool  # began after a serve whistle (or no referee in this video)
+
+
 def find_v0(
     sig: Signals, feats: StepFeatures | None = None, p: V0Params | None = None
 ) -> list[Proposal]:
-    """Rallies from the rules (module docstring). Candidate stretches come from the smoothed
-    ball activity; their edges from the raw per-step activity; whistles split stretches
-    that hold more than one rally and give the end (when the video has a referee)."""
+    """Rallies from the rules (module docstring). Candidate stretches of play come from the
+    smoothed ball activity, their edges from the raw per-step activity. With a referee,
+    every rally hangs on a serve whistle and ends at the next whistle of the same pitch."""
     p = p or V0Params()
     f = feats or step_features(sig)
     n = f.n_steps
@@ -116,74 +136,117 @@ def find_v0(
     on = (act >= p.on) | ((act >= p.on_low) & (motion >= p.motion))
     raw = trk >= p.edge
     runs = merge_gaps(runs_of(on), round(p.gap_s * PER_S))
-    whistles = sig.whistles.reshape(-1, 5)
-    use_whistles = f.whistle_rate >= p.whistle_rate and len(whistles) > 0
-    w_start = whistles[:, 0].astype(np.float64) / STEP_S if use_whistles else np.zeros(0)
-    w_end = (
-        (whistles[:, 0] + whistles[:, 1]).astype(np.float64) / STEP_S
-        if use_whistles
-        else np.zeros(0)
-    )
-
-    def active_edges(a: float, b: float) -> tuple[int, int] | None:
-        """First and last+1 step in [a, b) where the ball is in play."""
-        lo, hi = max(0, int(a)), min(n, int(np.ceil(b)))
-        idx = np.flatnonzero(raw[lo:hi])
-        return (lo + int(idx[0]), lo + int(idx[-1]) + 1) if len(idx) else None
-
-    pieces: list[tuple[int, float, bool]] = []  # first active step, end, ended by a whistle
-    for a, b in runs:
-        edges = active_edges(a, b)
-        if edges is None:
-            continue
-        first, last = edges
-        if use_whistles:
-            # Whistles inside the activity end one rally; the next starts after them.
-            inside = np.flatnonzero(
-                (w_start > first + 2 * PER_S) & (w_start < last - p.snap_before_s * PER_S)
-            )
-            for k in inside:
-                pieces.append((first, float(w_start[k]), True))
-                after = active_edges(w_end[k], last)
-                if after is None:
-                    break
-                first = after[0]
-            else:
-                # The end whistle: just before or a little after the ball is lost.
-                near = np.flatnonzero(
-                    (w_start >= last - p.snap_before_s * PER_S)
-                    & (w_start <= last + p.snap_after_s * PER_S)
-                    & (w_start > first)
-                )
-                if len(near):
-                    pieces.append((first, float(w_start[near[0]]), True))
-                else:
-                    pieces.append((first, float(last) + p.tail_s * PER_S, False))
-            continue
-        pieces.append((first, float(last) + p.tail_s * PER_S, False))
+    pieces = _with_referee(sig, f, trk, raw, runs, p)
+    min_s = p.min_s
+    if pieces is None:
+        pieces = _from_activity(raw, runs, p)
+        min_s = p.min_s_ball_only
 
     out: list[Proposal] = []
-    for first, end, by_whistle in pieces:
-        s = first - p.lead_s * PER_S
-        if use_whistles:
-            # Not before the serve whistle that precedes it.
-            before = np.flatnonzero(
-                (w_end <= first + 1 * PER_S) & (w_end >= first - p.serve_window_s * PER_S)
-            )
-            if len(before):
-                s = max(s, float(w_end[before[-1]]))
-        s, e = max(0.0, s), min(float(n), end)
+    for piece in pieces:
+        s = max(0.0, piece.first - p.lead_s * PER_S)
+        e = min(float(n), piece.end)
         length = (e - s) * STEP_S
-        if length < p.min_s or length > p.max_s:
+        if length < min_s or length > p.max_s:
             continue
         a, b = int(s), max(int(s) + 1, int(np.ceil(e)))
         activity = float(np.nanmean(trk[a:b]))
         if activity < p.min_activity:
             continue
         strength = float(np.clip(activity / 0.5, 0, 1))
-        confidence = 0.25 + 0.5 * strength + (0.25 if by_whistle else 0.0)
+        confidence = 0.2 + 0.4 * strength + 0.2 * piece.by_whistle + 0.2 * piece.anchored
         out.append(Proposal(to_ms(s), to_ms(e), round(min(confidence, 1.0), 3)))
     return out
+
+
+def _active_edges(raw: Arr, a: float, b: float) -> tuple[int, int] | None:
+    """First and last+1 step in [a, b) where the ball is in play."""
+    lo, hi = max(0, int(a)), min(len(raw), int(np.ceil(b)))
+    idx = np.flatnonzero(raw[lo:hi])
+    return (lo + int(idx[0]), lo + int(idx[-1]) + 1) if len(idx) else None
+
+
+def _from_activity(raw: Arr, runs: list[tuple[int, int]], p: V0Params) -> list[_Piece]:
+    """No referee (friendlies, silent videos): every clear stretch of play."""
+    out = []
+    for a, b in runs:
+        edges = _active_edges(raw, a, b)
+        if edges is not None:
+            out.append(_Piece(edges[0], edges[1] + p.tail_s * PER_S, False, True))
+    return out
+
+
+def _with_referee(
+    sig: Signals,
+    f: StepFeatures,
+    trk: Arr,
+    raw: Arr,
+    runs: list[tuple[int, int]],
+    p: V0Params,
+) -> list[_Piece] | None:
+    """Serve whistle → the ball comes into play within seconds → the next whistle of the
+    referee's pitch ends it (else the play stops). None when the video has no referee."""
+    w = sig.whistles.reshape(-1, 5)
+    if f.whistle_rate < p.whistle_rate or len(w) == 0:
+        return None
+    n = len(trk)
+    starts = w[:, 0].astype(np.float64) / STEP_S
+    ends = (w[:, 0] + w[:, 1]).astype(np.float64) / STEP_S
+    long_enough = w[:, 1] >= p.whistle_s
+
+    def mean_trk(a: float, b: float) -> float:
+        lo, hi = max(0, int(a)), min(n, int(np.ceil(b)))
+        return float(trk[lo:hi].mean()) if hi > lo else 0.0
+
+    quiet_before = np.array([mean_trk(s - p.quiet_s * PER_S, s) < p.quiet for s in starts])
+    window = p.serve_window_s * PER_S
+    play_after = np.array([_active_edges(raw, e, e + window) is not None for e in ends])
+    serve_like = long_enough & quiet_before & play_after
+    if serve_like.sum() < p.min_serves:
+        return None
+    # Our referee's whistles: near the pitch of the serve whistles (other courts' referees
+    # in a tournament hall, squeaks and the bench whistle elsewhere).
+    pitch = float(np.median(w[serve_like, 2]))
+    ours = long_enough & (np.abs(w[:, 2] - pitch) <= p.pitch_hz)
+    serves = np.flatnonzero(serve_like & ours)
+
+    pieces: list[_Piece] = []
+    for i, k in enumerate(serves):
+        stop = starts[serves[i + 1]] if i + 1 < len(serves) else float(n)
+        edges = _active_edges(raw, ends[k], min(ends[k] + window, stop))
+        if edges is None:
+            continue
+        first = edges[0]
+        closing = np.flatnonzero(ours & (starts > first + 2 * PER_S) & (starts < stop))
+        if len(closing):
+            pieces.append(_Piece(first, float(starts[closing[0]]), True, True))
+            continue
+        # No end whistle heard: the end of the stretch of play it starts.
+        run = next(((a, b) for a, b in runs if a <= first < b), (first, first + 1))
+        play = _active_edges(raw, first, min(run[1], stop))
+        end = (play[1] if play else first + 1) + p.tail_s * PER_S
+        pieces.append(_Piece(first, min(end, stop), False, True))
+
+    # Clear play without a serve whistle (a whistle we did not hear), between the first and
+    # the last serve, not right after a rally ended, not overlapping one.
+    if len(serves):
+        lo, hi = starts[serves[0]], ends[serves[-1]] + 120 * PER_S
+        taken = [(q.first - p.lead_s * PER_S, q.end) for q in pieces]
+        for a, b in runs:
+            edges = _active_edges(raw, a, b)
+            if edges is None or not lo <= edges[0] <= hi:
+                continue
+            first, last = edges
+            if any(min(last, e) > max(first, s) for s, e in taken):
+                continue
+            if any(0 <= first - q.end <= p.after_end_s * PER_S for q in pieces):
+                continue
+            if (last - first) * STEP_S < p.unanchored_s:
+                continue
+            if mean_trk(first, last) < p.unanchored_activity:
+                continue
+            pieces.append(_Piece(first, last + p.tail_s * PER_S, False, False))
+    return sorted(pieces, key=lambda q: q.first)
 
 
 # --- v1: learned ---------------------------------------------------------------------------

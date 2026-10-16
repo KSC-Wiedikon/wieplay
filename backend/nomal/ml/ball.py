@@ -48,6 +48,9 @@ class BallTracker:
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = max(1, threads)
         opts.inter_op_num_threads = 1
+        # Idle threads sleep instead of spinning: ~3 % slower, ~20 % less CPU, which the
+        # transcodes on the same box can use (measured 16.10.2026).
+        opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
         self._session: Any = ort.InferenceSession(
             str(weights), sess_options=opts, providers=["CPUExecutionProvider"]
         )

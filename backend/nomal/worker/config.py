@@ -29,8 +29,10 @@ class WorkerSettings(BaseSettings):
     # Automatic analysis (cap "analyse"): signals and rally models are written here, on the
     # NAS next to raw/ (analysis/, analysis-dev/).
     analysis_root: Path | None = None
-    # Decoding for the analysis: VAAPI on the iGPU (falls back to the CPU by itself).
-    analysis_hwaccel: Literal["vaapi", "none"] = "vaapi"
+    # Decoding for the analysis. The CPU by default: in the worker image VAAPI was not
+    # faster (the model is the bottleneck) and its scaler found ~1 % fewer balls than the
+    # CPU's area filter (16.10.2026); "vaapi" falls back to the CPU by itself.
+    analysis_hwaccel: Literal["vaapi", "none"] = "none"
     analysis_threads: int = 6
     inbox_scan_seconds: int = 60
     inbox_stable_seconds: int = 120

@@ -188,10 +188,11 @@ def _batches(pipe: _Pipe, frames_per_batch: int, cancel: threading.Event) -> Ite
 
 
 def motion_grid(frames: Arr, previous: Arr | None) -> tuple[Arr, Arr]:
-    """Mean |Δgrey| per grid cell against the previous frame, on a 4x smaller picture.
-    Returns (n, GRID_ROWS, GRID_COLS) and the last grey frame."""
+    """Mean |Δgrey| per grid cell against the previous frame, on every 4th pixel (128x72:
+    enough for how much moves, and cheap next to the model). Returns (n, GRID_ROWS,
+    GRID_COLS) and the last grey frame."""
     n = len(frames)
-    small = frames.reshape(n, HEIGHT // 4, 4, WIDTH // 4, 4, 3).mean(axis=(2, 4), dtype=np.float32)
+    small = frames[:, ::4, ::4, :].astype(np.float32)
     grey = small @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
     before = np.concatenate([grey[:1] if previous is None else previous[None], grey[:-1]])
     diff = np.abs(grey - before)

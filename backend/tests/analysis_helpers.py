@@ -17,6 +17,8 @@ def synthetic_signals(
     whistles: bool = True,
     audio: bool = True,
     seed: int = 0,
+    throws: bool = False,
+    squeaks: bool = False,
 ) -> Signals:
     """A video whose rallies are `rallies_s` (seconds): during a rally the ball flies (seen in
     ~85 % of frames, along a smooth path, from 1 s after the start to 1 s before the end)
@@ -33,6 +35,8 @@ def synthetic_signals(
         # As a coach tags: the rally opens a moment before the toss and closes about when
         # the referee whistles, a moment after the ball is dead.
         flying |= (t >= s + 1.0) & (t < e - 1.0)
+        if throws:  # after the whistle, the ball goes back to the server
+            flying |= (t >= e + 1.0) & (t < e + 3.0)
     vis = (flying & (rng.random(n) < 0.85)).astype(np.uint8)
     x = np.where(vis, 256 + 200 * np.sin(t * 1.3), -1).astype(np.float32)
     y = np.where(vis, 140 + 100 * np.cos(t * 2.1), -1).astype(np.float32)
@@ -44,16 +48,19 @@ def synthetic_signals(
     vis[lamp] = 1
     x[lamp], y[lamp] = 500.0, 12.0
     motion = rng.normal(3.0, 0.5, (n, GRID_ROWS, GRID_COLS)) + 3.0 * in_rally[:, None, None]
-    events = []
+    events: list[tuple[float, float, float, float, float]] = []
     if whistles:
         for s, e in rallies_s:
             events.append((s - 3.0, 0.5, 3800.0, 20.0, 40.0))
             events.append((e - 0.3, 0.6, 3800.0, 22.0, 45.0))
+            if squeaks:  # shoes in the middle of the rally
+                events.append(((s + e) / 2, 0.2, 2500.0, 12.0, 25.0))
     m = round(duration_s / AUDIO_HOP_S) if audio else 0
     ta = np.arange(m) * AUDIO_HOP_S
     band = rng.normal(-60, 1.5, m)
     for w in events:
         band[(ta >= w[0]) & (ta < w[0] + w[1])] += 25
+    events.sort()
     return Signals(
         fps=fps,
         duration_s=duration_s,
