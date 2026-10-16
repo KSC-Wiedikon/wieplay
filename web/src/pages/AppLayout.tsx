@@ -1,8 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Outlet } from 'react-router'
 import { Header } from '../components/Header'
-import { cx } from '../lib/cx'
-import { useWidePage } from '../lib/useWidePage'
 import { LoadError } from '../components/Message'
 import { PageSpinner } from '../components/Spinner'
 import { useMe } from '../lib/queries'
@@ -12,7 +10,6 @@ import { LoggedOutPage } from './LoggedOutPage'
 export function AppLayout() {
   const { t } = useTranslation()
   const me = useMe()
-  const wide = useWidePage()
 
   if (me.isPending) return <PageSpinner />
   if (me.isError) {
@@ -28,12 +25,13 @@ export function AppLayout() {
     <>
       <a
         href="#main"
-        className="sr-only rounded-xl bg-accent px-4 py-2 text-on-accent focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
+        className="sr-only rounded-control bg-accent px-4 py-2 text-on-accent focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50"
       >
         {t('common.skipToContent')}
       </a>
       <Header me={me.data} />
-      <main id="main" className={cx('mx-auto px-4 py-6 sm:py-8', wide ? 'max-w-[110rem]' : 'max-w-5xl')}>
+      {/* Every page uses the full window up to 110rem; forms and dialogs set their own widths. */}
+      <main id="main" className="mx-auto w-full max-w-[110rem] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <Outlet context={{ me: me.data } satisfies Session} />
       </main>
     </>

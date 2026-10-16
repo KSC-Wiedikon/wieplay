@@ -376,6 +376,7 @@ export const de: Messages<typeof en> = {
   },
   nav: {
     label: 'Hauptmenü',
+    home: 'Start',
     clips: 'Clips',
     reels: 'Reels',
     downloads: 'Downloads',

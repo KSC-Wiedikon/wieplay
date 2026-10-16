@@ -361,6 +361,7 @@ export const en = {
   },
   nav: {
     label: 'Main',
+    home: 'Home',
     clips: 'Clips',
     reels: 'Reels',
     downloads: 'Downloads',
