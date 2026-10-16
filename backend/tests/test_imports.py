@@ -311,7 +311,7 @@ def test_the_worker_checks_the_channel_before_downloading(
     path, kept = fetch_with(LUCA, tmp_path)
     assert path.read_bytes() == b"\0" * 1000
     assert kept["channel_id"] == LUCA["channel_id"] and kept["duration"] == 7920
-    assert made[0].options["js_runtimes"] == {"node": {}}
+    assert made[0].options["js_runtimes"] == {"deno": {}}
 
     for info, message in [
         ({**LUCA, "uploader_id": "@other", "channel_id": "UC" + "x" * 22, "uploader_url": "",
@@ -324,3 +324,22 @@ def test_the_worker_checks_the_channel_before_downloading(
         with pytest.raises(importer.Refused, match=message):
             fetch_with(info, tmp_path)
         assert not made[0].downloaded  # nothing fetched
+
+
+def test_a_failed_import_can_be_retried(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    allow_luca(club["admin"])
+    video = link_video(club["coach"]).json()
+    w = worker_client(app, club["admin"], IMPORT_CAPS)
+    [job] = claim(w, IMPORT_CAPS)
+    failed = w.post(
+        f"/api/worker/jobs/{job['id']}/fail", json={"error": "disk full", "retryable": False}
+    )
+    assert failed.status_code == 204
+    assert club["coach"].get(f"/api/videos/{video['id']}").json()["status"] == "failed"
+    assert club["admin"].post(f"/api/admin/jobs/{job['id']}/retry").status_code == 200
+    # Back to importing, not "processing": nothing has been ingested yet.
+    assert club["coach"].get(f"/api/videos/{video['id']}").json()["status"] == "importing"
+    [again] = claim(w, IMPORT_CAPS)
+    assert again["id"] == job["id"]

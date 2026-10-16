@@ -171,7 +171,7 @@ export const en = {
     forbidden: "Only the team's coaches and team managers can upload videos.",
     pickMatch: 'Match',
     choose: 'Choose…',
-    noGames: 'No games in the last 60 days.',
+    noGames: 'No played games in the last 13 months.',
     otherMatch: 'Other match (friendly, tournament, cup)',
     date: 'Date',
     matchTitle: 'Title',

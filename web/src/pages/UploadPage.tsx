@@ -34,7 +34,6 @@ import {
 import { NotFoundPage } from './NotFoundPage'
 
 /** How far back a game can be picked. */
-const RECENT_DAYS = 60
 /** The filming check answers for days up to 400 days back. */
 const OLDEST_DAYS = 400
 /** A match that is not in Wiedisync (friendly, tournament, cup): a date and a title instead of a game. */
@@ -104,7 +103,6 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const toast = useToast()
   const upload = useUpload()
   const today = todayIso()
-  const from = addDaysIso(today, -RECENT_DAYS)
   const oldest = addDaysIso(today, -OLDEST_DAYS)
 
   const [match, setMatch] = useState('')
@@ -124,7 +122,8 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const choices = useMemo<Choice[]>(
     () =>
       (games.data ?? [])
-        .filter((g) => g.date && g.date >= from && g.date <= today)
+        // Every played game the filming rules still cover, so older games can be imported.
+        .filter((g) => g.date && g.date >= oldest && g.date <= today)
         .sort((a, b) => b.date.localeCompare(a.date))
         .map((g) => ({
           value: String(g.id),
@@ -132,7 +131,7 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
           date: g.date,
           defaultTitle: `${g.home_name} – ${g.away_name}`,
         })),
-    [games.data, from, today],
+    [games.data, oldest, today],
   )
 
   const other = match === OTHER_MATCH

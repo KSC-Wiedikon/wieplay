@@ -181,7 +181,7 @@ export const de: Messages<typeof en> = {
     forbidden: 'Nur Coaches und Teamverantwortliche des Teams können Videos hochladen.',
     pickMatch: 'Spiel',
     choose: 'Auswählen…',
-    noGames: 'Keine Spiele in den letzten 60 Tagen.',
+    noGames: 'Keine gespielten Spiele in den letzten 13 Monaten.',
     otherMatch: 'Anderes Spiel (Freundschaftsspiel, Turnier, Cup)',
     date: 'Datum',
     matchTitle: 'Titel',

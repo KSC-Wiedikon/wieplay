@@ -310,7 +310,7 @@ describe('UploadPage', () => {
     renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
 
     const match = await screen.findByLabelText('Match')
-    expect(screen.getByText('No games in the last 60 days.')).toBeInTheDocument()
+    expect(screen.getByText('No played games in the last 13 months.')).toBeInTheDocument()
     fireEvent.change(match, { target: { value: 'other' } })
     expect(await screen.findByText('2 people on the roster have no birthdate in Wiedisync.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Start upload' })).not.toBeInTheDocument()
