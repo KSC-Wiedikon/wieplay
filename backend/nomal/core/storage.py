@@ -8,6 +8,7 @@ Key layout in the bucket:
     incoming/<video>/<part_no>/<file name>    browser upload staging (lifecycle: 14 days)
     media/<video>/<rendition>/init.mp4, seg_00001.m4s …   HLS renditions
     media/<video>/thumbs/sprite_001.jpg …, poster.jpg     scrub previews
+    media/<video>/analysis/ball-track-<token>.json.gz       the ball's path (PLAN §10.4)
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ CONTENT_TYPES = {
     ".mp4": "video/mp4",
     ".jpg": "image/jpeg",
     ".m3u8": "application/vnd.apple.mpegurl",
+    ".gz": "application/gzip",
 }
 
 
@@ -52,6 +54,7 @@ class ObjectStore(Protocol):
     def abort_multipart(self, key: str, upload_id: str) -> None: ...
     def upload_gone(self, exc: Exception) -> bool: ...
     def size(self, key: str) -> int | None: ...
+    def read(self, key: str, max_bytes: int) -> bytes | None: ...
     def delete(self, keys: Iterable[str]) -> None: ...
     def delete_prefix(self, prefix: str) -> int: ...
 
@@ -162,6 +165,20 @@ class S3Store:
             if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
                 return None
             raise
+
+    def read(self, key: str, max_bytes: int) -> bytes | None:
+        """A small object's bytes (the ball track), None when it is not there; at most
+        max_bytes are read."""
+        try:
+            response = self._client.get_object(
+                Bucket=self.bucket, Key=key, Range=f"bytes=0-{max_bytes - 1}"
+            )
+        except self._client.exceptions.ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                return None
+            raise
+        data: bytes = response["Body"].read()
+        return data
 
     def delete(self, keys: Iterable[str]) -> None:
         batch: list[Any] = []

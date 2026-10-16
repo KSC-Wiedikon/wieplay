@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine
 
-from nomal.core import models  # noqa: F401 - registers the tables
+from nomal.core import calibration, models  # noqa: F401 - registers the tables
 from nomal.core.config import Settings
 from nomal.core.db import Base
 
