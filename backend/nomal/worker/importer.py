@@ -128,7 +128,7 @@ def fetch(
         "concurrent_fragment_downloads": 4,
         "overwrites": True,
         "progress_hooks": [hook],
-        "js_runtimes": {"node": {}},  # YouTube's JavaScript challenges
+        "js_runtimes": {"deno": {}},  # YouTube's JavaScript challenges (Deno in the image)
         "logger": _Quiet(),
         "quiet": True,
         "no_warnings": True,

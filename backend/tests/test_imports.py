@@ -311,7 +311,7 @@ def test_the_worker_checks_the_channel_before_downloading(
     path, kept = fetch_with(LUCA, tmp_path)
     assert path.read_bytes() == b"\0" * 1000
     assert kept["channel_id"] == LUCA["channel_id"] and kept["duration"] == 7920
-    assert made[0].options["js_runtimes"] == {"node": {}}
+    assert made[0].options["js_runtimes"] == {"deno": {}}
 
     for info, message in [
         ({**LUCA, "uploader_id": "@other", "channel_id": "UC" + "x" * 22, "uploader_url": "",
