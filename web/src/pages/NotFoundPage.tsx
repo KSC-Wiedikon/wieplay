@@ -1,14 +1,25 @@
 import { useTranslation } from 'react-i18next'
 import { ButtonLink } from '../components/Button'
-import { Message } from '../components/Message'
+import { AlertIcon, HomeIcon } from '../components/icons'
+import { EmptyState } from '../components/Message'
+import { PageHeader } from '../components/PageHeader'
 
 export function NotFoundPage() {
   const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-6">
       <title>{`${t('notFound.title')} · nomal`}</title>
-      <h1 className="text-2xl font-bold">{t('notFound.title')}</h1>
-      <Message action={<ButtonLink to="/">{t('notFound.back')}</ButtonLink>}>{t('notFound.body')}</Message>
+      <PageHeader title={t('notFound.title')} />
+      <EmptyState
+        icon={<AlertIcon />}
+        title={t('notFound.body')}
+        action={
+          <ButtonLink to="/" variant="primary">
+            <HomeIcon className="size-4" />
+            {t('notFound.back')}
+          </ButtonLink>
+        }
+      />
     </div>
   )
 }

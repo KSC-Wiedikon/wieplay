@@ -252,6 +252,7 @@ export const en = {
   },
   admin: {
     title: 'Admin',
+    subtitle: 'Teams, filming rules and the machines that process the videos.',
     forbidden: 'This page is for admins only.',
     teams: 'Teams',
     teamsHint: 'Teams of the current and the previous season. Members only see teams that use Nomal.',

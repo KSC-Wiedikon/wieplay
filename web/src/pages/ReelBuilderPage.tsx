@@ -7,6 +7,7 @@ import { Card } from '../components/Card'
 import { Field, Select, TextInput } from '../components/Field'
 import { ChevronDownIcon, ChevronUpIcon, PlusIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader } from '../components/PageHeader'
 import { ReelPlayer } from '../components/ReelPlayer'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
@@ -127,9 +128,9 @@ function Chips({ label, options, value, onChange }: { label: string; options: { 
               title={option.title}
               onClick={() => onChange(on ? value.filter((v) => v !== option.value) : [...value, option.value])}
               className={cx(
-                'min-h-11 cursor-pointer rounded-xl border px-3 text-sm font-semibold sm:min-h-9',
+                'min-h-11 cursor-pointer rounded-control border px-3 text-sm font-semibold sm:min-h-9',
                 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-                on ? 'border-transparent bg-accent text-on-accent' : 'border-hairline bg-surface text-fg hover:bg-sunken',
+                on ? 'border-transparent bg-accent text-on-accent shadow-card' : 'border-hairline-strong bg-surface text-fg hover:bg-sunken',
               )}
             >
               {option.label}
@@ -207,14 +208,17 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   ].sort((a, b) => b.localeCompare(a))
 
   return (
-    <div className="flex flex-col gap-6">
+    // A form: it keeps a readable width on wide screens.
+    <div className="flex max-w-5xl flex-col gap-6">
       <title>{`${reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newTitle')} · nomal`}</title>
-      <div className="flex flex-col gap-1">
-        <Link to="/reels" className="text-sm font-semibold text-link underline-offset-2 hover:underline">
-          {t('reels.back')}
-        </Link>
-        <h1 className="text-2xl font-bold wrap-break-word">{reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newTitle')}</h1>
-      </div>
+      <PageHeader
+        eyebrow={
+          <Link to="/reels" className="font-semibold link">
+            {t('reels.back')}
+          </Link>
+        }
+        title={reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newTitle')}
+      />
 
       <section aria-labelledby={`${id}-filters`} className="flex flex-col gap-3">
         <h2 id={`${id}-filters`} className="text-lg font-semibold">
@@ -397,7 +401,7 @@ function SaveForm({ reel, suggested, canShare, teamLabel, build, children, disab
         {t('reels.builder.saveTitle')}
       </h2>
       <form
-        className="flex flex-col gap-4 rounded-2xl border border-hairline bg-surface p-4"
+        className="flex flex-col gap-4 rounded-card border border-hairline bg-surface shadow-card p-4"
         onSubmit={(e) => {
           e.preventDefault()
           submit()
@@ -486,7 +490,7 @@ function ManualForm({ reel, initial }: { reel: Reel | null; initial: Piece[] }) 
     <div className="flex flex-col gap-6">
       <title>{`${reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newManualTitle')} · nomal`}</title>
       <div className="flex flex-col gap-1">
-        <Link to="/reels" className="text-sm font-semibold text-link underline-offset-2 hover:underline">
+        <Link to="/reels" className="text-sm font-semibold link">
           {t('reels.back')}
         </Link>
         <h1 className="text-2xl font-bold wrap-break-word">{reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newManualTitle')}</h1>

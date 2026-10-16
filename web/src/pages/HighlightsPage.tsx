@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router'
 import { Button, ButtonLink } from '../components/Button'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader } from '../components/PageHeader'
 import { ReelPlayer } from '../components/ReelPlayer'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { ApiError } from '../lib/api'
@@ -47,16 +48,22 @@ function Highlights({ teamId }: { teamId: number }) {
   return (
     <div className="flex flex-col gap-6">
       <title>{`${title} · nomal`}</title>
-      <div className="flex flex-col gap-1">
-        <Link to={`/teams/${teamId}`} className="text-sm font-semibold text-link underline-offset-2 hover:underline">
-          {`${name} ${season}`}
-        </Link>
-        <h1 className="text-2xl font-bold">{t('highlights.pageTitle')}</h1>
-        <p className="text-sm text-muted">{t('highlights.hint')}</p>
-        {preview.data && pieces.length > 0 && (
-          <p className="text-sm text-muted tabular-nums">{`${t('reels.count', { count: pieces.length })} · ${formatDuration(reelTimeline(pieces).total_ms)}`}</p>
-        )}
-      </div>
+      <PageHeader
+        eyebrow={
+          <Link to={`/teams/${teamId}`} className="font-semibold link">
+            {`${name} ${season}`}
+          </Link>
+        }
+        title={t('highlights.pageTitle')}
+        subtitle={
+          <div className="flex flex-col gap-1">
+            <p>{t('highlights.hint')}</p>
+            {preview.data && pieces.length > 0 && (
+              <p className="text-sm tabular-nums">{`${t('reels.count', { count: pieces.length })} · ${formatDuration(reelTimeline(pieces).total_ms)}`}</p>
+            )}
+          </div>
+        }
+      />
       {preview.isPending ? (
         <Spinner />
       ) : preview.isError ? (

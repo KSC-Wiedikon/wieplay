@@ -1,31 +1,19 @@
-import { useId, type ReactNode } from 'react'
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { ButtonLink } from '../components/Button'
 import { Card } from '../components/Card'
-import { FilmIcon, UploadIcon } from '../components/icons'
-import { LoadError, Message } from '../components/Message'
+import { CalendarIcon, FilmIcon, UploadIcon } from '../components/icons'
+import { EmptyState, LoadError, Message } from '../components/Message'
+import { SectionHeader } from '../components/PageHeader'
 import { Spinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead, Tr } from '../components/Table'
 import { BlockerList, FilmingBadge, VideoStatusBadge } from '../components/VideoBadges'
+import { VideoPoster } from '../components/VideoPoster'
 import { formatDate, formatDuration } from '../lib/format'
 import { useTeamVideos, useUpcomingFilming, useVideoConfig } from '../lib/queries'
 import type { TeamDetail, UpcomingFilming, Video } from '../lib/types'
 import { kindLabel, newestFirst } from '../lib/video'
-
-function SectionHead({ id, title, hint, action }: { id: string; title: string; hint?: string; action?: ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div className="flex flex-col gap-1">
-        <h2 id={id} className="text-lg font-semibold">
-          {title}
-        </h2>
-        {hint && <p className="text-sm text-muted">{hint}</p>}
-      </div>
-      {action}
-    </div>
-  )
-}
 
 // Videos
 
@@ -38,13 +26,13 @@ export function VideosSection({ team }: { team: TeamDetail }) {
 
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
-      <SectionHead
+      <SectionHeader
         id={id}
         title={t('team.videos')}
         action={
           team.can_upload && config.data?.enabled ? (
             <ButtonLink to={`/teams/${team.id}/upload`} variant="primary">
-              <UploadIcon />
+              <UploadIcon className="size-4" />
               {t('team.upload')}
             </ButtonLink>
           ) : null
@@ -57,33 +45,15 @@ export function VideosSection({ team }: { team: TeamDetail }) {
       ) : videos.isError ? (
         <LoadError onRetry={() => void videos.refetch()} />
       ) : videos.data.length === 0 ? (
-        <Message>{t('team.noVideos')}</Message>
+        <EmptyState icon={<FilmIcon />} title={t('team.noVideos')}>
+          {team.can_upload ? t('home.noVideosUpload') : t('home.noVideosPlayer')}
+        </EmptyState>
       ) : (
         <Card className="overflow-hidden">
           <VideoTable videos={newestFirst(videos.data)} />
         </Card>
       )}
     </section>
-  )
-}
-
-function Poster({ video }: { video: Video }) {
-  if (video.has_thumbs) {
-    return (
-      <img
-        src={`/api/media/${video.id}/poster.jpg`}
-        alt=""
-        loading="lazy"
-        width={64}
-        height={36}
-        className="aspect-video w-16 rounded-md bg-sunken object-cover"
-      />
-    )
-  }
-  return (
-    <span className="grid aspect-video w-16 place-items-center rounded-md bg-sunken text-muted">
-      <FilmIcon className="size-4" />
-    </span>
   )
 }
 
@@ -107,10 +77,10 @@ function VideoTable({ videos }: { videos: Video[] }) {
         {videos.map((video) => (
           <Tr key={video.id} onActivate={() => navigate(`/videos/${video.id}`)}>
             <Td className="pr-0">
-              <Poster video={video} />
+              <VideoPoster video={video} small className="w-16 rounded-md sm:w-20" />
             </Td>
             <Td>
-              <Link to={`/videos/${video.id}`} className="font-semibold text-link underline-offset-2 hover:underline">
+              <Link to={`/videos/${video.id}`} className="font-semibold link">
                 {video.title}
               </Link>
               <span className="mt-0.5 block text-xs text-muted tabular-nums sm:hidden">
@@ -142,13 +112,13 @@ export function FilmingSection({ teamId }: { teamId: number }) {
   const upcoming = useUpcomingFilming(teamId)
   return (
     <section aria-labelledby={id} className="flex flex-col gap-3">
-      <SectionHead id={id} title={t('team.filming')} hint={t('team.filmingHint')} />
+      <SectionHeader id={id} title={t('team.filming')} hint={t('team.filmingHint')} />
       {upcoming.isPending ? (
         <Spinner />
       ) : upcoming.isError ? (
         <LoadError onRetry={() => void upcoming.refetch()} />
       ) : upcoming.data.length === 0 ? (
-        <Message>{t('team.noUpcoming')}</Message>
+        <Message icon={<CalendarIcon />}>{t('team.noUpcoming')}</Message>
       ) : (
         <Card className="overflow-hidden">
           <FilmingTable items={upcoming.data} />

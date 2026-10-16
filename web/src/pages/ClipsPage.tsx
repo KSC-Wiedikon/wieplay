@@ -5,8 +5,9 @@ import { Badge } from '../components/Badge'
 import { ButtonLink, Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { PlayIcon, TrashIcon } from '../components/icons'
+import { PlayIcon, ScissorsIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader } from '../components/PageHeader'
 import { PageSpinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead, Tr } from '../components/Table'
 import { newestFirst } from '../lib/clips'
@@ -31,16 +32,13 @@ export function ClipsPage() {
   return (
     <div className="flex flex-col gap-6">
       <title>{`${t('clips.myTitle')} · nomal`}</title>
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">{t('clips.myTitle')}</h1>
-        <p className="text-sm text-muted">{t('clips.myHint')}</p>
-      </div>
+      <PageHeader title={t('clips.myTitle')} subtitle={t('clips.myHint')} />
       {clips.isPending ? (
         <PageSpinner />
       ) : clips.isError ? (
         <LoadError onRetry={() => void clips.refetch()} />
       ) : clips.data.length === 0 ? (
-        <Message>{t('clips.myEmpty')}</Message>
+        <Message icon={<ScissorsIcon />}>{t('clips.myEmpty')}</Message>
       ) : (
         <Card className="overflow-hidden">
           <Table caption={t('clips.myTitle')}>
@@ -58,7 +56,7 @@ export function ClipsPage() {
               {newestFirst(clips.data).map((clip) => (
                 <Tr key={clip.id} onActivate={() => void navigate(clipUrl(clip))}>
                   <Td>
-                    <Link to={clipUrl(clip)} className="font-semibold text-link underline-offset-2 hover:underline">
+                    <Link to={clipUrl(clip)} className="font-semibold link">
                       {clip.title}
                     </Link>
                     {clip.visibility === 'team' && (

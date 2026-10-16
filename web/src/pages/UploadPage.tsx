@@ -4,10 +4,12 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router'
 import { Badge, SportBadge } from '../components/Badge'
 import { Button } from '../components/Button'
+import { buttonClasses } from '../components/buttonStyles'
 import { Card } from '../components/Card'
 import { Field, Select, TextInput } from '../components/Field'
 import { CheckIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
+import { PageHeader } from '../components/PageHeader'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { UploadProgress } from '../components/UploadProgress'
@@ -65,18 +67,21 @@ function UploadView({ teamId }: { teamId: number }) {
   if (config.isError) return <LoadError onRetry={() => void config.refetch()} />
 
   return (
-    <div className="flex flex-col gap-6">
+    // A form: it keeps a readable width on wide screens.
+    <div className="flex max-w-3xl flex-col gap-6">
       <title>{`${t('upload.title')} · ${team.data.name} · nomal`}</title>
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold">{t('upload.title')}</h1>
-        <p className="flex items-center gap-2 text-muted">
-          <SportBadge sport={team.data.sport} />
-          <Link to={`/teams/${teamId}`} className="font-semibold text-link underline-offset-2 hover:underline">
-            {team.data.name}
-          </Link>
-          <span>{team.data.season}</span>
-        </p>
-      </div>
+      <PageHeader
+        eyebrow={
+          <>
+            <SportBadge sport={team.data.sport} />
+            <Link to={`/teams/${teamId}`} className="font-semibold link">
+              {team.data.name}
+            </Link>
+            <span>{team.data.season}</span>
+          </>
+        }
+        title={t('upload.title')}
+      />
       {!config.data.enabled ? (
         <Message>{t('video.notConfigured')}</Message>
       ) : !team.data.can_upload ? (
@@ -392,7 +397,7 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
                     {me.data?.is_admin && (
                       <Link
                         to="/admin/import-channels"
-                        className="self-start font-semibold text-link underline-offset-2 hover:underline"
+                        className="self-start font-semibold link"
                       >
                         {t('upload.addChannels')}
                       </Link>
@@ -446,9 +451,9 @@ function Segmented<T extends string>({
             <label
               key={option.value}
               className={cx(
-                'inline-flex min-h-11 cursor-pointer items-center rounded-xl border px-4 text-sm font-semibold sm:min-h-9',
+                'inline-flex min-h-11 cursor-pointer items-center rounded-control border px-4 text-sm font-semibold sm:min-h-9',
                 'has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring',
-                checked ? 'border-transparent bg-accent text-on-accent' : 'border-hairline bg-surface hover:bg-sunken',
+                checked ? 'border-transparent bg-accent text-on-accent shadow-card' : 'border-hairline-strong bg-surface hover:bg-sunken',
               )}
             >
               <input
@@ -513,10 +518,7 @@ function DevicePicker({
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">{t('upload.pickFilesHint')}</p>
       <label
-        className={cx(
-          'inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 self-start rounded-xl border border-hairline bg-surface px-4 text-sm font-semibold text-fg hover:bg-sunken sm:min-h-9',
-          'has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ring',
-        )}
+        className={buttonClasses({}, 'self-start')}
       >
         <input
           id={id}

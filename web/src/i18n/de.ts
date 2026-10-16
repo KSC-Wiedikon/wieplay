@@ -266,6 +266,7 @@ export const de: Messages<typeof en> = {
   },
   admin: {
     title: 'Admin',
+    subtitle: 'Teams, Filmregeln und die Maschinen, die die Videos verarbeiten.',
     forbidden: 'Diese Seite ist nur für Admins.',
     teams: 'Teams',
     teamsHint: 'Teams der aktuellen und der letzten Saison. Mitglieder sehen nur Teams, die Nomal nutzen.',
