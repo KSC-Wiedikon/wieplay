@@ -110,3 +110,29 @@ def can_delete_video(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bo
 def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
     """See the NAS inbox: anyone who may upload for at least one enabled team."""
     return any(can_upload(viewer, t) for t in teams)
+
+
+def can_tag(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Tag, mark rallies and sets, correct scores (§5.1): the team's coaches and team
+    managers (every season of the team) and sport admins. Analysts arrive with team grants."""
+    if not team.enabled:
+        return False
+    return team.sport in viewer.sport_admin or team.lineage_id in leads
+
+
+def is_team_manager(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Coaches and team managers (any season), sport admins, admins: they see coach-only
+    comments and manage the team's shared clips and reels."""
+    if not team.enabled:
+        return False
+    return viewer.is_admin or team.sport in viewer.sport_admin or team.lineage_id in leads
+
+
+def can_share_with_team(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Share a clip or reel with the team (§5.1): coaches, team managers, sport admins."""
+    return can_tag(viewer, team, leads)
+
+
+def can_export(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Download a watermarked MP4 (§5.1, §5.2): coaches, team managers, sport admins."""
+    return can_tag(viewer, team, leads)

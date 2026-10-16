@@ -5,12 +5,15 @@ export const keys = {
   me: ['me'] as const,
   teams: ['teams'] as const,
   team: (id: number) => ['teams', id] as const,
+  teamSeasons: (id: number) => ['teams', id, 'seasons'] as const,
   teamGames: (id: number) => ['teams', id, 'games'] as const,
   teamVideos: (id: number) => ['teams', id, 'videos'] as const,
   teamFilming: (id: number, on: string) => ['teams', id, 'filming', on] as const,
   upcomingFilming: (id: number) => ['teams', id, 'upcoming-filming'] as const,
   videoConfig: ['video-config'] as const,
   video: (id: string) => ['videos', id] as const,
+  tagging: (id: string) => ['videos', id, 'tagging'] as const,
+  rosterCandidates: (id: string) => ['videos', id, 'roster-candidates'] as const,
   inbox: ['inbox'] as const,
   adminTeams: ['admin', 'teams'] as const,
   sync: ['admin', 'sync'] as const,
@@ -18,6 +21,17 @@ export const keys = {
   jobs: (status: string | null) => ['admin', 'jobs', status] as const,
   policies: ['admin', 'policies'] as const,
   importChannels: ['admin', 'import-channels'] as const,
+  // M3: clips, reels, comments, exports
+  videoClips: (id: string) => ['videos', id, 'clips'] as const,
+  myClips: ['clips', 'mine'] as const,
+  comments: (id: string) => ['videos', id, 'comments'] as const,
+  videoPeople: (id: string) => ['videos', id, 'people'] as const,
+  reels: ['reels'] as const,
+  reel: (id: string) => ['reels', id] as const,
+  reelItems: (id: string) => ['reels', id, 'items'] as const,
+  reelPreview: (query: unknown) => ['reels', 'preview', query] as const,
+  exports: ['exports'] as const,
+  taxonomy: (sport: string) => ['taxonomy', sport] as const,
 }
 
 function shouldRetry(failureCount: number, error: Error): boolean {

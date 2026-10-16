@@ -12,11 +12,23 @@ export interface Team {
   rel: string[]
   /** The same team across seasons (D1 2026/27 was D2 in 2025/26). */
   lineage_id: string
+  /** Coaches and team managers (any season of the team) and sport admins: tag, share, download. */
+  can_tag: boolean
+  can_share: boolean
+  can_export: boolean
 }
 
 export interface TeamDetail extends Team {
   /** Coach or team manager of this season's team, or sport admin. */
   can_upload: boolean
+}
+
+/** A season of a team's lineage that the user can see (GET /api/teams/{id}/seasons, newest first). */
+export interface Season {
+  team_id: number
+  name: string
+  /** 'yyyy/yy' */
+  season: string
 }
 
 export interface Me {
@@ -143,6 +155,12 @@ export interface Video {
   created_by: number
   can_delete: boolean
   can_upload: boolean
+  /** Coaches and team managers (any season of the team) and sport admins. */
+  can_tag: boolean
+  /** Share clips and reels with the team. */
+  can_share: boolean
+  /** Download watermarked MP4s. */
+  can_export: boolean
   files: VideoFile[]
 }
 
@@ -267,4 +285,405 @@ export interface ImportChannel {
   ref: string
   label: string
   added_at: string
+}
+
+// Tagging (M2, docs/PLAN.md §6.5–§6.7, §9).
+
+export type Side = 'us' | 'them'
+export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected'
+export type TimePrecision = 'live' | 'adjusted' | 'frame'
+export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
+
+export interface TaxonomySkill {
+  /** One letter for volleyball (S R E A B D F); one or two characters for basketball (S2 S3 FT RO … F). */
+  code: string
+  /** i18n key, e.g. 'skill.serve'. */
+  name_key: string
+  category: string
+  /** The tag is placed this long before the first keystroke. */
+  lead_ms: number
+  pre_ms: number
+  post_ms: number
+  starts_rally: boolean
+  /** Grade → who wins the rally: the tagged side ('self') or the other one. Empty for basketball. */
+  ends_rally_on: Record<string, 'self' | 'other'>
+  /** What the skill adds to the score when made (grade `+`): basketball shots 2, 3, 1; else 0. */
+  points: number
+  /** Whether the skill takes a grade at all (volleyball: every skill; basketball: shots only). */
+  graded: boolean
+}
+
+export interface Taxonomy {
+  sport: string
+  version: number
+  grades: string[]
+  zones: number[]
+  skills: TaxonomySkill[]
+}
+
+export interface RosterEntry {
+  side: Side
+  number: number
+  member_id: number | null
+  position: string | null
+  is_libero: boolean
+  name: string | null
+}
+
+export interface Period {
+  id: string
+  /** Set (volleyball) or quarter (basketball: 1–4, then overtimes from 5). */
+  no: number
+  start_ms: number
+  end_ms: number | null
+  start_us: number
+  start_them: number
+  first_serve: Side | null
+  our_court_side_at_start: 'near' | 'far' | null
+  side_switch_at_score: number | null
+  /** Computed by the server: from the rallies (volleyball), the running score at its end (basketball). */
+  final_us: number | null
+  final_them: number | null
+  version: number
+  /** Null while live. Deleted sets only come back in a /changes answer that touched them. */
+  deleted_at: string | null
+}
+
+export interface Segment {
+  id: string
+  kind: SegmentKind
+  start_ms: number
+  end_ms: number
+  /** Computed by the server: the set this segment is in. */
+  period_id: string | null
+  serving: Side | null
+  won_by: Side | null
+  score_us_after: number | null
+  score_them_after: number | null
+  score_source: string | null
+  source: string
+  review: Review
+  version: number
+  /** Null while live. Deleted segments only come back in a /changes answer that touched them. */
+  deleted_at: string | null
+}
+
+export interface TagAttributes {
+  grade?: string
+  zone_from?: number
+  zone_to?: number
+}
+
+/** A tag (`event` in the API; named Tag here so it doesn't shadow the DOM's Event). */
+export interface Tag {
+  id: string
+  code: string
+  t_ms: number
+  frame: number | null
+  time_precision: TimePrecision
+  side: Side
+  number: number | null
+  /** Derived by the server from the roster snapshot. */
+  member_id: number | null
+  attributes: TagAttributes
+  /** Derived by the server: the rally the tag falls in, by time. */
+  segment_id: string | null
+  clip_pre_ms: number | null
+  clip_post_ms: number | null
+  note: string | null
+  source: string
+  review: Review
+  version: number
+  updated_at: string
+  /** Null while live; set on a stale change's answer when the server has the tag deleted. */
+  deleted_at: string | null
+}
+
+export interface Tagging {
+  /** Coaches and team managers of the team, and sport admins, on a ready video. */
+  can_tag: boolean
+  sport: string
+  taxonomy: Taxonomy | null
+  roster: RosterEntry[]
+  periods: Period[]
+  segments: Segment[]
+  events: Tag[]
+  /** Federation set scores as [us, them]; null when unknown. */
+  official_sets: [number, number][] | null
+  /** The game's official final result as [us, them] (both sports); null when not played or unknown. */
+  official_final: [number, number] | null
+}
+
+/**
+ * Every change names the server version it was based on: 0 for a new item, else the version
+ * last received. A change based on an older version than the server's is skipped (`stale`).
+ */
+interface ChangeBase {
+  id: string
+  base_version: number
+  deleted?: boolean
+}
+
+export interface EventIn extends ChangeBase {
+  code: string
+  t_ms: number
+  frame?: number | null
+  time_precision: TimePrecision
+  side: Side
+  number?: number | null
+  attributes: TagAttributes
+  /** Ignored by the server (it links tags to rallies itself); always sent as null. */
+  segment_id?: null
+  clip_pre_ms?: number | null
+  clip_post_ms?: number | null
+  note?: string | null
+  review?: Review
+}
+
+/** Who served is always derived by the server. */
+export interface SegmentIn extends ChangeBase {
+  kind: SegmentKind
+  start_ms: number
+  end_ms: number
+  won_by?: Side | null
+  review?: Review
+}
+
+export interface PeriodIn extends ChangeBase {
+  no: number
+  start_ms: number
+  end_ms?: number | null
+  start_us: number
+  start_them: number
+  first_serve?: Side | null
+  our_court_side_at_start?: 'near' | 'far' | null
+  side_switch_at_score?: number | null
+}
+
+export interface ChangesIn {
+  events: EventIn[]
+  segments: SegmentIn[]
+  periods: PeriodIn[]
+}
+
+export interface ChangesOut {
+  /** The events that were sent, with their new version (the server's state for stale ones). */
+  events: Tag[]
+  /** All live segments of the video, rescored, plus the deleted ones this batch touched. */
+  segments: Segment[]
+  /** All live periods of the video, plus the deleted ones this batch touched. */
+  periods: Period[]
+  /** Ids of changes skipped because the server had a newer version. */
+  stale: string[]
+}
+
+export interface RosterEntryIn {
+  side: Side
+  number: number
+  member_id?: number | null
+  position?: string | null
+  is_libero: boolean
+}
+
+/** Someone who can go on the video's roster: a player of the team in any season. */
+export interface RosterCandidate {
+  member_id: number
+  name: string
+  number: number | null
+}
+
+export interface EventRevision {
+  version: number
+  action: string
+  changed_by: number | null
+  changed_at: string
+  after: Record<string, unknown>
+}
+
+// Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).
+
+export type Visibility = 'private' | 'team'
+
+/** A time range of a video. Nothing is rendered: watching it seeks in the stream. */
+export interface Clip {
+  id: string
+  video_id: string
+  video_title: string
+  /** yyyy-mm-dd */
+  recorded_on: string
+  start_ms: number
+  end_ms: number
+  title: string
+  note: string | null
+  event_id: string | null
+  owner: number
+  owner_name: string | null
+  mine: boolean
+  visibility: Visibility
+  created_at: string
+}
+
+/** PUT /api/clips/{client id}: creates or updates one's own clip (at most 10 minutes). */
+export interface ClipIn {
+  video_id: string
+  start_ms: number
+  end_ms: number
+  title: string
+  note?: string | null
+  event_id?: string | null
+  /** `team` only for coaches, team managers and sport admins (403 otherwise). */
+  visibility: Visibility
+}
+
+export type ReelKind = 'smart' | 'manual'
+
+/** A smart reel's saved query, evaluated for each viewer when the reel is opened. */
+export interface ReelQuery {
+  lineage_id?: string | null
+  /** 'yyyy/yy' */
+  season?: string | null
+  video_ids?: string[]
+  member_id?: number | null
+  side?: Side | null
+  codes?: string[]
+  grades?: string[]
+  /** 1..500, default 200. */
+  limit?: number
+}
+
+export interface Reel {
+  id: string
+  title: string
+  kind: ReelKind
+  query: ReelQuery | null
+  visibility: Visibility
+  lineage_id: string | null
+  owner: number
+  mine: boolean
+  created_at: string
+  updated_at: string
+}
+
+/** GET /api/reels/{id}: the reel with the moments the viewer may watch, counted. */
+export interface ReelDetail {
+  reel: Reel
+  item_count: number
+  total_ms: number
+}
+
+export interface ReelItemIn {
+  video_id: string
+  start_ms: number
+  end_ms: number
+  event_id?: string | null
+  clip_id?: string | null
+  caption?: string | null
+}
+
+export interface ReelIn {
+  title: string
+  kind: ReelKind
+  /** Smart reels only. */
+  query?: ReelQuery | null
+  /** Manual reels only, in order. */
+  items?: ReelItemIn[]
+  visibility: Visibility
+  /** Required for `team`. */
+  lineage_id?: string | null
+}
+
+/** One stretch of a reel, a smart reel's match or a condensed match, as the viewer may watch it. */
+export interface Piece {
+  video_id: string
+  start_ms: number
+  end_ms: number
+  event_id: string | null
+  clip_id: string | null
+  caption: string | null
+  video_title: string | null
+  recorded_on: string | null
+  code: string | null
+  grade: string | null
+  side: Side | null
+  number: number | null
+  member_id: number | null
+  player_name: string | null
+  /** The score after the rally the moment belongs to, when it is tagged. */
+  score_us: number | null
+  score_them: number | null
+}
+
+/** Someone of the video's team in any season: who a comment can mention or be addressed to. */
+export interface VideoPerson {
+  member_id: number
+  name: string
+  number: number | null
+  /** player, coach, captain, team_responsible, … */
+  roles: string[]
+}
+
+export type Audience = 'team' | 'coaches' | 'person'
+export type CommentTarget = 'video' | 'event' | 'segment' | 'clip'
+
+export interface Comment {
+  id: string
+  video_id: string
+  target_type: CommentTarget
+  target_id: string | null
+  t_ms: number | null
+  author: number
+  author_name: string | null
+  body: string
+  /** Member ids of the team. */
+  mentions: number[]
+  audience: Audience
+  recipient: number | null
+  recipient_name: string | null
+  created_at: string
+  edited_at: string | null
+  mine: boolean
+  /** The author, and the team's coaches for any comment. */
+  can_delete: boolean
+}
+
+export interface CommentIn {
+  /** Client-made UUID. */
+  id: string
+  target_type: CommentTarget
+  /** Required unless the target is the video. */
+  target_id?: string | null
+  t_ms?: number | null
+  /** 1..4000 characters. */
+  body: string
+  mentions: number[]
+  audience: Audience
+  /** Required for `person`. */
+  recipient?: number | null
+}
+
+export type ExportKind = 'clip' | 'reel' | 'condensed'
+export type ExportStatus = 'queued' | 'ready' | 'failed' | 'expired' | 'deleted'
+
+/** A watermarked MP4 rendered by the media worker (coaches only, PLAN §5.2). */
+export interface VideoExport {
+  id: string
+  kind: ExportKind
+  title: string
+  duration_ms: number
+  status: ExportStatus
+  bytes: number | null
+  /** 0..1 while queued, when the worker reports it. */
+  progress: number | null
+  error: string | null
+  created_at: string
+  expires_at: string | null
+}
+
+export interface ExportIn {
+  kind: ExportKind
+  clip_id?: string
+  reel_id?: string
+  /** A condensed match. */
+  video_id?: string
+  title?: string
 }

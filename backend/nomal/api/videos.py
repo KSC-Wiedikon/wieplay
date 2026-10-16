@@ -38,7 +38,15 @@ from nomal.core.filming import (
     refresh_rosters,
 )
 from nomal.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTeam
-from nomal.core.permissions import Viewer, can_delete_video, can_upload, can_use_inbox
+from nomal.core.permissions import (
+    Viewer,
+    can_delete_video,
+    can_export,
+    can_share_with_team,
+    can_tag,
+    can_upload,
+    can_use_inbox,
+)
 from nomal.core.storage import ObjectStore, safe_file_name
 
 log = logging.getLogger(__name__)
@@ -139,6 +147,9 @@ class VideoOut(BaseModel):
     created_by: int
     can_delete: bool
     can_upload: bool
+    can_tag: bool
+    can_share: bool
+    can_export: bool
     files: list[FileOut]
 
 
@@ -276,6 +287,9 @@ def _video_out(
         created_by=video.created_by,
         can_delete=can_delete_video(viewer, access.ref, access.leads),
         can_upload=can_upload(viewer, access.ref),
+        can_tag=can_tag(viewer, access.ref, access.leads),
+        can_share=can_share_with_team(viewer, access.ref, access.leads),
+        can_export=can_export(viewer, access.ref, access.leads),
         files=[
             FileOut(
                 id=f.id,

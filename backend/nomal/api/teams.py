@@ -9,15 +9,20 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, contains_eager
 
+from nomal.api.access import team_refs
 from nomal.api.deps import DbDep, ViewerDep
 from nomal.core.models import TeamLineage, WdGame, WdTeam
 from nomal.core.permissions import (
     TeamRef,
     Viewer,
+    can_export,
     can_manage_nomal,
+    can_share_with_team,
+    can_tag,
     can_upload,
+    lead_lineages,
     visible_team_ids,
 )
 
@@ -33,6 +38,10 @@ class TeamOut(BaseModel):
     rel: list[str]
     # The same team across seasons (D1 2026/27 was D2 in 2025/26): the start page groups by it.
     lineage_id: uuid.UUID
+    # Coaches and team managers (any season) and sport admins: tag, share, download.
+    can_tag: bool
+    can_share: bool
+    can_export: bool
 
 
 class TeamDetailOut(TeamOut):
@@ -72,14 +81,23 @@ SPORT_ORDER = {"volleyball": 0, "basketball": 1}
 
 
 def _visible_teams(db: Session, viewer: Viewer) -> list[WdTeam]:
-    rows = db.execute(select(WdTeam, TeamLineage.enabled).join(WdTeam.lineage)).all()
+    rows = db.execute(
+        select(WdTeam, TeamLineage.enabled)
+        .join(WdTeam.lineage)
+        .options(contains_eager(WdTeam.lineage))
+    ).all()
     refs = [TeamRef(t.id, t.sport, t.lineage_id, enabled) for t, enabled in rows]
     ids = visible_team_ids(viewer, refs)
     teams = [t for t, _ in rows if t.id in ids]
     return sorted(teams, key=lambda t: (SPORT_ORDER.get(t.sport, 9), t.name, t.season))
 
 
-def _team_out(team: WdTeam, viewer: Viewer) -> TeamOut:
+def _ref(team: WdTeam) -> TeamRef:
+    return TeamRef(team.id, team.sport, team.lineage_id, team.lineage.enabled)
+
+
+def _team_out(team: WdTeam, viewer: Viewer, leads: set[uuid.UUID]) -> TeamOut:
+    ref = _ref(team)
     return TeamOut(
         id=team.id,
         name=team.name,
@@ -88,7 +106,15 @@ def _team_out(team: WdTeam, viewer: Viewer) -> TeamOut:
         league=team.league,
         rel=sorted(viewer.team_rels.get(team.id, frozenset())),
         lineage_id=team.lineage_id,
+        can_tag=can_tag(viewer, ref, leads),
+        can_share=can_share_with_team(viewer, ref, leads),
+        can_export=can_export(viewer, ref, leads),
     )
+
+
+def _team_list(db: Session, viewer: Viewer) -> list[TeamOut]:
+    leads = lead_lineages(viewer, team_refs(db))
+    return [_team_out(t, viewer, leads) for t in _visible_teams(db, viewer)]
 
 
 def _get_visible_team(db: Session, viewer: Viewer, team_id: int) -> WdTeam:
@@ -105,20 +131,38 @@ def me(viewer: ViewerDep, db: DbDep) -> MeOut:
         roles=sorted(viewer.roles),
         is_admin=can_manage_nomal(viewer),
         sport_admin=sorted(viewer.sport_admin),
-        teams=[_team_out(t, viewer) for t in _visible_teams(db, viewer)],
+        teams=_team_list(db, viewer),
     )
 
 
 @router.get("/teams", response_model=list[TeamOut])
 def list_teams(viewer: ViewerDep, db: DbDep) -> list[TeamOut]:
-    return [_team_out(t, viewer) for t in _visible_teams(db, viewer)]
+    return _team_list(db, viewer)
 
 
 @router.get("/teams/{team_id}", response_model=TeamDetailOut)
 def get_team(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamDetailOut:
     team = _get_visible_team(db, viewer, team_id)
-    ref = TeamRef(team.id, team.sport, team.lineage_id, team.lineage.enabled)
-    return TeamDetailOut(**_team_out(team, viewer).model_dump(), can_upload=can_upload(viewer, ref))
+    leads = lead_lineages(viewer, team_refs(db))
+    return TeamDetailOut(
+        **_team_out(team, viewer, leads).model_dump(), can_upload=can_upload(viewer, _ref(team))
+    )
+
+
+class SeasonOut(BaseModel):
+    team_id: int
+    name: str
+    season: str
+
+
+@router.get("/teams/{team_id}/seasons", response_model=list[SeasonOut])
+def team_seasons(team_id: int, viewer: ViewerDep, db: DbDep) -> list[SeasonOut]:
+    """The seasons of this team the viewer can see (newest first)."""
+    team = _get_visible_team(db, viewer, team_id)
+    visible = {t.id for t in _visible_teams(db, viewer)}
+    rows = db.scalars(select(WdTeam).where(WdTeam.lineage_id == team.lineage_id))
+    out = [SeasonOut(team_id=t.id, name=t.name, season=t.season) for t in rows if t.id in visible]
+    return sorted(out, key=lambda s: s.season, reverse=True)
 
 
 @router.get("/teams/{team_id}/games", response_model=list[GameOut])

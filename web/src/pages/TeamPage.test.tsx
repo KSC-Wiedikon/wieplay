@@ -13,6 +13,9 @@ const team = (patch: Partial<TeamDetail> = {}): TeamDetail => ({
   rel: ['player'],
   lineage_id: '6f1c0a52-2a43-4c11-9a43-111111111111',
   can_upload: false,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
   ...patch,
 })
 
@@ -44,6 +47,9 @@ const video = (patch: Partial<Video>): Video => ({
   created_by: 7,
   can_delete: false,
   can_upload: false,
+  can_tag: false,
+  can_share: false,
+  can_export: false,
   files: [],
   ...patch,
 })
@@ -164,5 +170,19 @@ describe('TeamPage videos', () => {
     expect(rows[0]).toHaveTextContent('Filming allowed')
     expect(rows[1]).toHaveTextContent('Filming blocked')
     expect(rows[1]).toHaveTextContent('2 people on the roster are under 18 on that day.')
+  })
+})
+
+describe('TeamPage highlights', () => {
+  it('offers players their highlights of the season', async () => {
+    stub(team(), [])
+    const section = await screen.findByRole('region', { name: 'My highlights' })
+    expect(within(section).getByRole('link', { name: 'Watch my highlights' })).toHaveAttribute('href', '/teams/92/highlights')
+  })
+
+  it('has no highlights section for coaches', async () => {
+    stub(team({ rel: ['coach'], can_upload: true }), [])
+    await screen.findByRole('region', { name: 'Videos' })
+    expect(screen.queryByRole('region', { name: 'My highlights' })).not.toBeInTheDocument()
   })
 })

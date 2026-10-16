@@ -1,26 +1,39 @@
+import '../i18n/pages'
 import { useQueryClient } from '@tanstack/react-query'
-import { useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Badge } from '../components/Badge'
-import { Button } from '../components/Button'
+import { Button, ButtonLink } from '../components/Button'
 import { Card } from '../components/Card'
+import { ClipDialog } from '../components/ClipDialog'
+import { ClipBar, ClipsSection } from '../components/ClipsSection'
+import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { ExportButton } from '../components/ExportButton'
 import { AlertIcon, CheckIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
+import { MomentsStrip } from '../components/MomentsStrip'
 import { ProgressBar } from '../components/ProgressBar'
+import { RallyPanel } from '../components/RallyPanel'
 import { PageSpinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { UploadProgress } from '../components/UploadProgress'
 import { VideoStatusBadge } from '../components/VideoBadges'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { ApiError, blockersOf } from '../lib/api'
+import { clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
+import { commentMoments } from '../lib/comments'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
-import { useDeleteVideo, useVideo, useVideoConfig } from '../lib/queries'
+import { formatClock } from '../lib/labels'
+import { useComments, useVideoClips } from '../lib/library'
+import { Playhead } from '../lib/playhead'
+import { useDeleteVideo, useMe, useTagging, useVideo, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
 import { sportOf, useSportAccent } from '../lib/sport'
+import { useRangePlayback } from '../lib/useRangePlayback'
 import { useToast } from '../lib/toast'
-import type { ImportedFrom, Video } from '../lib/types'
+import type { Clip, ImportedFrom, Video } from '../lib/types'
 import { matchFiles, useUpload, type FilePair } from '../lib/upload'
 import { isUuid, kindLabel, parseVideoLink, platformName, VIDEO_ACCEPT, videoFacts } from '../lib/video'
 
@@ -196,14 +209,152 @@ function Problem({ video }: { video: Video }) {
   )
 }
 
+interface PlayItem extends PlayRange {
+  key: string
+  label: string
+}
+
+function clipItem(clip: Clip): PlayItem {
+  return { key: clip.id, label: clip.title, start_ms: clip.start_ms, end_ms: clip.end_ms }
+}
+
 function Ready({ video }: { video: Video }) {
   const { t } = useTranslation()
+  const tagging = useTagging(video.id, true)
+  const clips = useVideoClips(video.id)
+  const comments = useComments(video.id)
+  const me = useMe()
+  const [searchParams] = useSearchParams()
+  const [element, setElement] = useState<HTMLVideoElement | null>(null)
+  const [playhead] = useState(() => new Playhead())
+  const [queue, setQueue] = useState<RangeQueue<PlayItem> | null>(null)
+  const [marks, setMarks] = useState<{ in: number | null; out: number | null }>({ in: null, out: null })
+  const [draft, setDraft] = useState<ClipDraft | null>(null)
+  useEffect(() => {
+    playhead.attach(element)
+    return () => playhead.detach()
+  }, [playhead, element])
+
+  // Clips play from their start to their end, then stop or go on with the next one.
+  const current = queue ? (queue.ranges[queue.index] ?? null) : null
+  const play = useCallback(
+    (ranges: readonly PlayItem[], index: number) => {
+      const range = ranges[index]
+      if (!range) return
+      setQueue({ ranges, index })
+      playhead.seek(range.start_ms)
+      playhead.play()
+    },
+    [playhead],
+  )
+  useRangePlayback(element, current, {
+    onEnd: (range) => {
+      const next = queue && queue.ranges[queue.index] === range ? nextInQueue(queue) : null
+      if (next) play(next.ranges, next.index)
+      else {
+        element?.pause()
+        setQueue((q) => (q && q.ranges[q.index] === range ? null : q))
+      }
+    },
+    onLeave: (range) => setQueue((q) => (q && q.ranges[q.index] === range ? null : q)),
+  })
+
+  // /videos/:id?clip=… (from "My clips"): play just that clip once the video can seek.
+  const wanted = searchParams.get('clip')
+  const started = useRef<string | null>(null)
+  useEffect(() => {
+    if (!wanted || started.current === wanted || !element || !clips.data) return
+    const clip = clips.data.find((c) => c.id === wanted)
+    if (!clip) return
+    started.current = wanted
+    const go = () => play([clipItem(clip)], 0)
+    if (element.readyState >= 1) go()
+    else element.addEventListener('loadedmetadata', go, { once: true })
+  }, [wanted, element, clips.data, play])
+
   const { resolution, fps } = videoFacts(video)
   const facts = [formatDuration(video.duration_ms), resolution, fps ? t('video.fps', { fps }) : null].filter(Boolean)
+  const data = tagging.data
+  const rallyCount = data?.segments.filter((s) => s.kind === 'rally').length ?? 0
+  const tagCount = data?.events.length ?? 0
+  const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
+  const duration = video.duration_ms ?? playhead.getState().duration_ms
+
+  const seekTo = (t_ms: number) => {
+    playhead.seek(t_ms)
+    element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }
+
+  const saveMarks = () => {
+    const range = clipRange(marks.in, marks.out, playhead.getState().t_ms, video.duration_ms)
+    if (!range) return
+    setDraft({
+      id: null,
+      video_id: video.id,
+      ...range,
+      title: t('clips.dialog.defaultTitle', { time: formatClock(range.start_ms, { tenths: false }) }),
+      note: null,
+      event_id: null,
+      visibility: 'private',
+    })
+  }
+
   return (
     <div className="flex flex-col gap-3">
-      <VideoPlayer video={video} />
+      <VideoPlayer video={video} videoRef={setElement} />
+      {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null)) ? (
+        <MomentsStrip
+          duration_ms={duration}
+          ranges={(clips.data ?? []).map((c) => ({ id: c.id, start_ms: c.start_ms, end_ms: c.end_ms, shared: c.visibility === 'team' }))}
+          marks={commentMoments(comments.data ?? [])}
+          playhead={playhead}
+          onSeek={(ms) => playhead.seek(ms)}
+        />
+      ) : null}
+      {current && (
+        <p className="flex flex-wrap items-center gap-2 text-sm" role="status">
+          <span className="font-semibold">{t('clips.nowPlaying', { title: current.label })}</span>
+          {queue && queue.ranges.length > 1 && (
+            <span className="text-muted tabular-nums">{t('clips.queuePosition', { n: queue.index + 1, total: queue.ranges.length })}</span>
+          )}
+          <Button
+            variant="ghost"
+            onClick={() => {
+              element?.pause()
+              setQueue(null)
+            }}
+          >
+            {t('clips.stop')}
+          </Button>
+        </p>
+      )}
       {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
+      <ClipBar
+        playhead={playhead}
+        clipIn={marks.in}
+        clipOut={marks.out}
+        onMark={(which, t_ms) => setMarks((m) => ({ ...m, [which]: t_ms }))}
+        onClear={() => setMarks({ in: null, out: null })}
+        onSave={saveMarks}
+      />
+      {showSummary && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm font-semibold tabular-nums">
+            {/* Basketball marks no rallies. */}
+            {data.sport === 'basketball'
+              ? t('tagging.tagCount', { count: tagCount })
+              : `${t('tagging.tagCount', { count: tagCount })} · ${t('tagging.rallyCount', { count: rallyCount })}`}
+          </p>
+          {data.can_tag && (
+            // Tagging is a keyboard task: desktop only (PLAN §9.1).
+            <div className="hidden lg:block">
+              <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
+                {t('tagging.tagThis')}
+              </ButtonLink>
+            </div>
+          )}
+        </div>
+      )}
       {video.meets_standard === false && (
         <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
           <p className="flex flex-wrap items-center gap-2 font-semibold">
@@ -216,6 +367,44 @@ function Ready({ video }: { video: Video }) {
           <p className="text-muted">{t('video.belowStandardNote')}</p>
         </div>
       )}
+      {data && rallyCount > 0 && (
+        <div className="mt-3">
+          <RallyPanel
+            tagging={data}
+            duration_ms={video.duration_ms}
+            element={element}
+            playhead={playhead}
+            suspended={current !== null}
+            action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
+          />
+        </div>
+      )}
+      <div className="mt-3">
+        <ClipsSection
+          clips={clips}
+          canManage={video.can_delete}
+          canExport={video.can_export}
+          playingId={current?.key ?? null}
+          onPlay={(list, index, all) => {
+            const items = list.map(clipItem)
+            if (all) play(items, index)
+            else play(items.slice(index, index + 1), 0)
+          }}
+          onEdit={(clip) => setDraft(draftOf(clip))}
+        />
+      </div>
+      <div className="mt-3">
+        <CommentsSection videoId={video.id} meId={me.data?.member.id ?? 0} playhead={playhead} onSeek={seekTo} />
+      </div>
+      <ClipDialog
+        draft={draft}
+        canShare={video.can_share}
+        duration_ms={video.duration_ms}
+        onClose={() => setDraft(null)}
+        onSaved={(clip) => {
+          if (clip.id && draft?.id === null) setMarks({ in: null, out: null })
+        }}
+      />
     </div>
   )
 }

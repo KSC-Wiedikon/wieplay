@@ -13,11 +13,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from nomal import __version__
-from nomal.api import admin, auth, media, teams, videos, worker
+from nomal.api import admin, auth, library, media, tagging, teams, videos, worker
 from nomal.core.config import Settings, get_settings
 from nomal.core.db import make_engine, make_sessionmaker
 from nomal.core.storage import ObjectStore, make_store
 from nomal.core.sync import BridgeClient, BridgeError, HttpBridgeClient, run_sync
+from nomal.core.taxonomy import seed as seed_taxonomies
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        try:
+            with sessions() as db:
+                seed_taxonomies(db)
+        except Exception:
+            log.exception("could not seed the taxonomy table (tagging still works from YAML)")
         tasks = []
         if settings.sync_interval_minutes > 0:
             tasks.append(asyncio.create_task(sync_loop()))
@@ -129,6 +135,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(videos.router)
     app.include_router(media.router)
     app.include_router(worker.router)
+    app.include_router(tagging.router)
+    app.include_router(library.router)
 
     if settings.web_dist:
         _mount_web(app, Path(settings.web_dist))
@@ -147,6 +155,7 @@ def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -
             log.warning("reaped %d expired job leases", count)
         if store is not None:
             videos.sweep_deleted(session, store)
+            library.sweep_exports(session, store)
 
 
 def _mount_web(app: FastAPI, dist: Path) -> None:

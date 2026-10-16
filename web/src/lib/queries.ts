@@ -17,6 +17,11 @@ export function useTeam(id: number) {
   return useQuery({ queryKey: keys.team(id), queryFn: ({ signal }) => api.team(id, signal) })
 }
 
+/** The seasons of the team's lineage I can see, newest first. */
+export function useTeamSeasons(id: number, enabled = true) {
+  return useQuery({ queryKey: keys.teamSeasons(id), queryFn: ({ signal }) => api.teamSeasons(id, signal), enabled })
+}
+
 export function useTeamGames(id: number) {
   return useQuery({ queryKey: keys.teamGames(id), queryFn: ({ signal }) => api.teamGames(id, signal) })
 }
@@ -122,6 +127,24 @@ export function useVideo(id: string) {
     queryKey: keys.video(id),
     queryFn: ({ signal }) => api.video(id, signal),
     refetchInterval: (query) => (query.state.data && BUSY.has(query.state.data.status) ? 5_000 : false),
+  })
+}
+
+/** Tags, rallies, sets and the roster snapshot of a ready video (players can read it too). */
+export function useTagging(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.tagging(id),
+    queryFn: ({ signal }) => api.tagging(id, signal),
+    enabled,
+  })
+}
+
+/** The team's players (any season), for the roster editor (coaches, sport admins). */
+export function useRosterCandidates(videoId: string) {
+  return useQuery({
+    queryKey: keys.rosterCandidates(videoId),
+    queryFn: ({ signal }) => api.rosterCandidates(videoId, signal),
+    staleTime: 0,
   })
 }
 

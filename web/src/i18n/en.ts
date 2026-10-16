@@ -10,6 +10,7 @@ export const en = {
     save: 'Save',
     saving: 'Saving…',
     draft: 'Draft',
+    close: 'Close',
   },
   sport: {
     volleyball: 'Volleyball',
@@ -82,6 +83,9 @@ export const en = {
     filming: 'Filming',
     filmingHint: 'Games in the next 21 days. Only film when filming is allowed.',
     noUpcoming: 'No games in the next 21 days.',
+    highlights: 'My highlights',
+    highlightsHint: 'Your tagged moments of this season, updated as tagging goes on.',
+    highlightsWatch: 'Watch my highlights',
   },
   video: {
     kind: {
@@ -354,6 +358,12 @@ export const en = {
       members: 'Members',
       games: 'Games',
     },
+  },
+  nav: {
+    label: 'Main',
+    clips: 'Clips',
+    reels: 'Reels',
+    downloads: 'Downloads',
   },
   notFound: {
     title: 'Page not found',

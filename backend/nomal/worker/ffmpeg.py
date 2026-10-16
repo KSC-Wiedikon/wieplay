@@ -354,24 +354,61 @@ def thumbs_args(
     ]
 
 
-def poster_args(*, concat: Path, at_s: float) -> list[str]:
+def poster_args(*, source: Path, at_s: float) -> list[str]:
+    """A poster frame from one camera file (no seeking inside the concat demuxer)."""
     return [
-        "-ss",
-        f"{at_s:.2f}",
-        *input_guard(concat=True),
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(concat),
-        "-map",
-        "0:v:0",
-        "-frames:v",
-        "1",
-        "-vf",
-        "scale=1280:-2",
-        "-q:v",
-        "3",
-        "poster.jpg",
-    ]
+        "-ss", f"{at_s:.2f}", *input_guard(), "-i", str(source),
+        "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=1280:-2", "-q:v", "3", "poster.jpg",
+    ]  # fmt: skip
+
+
+EXPORT_WIDTH, EXPORT_HEIGHT, EXPORT_FPS = 1920, 1080, 50
+
+
+def export_piece_args(
+    *,
+    source: Path,
+    start_s: float,
+    duration_s: float,
+    has_audio: bool,
+    watermark_file: Path,
+    font_file: str,
+    output: str,
+) -> list[str]:
+    """One piece of an export: cut frame-accurately from the originals, 1080p50, the
+    watermark burned in (PLAN §5.2). Pieces share every parameter, so they join without
+    re-encoding. Silent audio when the source has none, so every piece has a track.
+    `source` is one camera file: seeking inside the concat demuxer is unreliable, so a
+    piece that spans two files is cut as two pieces."""
+    text = str(watermark_file).replace("\\", "/").replace(":", "\\:")
+    font = font_file.replace(":", "\\:")
+    video_filter = (
+        f"scale={EXPORT_WIDTH}:{EXPORT_HEIGHT}:force_original_aspect_ratio=decrease,"
+        f"pad={EXPORT_WIDTH}:{EXPORT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps={EXPORT_FPS},"
+        "format=yuv420p,"
+        f"drawtext=fontfile={font}:textfile={text}:fontsize=30:fontcolor=white@0.85:"
+        "box=1:boxcolor=black@0.45:boxborderw=8:x=w-tw-28:y=h-th-28"
+    )
+    args = [
+        "-ss", f"{start_s:.3f}", *input_guard(), "-i", str(source),
+    ]  # fmt: skip
+    if not has_audio:
+        args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+    args += [
+        "-t", f"{duration_s:.3f}",
+        "-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
+        "-vf", video_filter,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "8M",
+        "-bufsize", "16M", "-g", str(2 * EXPORT_FPS), "-profile:v", "high",
+        "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+        output,
+    ]  # fmt: skip
+    return args
+
+
+def join_args(*, parts_list: Path, output: str) -> list[str]:
+    """Join export pieces without re-encoding; moov at the front for streaming."""
+    return [
+        "-f", "concat", "-safe", "0", "-i", str(parts_list),
+        "-c", "copy", "-movflags", "+faststart", output,
+    ]  # fmt: skip

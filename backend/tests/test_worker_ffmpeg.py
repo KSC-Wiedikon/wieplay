@@ -90,7 +90,7 @@ def test_thumbnails_and_poster(parts: list[Path], tmp_path: Path) -> None:
         duration_ms=8000, on_progress=lambda _: None, cancel=cancel, cwd=out,
     )  # fmt: skip
     ffmpeg.run(
-        ffmpeg.poster_args(concat=concat, at_s=1.0),
+        ffmpeg.poster_args(source=parts[0], at_s=1.0),
         duration_ms=1, on_progress=lambda _: None, cancel=cancel, cwd=out,
     )  # fmt: skip
     sheets = sorted(p.name for p in out.glob("sprite_*.jpg"))
@@ -108,3 +108,49 @@ def test_cancel_stops_ffmpeg(parts: list[Path], tmp_path: Path) -> None:
             ["-f", "concat", "-safe", "0", "-i", str(concat), "-f", "null", "-"],
             duration_ms=8000, on_progress=lambda _: None, cancel=cancel,
         )  # fmt: skip
+
+
+def test_export_pieces_with_watermark_join_into_one_mp4(parts: list[Path], tmp_path: Path) -> None:
+    silent = tmp_path / "silent.mp4"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+         "-i", "testsrc2=size=640x360:rate=25", "-t", "3", "-c:v", "libx264",
+         "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(silent)],
+        check=True,
+    )  # fmt: skip
+    watermark = tmp_path / "wm.txt"
+    watermark.write_text("KSCW intern · Jo Trainer · 15.10.2026")
+    cancel = threading.Event()
+    names = []
+    # The first piece crosses the join of the two camera files (4.0-6.0 s; the first is 5 s),
+    # so it is cut as two pieces, as the worker does.
+    cuts = [(parts[0], 4.0, 1.0, True), (parts[1], 0.0, 1.0, True), (silent, 0.5, 1.5, False)]
+    for n, (source, start, length, audio) in enumerate(cuts):
+        name = f"piece_{n}.mp4"
+        ffmpeg.run(
+            ffmpeg.export_piece_args(
+                source=source, start_s=start, duration_s=length, has_audio=audio,
+                watermark_file=watermark,
+                font_file="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", output=name,
+            ),
+            duration_ms=int(length * 1000), on_progress=lambda _: None, cancel=cancel,
+            cwd=tmp_path,
+        )  # fmt: skip
+        names.append(name)
+    listing = tmp_path / "parts.ffconcat"
+    listing.write_text("ffconcat version 1.0\n" + "".join(f"file '{n}'\n" for n in names))
+    ffmpeg.run(
+        ffmpeg.join_args(parts_list=listing, output="export.mp4"),
+        duration_ms=3500, on_progress=lambda _: None, cancel=cancel, cwd=tmp_path,
+    )  # fmt: skip
+    result = ffmpeg.probe(tmp_path / "export.mp4", camera=False)
+    # The average rate is a hair under 50: AAC priming makes the container a few ms longer.
+    assert (result.width, result.height, round(float(result.fps))) == (1920, 1080, 50)
+    assert result.has_audio
+    assert 3300 <= result.duration_ms <= 3700
+    joined = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+         "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(tmp_path / "export.mp4")],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()  # fmt: skip
+    assert 172 <= int(joined) <= 175  # 3.5 s at 50 fps; at most a frame lost per cut

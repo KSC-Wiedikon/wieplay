@@ -41,7 +41,7 @@ class UploadedPart:
 
 
 class ObjectStore(Protocol):
-    def presign_get(self, key: str, ttl: int) -> str: ...
+    def presign_get(self, key: str, ttl: int, download_name: str | None = None) -> str: ...
     def presign_put(self, key: str, ttl: int) -> str: ...
     def create_multipart(self, key: str, content_type: str) -> str: ...
     def presign_part(self, key: str, upload_id: str, part: int, size: int, ttl: int) -> str: ...
@@ -91,10 +91,11 @@ class S3Store:
             ),
         )
 
-    def presign_get(self, key: str, ttl: int) -> str:
-        return self._client.generate_presigned_url(
-            "get_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=ttl
-        )
+    def presign_get(self, key: str, ttl: int, download_name: str | None = None) -> str:
+        params: dict[str, Any] = {"Bucket": self.bucket, "Key": key}
+        if download_name:
+            params["ResponseContentDisposition"] = f'attachment; filename="{download_name}"'
+        return self._client.generate_presigned_url("get_object", Params=params, ExpiresIn=ttl)
 
     def presign_put(self, key: str, ttl: int) -> str:
         return self._client.generate_presigned_url(

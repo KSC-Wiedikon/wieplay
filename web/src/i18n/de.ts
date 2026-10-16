@@ -1,6 +1,6 @@
 import type { en } from './en'
 
-type Messages<T> = { [K in keyof T]: T[K] extends string ? string : Messages<T[K]> }
+export type Messages<T> = { [K in keyof T]: T[K] extends string ? string : Messages<T[K]> }
 
 // Swiss German spelling (ss, never ß), informal "du" as in Wiedisync.
 export const de: Messages<typeof en> = {
@@ -15,6 +15,7 @@ export const de: Messages<typeof en> = {
     save: 'Speichern',
     saving: 'Speichert…',
     draft: 'Entwurf',
+    close: 'Schliessen',
   },
   sport: {
     volleyball: 'Volleyball',
@@ -87,6 +88,9 @@ export const de: Messages<typeof en> = {
     filming: 'Filmen',
     filmingHint: 'Spiele der nächsten 21 Tage. Filme nur, wenn Filmen erlaubt ist.',
     noUpcoming: 'Keine Spiele in den nächsten 21 Tagen.',
+    highlights: 'Meine Highlights',
+    highlightsHint: 'Deine getaggten Szenen dieser Saison, laufend ergänzt, während getaggt wird.',
+    highlightsWatch: 'Meine Highlights anschauen',
   },
   video: {
     kind: {
@@ -369,6 +373,12 @@ export const de: Messages<typeof en> = {
       members: 'Mitglieder',
       games: 'Spiele',
     },
+  },
+  nav: {
+    label: 'Hauptmenü',
+    clips: 'Clips',
+    reels: 'Reels',
+    downloads: 'Downloads',
   },
   notFound: {
     title: 'Seite nicht gefunden',

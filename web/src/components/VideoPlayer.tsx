@@ -1,5 +1,5 @@
 import type Hls from 'hls.js'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Video } from '../lib/types'
 import { Button } from './Button'
@@ -27,15 +27,32 @@ function isInteractive(target: EventTarget | null): boolean {
   )
 }
 
+interface VideoPlayerProps {
+  video: Video
+  /** Receives the <video> element (null when it goes away), for tagging and condensed playback. */
+  videoRef?: (element: HTMLVideoElement | null) => void
+  /** The player's own keys (space, arrows, comma and period). Off where the page has its own. */
+  keyboard?: boolean
+  /** Frame rate of the rendition playing now. */
+  onFrameRate?: (fps: number) => void
+}
+
 /**
  * HLS playback through the API: hls.js where Media Source Extensions exist
  * (also iOS 17.1+), native HLS otherwise (older iPhones). Segment requests
  * are answered with short-lived redirects to object storage.
  */
-export function VideoPlayer({ video }: { video: Video }) {
+export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate }: VideoPlayerProps) {
   const { t } = useTranslation()
   const id = useId()
   const ref = useRef<HTMLVideoElement>(null)
+  const setRef = useCallback(
+    (element: HTMLVideoElement | null) => {
+      ref.current = element
+      videoRef?.(element)
+    },
+    [videoRef],
+  )
   const hlsRef = useRef<Hls | null>(null)
   const [mode, setMode] = useState<Mode>('loading')
   const [levels, setLevels] = useState<Level[]>([])
@@ -110,6 +127,11 @@ export function VideoPlayer({ video }: { video: Video }) {
   const frame = 1 / fps
 
   useEffect(() => {
+    onFrameRate?.(fps)
+  }, [fps, onFrameRate])
+
+  useEffect(() => {
+    if (!keyboard) return
     const onKey = (event: KeyboardEvent) => {
       const element = ref.current
       if (!element || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
@@ -146,7 +168,7 @@ export function VideoPlayer({ video }: { video: Video }) {
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [frame])
+  }, [frame, keyboard])
 
   const chooseLevel = (value: number) => {
     setChosen(value)
@@ -159,7 +181,7 @@ export function VideoPlayer({ video }: { video: Video }) {
     <div className="flex flex-col gap-3">
       <div className="overflow-hidden rounded-2xl bg-navy">
         <video
-          ref={ref}
+          ref={setRef}
           controls
           playsInline
           preload="metadata"
@@ -205,7 +227,7 @@ export function VideoPlayer({ video }: { video: Video }) {
           </Select>
         </div>
       )}
-      <p className="hidden text-xs text-muted sm:block">{t('video.player.keys')}</p>
+      {keyboard && <p className="hidden text-xs text-muted sm:block">{t('video.player.keys')}</p>}
     </div>
   )
 }
