@@ -78,7 +78,56 @@ court frames and 1–3 s to look for the court. The court finder is a first vers
 lines and the near end line but can mistake another sport's lines for the court's depth; it
 then reports a low confidence and offers nothing (16.10.2026: the Legends hall, 0.29). A
 camera bumped during a match moves the court in the picture; one calibration per video does
-not follow that yet.
+not follow that yet. Since 17.10.2026 the court job below does both, and trajectory jobs
+leave the court to it (`"court": false` in their params; older workers still send their
+finder's guess, which is kept as a proposal).
+
+## The court set automatically (court job)
+
+After each trajectory job a `court` job (same `analyse` capability and lane, a few minutes)
+reads a key frame every 30 s of the originals and finds:
+
+- **the camera's setups**: where the picture moved by more than 4 px (at 1280×720) — a *bump*
+  (someone knocked the tripod; placed to a few seconds), a *drift* (the head sagging: every
+  H3 game does, 10–35 px a match), or another *view* (the camera carried elsewhere);
+- **the empty hall** of the longest setup (median of 15 key frames), kept as
+  `court-<job8>.npz` next to the signals (a JPEG inside; the hall's memory for later videos);
+- **the court**: through the *hall's memory* (other videos' calibrated pictures — a coach's
+  always, the job's own from confidence 0.75 — the team's and the hall's first, at most 16;
+  matched with SIFT and RANSAC, the court's lines then fitted to this picture), else the
+  *finder v2* (paint colours, the net, the bounces). Every setup gets the court through its
+  picture's homography onto the main setup's.
+
+The API keeps the court as the video's proposal and, **when sure** (hall memory ≥ 0.6,
+finder ≥ 0.7) and no coach set the court, as its calibration with `checked` false: the
+video page says "Court set automatically: check", Tendencies already uses it. A coach's
+calibration always wins: a later court job only adds the setups to it (the coach's points
+hold for the setup where the video was paused). In the dialog the coach checks or fixes one
+setup at a time on a frame of its own; the setups nobody set follow the fix. Saving also
+makes the video part of the hall's memory (a video without an empty-hall picture gets a
+court job for it).
+
+```bash
+python -m nomal.cli court --all-ready --dry-run   # what would be queued
+python -m nomal.cli court --all-ready             # videos without a court job result
+python -m nomal.cli court --video <id> --force    # again, e.g. after a coach calibrated a
+                                                  # first video in that hall
+python -m nomal.cli court-eval                    # per video: method, confidence, setups,
+                                                  # and against the coach's calibration
+```
+
+Start a hall's memory by setting up the court by hand on one video of each hall (the
+finder v2 does not find the court on the real halls yet), then `court --all-ready --force`
+for the others. Timing (Lenovo, under load): 240 key frames in 20–180 s depending on the NAS,
+the hall's memory ~1 s a reference, the finder 10–15 s. Real check (17.10.2026, H3 games):
+Stäfa calibrated by hand (2.9 cm RMS) → Uster set automatically at 0.92, 2.2 cm RMS against
+a hand calibration of Uster; Legends and Volero H4 (other floors) correctly not matched;
+Legends' bump found at 1:11:30 (25 px), its court carried over to the setup after it.
+
+**When something goes wrong**: a wrong automatic court is fixed in the dialog (it then
+counts as the coach's). A court job stuck on the NAS logs "no frame at … s" and goes on;
+too few frames fails the job, the video plays on. Delete a hall reference by removing that
+video's calibration.
 
 ## The learning loop
 

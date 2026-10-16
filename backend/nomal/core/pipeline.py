@@ -365,6 +365,9 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
         analysis.complete(db, video, job, payload)
         calibration.after_analyse(db, video, job)  # the ball's path and the court follow
         return
+    if job.kind == "court":
+        calibration.complete_court(db, video, job, payload)
+        return
     if job.kind in calibration.KINDS:
         calibration.complete(db, video, job, payload)
         return

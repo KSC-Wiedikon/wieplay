@@ -487,6 +487,12 @@ def trajectory(ctx: Context) -> dict[str, Any]:
     return job.run(ctx)
 
 
+def court(ctx: Context) -> dict[str, Any]:
+    from nomal.worker import court as job  # numpy, OpenCV: the worker image only
+
+    return job.run(ctx)
+
+
 HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "import": import_video,
     "ingest": ingest,
@@ -497,6 +503,7 @@ HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "analyse": analyse,
     "train_rallies": train_rallies,
     "trajectory": trajectory,
+    "court": court,
 }
 # Long CPU jobs that run on a worker's background lane (runner.py), next to the media jobs.
-BACKGROUND_KINDS = ("analyse", "train_rallies", "trajectory")
+BACKGROUND_KINDS = ("analyse", "train_rallies", "trajectory", "court")

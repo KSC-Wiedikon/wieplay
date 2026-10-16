@@ -652,6 +652,9 @@ calibration      id, video_id, hall_name, image_points, court_points, homography
                  -- built in 0008 (16.10.2026) with lineage_id, status 'confirmed'|'proposed'
                  -- (the court finder's), landmarks, image_aspect, camera, max_error_cm,
                  -- confidence, model_run_id; one row per video and status
+                 -- 0009 (17.10.2026): segments jsonb NULL (the camera's setups, each a time
+                 -- range with its own landmarks and homography), checked (false: set by the
+                 -- court job), at_ms; method also 'auto-hall' (the hall's memory)
 scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
                  clock), created_by, copied_from NULL
 compute_usage    id, job_id, backend, gpu_type, gpu_seconds, cpu_core_seconds, gib_seconds,
@@ -996,6 +999,7 @@ the job waits in `waiting_budget` and admins are told.
 | `transcode` (per rendition) | `transcode` | HLS in `media/{video}/{rendition}/` |
 | `thumbs`, `audio` | `thumbs` / `audio` | Sprite + VTT; 16 kHz mono FLAC on NAS |
 | `analyse` (16.10.2026) | `analyse`, `nas` | One volleyball video: ball per frame (VballNet-Fast, CPU), motion, whistles and loudness as signals in `analysis/` on the NAS; rally proposals, or their score against the coach's rallies (§10.1). Priority −10, background lane |
+| `court` (17.10.2026) | `analyse`, `nas` | The camera's setups (bumps, drift, views), the empty hall's picture in `analysis/`, the court through the hall's memory or the finder v2 (§10.6). After each `trajectory` job; priority −10, background lane |
 | `train_rallies` (16.10.2026) | `analyse`, `nas` | Rally finder v1 from every reviewed game, held-out scores of v0 and v1, new proposals when v1 wins (§10.1). Priority −5, debounced |
 | `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
@@ -1441,6 +1445,45 @@ proposes the shot type.
   lines, the court's spacing along them, a camera that could see it; offered at confidence
   ≥ 0.6) or from the team's last calibration (same hall first). Not yet: lens distortion
   (the wide Legends hall fits at ± 24 cm), a camera bumped during a match.
+- **Set automatically, 17.10.2026** (migration `0009`, the `court` job after each trajectory
+  job; runbook: [analysis](runbooks/analysis.md#the-court-set-automatically-court-job)):
+  - *The camera's setups*: a key frame every 30 s, matched (ORB, RANSAC homography) to an
+    anchor frame; where floor probe points land, smoothed over five frames, splits the match
+    where they wander more than 4 px (at 1280×720). A jump between two frames (> 8 px) is a
+    *bump*, placed by halving between them on key frames (to a few seconds); a slow sag is a
+    *drift*; frames that match no anchor make another *view* (the camera carried elsewhere).
+    Every H3 game moved: tripod heads sag 10–35 px a match; Legends was bumped at 1:11:30
+    (25 px), Stäfa at 2:54. Each setup carries the homography of its picture onto the longest
+    (main) setup's, so one court serves them all.
+  - *The hall's memory*: the main setup's empty hall (median of 15 key frames) is kept as a
+    JPEG on the NAS (`analysis_artifact` `court_frames`). A new video is matched (SIFT,
+    RANSAC; the floor around the court first, the whole picture too, the floors seen from
+    above when the tripod stood elsewhere) against the calibrated pictures of other videos:
+    a coach's always, the court job's at confidence ≥ 0.75; the team's and the hall's first.
+    The court comes over, its lines are fitted to the new picture's, and the confidence
+    weighs the matches against the court's lines on line pixels. Stäfa → Uster (same hall):
+    0.92, 2.2 cm RMS against a hand calibration of Uster, landmarks within 1 px.
+  - *The finder v2* for a hall seen for the first time (`nomal/ml/court_find.py`): line
+    pixels grouped by paint colour (the middle of clear lines; faint pixels join the paint
+    they lie towards from their floor); per colour, two side lines through the vanishing
+    point and a line across fix the court up to the focal length (square pixels, principal
+    point at the centre), which is swept; judged on that colour's pixels along the model,
+    the share of the colour the court explains, the net's tapes above the centre line (the
+    camera is known with the court) and the ball's bounces on the court; a camera that
+    could film a match (≤ 12 m up, ≤ 16 m behind). Finds the court on rendered multi-sport
+    floors where v1 takes another sport's lines; on the real halls not yet (wide lenses,
+    faint far lines): every guess stays below 0.55 and is not offered.
+  - *What it writes*: the court as the video's calibration when sure (hall memory ≥ 0.6,
+    finder ≥ 0.7), `checked` false until a coach looks ("set automatically: check"); always
+    its proposal (offered in the dialog from 0.45 as the best guess). The setups go into
+    `calibration.segments` (from_ms, to_ms, landmarks, homography, camera, how it began,
+    `to_main`); the row's own fields stay those of the main setup, so a reader that knows
+    nothing of setups gets most of the match; `calibration.segment_at(row, t_ms)` (web:
+    `calibrationAt`) picks the setup of a moment, Tendencies uses it. A coach's calibration
+    always wins: the job only adds the setups to it (from where the coach paused); a coach
+    fixing one setup carries the fix to the setups nobody set, and becomes the hall's
+    memory. Metrics per run: method, confidence, setups and bumps, the court against the
+    coach's (`vs_coach`, held out); `python -m nomal.cli court-eval`.
 
 ### 10.7 Serve placement
 

@@ -22,8 +22,8 @@ export function CourtTools({ video, element, trajectories }: { video: Video; ele
       {trajectories.pending && <span className="text-sm text-muted">{t('court.trajectoriesPending')}</span>}
       {data.can_edit && (
         <Button onClick={() => setOpen(true)} aria-haspopup="dialog">
-          {data.calibration && <CheckIcon className="size-4" />}
-          {data.calibration ? t('court.setup.edit') : t('court.setup.open')}
+          {data.calibration?.checked !== false && data.calibration && <CheckIcon className="size-4" />}
+          {data.calibration ? (data.calibration.checked === false ? t('court.setup.check') : t('court.setup.edit')) : t('court.setup.open')}
         </Button>
       )}
       {open && <CourtSetupDialog open videoId={video.id} state={data} element={element} onClose={() => setOpen(false)} />}

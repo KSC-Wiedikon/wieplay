@@ -110,7 +110,12 @@ def run(ctx: Context) -> dict[str, Any]:
     t = time.perf_counter()
     guess = None
     try:
-        frame = median_frame(ctx, int(params.get("duration_ms") or sig.duration_s * 1000))
+        # Jobs queued since the court job exists (nomal/worker/court.py) leave the court to it.
+        frame = (
+            median_frame(ctx, int(params.get("duration_ms") or sig.duration_s * 1000))
+            if params.get("court", True)
+            else None
+        )
         if frame is not None:
             ctx.report(0.85, "finding the court")
             guess = court_detect.detect(frame)

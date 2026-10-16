@@ -1,7 +1,10 @@
 // The court of a video (docs/PLAN.md §10.6, §10.7): its calibration (GET/PUT/DELETE
-// /api/videos/{id}/court, POST …/court/solve), the court's geometry, and the arrows of the
-// court diagram ("Tendencies"): serves and attacks from where they started to where they
-// landed, from the ball's bounces when the court is set up, else from the tags' zones.
+// /api/videos/{id}/court, POST …/court/solve), set by a coach or by the court job (from the
+// hall's earlier videos or found in the picture; `checked` false until a coach looks), with
+// the camera's setups when it moved during the match (`segments`: a time range each, with its
+// own homography; `calibrationAt` picks the one for a moment), the court's geometry, and the
+// arrows of the court diagram ("Tendencies"): serves and attacks from where they started to
+// where they landed, from the ball's bounces when the court is set up, else from the tags' zones.
 
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiRequest } from './api'
@@ -77,19 +80,58 @@ export interface Solution {
   lines: [number, number][][]
 }
 
+/** How a court came about: clicked, found in the picture, taken from the team's last video, or carried over from the hall's earlier videos. */
+export type CourtMethod = 'manual' | 'auto' | 'copied' | 'auto-hall'
+
+/** One of the camera's setups: from_ms (inclusive) to to_ms (exclusive; null: the end). */
+export interface CalibrationSegment {
+  index: number
+  from_ms: number
+  to_ms: number | null
+  /** How it began: knocked (bump), sagged slowly (drift), carried to another view (moved). */
+  start: 'start' | 'bump' | 'drift' | 'moved'
+  shift_px: number
+  view: number
+  points: CourtPoint[]
+  /** derived: carried over from another setup; none: the camera showed no court. */
+  method: CourtMethod | 'derived' | 'none'
+  checked: boolean
+  main: boolean
+  image_to_court: Mat3 | null
+  court_to_image: Mat3 | null
+  camera: Camera | null
+  error_cm: number | null
+  max_error_cm: number | null
+  lines: [number, number][][]
+}
+
 export interface Calibration extends Solution {
   id: string
   video_id: string
   status: 'confirmed' | 'proposed'
-  method: 'manual' | 'auto' | 'copied'
+  method: CourtMethod
   points: CourtPoint[]
   confidence: number | null
   copied_from: string | null
   updated_at: string
+  /** False: the court job set it and no coach has checked it yet. */
+  checked?: boolean
+  at_ms?: number | null
+  /** The camera's setups when it moved during the match; absent or null: one for the whole video. */
+  segments?: CalibrationSegment[] | null
+}
+
+/** The camera's setups as the newest court job saw them. */
+export interface CameraSetup {
+  from_ms: number
+  to_ms: number
+  start: CalibrationSegment['start']
+  shift_px: number
+  view?: number
 }
 
 export interface Suggestion {
-  source: 'auto' | 'team'
+  source: 'auto' | 'auto-hall' | 'team'
   points: CourtPoint[]
   confidence: number | null
   video_id: string
@@ -115,6 +157,8 @@ export interface CourtState {
   calibration: Calibration | null
   suggestions: Suggestion[]
   ball_track: BallTrackState
+  court_job?: 'none' | 'queued' | 'running' | 'done' | 'failed'
+  setups?: CameraSetup[]
 }
 
 export const courtKey = (videoId: string) => ['videos', videoId, 'court'] as const
@@ -124,7 +168,8 @@ export function courtQuery(videoId: string) {
     queryKey: courtKey(videoId),
     queryFn: ({ signal }) => apiRequest<CourtState>(`/api/videos/${videoId}/court`, { signal }),
     // While the ball track is being made, look again now and then.
-    refetchInterval: (query) => (['queued', 'running'].includes(query.state.data?.ball_track.job ?? '') ? 15_000 : false),
+    refetchInterval: (query) =>
+      ['queued', 'running'].includes(query.state.data?.ball_track.job ?? '') || ['queued', 'running'].includes(query.state.data?.court_job ?? '') ? 15_000 : false,
   })
 }
 
@@ -138,8 +183,12 @@ export function solveCourt(videoId: string, points: CourtPoint[], signal?: Abort
 
 export interface SaveCourt {
   points: CourtPoint[]
-  method: 'manual' | 'auto' | 'copied'
+  method: CourtMethod
   copied_from?: string | null
+  /** One of the camera's setups only; the setups nobody set follow it. */
+  segment?: number | null
+  /** Where the video was paused while setting it up (ms). */
+  at_ms?: number | null
 }
 
 export function useSaveCourt(videoId: string) {
@@ -222,6 +271,28 @@ export function toCourt(cal: Pick<Solution, 'image_to_court' | 'camera'>, u: num
   return [cam.center[0] + s * (d[0] ?? 0), cam.center[1] + s * (d[1] ?? 0)]
 }
 
+/** What maps a moment of the video onto the court: a calibration, with its camera setups if any. */
+export type CourtMapping = Pick<Solution, 'image_to_court' | 'camera'> & { segments?: CalibrationSegment[] | null }
+
+/**
+ * The calibration for a moment of the video (ms): the camera's setup then when it moved during the
+ * match, else the calibration itself. Null when the camera showed no court then.
+ */
+export function calibrationAt(cal: CourtMapping, tMs: number): Pick<Solution, 'image_to_court' | 'camera'> | null {
+  const segments = cal.segments
+  if (!segments || segments.length === 0) return cal
+  const seg =
+    segments.find((s) => s.from_ms <= tMs && (s.to_ms === null || tMs < s.to_ms)) ??
+    ((segments[0]?.from_ms ?? 0) > tMs ? segments[0] : segments[segments.length - 1])
+  if (!seg?.image_to_court) return null
+  return { image_to_court: seg.image_to_court, camera: seg.camera }
+}
+
+/** When the camera was knocked or carried elsewhere (not its slow drift), in ms. */
+export function cameraMoves(setups: readonly Pick<CameraSetup, 'from_ms' | 'start'>[]): number[] {
+  return setups.filter((s) => s.start === 'bump' || s.start === 'moved').map((s) => s.from_ms)
+}
+
 /** Turns the court round (the other half's view): the acting team is drawn at the bottom. */
 export function turn([x, y]: [number, number]): [number, number] {
   return [WIDTH_M - x, LENGTH_M - y]
@@ -299,7 +370,7 @@ const MARGIN_M = 3.5
 export interface DiagramInput {
   tags: readonly Tag[]
   taxonomy: Taxonomy | null
-  calibration: Pick<Solution, 'image_to_court' | 'camera'> | null
+  calibration: CourtMapping | null
   track: BallTrack | null
 }
 
@@ -324,7 +395,9 @@ function landingOf(
     if (c.t < t + window[0]) continue
     if (c.t > t + window[1]) break
     if (c.kind === 'high') continue
-    const at = toCourt(calibration, c.x, c.y, c.kind === 'bounce' ? 0 : LOW_CONTACT_M) ?? (c.kind === 'low' ? toCourt(calibration, c.x, c.y, 0) : null)
+    const then = calibrationAt(calibration, c.t * 1000)
+    if (!then) continue
+    const at = toCourt(then, c.x, c.y, c.kind === 'bounce' ? 0 : LOW_CONTACT_M) ?? (c.kind === 'low' ? toCourt(then, c.x, c.y, 0) : null)
     if (at && inBounds(at)) return { at, kind: c.kind }
   }
   return null
@@ -332,7 +405,8 @@ function landingOf(
 
 /** The serve's start from the ball at the serve (toss height), when the camera is known. */
 function serveFromTrack(tag: Tag, input: DiagramInput): [number, number] | null {
-  const { calibration, track } = input
+  const { track } = input
+  const calibration = input.calibration ? calibrationAt(input.calibration, tag.t_ms) : null
   if (!calibration?.camera || !track) return null
   const t = tag.t_ms / 1000
   for (const dt of [0, -0.1, 0.1, -0.2, 0.2, 0.3]) {
