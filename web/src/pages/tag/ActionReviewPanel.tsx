@@ -282,11 +282,9 @@ function Facts({ tag, number }: { tag: Tag; number: string }) {
           </Button>
         </dd>
         <dt className="font-semibold text-muted">{t('actions.player')}</dt>
-        <dd className={cx('tabular-nums', number && 'font-bold text-link')} aria-live="polite">
+        <dd className={cx('col-span-2 flex items-center gap-2 tabular-nums', number && 'font-bold text-link')} aria-live="polite">
           {number ? t('actions.typing', { number }) : tag.number !== null ? `#${tag.number}` : t('actions.noPlayer')}
-        </dd>
-        <dd>
-          <Kbd hidden={narrow}>0–9</Kbd>
+          {!number && <Kbd hidden={narrow}>0–9</Kbd>}
         </dd>
         <dt className="font-semibold text-muted">{t('actions.time')}</dt>
         <dd className="font-mono tabular-nums">
