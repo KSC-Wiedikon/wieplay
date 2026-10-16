@@ -7,7 +7,7 @@ import { formatEntry, isEntryChar, parseEntry, toggleSide, type EntryError } fro
 import type { Playhead } from '../../lib/playhead'
 import { proposeByKey, proposeByTag, rallyStartForServe, ralliesOf, type RallyProposal } from '../../lib/rallies'
 import { eventToIn, newId, periodToIn, segmentToIn, type TaggingStore } from '../../lib/taggingStore'
-import type { EventIn, PeriodIn, SegmentIn, SegmentKind, Side, Tag, Taxonomy } from '../../lib/types'
+import type { EventIn, PeriodIn, Review, Segment, SegmentIn, SegmentKind, Side, Tag, Taxonomy } from '../../lib/types'
 import type { Change } from '../../lib/outbox'
 
 export const RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2] as const
@@ -90,6 +90,20 @@ export function ownsKeys(target: EventTarget | null): boolean {
     target instanceof Element &&
     target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="alertdialog"]') !== null
   )
+}
+
+/**
+ * The review state a segment gets with an edit: a model's proposal whose boundaries, kind or
+ * point change is corrected; anything else keeps its state.
+ */
+export function reviewAfterEdit(before: Segment, after: SegmentIn): Review {
+  if (before.source !== 'model') return after.review ?? before.review
+  const edited =
+    before.kind !== after.kind ||
+    before.start_ms !== after.start_ms ||
+    before.end_ms !== after.end_ms ||
+    (before.won_by ?? null) !== (after.won_by ?? null)
+  return edited ? 'corrected' : (after.review ?? before.review)
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -357,20 +371,36 @@ export class TagController {
 
   selectSegment = (id: string | null): void => this.set({ segmentId: id })
 
+  /** Edits a segment; editing a model's proposal makes it a correction (PLAN §11). */
   updateSegment = (id: string, patch: Partial<SegmentIn>): boolean => {
     const segment = this.store.getView().segments.find((s) => s.id === id)
     if (!segment) return false
     const payload = { ...segmentToIn(segment), ...patch }
     if (payload.end_ms <= payload.start_ms) return false
+    if (patch.review === undefined) payload.review = reviewAfterEdit(segment, payload)
     this.commit([{ kind: 'segment', payload }])
     return true
   }
 
+  /** Deletes a segment; a model's proposal is rejected (the server keeps it as a negative). */
   deleteSegment = (id: string): void => {
     const segment = this.store.getView().segments.find((s) => s.id === id)
     if (!segment) return
-    this.commit([{ kind: 'segment', payload: { ...segmentToIn(segment), deleted: true } }])
+    const review = segment.source === 'model' ? 'rejected' : segment.review
+    this.commit([{ kind: 'segment', payload: { ...segmentToIn(segment), review, deleted: true } }])
     this.set({ segmentId: null })
+  }
+
+  /** Accepts a model's proposal as it is. */
+  acceptSegment = (id: string): void => {
+    const segment = this.store.getView().segments.find((s) => s.id === id)
+    if (!segment || segment.source !== 'model' || segment.review !== 'unreviewed') return
+    this.commit([{ kind: 'segment', payload: { ...segmentToIn(segment), review: 'confirmed' } }])
+  }
+
+  /** One frame of the rendition playing, in ms. */
+  get frameMs(): number {
+    return 1000 / this.fps
   }
 
   // Sets

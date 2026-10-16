@@ -4,6 +4,7 @@ import type { Playhead } from '../../lib/playhead'
 import type { TaggingStore, TaggingView } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import type { TagController, UiState } from './controller'
+import type { ReviewController, ReviewState } from './review'
 
 export interface WorkspaceParts {
   video: Video
@@ -13,6 +14,9 @@ export interface WorkspaceParts {
   outbox: Outbox
   playhead: Playhead
   controller: TagController
+  review: ReviewController
+  /** A narrow screen (tablet, phone): only the review of suggestions, by touch. */
+  narrow: boolean
 }
 
 export const WorkspaceContext = createContext<WorkspaceParts | null>(null)
@@ -37,4 +41,9 @@ export function useUi(): UiState {
 export function useSync(): OutboxState {
   const { outbox } = useWorkspace()
   return useSyncExternalStore(outbox.subscribe, outbox.getState)
+}
+
+export function useReview(): ReviewState {
+  const { review } = useWorkspace()
+  return useSyncExternalStore(review.subscribe, review.getState)
 }

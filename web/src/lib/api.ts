@@ -1,5 +1,6 @@
 import type {
   AdminTeam,
+  Analysis,
   Blocker,
   ChangesIn,
   ChangesOut,
@@ -213,6 +214,16 @@ export const api = {
     apiRequest<EventRevision[]>(`/api/events/${eventId}/revisions`, { signal }),
   taxonomy: (sport: string, signal?: AbortSignal) =>
     apiRequest<Taxonomy>(`/api/taxonomies/${encodeURIComponent(sport)}`, { signal }),
+
+  // Automatic analysis (PLAN §10.1): rally proposals, and "rallies reviewed" (Nomal retrains)
+  analysis: (videoId: string, signal?: AbortSignal) =>
+    apiRequest<Analysis>(`/api/videos/${videoId}/analysis`, { signal }),
+  analyse: (videoId: string) => apiRequest<unknown>(`/api/videos/${videoId}/analyse`, { method: 'POST' }),
+  setRalliesReviewed: (videoId: string, reviewed: boolean) =>
+    apiRequest<{ rallies_reviewed_at?: string | null } | undefined>(`/api/videos/${videoId}/rallies-reviewed`, {
+      method: 'POST',
+      body: { reviewed },
+    }),
 
   // Filming rules
   filming: (teamId: number, on: string, signal?: AbortSignal) =>

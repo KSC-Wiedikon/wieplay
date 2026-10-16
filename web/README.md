@@ -103,7 +103,8 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
   page, when a video has rallies, everyone who can watch it can play only the rallies (2 s
   before, 1.5 s after, overlapping windows merged), jump through a rally list with the score,
   and narrow it by player, skill, grade and set.
-- **Tagging workspace** (`/videos/:id/tag`, `src/pages/tag/`, loaded on demand, desktop only):
+- **Tagging workspace** (`/videos/:id/tag`, `src/pages/tag/`, loaded on demand, desktop only;
+  smaller screens get the review of suggestions only):
   - `src/lib/grammar.ts` parses entries like `7A#`, `a12S=`, `3A#46` for the live preview.
   - `src/pages/tag/controller.ts` is the keyboard (PLAN §9.2) as plain TypeScript, so fast
     typing never sees stale React state; `?` in the app lists every key.
@@ -117,6 +118,26 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     narrowed down to the one bad change by splitting the batch.
   - `src/lib/rallies.ts` mirrors the server's scoring for the moments when changes are still
     queued; after each sync the server's scores are shown.
+- **Nomal's rally suggestions and their review** (PLAN §10.1, §11; `src/lib/suggestions.ts`,
+  `src/lib/analysis.ts`, `src/pages/tag/review.ts`, `ReviewPanel.tsx`, `RallyList.tsx`): the
+  analysis proposes rallies as segments with `source: "model"`, a `confidence` and a `review`
+  state. Open ones (`unreviewed`) are outlined (dashed) on the timeline and carry a "Suggested ·
+  87%" chip in the rally list (filter "Suggestions (n)"); accepted and corrected ones are rallies
+  with a small marker. They are not shown as rallies on the video page until reviewed.
+  - Review mode (`/videos/:id/tag?mode=review`, the only mode on tablets and phones) goes through
+    the open ones in time order and loops each from 1 s before it (`src/lib/useLoopPlayback.ts`):
+    `Enter` accept, `X` reject, `←/→` start and `Shift+←/→` end by 0.25 s (`Alt`: one frame), `M`
+    merge with the next, `S` split at the playhead, `U` undo, `↑/↓` move, `Esc` back to tagging.
+    Every answer is an ordinary segment change through the outbox: accept sets `review:
+    "confirmed"`, a moved boundary `"corrected"`, reject deletes with `review: "rejected"` (kept by
+    the server as a negative); merge corrects the first and rejects the second; a split adds a
+    manual rally that comes next in the list. "Accept all remaining with confidence ≥ 90%" asks
+    first and is one undo step.
+  - `AnalysisStatus` (video page and tagging page, for those who may tag, volleyball): the
+    analysis state from `GET /api/videos/{id}/analysis` (polled while queued or running),
+    "Analyse" (`POST …/analyse`) when there is none or it failed, the F1 against the coach's own
+    rallies, and "Rallies reviewed" (`POST …/rallies-reviewed`), which makes Nomal learn from the
+    game; it waits until no suggestion is open, and asks for it once all are answered.
 - **Clips, reels, comments, downloads** (M3; API calls and hooks in `src/lib/library.ts`):
   - A clip is a time range. On the video page "Clip in" / "Clip out" mark it at the playhead
     (`[`, `]`, then `C` in the tagging workspace; `Shift+C` still sets the selected tag's clip

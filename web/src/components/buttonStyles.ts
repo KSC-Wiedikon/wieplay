@@ -1,7 +1,7 @@
 import { cx } from '../lib/cx'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ghostDanger'
-export type ButtonSize = 'md' | 'icon'
+export type ButtonSize = 'md' | 'icon' | 'touch' | 'touchIcon'
 
 export interface ButtonStyle {
   variant?: ButtonVariant
@@ -12,6 +12,9 @@ export interface ButtonStyle {
 const sizes: Record<ButtonSize, string> = {
   md: 'min-h-11 px-4 sm:min-h-9',
   icon: 'size-11 sm:size-9',
+  // 44px at every width: actions meant for touch on tablets too (reviewing suggestions).
+  touch: 'min-h-11 px-4',
+  touchIcon: 'size-11',
 }
 
 const variants: Record<ButtonVariant, string> = {

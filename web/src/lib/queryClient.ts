@@ -13,6 +13,7 @@ export const keys = {
   videoConfig: ['video-config'] as const,
   video: (id: string) => ['videos', id] as const,
   tagging: (id: string) => ['videos', id, 'tagging'] as const,
+  analysis: (id: string) => ['videos', id, 'analysis'] as const,
   rosterCandidates: (id: string) => ['videos', id, 'roster-candidates'] as const,
   inbox: ['inbox'] as const,
   adminTeams: ['admin', 'teams'] as const,

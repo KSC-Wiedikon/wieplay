@@ -316,3 +316,33 @@ export function ChartIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** Four-point stars: something Nomal suggested (a model's proposal). */
+export function SparkleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M11 3.5 12.4 8a3 3 0 0 0 2 2l4.6 1.4-4.6 1.4a3 3 0 0 0-2 2L11 19.5l-1.4-4.6a3 3 0 0 0-2-2L3 11.4l4.6-1.4a3 3 0 0 0 2-2Z" />
+      <path d="M19 3v4M17 5h4" />
+    </Icon>
+  )
+}
+
+/** Two bars joining into one: merge two rallies. */
+export function MergeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 7h5l4 5 4-5h5M12 12v7" />
+      <path d="m9 16 3 3 3-3" />
+    </Icon>
+  )
+}
+
+/** A bar cut in two: split a rally. */
+export function SplitIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 12h6M15 12h6M12 4v16" />
+      <path d="m6 9-3 3 3 3M18 9l3 3-3 3" />
+    </Icon>
+  )
+}

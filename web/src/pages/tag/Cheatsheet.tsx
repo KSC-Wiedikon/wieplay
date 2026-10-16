@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '../../components/Modal'
 import { gradeLabel, skillLabel } from '../../lib/labels'
-import { useUi, useWorkspace } from './context'
+import { useReview, useUi, useWorkspace } from './context'
 
 function Keys({ keys }: { keys: string[] }) {
   return (
@@ -44,10 +44,11 @@ export function Cheatsheet() {
   const { t } = useTranslation()
   const { controller, taxonomy } = useWorkspace()
   const ui = useUi()
+  const reviewing = useReview().active
   const basketball = taxonomy.sport === 'basketball'
   const examples = examplesFor(t, basketball)
 
-  const groups: { title: string; rows: [string[], string][] }[] = [
+  const all: { title: string; rows: [string[], string][] }[] = [
     {
       title: t('tagging.keys.groups.playback'),
       rows: [
@@ -87,6 +88,27 @@ export function Cheatsheet() {
             [['B'], t('tagging.keys.b')],
           ],
         },
+    // Reviewing Nomal's suggestions (volleyball: basketball has no rallies to suggest).
+    ...(basketball
+      ? []
+      : [
+          {
+            title: t('tagging.keys.groups.review'),
+            rows: [
+              [['Enter'], t('tagging.keys.review.accept')],
+              [['X'], t('tagging.keys.review.reject')],
+              [['←', '→'], t('tagging.keys.review.start')],
+              [['Shift + ←', 'Shift + →'], t('tagging.keys.review.end')],
+              [['Alt'], t('tagging.keys.review.frame')],
+              [['M'], t('tagging.keys.review.merge')],
+              [['S'], t('tagging.keys.review.split')],
+              [['U'], t('tagging.keys.review.undo')],
+              [['↑', '↓'], t('tagging.keys.review.move')],
+              [['Space'], t('tagging.keys.review.space')],
+              [['Esc'], t('tagging.keys.review.leave')],
+            ] as [string[], string][],
+          },
+        ]),
     {
       title: t('tagging.keys.groups.selected'),
       rows: [
@@ -101,6 +123,10 @@ export function Cheatsheet() {
       ],
     },
   ]
+
+  // While reviewing, its keys come first.
+  const review = t('tagging.keys.groups.review')
+  const groups = reviewing ? [...all.filter((g) => g.title === review), ...all.filter((g) => g.title !== review)] : all
 
   return (
     <Modal open={ui.cheatsheet} title={t('tagging.keys.title')} onClose={() => controller.toggleCheatsheet(false)} size="xl">

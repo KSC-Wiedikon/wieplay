@@ -6,15 +6,18 @@ interface SwitchProps {
   /** Accessible name, e.g. "H3 uses Nomal". */
   label: string
   disabled?: boolean
+  /** Id of a text that says more about the setting. */
+  describedBy?: string
 }
 
-export function Switch({ checked, onChange, label, disabled }: SwitchProps) {
+export function Switch({ checked, onChange, label, disabled, describedBy }: SwitchProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      aria-describedby={describedBy}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cx(
