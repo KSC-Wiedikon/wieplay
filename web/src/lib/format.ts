@@ -48,13 +48,6 @@ export function formatDateTime(value: Value): string {
   return date && time ? `${date} ${time}` : date
 }
 
-/** "20:00", "22:00" → "20:00–22:00"; either end may be missing. */
-export function formatTimeRange(start: Value, end: Value): string {
-  const from = formatTime(start)
-  const to = formatTime(end)
-  return from && to ? `${from}–${to}` : from || to
-}
-
 /** Today's date in Zurich as "yyyy-mm-dd", for comparing with API dates. */
 export function todayIso(now: Date = new Date()): string {
   const parts = Object.fromEntries(

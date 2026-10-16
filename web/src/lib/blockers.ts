@@ -8,8 +8,6 @@ export function blockerMessage(t: TFunction, blocker: Blocker): string {
   switch (blocker.code) {
     case 'policy_matches':
       return t('blockers.policy_matches') + reason
-    case 'policy_trainings':
-      return t('blockers.policy_trainings') + reason
     case 'under_18':
       return count == null ? t('blockers.under_18_unknown') : t('blockers.under_18', { count })
     case 'no_birthdate':

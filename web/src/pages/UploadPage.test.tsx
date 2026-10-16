@@ -30,7 +30,6 @@ const created: Video = {
   sport: 'volleyball',
   kind: 'match',
   game_id: 501,
-  training_id: null,
   title: 'KSCW H3 – Volley Näfels',
   recorded_on: gameDate,
   source: 'file',
@@ -111,9 +110,8 @@ function uploadApi(complete: { status?: number; body?: unknown } = { body: { ...
       body: { enabled: true, part_size: PART_SIZE, max_file_bytes: 1e12, max_files: 20 },
     },
     '/api/teams/92/games': { body: [game] },
-    '/api/teams/92/trainings': { body: [] },
     '/api/inbox': { status: 403, body: { detail: 'Coaches and sport admins only' } },
-    [`/api/teams/92/filming?kind=match&on=${gameDate}`]: {
+    [`/api/teams/92/filming?on=${gameDate}`]: {
       body: { allowed: true, blockers: [], adult_checked_at: null },
     },
     'POST /api/teams/92/videos': { status: 201, body: created },
@@ -130,7 +128,7 @@ function uploadApi(complete: { status?: number; body?: unknown } = { body: { ...
 }
 
 async function pickGameAndFile(name = 'GX010042.MP4') {
-  fireEvent.change(await screen.findByLabelText('Game'), { target: { value: '501' } })
+  fireEvent.change(await screen.findByLabelText('Match'), { target: { value: '501' } })
   expect(await screen.findByText(`Filming is allowed on ${formatDate(gameDate)}.`)).toBeInTheDocument()
   const file = new File(['x'.repeat(25)], name, { type: 'video/mp4' })
   fireEvent.change(screen.getByLabelText('Choose files'), { target: { files: [file] } })
@@ -149,9 +147,10 @@ describe('UploadPage', () => {
       routes: [{ path: '/videos/:id', element: <p>Video page</p> }],
     })
 
-    // 1. The game, then the filming check for its day.
-    const game = await screen.findByLabelText('Game')
+    // 1. The game, then the filming check for its day. No Match/Training choice any more.
+    const game = await screen.findByLabelText('Match')
     expect(within(game).getByRole('option', { name: `${formatDate(gameDate)} · Volley Näfels` })).toBeInTheDocument()
+    expect(screen.queryByText(/Training/)).not.toBeInTheDocument()
     fireEvent.change(game, { target: { value: '501' } })
     expect(await screen.findByText(`Filming is allowed on ${formatDate(gameDate)}.`)).toBeInTheDocument()
 
@@ -171,7 +170,6 @@ describe('UploadPage', () => {
     const calls = fetch.mock.calls.map(([path, init]) => `${init?.method ?? 'GET'} ${String(path)}`)
     const createCall = fetch.mock.calls.find(([path, init]) => path === '/api/teams/92/videos' && init?.method === 'POST')
     expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
-      kind: 'match',
       game_id: 501,
       files: [{ name: 'GX010042.MP4', size: 25, type: 'video/mp4' }],
     })
@@ -235,11 +233,10 @@ describe('UploadPage', () => {
         '/api/teams/92': { body: team },
         '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
         '/api/teams/92/games': { body: [game] },
-        '/api/teams/92/trainings': { body: [] },
         '/api/inbox': {
           body: [inboxFile('i2', 'vb-H3/GX020042.MP4'), inboxFile('i1', 'vb-H3/GX010042.MP4'), inboxFile('i9', 'vb-D1/other.MP4')],
         },
-        [`/api/teams/92/filming?kind=match&on=${gameDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
+        [`/api/teams/92/filming?on=${gameDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
         'POST /api/teams/92/videos': { status: 201, body: { ...created, source: 'inbox', status: 'queued' } },
       }),
     )
@@ -249,7 +246,7 @@ describe('UploadPage', () => {
       url: '/teams/92/upload',
       routes: [{ path: '/videos/:id', element: <p>Video page</p> }],
     })
-    fireEvent.change(await screen.findByLabelText('Game'), { target: { value: '501' } })
+    fireEvent.change(await screen.findByLabelText('Match'), { target: { value: '501' } })
     fireEvent.click(await screen.findByLabelText('From the NAS inbox'))
 
     expect(screen.getByText('vb-H3').tagName).toBe('CODE')
@@ -261,7 +258,7 @@ describe('UploadPage', () => {
 
     await waitFor(() => expect(router.state.location.pathname).toBe(`/videos/${VIDEO_ID}`))
     const createCall = fetch.mock.calls.find(([path, init]) => path === '/api/teams/92/videos' && init?.method === 'POST')
-    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({ kind: 'match', game_id: 501, inbox_file_ids: ['i1', 'i2'] })
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({ game_id: 501, inbox_file_ids: ['i1', 'i2'] })
   })
 
   it('shows the folder hint when the inbox folder is empty', async () => {
@@ -272,14 +269,13 @@ describe('UploadPage', () => {
           '/api/teams/92': { body: team },
           '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
           '/api/teams/92/games': { body: [game] },
-          '/api/teams/92/trainings': { body: [] },
           '/api/inbox': { body: [] },
-          [`/api/teams/92/filming?kind=match&on=${gameDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
+          [`/api/teams/92/filming?on=${gameDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
         }),
       ),
     )
     renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
-    fireEvent.change(await screen.findByLabelText('Game'), { target: { value: '501' } })
+    fireEvent.change(await screen.findByLabelText('Match'), { target: { value: '501' } })
     fireEvent.click(await screen.findByLabelText('From the NAS inbox'))
     expect(screen.getByText('vb-H3')).toBeInTheDocument()
     expect(screen.getByText(/No files there yet/)).toBeInTheDocument()
@@ -303,9 +299,8 @@ describe('UploadPage', () => {
           '/api/teams/92': { body: team },
           '/api/video/config': { body: { enabled: true, part_size: 10, max_file_bytes: 1e12, max_files: 20 } },
           '/api/teams/92/games': { body: [] },
-          '/api/teams/92/trainings': { body: [] },
           '/api/inbox': { body: [] },
-          [`/api/teams/92/filming?kind=training&on=${todayIso()}`]: {
+          [`/api/teams/92/filming?on=${todayIso()}`]: {
             body: { allowed: false, blockers: [{ code: 'no_birthdate', count: 2, detail: null }], adult_checked_at: null },
           },
         }),
@@ -313,9 +308,62 @@ describe('UploadPage', () => {
     )
     renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
 
-    fireEvent.click(await screen.findByLabelText('Training'))
-    fireEvent.change(await screen.findByLabelText('Training', { selector: 'select' }), { target: { value: 'other' } })
+    const match = await screen.findByLabelText('Match')
+    expect(screen.getByText('No games in the last 60 days.')).toBeInTheDocument()
+    fireEvent.change(match, { target: { value: 'other' } })
     expect(await screen.findByText('2 people on the roster have no birthdate in Wiedisync.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Start upload' })).not.toBeInTheDocument()
+  })
+
+  it('uploads a match that is not in Wiedisync with its date and a title', async () => {
+    FakeXhr.puts = []
+    vi.stubGlobal('XMLHttpRequest', FakeXhr)
+    const friendlyDate = addDaysIso(todayIso(), -5)
+    const fetch = vi.fn(
+      stubFetch({
+        '/api/teams/92': { body: team },
+        '/api/video/config': { body: { enabled: true, part_size: PART_SIZE, max_file_bytes: 1e12, max_files: 20 } },
+        '/api/teams/92/games': { body: [game] },
+        '/api/inbox': { status: 403, body: { detail: 'Coaches and sport admins only' } },
+        [`/api/teams/92/filming?on=${friendlyDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
+        'POST /api/teams/92/videos': { status: 201, body: { ...created, game_id: null, title: 'Friendly vs. VBC Zürich' } },
+        [`GET /api/videos/${VIDEO_ID}/files/${FILE_ID}/parts`]: { body: [] },
+        [`POST /api/videos/${VIDEO_ID}/files/${FILE_ID}/parts`]: {
+          body: ({ body }: { body: unknown }) =>
+            (body as { parts: number[] }).parts.map((part) => ({ part, url: `https://bucket.example/p${part}` })),
+        },
+        [`POST /api/videos/${VIDEO_ID}/files/${FILE_ID}/complete`]: { body: { ...created, status: 'queued' } },
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const { router } = renderRoute(<UploadPage />, {
+      path: '/teams/:id/upload',
+      url: '/teams/92/upload',
+      routes: [{ path: '/videos/:id', element: <p>Video page</p> }],
+    })
+
+    const match = await screen.findByLabelText('Match')
+    expect(within(match).getByRole('option', { name: 'Other match (friendly, tournament, cup)' })).toBeInTheDocument()
+    fireEvent.change(match, { target: { value: 'other' } })
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: friendlyDate } })
+    expect(await screen.findByText(`Filming is allowed on ${formatDate(friendlyDate)}.`)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Title (optional)')).not.toBeInTheDocument()
+    const file = new File(['x'.repeat(25)], 'GX010042.MP4', { type: 'video/mp4' })
+    fireEvent.change(screen.getByLabelText('Choose files'), { target: { files: [file] } })
+
+    // The title is required for a match without a Wiedisync game.
+    const start = screen.getByRole('button', { name: 'Start upload' })
+    expect(start).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '  Friendly vs. VBC Zürich ' } })
+    expect(start).toBeEnabled()
+    fireEvent.click(start)
+
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/videos/${VIDEO_ID}`))
+    const createCall = fetch.mock.calls.find(([path, init]) => path === '/api/teams/92/videos' && init?.method === 'POST')
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+      recorded_on: friendlyDate,
+      title: 'Friendly vs. VBC Zürich',
+      files: [{ name: 'GX010042.MP4', size: 25, type: 'video/mp4' }],
+    })
   })
 })

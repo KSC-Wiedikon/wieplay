@@ -88,7 +88,7 @@ From the Q&A on 15.10.2026 (second round supersedes the first):
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube link** is accepted as a source **for the club's own uploads only**: the club's channel or a club member's own channel; the **original file is preferred** (YouTube re-encodes and may drop 50 fps) and can replace the YouTube source later. |
-| D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 videos per season in total. **DU23-1: trainings only** (decided 15.10.2026, §5.3). |
+| D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 videos per season in total. **DU23-1: trainings only** (decided 15.10.2026, §5.3). **Matches only for now** (decided 16.10.2026): trainings removed from the product, tables kept until the cleanup migration (§5.3). |
 | D3 | Delivery | Hetzner Object Storage. **HLS**: the authenticated API serves the playlist and every segment URL is signed with a **TTL of minutes** at the moment the player asks for it. No long-lived link per video anywhere. A copied link dies quickly; a 2 h match plays without interruption (§7.6). |
 | D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference starts internal** (decided 15.10.2026): on the **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; always on), with a researched plan to move to an **EU or Swiss provider** later (§8.6). US providers are out. The Framework 16 is also the development and training machine; the RTX 4090 PC is not part of the plan. The worker interface is backend-agnostic (queue → worker), so internal, provider and a future GPU box are interchangeable (§8). |
 | D5 | Permissions | Team-scoped defaults accepted (§5.1). **Adults only**: a hard check against member birthdates; nothing under 18 is filmed or stored. |
@@ -341,6 +341,13 @@ Its trainings pass the same hard check as everyone else: every rostered person n
 birthdate and must be 18 or older on the day, otherwise the training is blocked too. Nomal
 enforces this with a per-team policy (`team_policy.matches_allowed = false`, §6.10): uploads
 linked to a game are refused for that team, and its upcoming games show *filming not allowed*.
+
+**Matches only for now** (decided 16.10.2026). Trainings are removed from the product: no
+training uploads, no trainings on the team page, and the team policy has only the matches
+switch (so DU23-1 films nothing for now). A match that is not in Wiedisync (friendly,
+tournament, cup) is uploaded with its date and a title and passes the same checks. The tables
+stay until the cleanup migration after M2–M4: `wd_training` (still synced, read by nothing),
+`video.training_id`, `team_policy.trainings_allowed`.
 
 ### 5.4 Consent and information
 

@@ -180,14 +180,13 @@ class PolicyOut(BaseModel):
     sport: Literal["volleyball", "basketball"]
     label: str
     matches_allowed: bool
-    trainings_allowed: bool
     reason: str | None
     set_at: datetime | None
 
 
 class PolicyIn(BaseModel):
+    # Matches only (16.10.2026): team_policy.trainings_allowed stays in the table, unused.
     matches_allowed: bool
-    trainings_allowed: bool
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -320,7 +319,6 @@ def list_policies(_: AdminDep, db: DbDep) -> list[PolicyOut]:
             sport=lineage.sport,
             label=_lineage_label(db, lineage),
             matches_allowed=policy.matches_allowed if policy else True,
-            trainings_allowed=policy.trainings_allowed if policy else True,
             reason=policy.reason if policy else None,
             set_at=policy.set_at if policy else None,
         )
@@ -343,7 +341,6 @@ def set_policy(lineage_id: uuid.UUID, body: PolicyIn, viewer: AdminDep, db: DbDe
         raise HTTPException(404, "Team not found")
     policy = db.get(TeamPolicy, lineage_id) or TeamPolicy(lineage_id=lineage_id)
     policy.matches_allowed = body.matches_allowed
-    policy.trainings_allowed = body.trainings_allowed
     policy.reason = (body.reason or "").strip() or None
     policy.set_by = viewer.member_id
     policy.set_at = datetime.now(UTC)
@@ -355,7 +352,6 @@ def set_policy(lineage_id: uuid.UUID, body: PolicyIn, viewer: AdminDep, db: DbDe
         "team_lineage",
         str(lineage_id),
         matches_allowed=body.matches_allowed,
-        trainings_allowed=body.trainings_allowed,
         reason=policy.reason,
     )
     db.commit()
@@ -364,7 +360,6 @@ def set_policy(lineage_id: uuid.UUID, body: PolicyIn, viewer: AdminDep, db: DbDe
         sport=lineage.sport,
         label=_lineage_label(db, lineage),
         matches_allowed=policy.matches_allowed,
-        trainings_allowed=policy.trainings_allowed,
         reason=policy.reason,
         set_at=policy.set_at,
     )

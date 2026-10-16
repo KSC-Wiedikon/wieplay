@@ -2,12 +2,14 @@
 
 Two rules, enforced here and nowhere else:
 
-1. The team's policy: DU23-1 films trainings only (team_policy).
+1. The team's policy: an admin can switch a team's matches off (team_policy), e.g. when
+   its opponents may be under 18.
 2. Adults only: every rostered person is 18 or older on the day. Wiedisync answers this
    (`adult-check`); birthdates never reach Nomal. Missing birthdate = fails.
 
 No per-player consent: Swiss Volley allows anyone to record a match (Volleyballreglement
 2026/27, Art. 86), and the club decided on 16.10.2026 not to ask for it (docs/PRIVACY.md).
+Nomal handles matches only (decided 16.10.2026, PLAN §5.3): every video is a match.
 
 The check runs fresh before anything is stored (`fresh=True`) and from a short cache for
 the "filming allowed / blocked" hints on the team page.
@@ -35,8 +37,8 @@ CAMERA_DATE_WINDOW_DAYS = 60
 
 @dataclass(frozen=True)
 class Blocker:
-    # policy_matches | policy_trainings | under_18 | no_birthdate | no_roster |
-    # adult_check_unavailable | roster_unavailable
+    # policy_matches | under_18 | no_birthdate | no_roster | adult_check_unavailable |
+    # roster_unavailable
     code: str
     count: int | None = None
     detail: str | None = None
@@ -117,7 +119,6 @@ def check_filming(
     db: Session,
     bridge: BridgeClient | None,
     team: WdTeam,
-    kind: str,
     on: date,
     *,
     fresh: bool,
@@ -130,11 +131,8 @@ def check_filming(
         blockers.append(Blocker("roster_unavailable"))
 
     policy = db.get(TeamPolicy, team.lineage_id)
-    if policy is not None:
-        if kind == "match" and not policy.matches_allowed:
-            blockers.append(Blocker("policy_matches", detail=policy.reason))
-        if kind == "training" and not policy.trainings_allowed:
-            blockers.append(Blocker("policy_trainings", detail=policy.reason))
+    if policy is not None and not policy.matches_allowed:
+        blockers.append(Blocker("policy_matches", detail=policy.reason))
 
     adult, checked_at = _adult_blockers(db, bridge, team, on, fresh, now)
     blockers += adult

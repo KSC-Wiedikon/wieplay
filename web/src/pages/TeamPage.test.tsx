@@ -24,7 +24,6 @@ const video = (patch: Partial<Video>): Video => ({
   sport: 'volleyball',
   kind: 'match',
   game_id: 501,
-  training_id: null,
   title: 'KSCW – Volley Näfels',
   recorded_on: '2026-10-11',
   source: 'file',
@@ -57,7 +56,6 @@ function stub(teamDetail: TeamDetail, videos: Video[], extra: Record<string, { s
       stubFetch({
         '/api/teams/92': { body: teamDetail },
         '/api/teams/92/games': { body: [] },
-        '/api/teams/92/trainings': { body: [] },
         '/api/teams/92/videos': { body: videos },
         '/api/teams/92/upcoming-filming': { body: [] },
         '/api/video/config': { body: config },
@@ -83,8 +81,8 @@ describe('TeamPage videos', () => {
         video({ id: '00000000-0000-4000-8000-000000000001', title: 'Older match', recorded_on: '2026-10-04' }),
         video({
           id: '00000000-0000-4000-8000-000000000002',
-          title: 'Training 12.10.2026',
-          kind: 'training',
+          title: 'Friendly vs. VBC Zürich',
+          game_id: null,
           recorded_on: '2026-10-12',
           status: 'processing',
           has_thumbs: false,
@@ -98,20 +96,28 @@ describe('TeamPage videos', () => {
     const table = await within(section).findByRole('table', { name: 'Videos' })
     const rows = within(table).getAllByRole('row').slice(1)
     expect(rows.map((row) => within(row).getByRole('link').textContent)).toEqual([
-      'Training 12.10.2026',
+      'Friendly vs. VBC Zürich',
       'Older match',
     ])
 
-    const [training, match] = rows as [HTMLElement, HTMLElement]
-    expect(within(training).getByRole('link')).toHaveAttribute('href', '/videos/00000000-0000-4000-8000-000000000002')
-    expect(within(training).getByText('Processing')).toBeInTheDocument()
-    expect(training.querySelector('img')).toBeNull()
+    const [friendly, match] = rows as [HTMLElement, HTMLElement]
+    expect(within(friendly).getByRole('link')).toHaveAttribute('href', '/videos/00000000-0000-4000-8000-000000000002')
+    expect(within(friendly).getByText('Processing')).toBeInTheDocument()
+    expect(friendly.querySelector('img')).toBeNull()
 
     expect(within(match).getByText('Ready')).toBeInTheDocument()
     expect(within(match).getAllByText(/1:32:10/).length).toBeGreaterThan(0)
     expect(match.querySelector('img')).toHaveAttribute('src', '/api/media/00000000-0000-4000-8000-000000000001/poster.jpg')
 
     expect(within(section).getByRole('link', { name: /Upload video/ })).toHaveAttribute('href', '/teams/92/upload')
+  })
+
+  it('still lists a training video from before Nomal handled matches only', async () => {
+    stub(team(), [video({ title: 'Training 12.10.2026', kind: 'training', game_id: null })])
+    const table = await screen.findByRole('table', { name: 'Videos' })
+    const [row] = within(table).getAllByRole('row').slice(1) as [HTMLElement]
+    expect(within(row).getByRole('link', { name: 'Training 12.10.2026' })).toBeInTheDocument()
+    expect(row).not.toHaveTextContent(/video\.kind|Match/)
   })
 
   it('says so when video storage is not set up', async () => {
@@ -130,10 +136,10 @@ describe('TeamPage videos', () => {
         body: [
           { kind: 'match', id: 1, date: '2026-10-18', label: 'KSCW – Volley Näfels', allowed: true, blockers: [], adult_checked_at: null },
           {
-            kind: 'training',
+            kind: 'match',
             id: 2,
-            date: '2026-10-20',
-            label: 'Sihlhölzli',
+            date: '2026-10-25',
+            label: 'VBC Zürich – KSCW',
             allowed: false,
             blockers: [{ code: 'under_18', count: 2, detail: null }],
             adult_checked_at: null,
@@ -144,6 +150,7 @@ describe('TeamPage videos', () => {
     const section = await screen.findByRole('region', { name: 'Filming' })
     const rows = (await within(section).findAllByRole('row')).slice(1)
     expect(rows[0]).toHaveTextContent('18.10.2026')
+    expect(rows[0]).toHaveTextContent('KSCW – Volley Näfels')
     expect(rows[0]).toHaveTextContent('Filming allowed')
     expect(rows[1]).toHaveTextContent('Filming blocked')
     expect(rows[1]).toHaveTextContent('2 people on the roster are under 18 on that day.')

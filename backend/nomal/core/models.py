@@ -111,6 +111,9 @@ class WdGame(Base):
 
 
 class WdTraining(Base):
+    """Still mirrored by the sync, read by nothing else: Nomal handles matches only since
+    16.10.2026. Kept until a cleanup migration after the M2-M4 ones."""
+
     __tablename__ = "wd_training"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
@@ -176,6 +179,7 @@ class TeamPolicy(Base):
         ForeignKey("team_lineage.id", ondelete="CASCADE"), primary_key=True
     )
     matches_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Unused since 16.10.2026 (matches only); dropped with wd_training later.
     trainings_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
     reason: Mapped[str | None] = mapped_column(Text)
     set_by: Mapped[int | None] = mapped_column(Integer)
@@ -218,8 +222,9 @@ class Video(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
     team_id: Mapped[int] = mapped_column(ForeignKey("wd_team.id"), index=True)
     lineage_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("team_lineage.id"), index=True)
-    kind: Mapped[str] = mapped_column(String(16))  # match | training
-    # Plain ids, no foreign keys: the sync replaces the game and training mirror.
+    kind: Mapped[str] = mapped_column(String(16))  # match (training: older rows only)
+    # Plain ids, no foreign keys: the sync replaces the game mirror. No game = a match that
+    # is not in Wiedisync (friendly, tournament, cup). training_id: unused since 16.10.2026.
     game_id: Mapped[int | None] = mapped_column(Integer, index=True)
     training_id: Mapped[int | None] = mapped_column(Integer, index=True)
     title: Mapped[str] = mapped_column(String(255))

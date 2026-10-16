@@ -100,7 +100,7 @@ describe('error bodies', () => {
     ]
     mockFetch(jsonResponse(409, { detail: 'Filming is not allowed for this team on that day', blockers }))
 
-    const error = await api.createVideo(92, { kind: 'match', game_id: 1, files: [] }).catch((e: unknown) => e)
+    const error = await api.createVideo(92, { game_id: 1, files: [] }).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ status: 409, detail: 'Filming is not allowed for this team on that day' })
     expect((error as ApiError).body).toMatchObject({ blockers })
@@ -123,7 +123,7 @@ describe('error bodies', () => {
     mockFetch(
       jsonResponse(422, { detail: [{ loc: ['body', 'title'], msg: 'String should have at most 200 characters', type: 'x' }] }),
     )
-    await expect(api.createVideo(92, { kind: 'training', recorded_on: '2026-10-10' })).rejects.toMatchObject({
+    await expect(api.createVideo(92, { recorded_on: '2026-10-10', title: 'Friendly' })).rejects.toMatchObject({
       status: 422,
       detail: 'String should have at most 200 characters',
     })

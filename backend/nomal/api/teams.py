@@ -1,4 +1,4 @@
-"""The viewer's profile and Nomal-enabled teams with their games and trainings."""
+"""The viewer's profile and Nomal-enabled teams with their games (matches only, 16.10.2026)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nomal.api.deps import DbDep, ViewerDep
-from nomal.core.models import TeamLineage, WdGame, WdTeam, WdTraining
+from nomal.core.models import TeamLineage, WdGame, WdTeam
 from nomal.core.permissions import (
     TeamRef,
     Viewer,
@@ -65,14 +65,6 @@ class GameOut(BaseModel):
     home_score: int | None
     away_score: int | None
     sets: list[list[int]] | None
-
-
-class TrainingOut(BaseModel):
-    id: int
-    date: date | None
-    start_time: time | None
-    end_time: time | None
-    hall_name: str | None
 
 
 SPORT_ORDER = {"volleyball": 0, "basketball": 1}
@@ -138,14 +130,3 @@ def team_games(team_id: int, viewer: ViewerDep, db: DbDep) -> list[GameOut]:
         select(WdGame).where(WdGame.team_id == team_id).order_by(WdGame.date, WdGame.time)
     )
     return [GameOut.model_validate(g, from_attributes=True) for g in rows]
-
-
-@router.get("/teams/{team_id}/trainings", response_model=list[TrainingOut])
-def team_trainings(team_id: int, viewer: ViewerDep, db: DbDep) -> list[TrainingOut]:
-    _get_visible_team(db, viewer, team_id)
-    rows = db.scalars(
-        select(WdTraining)
-        .where(WdTraining.team_id == team_id)
-        .order_by(WdTraining.date, WdTraining.start_time)
-    )
-    return [TrainingOut.model_validate(t, from_attributes=True) for t in rows]

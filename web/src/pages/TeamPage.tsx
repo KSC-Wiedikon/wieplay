@@ -7,11 +7,11 @@ import { LoadError, Message } from '../components/Message'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { ForbiddenError, NotFoundError } from '../lib/api'
-import { formatDate, formatTime, formatTimeRange, todayIso } from '../lib/format'
-import { opponentOf, scoreOf, setsOf, splitGames, upcomingTrainings } from '../lib/games'
-import { useTeam, useTeamGames, useTeamTrainings } from '../lib/queries'
+import { formatDate, formatTime, todayIso } from '../lib/format'
+import { opponentOf, scoreOf, setsOf, splitGames } from '../lib/games'
+import { useTeam, useTeamGames } from '../lib/queries'
 import { sportOf, useSportAccent } from '../lib/sport'
-import type { Game, Training } from '../lib/types'
+import type { Game } from '../lib/types'
 import { NotFoundPage } from './NotFoundPage'
 import { FilmingSection, VideosSection } from './TeamSections'
 
@@ -25,7 +25,6 @@ function TeamView({ teamId }: { teamId: number }) {
   const { t } = useTranslation()
   const team = useTeam(teamId)
   const games = useTeamGames(teamId)
-  const trainings = useTeamTrainings(teamId)
   useSportAccent(team.data ? sportOf(team.data.sport) : 'vb')
 
   if (team.isPending) return <PageSpinner />
@@ -57,9 +56,6 @@ function TeamView({ teamId }: { teamId: number }) {
       </Section>
       <Section title={t('team.playedGames')} query={games}>
         {(data) => <PlayedGames games={splitGames(data, today).played} />}
-      </Section>
-      <Section title={t('team.upcomingTrainings')} query={trainings}>
-        {(data) => <Trainings trainings={upcomingTrainings(data, today)} />}
       </Section>
 
     </div>
@@ -142,35 +138,6 @@ function PlayedGames({ games }: { games: Game[] }) {
               <Td className="font-semibold">{opponentOf(game)}</Td>
               <Td className="font-semibold whitespace-nowrap tabular-nums">{scoreOf(game) || '–'}</Td>
               <Td className="hidden text-muted tabular-nums sm:table-cell">{setsOf(game) || '–'}</Td>
-            </tr>
-          ))}
-        </TBody>
-      </Table>
-    </Card>
-  )
-}
-
-function Trainings({ trainings }: { trainings: Training[] }) {
-  const { t } = useTranslation()
-  if (trainings.length === 0) return <Message>{t('team.noTrainings')}</Message>
-  return (
-    <Card className="overflow-hidden">
-      <Table caption={t('team.upcomingTrainings')}>
-        <THead>
-          <tr>
-            <Th>{t('columns.date')}</Th>
-            <Th>{t('columns.time')}</Th>
-            <Th>{t('columns.hall')}</Th>
-          </tr>
-        </THead>
-        <TBody>
-          {trainings.map((training) => (
-            <tr key={training.id}>
-              <Td className="whitespace-nowrap tabular-nums">{formatDate(training.date)}</Td>
-              <Td className="whitespace-nowrap tabular-nums">
-                {formatTimeRange(training.start_time, training.end_time) || '–'}
-              </Td>
-              <Td>{training.hall_name || '–'}</Td>
             </tr>
           ))}
         </TBody>

@@ -22,7 +22,7 @@ import { sportOf, useSportAccent } from '../lib/sport'
 import { useToast } from '../lib/toast'
 import type { Video } from '../lib/types'
 import { matchFiles, useUpload, type FilePair } from '../lib/upload'
-import { isUuid, VIDEO_ACCEPT, videoFacts } from '../lib/video'
+import { isUuid, kindLabel, VIDEO_ACCEPT, videoFacts } from '../lib/video'
 
 export function VideoPage() {
   const { id } = useParams()
@@ -59,6 +59,7 @@ function VideoView({ videoId }: { videoId: string }) {
 
   const v = video.data
   const enabled = config.data?.enabled !== false
+  const kind = kindLabel(t, v.kind)
 
   const onDelete = () =>
     remove.mutate(v, {
@@ -75,7 +76,7 @@ function VideoView({ videoId }: { videoId: string }) {
       <title>{`${v.title} · nomal`}</title>
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge>{t(`video.kind.${v.kind}`)}</Badge>
+          {kind && <Badge>{kind}</Badge>}
           {v.status !== 'ready' && <VideoStatusBadge status={v.status} />}
         </div>
         <h1 className="text-2xl font-bold wrap-break-word">{v.title}</h1>

@@ -12,13 +12,11 @@ import type {
   SyncStatus,
   Team,
   TeamDetail,
-  Training,
   UpcomingFilming,
   UploadedPart,
   Video,
   VideoConfig,
   VideoCreate,
-  VideoKind,
   Worker,
   WorkerCreated,
 } from './types'
@@ -169,8 +167,6 @@ export const api = {
   team: (id: number, signal?: AbortSignal) => apiRequest<TeamDetail>(`/api/teams/${id}`, { signal }),
   teamGames: (id: number, signal?: AbortSignal) =>
     apiRequest<Game[]>(`/api/teams/${id}/games`, { signal }),
-  teamTrainings: (id: number, signal?: AbortSignal) =>
-    apiRequest<Training[]>(`/api/teams/${id}/trainings`, { signal }),
   adminTeams: (signal?: AbortSignal) => apiRequest<AdminTeam[]>('/api/admin/teams', { signal }),
   setTeamEnabled: (id: number, enabled: boolean) =>
     apiRequest<AdminTeam>(`/api/admin/teams/${id}`, { method: 'PUT', body: { enabled } }),
@@ -194,8 +190,8 @@ export const api = {
   inbox: (signal?: AbortSignal) => apiRequest<InboxFile[]>('/api/inbox', { signal }),
 
   // Filming rules
-  filming: (teamId: number, kind: VideoKind, on: string, signal?: AbortSignal) =>
-    apiRequest<FilmingCheck>(`/api/teams/${teamId}/filming?kind=${kind}&on=${encodeURIComponent(on)}`, { signal }),
+  filming: (teamId: number, on: string, signal?: AbortSignal) =>
+    apiRequest<FilmingCheck>(`/api/teams/${teamId}/filming?on=${encodeURIComponent(on)}`, { signal }),
   upcomingFilming: (teamId: number, signal?: AbortSignal) =>
     apiRequest<UpcomingFilming[]>(`/api/teams/${teamId}/upcoming-filming`, { signal }),
 

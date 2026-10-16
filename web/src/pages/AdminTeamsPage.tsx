@@ -64,7 +64,6 @@ function SyncDetails({ status }: { status: SyncStatus }) {
     [t('admin.sync.teams'), status.counts.teams],
     [t('admin.sync.members'), status.counts.members],
     [t('admin.sync.games'), status.counts.games],
-    [t('admin.sync.trainings'), status.counts.trainings],
   ] as const
 
   return (

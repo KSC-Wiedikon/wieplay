@@ -42,14 +42,6 @@ export interface Game {
   sets: [number, number][] | null
 }
 
-export interface Training {
-  id: number
-  date: string
-  start_time: string | null
-  end_time: string | null
-  hall_name: string | null
-}
-
 export interface AdminTeam {
   id: number
   name: string
@@ -63,7 +55,7 @@ export interface SyncStatus {
   last_run: string | null
   last_ok: string | null
   error: string | null
-  counts: { teams: number; members: number; games: number; trainings: number }
+  counts: { teams: number; members: number; games: number }
 }
 
 // Video (M1).
@@ -76,7 +68,8 @@ export interface VideoConfig {
   max_files: number
 }
 
-export type VideoKind = 'match' | 'training'
+/** Nomal handles matches only (decided 16.10.2026). */
+export type VideoKind = 'match'
 /** `refused`: the filming rules turned the video down after the upload; it can't be retried. */
 export type VideoStatus = 'uploading' | 'queued' | 'processing' | 'ready' | 'failed' | 'refused'
 
@@ -103,9 +96,10 @@ export interface Video {
   team_name: string
   team_season: string
   sport: SportName
-  kind: VideoKind
+  /** A VideoKind; rows from before 16.10.2026 may still say 'training'. */
+  kind: string
+  /** null: a match that is not in Wiedisync (friendly, tournament, cup). */
   game_id: number | null
-  training_id: number | null
   title: string
   /** yyyy-mm-dd */
   recorded_on: string
@@ -131,10 +125,9 @@ export interface Video {
   files: VideoFile[]
 }
 
+/** A match: a Wiedisync game, or a date and a title for one that is not in Wiedisync. */
 export interface VideoCreate {
-  kind: VideoKind
   game_id?: number
-  training_id?: number
   recorded_on?: string
   title?: string
   files?: { name: string; size: number; type: string }[]
@@ -153,7 +146,6 @@ export interface UploadedPart {
 
 export type BlockerCode =
   | 'policy_matches'
-  | 'policy_trainings'
   | 'under_18'
   | 'no_birthdate'
   | 'no_roster'
@@ -234,13 +226,11 @@ export interface Policy {
   sport: SportName
   label: string
   matches_allowed: boolean
-  trainings_allowed: boolean
   reason: string | null
   set_at: string | null
 }
 
 export interface PolicyUpdate {
   matches_allowed: boolean
-  trainings_allowed: boolean
   reason: string | null
 }

@@ -205,7 +205,7 @@ def test_a_refused_upload_stores_nothing(
     club: dict[str, TestClient], store: FakeStore, db_engine: Engine
 ) -> None:
     lineage = club["coach"].get(f"/api/teams/{H3}").json()["lineage_id"]
-    policy = {"matches_allowed": False, "trainings_allowed": True, "reason": "test"}
+    policy = {"matches_allowed": False, "reason": "test"}
     assert club["admin"].put(f"/api/admin/policies/{lineage}", json=policy).status_code == 200
     refused = create_match(club["coach"])
     assert refused.status_code == 409
@@ -228,11 +228,7 @@ def test_adults_only_and_team_policy(club: dict[str, TestClient], as_: Any) -> N
     # DU23-1 has a fictional 15-year-old on the roster: blocked.
     du23 = sport_admin.post(
         f"/api/teams/{DU23}/videos",
-        json={
-            "kind": "training",
-            "recorded_on": TODAY.isoformat(),
-            "files": [{"name": "a.mp4", "size": 10}],
-        },
+        json={"game_id": game_id(DU23, 1), "files": [{"name": "a.mp4", "size": 10}]},
     )
     assert du23.status_code == 409
     codes = {b["code"]: b["count"] for b in du23.json()["blockers"]}
@@ -240,10 +236,10 @@ def test_adults_only_and_team_policy(club: dict[str, TestClient], as_: Any) -> N
     # D1: matches switched off by an admin.
     lineage = club["admin"].get(f"/api/teams/{D1}").json()["lineage_id"]
     r = club["admin"].put(
-        f"/api/admin/policies/{lineage}",
-        json={"matches_allowed": False, "trainings_allowed": True, "reason": "test"},
+        f"/api/admin/policies/{lineage}", json={"matches_allowed": False, "reason": "test"}
     )
     assert r.status_code == 200
+    assert "trainings_allowed" not in r.json()
     d1 = sport_admin.post(
         f"/api/teams/{D1}/videos",
         json={"kind": "match", "game_id": game_id(D1, 1), "files": [{"name": "a.mp4", "size": 10}]},
@@ -251,8 +247,8 @@ def test_adults_only_and_team_policy(club: dict[str, TestClient], as_: Any) -> N
     assert d1.status_code == 409
     assert {"code": "policy_matches", "count": None, "detail": "test"} in d1.json()["blockers"]
     upcoming = sport_admin.get(f"/api/teams/{D1}/upcoming-filming").json()
-    matches = [u for u in upcoming if u["kind"] == "match"]
-    assert matches and all(not u["allowed"] for u in matches)
+    assert upcoming and all(u["kind"] == "match" and not u["allowed"] for u in upcoming)
+    assert {u["id"] for u in upcoming} <= {game_id(D1, k) for k in range(6)}  # games only
 
 
 def test_who_may_upload(club: dict[str, TestClient], as_: Any) -> None:
@@ -274,6 +270,86 @@ def test_who_may_upload(club: dict[str, TestClient], as_: Any) -> None:
         },
     )
     assert notvideo.status_code == 415
+
+
+def friendly(client: TestClient, team: int = H3, **fields: Any) -> Any:
+    """A match that is not in Wiedisync: a date and a title instead of a game."""
+    body = {"recorded_on": (TODAY - timedelta(days=2)).isoformat(), "title": "Friendly"}
+    body.update(fields)
+    return client.post(
+        f"/api/teams/{team}/videos", json={**body, "files": [{"name": "a.mp4", "size": 10}]}
+    )
+
+
+def test_a_match_without_a_wiedisync_game_needs_a_date_and_a_title(
+    club: dict[str, TestClient],
+) -> None:
+    coach = club["coach"]
+    created = friendly(coach, title="  Friendly vs. VBC Zürich  ")
+    assert created.status_code == 201, created.text
+    video = created.json()
+    assert video["kind"] == "match" and video["game_id"] is None
+    assert video["title"] == "Friendly vs. VBC Zürich"
+    assert video["recorded_on"] == (TODAY - timedelta(days=2)).isoformat()
+
+    assert friendly(coach, title=None).status_code == 422
+    assert friendly(coach, title="   ").status_code == 422
+    assert friendly(coach, title="x" * 201).status_code == 422
+    assert friendly(coach, recorded_on=None).status_code == 422  # neither game nor date
+    assert friendly(coach, game_id=game_id(H3, 1)).status_code == 422  # both
+    future = (TODAY + timedelta(days=2)).isoformat()
+    assert friendly(coach, recorded_on=future).status_code == 422
+    # A date of another season belongs on that season's team page (retention counts from it).
+    last_year = friendly(coach, recorded_on=(TODAY - timedelta(days=400)).isoformat())
+    assert last_year.status_code == 422 and "season" in last_year.json()["detail"]
+
+
+def test_a_match_without_a_game_passes_the_filming_rules_too(
+    club: dict[str, TestClient], as_: Any, store: FakeStore
+) -> None:
+    sport_admin = as_("vb-sport-admin")
+    du23 = friendly(sport_admin, team=DU23)
+    assert du23.status_code == 409
+    assert {b["code"] for b in du23.json()["blockers"]} >= {"under_18"}
+    lineage = club["admin"].get(f"/api/teams/{H3}").json()["lineage_id"]
+    policy = {"matches_allowed": False, "reason": "test"}
+    assert club["admin"].put(f"/api/admin/policies/{lineage}", json=policy).status_code == 200
+    refused = friendly(club["coach"])
+    assert refused.status_code == 409
+    assert refused.json()["blockers"] == [
+        {"code": "policy_matches", "count": None, "detail": "test"}
+    ]
+    assert store.uploads == {}
+
+
+def test_trainings_are_gone(club: dict[str, TestClient], db_engine: Engine) -> None:
+    """Matches only (16.10.2026): no training uploads, but older training rows still list."""
+    coach = club["coach"]
+    training = coach.post(
+        f"/api/teams/{H3}/videos",
+        json={
+            "kind": "training",
+            "recorded_on": TODAY.isoformat(),
+            "files": [{"name": "a.mp4", "size": 10}],
+        },
+    )
+    assert training.status_code == 422
+    on = TODAY.isoformat()
+    assert (
+        coach.get(f"/api/teams/{H3}/filming", params={"kind": "training", "on": on}).status_code
+        == 422
+    )
+    for params in ({"kind": "match", "on": on}, {"on": on}):
+        r = coach.get(f"/api/teams/{H3}/filming", params=params)
+        assert r.status_code == 200 and r.json()["allowed"] is True
+
+    video = create_match(coach).json()
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE video SET kind = 'training', game_id = NULL, training_id = 1"))
+    listed = coach.get(f"/api/teams/{H3}/videos")
+    assert listed.status_code == 200 and listed.json()[0]["kind"] == "training"
+    got = coach.get(f"/api/videos/{video['id']}")
+    assert got.status_code == 200 and "training_id" not in got.json()
 
 
 def test_upload_to_playback_to_deletion(
@@ -536,7 +612,7 @@ def test_a_policy_change_during_the_upload_refuses_it(
     coach = club["coach"]
     video = create_match(coach).json()
     lineage = coach.get(f"/api/teams/{H3}").json()["lineage_id"]
-    policy = {"matches_allowed": False, "trainings_allowed": True}
+    policy = {"matches_allowed": False}
     assert club["admin"].put(f"/api/admin/policies/{lineage}", json=policy).status_code == 200
     f = video["files"][0]
     signed = coach.post(f"/api/videos/{video['id']}/files/{f['id']}/parts", json={"parts": [1, 2]})
@@ -563,8 +639,7 @@ def test_a_camera_date_that_was_blocked_refuses_the_video(
     # route instead: switch matches off, which applies to any day).
     lineage = club["admin"].get(f"/api/teams/{H3}").json()["lineage_id"]
     club["admin"].put(
-        f"/api/admin/policies/{lineage}",
-        json={"matches_allowed": False, "trainings_allowed": True, "reason": "test"},
+        f"/api/admin/policies/{lineage}", json={"matches_allowed": False, "reason": "test"}
     )
     camera = datetime.now(UTC) - timedelta(days=10)
     result["capture"]["creation_time"] = camera.isoformat()

@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -37,7 +37,7 @@ from nomal.core.filming import (
     club_today,
     refresh_rosters,
 )
-from nomal.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTeam, WdTraining
+from nomal.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTeam
 from nomal.core.permissions import Viewer, can_delete_video, can_upload, can_use_inbox
 from nomal.core.storage import ObjectStore, safe_file_name
 
@@ -73,7 +73,7 @@ class FilmingOut(BaseModel):
 
 
 class UpcomingOut(FilmingOut):
-    kind: Literal["match", "training"]
+    kind: Literal["match"] = "match"  # games only (matches only since 16.10.2026)
     id: int
     date: date
     label: str
@@ -109,9 +109,8 @@ class VideoOut(BaseModel):
     team_name: str
     team_season: str
     sport: Literal["volleyball", "basketball"]
-    kind: Literal["match", "training"]
+    kind: str  # "match"; older rows from before 16.10.2026 may say "training"
     game_id: int | None
-    training_id: int | None
     title: str
     recorded_on: date
     source: str
@@ -141,11 +140,13 @@ class FileIn(BaseModel):
 
 
 class VideoCreateIn(BaseModel):
-    kind: Literal["match", "training"]
+    """A match: a Wiedisync game, or a date and a title for one that is not in Wiedisync
+    (a friendly, tournament or cup)."""
+
+    kind: Literal["match"] = "match"  # matches only (16.10.2026); kept for older clients
     game_id: int | None = None
-    training_id: int | None = None
     recorded_on: date | None = None
-    title: str | None = Field(default=None, max_length=200)
+    title: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
     files: list[FileIn] = Field(default_factory=list, max_length=50)
     inbox_file_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
 
@@ -227,7 +228,6 @@ def _video_out(
         sport=access.team.sport,
         kind=video.kind,
         game_id=video.game_id,
-        training_id=video.training_id,
         title=video.title,
         recorded_on=video.recorded_on,
         source=video.source,
@@ -283,14 +283,14 @@ def filming_status(
     viewer: ViewerDep,
     db: DbDep,
     bridge: BridgeDep,
-    kind: Literal["match", "training"],
     on: Annotated[date, Query()],
+    kind: Literal["match"] = "match",  # matches only; older clients still send it
 ) -> FilmingOut:
     access = visible_team(db, viewer, team_id)
     today = club_today()
     if not today - timedelta(days=FILMING_PAST_DAYS) <= on <= today + timedelta(days=UPCOMING_DAYS):
         raise HTTPException(422, "Date out of range")
-    check = check_filming(db, bridge, access.team, kind, on, fresh=False)
+    check = check_filming(db, bridge, access.team, on, fresh=False)
     db.commit()
     return FilmingOut(
         allowed=check.allowed, blockers=_blockers(check), adult_checked_at=check.adult_checked_at
@@ -301,33 +301,25 @@ def filming_status(
 def upcoming_filming(
     team_id: int, viewer: ViewerDep, db: DbDep, bridge: BridgeDep
 ) -> list[UpcomingOut]:
-    """Filming allowed / blocked for the team's next games and trainings (PLAN §5.3)."""
+    """Filming allowed / blocked for the team's next games (PLAN §5.3)."""
     access = visible_team(db, viewer, team_id)
     today = club_today()
     until = today + timedelta(days=UPCOMING_DAYS)
-    items: list[tuple[date, Literal["match", "training"], int, str]] = []
-    for g in db.scalars(
-        select(WdGame).where(WdGame.team_id == team_id, WdGame.date >= today, WdGame.date <= until)
-    ):
-        assert g.date is not None
-        items.append((g.date, "match", g.id, f"{g.home_name or '?'} {DASH} {g.away_name or '?'}"))
-    for t in db.scalars(
-        select(WdTraining).where(
-            WdTraining.team_id == team_id, WdTraining.date >= today, WdTraining.date <= until
-        )
-    ):
-        assert t.date is not None
-        items.append((t.date, "training", t.id, t.hall_name or ""))
-    items.sort(key=lambda i: (i[0], i[1]))
+    games = db.scalars(
+        select(WdGame)
+        .where(WdGame.team_id == team_id, WdGame.date >= today, WdGame.date <= until)
+        .order_by(WdGame.date, WdGame.time)
+        .limit(UPCOMING_MAX)
+    )
     out = []
-    for day, kind, item_id, label in items[:UPCOMING_MAX]:
-        check = check_filming(db, bridge, access.team, kind, day, fresh=False)
+    for g in games:
+        assert g.date is not None
+        check = check_filming(db, bridge, access.team, g.date, fresh=False)
         out.append(
             UpcomingOut(
-                kind=kind,
-                id=item_id,
-                date=day,
-                label=label,
+                id=g.id,
+                date=g.date,
+                label=f"{g.home_name or '?'} {DASH} {g.away_name or '?'}",
                 allowed=check.allowed,
                 blockers=_blockers(check),
                 adult_checked_at=check.adult_checked_at,
@@ -352,24 +344,30 @@ def team_videos(
     return [_video_out(db, v, access, viewer, settings, progress) for v in videos]
 
 
-def _resolve_event(
-    db: Session, team_id: int, body: VideoCreateIn
-) -> tuple[date, str, int | None, int | None]:
-    if body.kind == "match":
-        if body.game_id is None:
-            raise HTTPException(422, "A match video needs its game")
+def _resolve_match(db: Session, team: WdTeam, body: VideoCreateIn) -> tuple[date, str, int | None]:
+    """The recording day, the title and the Wiedisync game. A match that is not in Wiedisync
+    (a friendly, tournament or cup) has no game: the coach gives its date and a title, and
+    the date must fall in this team row's season (retention counts from it, PLAN §5.5)."""
+    if body.game_id is not None:
+        if body.recorded_on is not None:
+            raise HTTPException(422, "Give either the game or a date, not both")
         game = db.get(WdGame, body.game_id)
-        if game is None or game.team_id != team_id or game.date is None:
+        if game is None or game.team_id != team.id or game.date is None:
             raise HTTPException(422, "Game not found for this team")
-        return game.date, f"{game.home_name or '?'} {DASH} {game.away_name or '?'}", game.id, None
-    if body.training_id is not None:
-        training = db.get(WdTraining, body.training_id)
-        if training is None or training.team_id != team_id or training.date is None:
-            raise HTTPException(422, "Training not found for this team")
-        return training.date, f"Training {training.date:%d.%m.%Y}", None, training.id
+        title = body.title or f"{game.home_name or '?'} {DASH} {game.away_name or '?'}"
+        return game.date, title, game.id
     if body.recorded_on is None:
-        raise HTTPException(422, "A training video needs a training or a date")
-    return body.recorded_on, f"Training {body.recorded_on:%d.%m.%Y}", None, None
+        raise HTTPException(422, "A match video needs its game, or a date and a title")
+    if not body.title:
+        raise HTTPException(422, "A match without a Wiedisync game needs a title")
+    season = pipeline.season_of(body.recorded_on)
+    if season != team.season:
+        raise HTTPException(
+            422,
+            f"{body.recorded_on:%d.%m.%Y} belongs to the {season} season; "
+            f"this is the team of {team.season}",
+        )
+    return body.recorded_on, body.title, None
 
 
 def _check_files(body: VideoCreateIn, settings: Settings) -> None:
@@ -404,12 +402,12 @@ def create_video(
     if not can_upload(viewer, access.ref):
         raise HTTPException(403, "Only the team's coaches and sport admins upload videos")
     _check_files(body, settings)
-    on, default_title, game_id, training_id = _resolve_event(db, team_id, body)
+    on, title, game_id = _resolve_match(db, access.team, body)
     if on > club_today():
         raise HTTPException(422, "The recording date is in the future")
 
     synced = refresh_rosters(db, bridge)
-    check = check_filming(db, bridge, access.team, body.kind, on, fresh=True, roster_fresh=synced)
+    check = check_filming(db, bridge, access.team, on, fresh=True, roster_fresh=synced)
     if not check.allowed:
         audit(
             db,
@@ -447,8 +445,7 @@ def create_video(
         lineage_id=access.team.lineage_id,
         kind=body.kind,
         game_id=game_id,
-        training_id=training_id,
-        title=(body.title or "").strip() or default_title,
+        title=title,
         sport=access.team.sport,
         recorded_on=on,
         source="inbox" if inbox else "file",
@@ -629,7 +626,7 @@ def complete_file(
     if video.status != "uploading":
         return _video_out(db, video, access, viewer, settings)  # someone else finished it
     check = check_filming(
-        db, bridge, access.team, video.kind, video.recorded_on, fresh=True, roster_fresh=synced
+        db, bridge, access.team, video.recorded_on, fresh=True, roster_fresh=synced
     )
     if not check.allowed:
         codes = [b.code for b in check.blockers]

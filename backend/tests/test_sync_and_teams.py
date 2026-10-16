@@ -66,7 +66,7 @@ def test_lineage_spans_seasons(client: TestClient) -> None:
     assert current["season"] != previous["season"]
 
 
-def test_members_see_their_teams_and_games(app: FastAPI) -> None:
+def test_members_see_their_teams_and_games(app: FastAPI, db_engine: Engine) -> None:
     with TestClient(app, follow_redirects=False) as admin:
         login(admin, P["admin"])
         sync(admin)
@@ -90,8 +90,10 @@ def test_members_see_their_teams_and_games(app: FastAPI) -> None:
         login(coach, P["coach-h3"])
         ids = {t["id"] for t in coach.get("/api/me").json()["teams"]}
         assert ids == {H3, H3_PREV, HERREN1, HERREN1_PREV}  # managers see every season
-        trainings = coach.get(f"/api/teams/{HERREN1}/trainings").json()
-        assert len(trainings) == 6
+        assert len(coach.get(f"/api/teams/{HERREN1}/games").json()) == 6
+        # Matches only (16.10.2026): no trainings in the API; the sync still mirrors them.
+        assert coach.get(f"/api/teams/{HERREN1}/trainings").status_code == 404
+        assert count(db_engine, "wd_training") > 0
 
     with TestClient(app, follow_redirects=False) as vb_admin:
         login(vb_admin, P["vb-sport-admin"])

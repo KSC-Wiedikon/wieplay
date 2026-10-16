@@ -1,4 +1,4 @@
-import type { Game, Training } from './types'
+import type { Game } from './types'
 
 function hasResult(game: Game): boolean {
   return game.home_score !== null && game.away_score !== null
@@ -18,12 +18,6 @@ export function splitGames(games: readonly Game[], today: string): { upcoming: G
   upcoming.sort(byDateTime)
   played.sort((a, b) => byDateTime(b, a))
   return { upcoming, played }
-}
-
-export function upcomingTrainings(trainings: readonly Training[], today: string): Training[] {
-  return trainings
-    .filter((t) => t.date >= today)
-    .sort((a, b) => byDateTime({ date: a.date, time: a.start_time }, { date: b.date, time: b.start_time }))
 }
 
 /** The side that isn't ours; both names when we don't know which side we are. */
