@@ -355,7 +355,8 @@ def thumbs_args(
 
 
 def poster_args(*, source: Path, at_s: float) -> list[str]:
-    """A poster frame from one camera file (no seeking inside the concat demuxer)."""
+    """A poster frame from one camera file. Seeking inside the concat demuxer is
+    unreliable ("could not seek"), and a failed poster would fail the thumbnails job."""
     return [
         "-ss", f"{at_s:.2f}", *input_guard(), "-i", str(source),
         "-map", "0:v:0", "-frames:v", "1", "-vf", "scale=1280:-2", "-q:v", "3", "poster.jpg",

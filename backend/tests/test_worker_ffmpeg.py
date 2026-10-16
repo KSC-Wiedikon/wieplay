@@ -7,10 +7,13 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
-from nomal.worker import ffmpeg
+from nomal.worker import ffmpeg, handlers
+from nomal.worker.client import ClaimedJob
+from nomal.worker.config import WorkerSettings
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 
@@ -97,6 +100,46 @@ def test_thumbnails_and_poster(parts: list[Path], tmp_path: Path) -> None:
     assert sheets[0] == "sprite_001.jpg"
     assert ffmpeg.probe(out / "sprite_001.jpg", camera=False).width == 320  # 2 tiles of 160 px
     assert (out / "poster.jpg").stat().st_size > 0
+
+
+def test_the_thumbnails_job_takes_the_poster_from_the_first_camera_file(
+    parts: list[Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Seeking inside the concat demuxer can fail ("could not seek to position"); the poster
+    step then failed the thumbnails job and, after three attempts, the whole video."""
+    raw = tmp_path / "raw"
+    folder = raw / "vb-H3" / "video"
+    folder.mkdir(parents=True)
+    inputs = []
+    for part in parts:
+        shutil.copy(part, folder / part.name)
+        inputs.append(str(folder / part.name))
+    posters: list[Path] = []
+    poster_args = ffmpeg.poster_args
+
+    def spy(*, source: Path, at_s: float) -> list[str]:
+        posters.append(source)
+        return poster_args(source=source, at_s=at_s)
+
+    uploaded: list[str] = []
+
+    def upload(ctx: Any, directory: Path, prefix: str, names: list[str], base: float) -> int:
+        uploaded.extend(names)
+        return 0
+
+    monkeypatch.setattr(ffmpeg, "poster_args", spy)
+    monkeypatch.setattr(handlers, "_upload_dir", upload)
+    settings = WorkerSettings(api_url="http://unused", work_dir=tmp_path / "work", raw_root=raw)
+    job = ClaimedJob(
+        id="job-1", kind="thumbs", video_id="video", attempt=1, checkpoint=None,
+        params={"video_id": "video", "inputs": inputs, "duration_ms": 8000, "interval_s": 2,
+                "cols": 2, "rows": 2, "tile_w": 160, "source": {"width": 640, "height": 360},
+                "prefix": "media/video/thumbs/"},
+    )  # fmt: skip
+    ctx = handlers.Context(settings, cast(Any, None), job, threading.Event(), lambda p, m: None)
+    result = handlers.HANDLERS["thumbs"](ctx)
+    assert result["poster"] is True and "poster.jpg" in uploaded
+    assert posters == [(folder / parts[0].name).resolve()]
 
 
 def test_cancel_stops_ffmpeg(parts: list[Path], tmp_path: Path) -> None:
