@@ -9,7 +9,7 @@ import { bundle, period, rally } from '../test/tagging'
 import { TagPage } from './TagPage'
 
 // The automatic scoring on the tagging page (PLAN §10.3): who served and who won as facts or
-// suggestions, the breaks Nomal labelled in the review, and the sets bar's scoring controls.
+// suggestions, the breaks WiePlay labelled in the review, and the sets bar's scoring controls.
 
 const ID = '00000000-0000-4000-8000-0000000000d1'
 
@@ -85,7 +85,7 @@ const G1 = '00000000-0000-4000-8000-0000000006b1'
 const G2 = '00000000-0000-4000-8000-0000000006b2'
 const G3 = '00000000-0000-4000-8000-0000000006b3'
 
-/** A coach's rally, an accepted one whose winner and score are Nomal's (flagged), an open suggestion and three breaks. */
+/** A coach's rally, an accepted one whose winner and score are WiePlay's (flagged), an open suggestion and three breaks. */
 const data = (): Tagging =>
   bundle({
     periods: [set1],
@@ -209,7 +209,7 @@ beforeEach(() => {
 })
 
 describe('TagPage, automatic scoring', () => {
-  it("shows who served and who won, Nomal's values as suggestions, and flags rallies to check", async () => {
+  it("shows who served and who won, WiePlay's values as suggestions, and flags rallies to check", async () => {
     const rendered = show()
     await screen.findByRole('region', { name: 'Tag entry' })
     fireEvent.click(screen.getByRole('button', { name: 'Rallies (3)' }))
@@ -221,17 +221,17 @@ describe('TagPage, automatic scoring', () => {
     // A coach's rally: facts, nothing suggested.
     expect(suggested(first)).toEqual([])
     expect(first).toHaveTextContent('1:0')
-    // Nomal's score and winner; the server is a fact (the previous winner). The winner is a
-    // choice of the teams' names: none yet, so Nomal's shows in the empty choice.
+    // WiePlay's score and winner; the server is a fact (the previous winner). The winner is a
+    // choice of the teams' names: none yet, so WiePlay's shows in the empty choice.
     expect(suggested(second)).toEqual(['1:1 (suggested)'])
-    expect(second.querySelector('[data-suggested]')).toHaveAttribute('title', 'Suggested by Nomal')
+    expect(second.querySelector('[data-suggested]')).toHaveAttribute('title', 'Suggested by WiePlay')
     expect(within(second).getAllByText('KSCW H3')[0]?.closest('td')?.querySelector('select')).toBeNull() // served: a fact
     const point = within(second).getByRole('combobox', { name: 'Point of rally 2' })
     expect(point).toHaveValue('')
-    expect(within(point).getAllByRole('option').map((o) => o.textContent)).toEqual(['Smash 05 (Nomal)', 'KSCW H3', 'Smash 05'])
+    expect(within(point).getAllByRole('option').map((o) => o.textContent)).toEqual(['Smash 05 (WiePlay)', 'KSCW H3', 'Smash 05'])
     expect(within(second).getByTitle("The serve doesn't fit the score.")).toHaveTextContent('Check')
     expect(second).toHaveAttribute('data-check', 'true')
-    // An open suggestion: its server is Nomal's too.
+    // An open suggestion: its server is WiePlay's too.
     expect(suggested(third)).toEqual(['Smash 05 (suggested)', '1:2 (suggested)'])
     // The score's order is in the column's head.
     expect(within(table).getByRole('columnheader', { name: 'Score: KSCW H3 – Smash 05' })).toBeInTheDocument()
@@ -268,7 +268,7 @@ describe('TagPage, automatic scoring', () => {
     keys('Enter')
     expect(within(panel()).getByText('Accepted: Timeout at 0:25.0.')).toBeInTheDocument()
 
-    // Then the rally: Nomal's server and winner as suggestions, and why to check it.
+    // Then the rally: WiePlay's server and winner as suggestions, and why to check it.
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
     expect(within(panel()).getByText('Smash 05 (suggested, 87%, far court)')).toBeInTheDocument()
     expect(within(panel()).getByText('Smash 05 (suggested, 91%)')).toBeInTheDocument()
@@ -297,7 +297,7 @@ describe('TagPage, automatic scoring', () => {
     expect(sent.get(G3)).toMatchObject({ review: 'rejected', deleted: true })
     expect(scored).toHaveLength(0)
 
-    // Leaving the review after answers: Nomal scores the match again, then the page reloads its data.
+    // Leaving the review after answers: WiePlay scores the match again, then the page reloads its data.
     keys('Escape')
     await waitFor(() => expect(scored).toHaveLength(1), { timeout: 3000 })
     expect(scored[0]).toBeGreaterThan(0) // after the answers were sent
@@ -315,12 +315,12 @@ describe('TagPage, automatic scoring', () => {
     expect(within(won).getAllByRole('button').map((b) => b.textContent)).toEqual(['KSCW H3' + '3', 'Smash 05' + '4'])
     expect(within(won).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Point KSCW H3', 'Point Smash 05'])
 
-    // Nomal says Smash 05 won it (1:2); the coach saw KSCW H3 win: 3.
+    // WiePlay says Smash 05 won it (1:2); the coach saw KSCW H3 win: 3.
     keys('3')
     expect(within(panel()).getByText('Point: KSCW H3, your call.')).toBeInTheDocument()
     expect(within(won).getByRole('button', { name: /Point KSCW H3/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(panel()).getByText('KSCW H3 (your call)')).toBeInTheDocument()
-    // The score line follows at once (Nomal's winner of the rally before still counts: suggested).
+    // The score line follows at once (WiePlay's winner of the rally before still counts: suggested).
     expect(within(panel()).getByText('KSCW H3 2:1 Smash 05 (suggested)')).toBeInTheDocument()
     await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: 'us', review: 'corrected' }), { timeout: 3000 })
 
@@ -375,15 +375,15 @@ describe('TagPage, sets bar and the automatic score', () => {
       ],
     })
 
-  it("shows Nomal's sets as suggestions to accept or reject, with the official score against Nomal's", async () => {
+  it("shows WiePlay's sets as suggestions to accept or reject, with the official score against WiePlay's", async () => {
     const { server } = show(sets())
     await screen.findByRole('region', { name: 'Tag entry' })
     const bar = screen.getByRole('region', { name: 'Sets' })
     expect(within(bar).getByRole('button', { name: 'Edit set 1' })).toHaveTextContent('Suggested · 82%')
     const details = within(bar).getByRole('table', { name: 'Serve, side and rotation per set' })
-    expect(within(details).getByText('Official 25:21 · Nomal 25:21')).toBeInTheDocument()
+    expect(within(details).getByText('Official 25:21 · WiePlay 25:21')).toBeInTheDocument()
     expect(within(details).getAllByText('Same as the official score')).toHaveLength(1)
-    expect(within(details).getByText('Official 25:23 · Nomal 23:25')).toBeInTheDocument()
+    expect(within(details).getByText('Official 25:23 · WiePlay 23:25')).toBeInTheDocument()
 
     fireEvent.click(within(bar).getByRole('button', { name: 'Accept set 1' }))
     expect(within(bar).getByRole('button', { name: 'Edit set 1' })).not.toHaveTextContent('Suggested')
@@ -398,13 +398,13 @@ describe('TagPage, sets bar and the automatic score', () => {
     ])
   })
 
-  it("sets first serve, our side and the starting rotation per set; Nomal's guess shows until a coach picks", async () => {
+  it("sets first serve, our side and the starting rotation per set; WiePlay's guess shows until a coach picks", async () => {
     const { server } = show(sets())
     await screen.findByRole('region', { name: 'Tag entry' })
     const serve = screen.getByRole('group', { name: 'First serve in set 1' })
     const guess = within(serve).getByRole('button', { name: 'Smash 05 (suggested)' })
     expect(guess).toHaveAttribute('aria-pressed', 'false')
-    expect(guess).toHaveAttribute('title', 'Nomal guesses Smash 05. Click to confirm.')
+    expect(guess).toHaveAttribute('title', 'WiePlay guesses Smash 05. Click to confirm.')
     fireEvent.click(guess)
     expect(within(serve).getByRole('button', { name: 'Smash 05' })).toHaveAttribute('aria-pressed', 'true')
 
@@ -446,11 +446,11 @@ describe('TagPage, sets bar and the automatic score', () => {
     expect(sent).toMatchObject({ start_lineup: [3, 7, 11, 9, 1, null], start_rotation: 1 })
   })
 
-  it("asks for set 1's first serve and side when Nomal is unsure about them", async () => {
+  it("asks for set 1's first serve and side when WiePlay is unsure about them", async () => {
     show(sets(), { state: { analysis: analysis({ scoring: scoring({ sides_confidence: 0.72 }) }) } })
     await screen.findByRole('region', { name: 'Tag entry' })
     const note = await screen.findByRole('note', { name: 'Set 1: who served first, and where did we start?' })
-    expect(note).toHaveTextContent('Nomal is only 72% sure.')
+    expect(note).toHaveTextContent('WiePlay is only 72% sure.')
     expect(note).toHaveTextContent('one click fixes the score of the whole match')
     fireEvent.click(within(screen.getByRole('group', { name: 'First serve in set 1' })).getByRole('button', { name: /^KSCW H3/ }))
     expect(screen.getByRole('note')).toBeInTheDocument()
@@ -458,10 +458,10 @@ describe('TagPage, sets bar and the automatic score', () => {
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 
-  it('stays quiet when Nomal is sure about the sides', async () => {
+  it('stays quiet when WiePlay is sure about the sides', async () => {
     show(sets())
     await screen.findByRole('region', { name: 'Tag entry' })
-    await screen.findByText('Official 25:21 · Nomal 25:21')
+    await screen.findByText('Official 25:21 · WiePlay 25:21')
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 })

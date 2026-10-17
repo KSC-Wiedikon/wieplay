@@ -121,7 +121,7 @@ def test_security_headers(client: TestClient) -> None:
 def test_spa_routes_answer_get_and_head(tmp_path, settings) -> None:  # type: ignore[no-untyped-def]
     from nomal.api.app import create_app
 
-    (tmp_path / "index.html").write_text("<!doctype html><title>nomal</title>")
+    (tmp_path / "index.html").write_text("<!doctype html><title>WiePlay</title>")
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "app.js").write_text("console.log(1)")
     app = create_app(settings.model_copy(update={"web_dist": str(tmp_path)}))

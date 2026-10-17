@@ -8,7 +8,7 @@ describe('who won a rally, set outside the workspace', () => {
   const second = rally({ start_ms: 9_000, end_ms: 14_000, period_id: set1.id, model_won_by: 'them', score_us_after: 1, score_them_after: 1, score_source: 'model' })
   const third = rally({ start_ms: 20_000, end_ms: 25_000, period_id: set1.id, won_by: 'them' })
 
-  it('shows the score line at once, the coach outranking Nomal', () => {
+  it('shows the score line at once, the coach outranking WiePlay', () => {
     const data = withWinner(bundle({ periods: [set1], segments: [first, second, third] }), second.id, 'us')
     const after = data.segments.map((s) => [s.won_by, s.score_us_after, s.score_them_after, s.score_source])
     expect(after).toEqual([
@@ -16,7 +16,7 @@ describe('who won a rally, set outside the workspace', () => {
       ['us', 2, 0, 'tags'],
       ['them', 2, 1, 'tags'],
     ])
-    // Taken back: Nomal's winner again, the score line marked as Nomal's from there.
+    // Taken back: WiePlay's winner again, the score line marked as WiePlay's from there.
     const back = withWinner(data, second.id, null)
     expect(back.segments.map((s) => [s.score_us_after, s.score_them_after, s.score_source])).toEqual([
       [1, 0, 'tags'],

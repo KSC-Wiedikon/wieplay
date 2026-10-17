@@ -37,7 +37,7 @@ export const courtEn = {
       auto: 'Found automatically: check the lines before saving.',
       autoHall: 'Set automatically from this hall’s earlier videos: check the lines.',
       autoFound: 'Found automatically in the picture: check the lines.',
-      guess: 'Nomal’s best guess (not sure): check the lines before saving.',
+      guess: 'WiePlay’s best guess (not sure): check the lines before saving.',
       yours: 'Set up by a coach.',
       confidence: 'confidence {{pct}} %',
       moved_one: 'The camera moved at {{at}}: {{count}} setup.',

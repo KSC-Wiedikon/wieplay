@@ -9,7 +9,7 @@ import { AlertIcon } from './icons'
 import { Th } from './Table'
 
 /**
- * A value from Nomal rather than a coach (who served, who won, the score): muted and italic,
+ * A value from WiePlay rather than a coach (who served, who won, the score): muted and italic,
  * "suggested" on hover and for screen readers. A fact shows as it is.
  */
 export function SuggestedValue({ suggested, children, className }: { suggested: boolean; children: ReactNode; className?: string }) {

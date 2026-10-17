@@ -117,7 +117,7 @@ export function openSuggestions(error: unknown): number | null {
 }
 
 /**
- * Marks the video's actions reviewed (or not): its tags then teach Nomal's action proposer.
+ * Marks the video's actions reviewed (or not): its tags then teach WiePlay's action proposer.
  * Shown at once in the tagging data.
  */
 export function useSetActionsReviewed(videoId: string) {

@@ -1,14 +1,17 @@
-# Nomal: plan
+# WiePlay: plan
 
-> *Nomal* is Swiss German for "again": watch it again, learn from it.
+> *WiePlay*: **Wie**dikon + re**play**, watch it again and learn from it. Called *Nomal*
+> (Swiss German for "again") until 17.10.2026, when the repo became `KSC-Wiedikon/wieplay`
+> and the hosts `wieplay(-dev).kscw.ch`. The code, packages, settings (`NOMAL_*`), containers,
+> database and buckets keep the name `nomal` (renaming them buys nothing a user sees).
 > In-house video analysis for KSC Wiedikon, replacing what clubs pay Hudl or Balltime for.
 
 | | |
 |---|---|
 | Status | **Plan, revision 4** (15.10.2026). Nothing built yet; brand icons generated. |
 | Owner | Luca Canepa (sole developer) |
-| Repo | `KSC-Wiedikon/nomal` (AGPL-3.0, like Wiedisync; private for now) |
-| Live host (planned) | `nomal.kscw.ch` (prod), `nomal-dev.kscw.ch` (dev) |
+| Repo | `KSC-Wiedikon/wieplay` (AGPL-3.0, like Wiedisync; private for now) |
+| Live hosts | `wieplay.kscw.ch` (prod), `wieplay-dev.kscw.ch` (dev); `nomal(-dev).kscw.ch` until 17.10.2026 |
 | Depends on | Wiedisync (accounts, teams, rosters, games): `KSC-Wiedikon/wiedisync` |
 
 This is the plan of record. Decisions that change it get a short ADR in `docs/adr/` and an
@@ -73,11 +76,11 @@ The budget still assumes 100 videos per season.
 ### Non-goals (to stay finishable by one person in the evenings)
 
 - No live streaming, no live tagging during the match. Footage is processed afterwards.
-- No public links of any kind, no social sharing, no embedding outside Nomal.
+- No public links of any kind, no social sharing, no embedding outside WiePlay.
 - No face recognition and no cross-video person re-identification, ever (§5.7).
 - No full DataVolley replacement. Statistics stay simple (counts and efficiencies per skill).
 - No multi-camera sync, no camera hardware. Telestration comes after launch (§12).
-- No minors: nothing under 18 is filmed for Nomal or stored by it (§5.3).
+- No minors: nothing under 18 is filmed for WiePlay or stored by it (§5.3).
 - No camera purchases: each team films with its own camera.
 
 ---
@@ -88,20 +91,20 @@ From the Q&A on 15.10.2026 (second round supersedes the first):
 
 | # | Topic | Decision |
 |---|---|---|
-| D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube or Twitch link** is accepted as a source **for the club's own videos only** (the club's channel or a member's own channel): Nomal imports the file (§7.2.2, decided 16.10.2026); the **original file is preferred** (the platforms re-encode) and can replace the import later. |
+| D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube or Twitch link** is accepted as a source **for the club's own videos only** (the club's channel or a member's own channel): WiePlay imports the file (§7.2.2, decided 16.10.2026); the **original file is preferred** (the platforms re-encode) and can replace the import later. |
 | D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 videos per season in total. **DU23-1: trainings only** (decided 15.10.2026, §5.3). **Matches only for now** (decided 16.10.2026): trainings removed from the product, tables kept until the cleanup migration (§5.3). |
 | D3 | Delivery | Hetzner Object Storage. **HLS**: the authenticated API serves the playlist and every segment URL is signed with a **TTL of minutes** at the moment the player asks for it. No long-lived link per video anywhere. A copied link dies quickly; a 2 h match plays without interruption (§7.6). |
 | D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference starts internal** (decided 15.10.2026): on the **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; always on), with a researched plan to move to an **EU or Swiss provider** later (§8.6). US providers are out. The Framework 16 is also the development and training machine; the RTX 4090 PC is not part of the plan. The worker interface is backend-agnostic (queue → worker), so internal, provider and a future GPU box are interchangeable (§8). |
 | D5 | Permissions | Team-scoped defaults accepted (§5.1). **Adults only**: a hard check against member birthdates; nothing under 18 is filmed or stored. |
 | D6 | OpenVolley | Not now. The data model stays open for importing points later (§6.6, §10.8). |
-| D7 | Repo | `KSC-Wiedikon/nomal`, AGPL-3.0 (created, private). |
+| D7 | Repo | `KSC-Wiedikon/wieplay` (`nomal` until 17.10.2026), AGPL-3.0 (private). |
 | D8 | Docs | This plan lives in the repo and is committed (secret-free by rule). |
-| D9 | Brand | Own Nomal brand (§13): assets in `docs/brand/`, `-vb` / `-bb` variants (default `vb`), wordmark "nomal" in Bricolage Grotesque ExtraBold. |
+| D9 | Brand | Own WiePlay brand (§13): assets in `docs/brand/`, `-vb` / `-bb` variants (default `vb`), wordmark "WiePlay" in Bricolage Grotesque ExtraBold (lowercase "nomal" until 17.10.2026). |
 | D10 | Budget | **~CHF 210 per season** running cost in total (cloud GPU ~80, backup storage ~50, test GPU ~35, reserve). Lines that would exceed it are flagged (§16). |
 | D11 | Tier 2 scope | Includes dead-time skipping (like Balltime) and automatic scoring. |
 | D12 | Defaults accepted | Download policy (coaches only, watermarked, 30 days), retention (season + 1), audio kept with per-video mute, players who leave lose access, no per-player consent (16.10.2026, §5.4). |
 | D13 | Opponents | Opponents in adult leagues are adults (the club's position, 15.10.2026); no per-upload confirmation (§5.3). |
-| D14 | Camera models | Not collected: Nomal reads resolution, frame rate and codec from each file (§7.1). |
+| D14 | Camera models | Not collected: WiePlay reads resolution, frame rate and codec from each file (§7.1). |
 
 ---
 
@@ -116,7 +119,7 @@ flowchart LR
   end
 
   subgraph CF[Cloudflare]
-    T[Tunnel: nomal.kscw.ch<br/>HTML, JSON, 302s only]
+    T[Tunnel: wieplay.kscw.ch<br/>HTML, JSON, 302s only]
   end
 
   subgraph H[Hetzner VPS]
@@ -162,9 +165,9 @@ the Lenovo server and the GPU.
 
 | Component | Runs on | Does | Tech |
 |---|---|---|---|
-| **nomal-web** | Built into the `nomal-api` image, served at `nomal.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
+| **nomal-web** | Built into the `nomal-api` image, served at `wieplay.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
 | **nomal-api** | Hetzner VPS (the club's account), Docker, bound to `127.0.0.1`, reached via the existing Cloudflare Tunnel; worker routes only through an SSH tunnel from the worker host (§8.1) | Auth, permissions, metadata, upload orchestration, media redirects, job queue, audit log, budget ledger | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
-| **Postgres `nomal`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All Nomal state incl. the job queue | Postgres 16 |
+| **Postgres `nomal`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All WiePlay state incl. the job queue | Postgres 16 |
 | **Object storage** | Hetzner Object Storage, same region as the VPS, private bucket | HLS renditions, thumbnails, upload staging, exports, temporary analysis copies | S3 API |
 | **Media worker** | **Lenovo server** (always on; Ryzen 7 PRO 8700GE 8C/16T, 30 GB RAM, Radeon 780M with VAAPI H.264 encode, ~690 GB free) | Ingest (NAS inbox + browser uploads), transcode, thumbnails, audio, CPU analysis (whistles, motion, scoreboard OCR), analysis copies, clip/reel export, retention | `nomal-worker` container, ffmpeg. **CPU-capped** (it also runs the LAN's DNS and other services) |
 | **GPU worker (now)** | **Framework 16** at home (RTX 5070 Laptop GPU, 8 GB; always on) | Pulls GPU jobs from the queue and runs `nomal-ml run <spec>` locally; busy guard (§8.2). Not set up yet: needs its own path to the API (§8.1) | `nomal-worker` + `nomal-ml` image (CUDA 12.8+, PyTorch), NVIDIA Container Toolkit |
@@ -175,11 +178,11 @@ the Lenovo server and the GPU.
 
 ### 3.3 Why this shape
 
-- **Same origin for app and API** (`nomal.kscw.ch` serves both): Nomal's own session cookie
-  is host-only, Nomal's API needs no CORS, and the Android WebView just works.
+- **Same origin for app and API** (`wieplay.kscw.ch` serves both): WiePlay's own session cookie
+  is host-only, WiePlay's API needs no CORS, and the Android WebView just works.
 - **Separate service, shared Postgres server**: keeps Wiedisync's Directus permissions out of
   the hot path and reuses the existing backup pipeline. No cross-database foreign keys:
-  Nomal stores Wiedisync IDs and a synced mirror (§6.2).
+  WiePlay stores Wiedisync IDs and a synced mirror (§6.2).
 - **Pull-based home worker**: the Lenovo server is behind NAT; it polls for work, nothing on
   the internet can reach it.
 - **GPU as a pluggable backend**: the queue does not know where a GPU job runs. Our own GPU
@@ -193,11 +196,11 @@ the Lenovo server and the GPU.
 ### 4.1 Constraint found in Wiedisync
 
 The Wiedisync login cookie (`kscw_session`) has been **httpOnly and host-only on
-`directus.kscw.ch`** since 28.09.2026. No other host, including `nomal.kscw.ch`, can read it.
+`directus.kscw.ch`** since 28.09.2026. No other host, including `wieplay.kscw.ch`, can read it.
 Wiedisync's other apps call Directus with credentialed CORS, which needs entries in the
 Directus `CORS_ORIGIN` env and in `cors-credentials.js`.
 
-Nomal avoids credentialed CORS entirely with a **redirect + signed token** flow (a minimal,
+WiePlay avoids credentialed CORS entirely with a **redirect + signed token** flow (a minimal,
 OIDC-shaped authorization flow).
 
 ### 4.2 Flow
@@ -206,7 +209,7 @@ OIDC-shaped authorization flow).
 sequenceDiagram
   autonumber
   participant B as Browser
-  participant N as nomal-api (nomal.kscw.ch)
+  participant N as nomal-api (wieplay.kscw.ch)
   participant D as Directus bridge (directus.kscw.ch)
   participant W as Wiedisync login (wiedisync.kscw.ch)
 
@@ -227,8 +230,8 @@ sequenceDiagram
 ```
 
 - **Token**: EdDSA (Ed25519) JWT, `iss=wiedisync-prod|wiedisync-dev`, `aud=nomal`, 60 s,
-  `jti` recorded by Nomal so it can be used once. The private key lives only in the Directus
-  env; Nomal holds the public key(s), chosen by `kid` (rotation = add new, retire old).
+  `jti` recorded by WiePlay so it can be used once. The private key lives only in the Directus
+  env; WiePlay holds the public key(s), chosen by `kid` (rotation = add new, retire old).
 - **Return URLs are allow-listed** in the bridge. No open redirect.
 - **Claims are minimal**: member ID and UUID, display name, global roles, sport-admin scopes,
   team relations for the current and previous season. No email, no birthdate.
@@ -243,8 +246,8 @@ sequenceDiagram
 ```
 
 - **Session**: server-side row (hashed ID in the cookie), 8 h, renewed by repeating the
-  redirect silently. Role changes reach Nomal within 8 h at most; admins can sign everyone out.
-- **Logout** ends the Nomal session; the UI links to Wiedisync logout.
+  redirect silently. Role changes reach WiePlay within 8 h at most; admins can sign everyone out.
+- **Logout** ends the WiePlay session; the UI links to Wiedisync logout.
 
 ### 4.3 Server-to-server sync
 
@@ -254,7 +257,7 @@ sequenceDiagram
   `GET /kscw/nomal/v1/sync?teams=<ids>` (only the enabled teams) on the bridge, with an
   `X-Nomal-Service-Token` header, called over the VPS's Docker network (no Cloudflare hop). A
   full snapshot each time; at this size there is no need for incremental sync.
-- Returns only **Nomal-enabled teams** (current + previous season), their rosters (member
+- Returns only **WiePlay-enabled teams** (current + previous season), their rosters (member
   ID, UUID, name, jersey number, positions, relation, guest flag), and their games and
   trainings (ID, date, time, home/away names, league, hall name, **official set scores** from
   `games.sets_json`). Never birthdates.
@@ -268,28 +271,28 @@ sequenceDiagram
 | `GET /kscw/nomal/v1/teams`, `GET /kscw/nomal/v1/sync?teams=` | same file | `X-Nomal-Service-Token` (not `Authorization: Bearer`, which Directus would claim), internal network only, read-only, versioned contract with tests. |
 | `GET /kscw/nomal/v1/adult-check?team=&date=` | same file | Pass/fail per rostered person for a recording date (§5.3); birthdates never leave Wiedisync. |
 | Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
-| ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in Nomal**, per lineage. The bridge returns personal data only for the team ids Nomal asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
+| ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in WiePlay**, per lineage. The bridge returns personal data only for the team ids WiePlay asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
 | Env | Directus `.env` (prod + dev) | `NOMAL_JWT_PRIVATE_KEY`, `NOMAL_JWT_KID`, `NOMAL_RETURN_URLS`, `NOMAL_SYNC_TOKEN_HASH`, and on dev `NOMAL_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
-| Later: "Video" link on game cards | `GameCard` | Plain link to `nomal.kscw.ch/games/<id>`. |
+| Later: "Video" link on game cards | `GameCard` | Plain link to `wieplay.kscw.ch/games/<id>`. |
 | Docs | `INFRA.md`, `SECURITY.md`, `PERMISSIONS.md` | Same commit, per Wiedisync rules. |
 
-No `CORS_ORIGIN` change is needed. A Cloudflare Tunnel public hostname `nomal.kscw.ch`
-(and `nomal-dev.kscw.ch`) pointing at the API's local port is.
+No `CORS_ORIGIN` change is needed. A Cloudflare Tunnel public hostname `wieplay.kscw.ch`
+(and `wieplay-dev.kscw.ch`) pointing at the API's local port is.
 
 ### 4.5 Guest clubs
 
-Built 17.10.2026. The owner wants to hand Nomal to other volleyball clubs' teams: they upload
+Built 17.10.2026. The owner wants to hand WiePlay to other volleyball clubs' teams: they upload
 their games, see only their own, and (with their OK) give the models more training data. They
-have no Wiedisync account, so they get a Nomal login of their own. Onboarding and offboarding:
+have no Wiedisync account, so they get a WiePlay login of their own. Onboarding and offboarding:
 `docs/runbooks/guest-club.md`.
 
 **Flow.**
 
 1. An admin creates the guest team (Admin → Teams → Guest clubs: club, team, league, season,
-   video limit, training OK) and invites its first coach: Nomal makes a link
+   video limit, training OK) and invites its first coach: WiePlay makes a link
    `<public URL>/join/<token>`, shown once, valid 14 days. Only with the club's written OK.
 2. The coach opens the link, sets an email and a password (at least 10 characters), accepts
-   the privacy notice (`/privacy`) and lands on the team page. Nomal sends no email.
+   the privacy notice (`/privacy`) and lands on the team page. WiePlay sends no email.
 3. On the team page (People) the coach adds the players and coaches (name, number, role) and
    makes each one their own invite link. Players see the roster read-only.
 4. Before the first upload, a coach of the team confirms once: "Everyone we film — our
@@ -346,7 +349,7 @@ reasonable; have the club's privacy contact read §5 before launch.*
 
 ### 5.1 Who can do what
 
-Relations come from the login token and Nomal's `team_grant` table (analysts). "Team" means
+Relations come from the login token and WiePlay's `team_grant` table (analysts). "Team" means
 the team's **lineage** (§6.3) unless a season is named.
 
 | Action⁶ | Player | Analyst¹ | Coach / team manager | Sport admin (that sport) | Admin / superuser² |
@@ -359,9 +362,9 @@ the team's **lineage** (§6.3) unless a season is named.
 | Download / export MP4 (watermarked) | | | ✓ | ✓ | ✓⁴ |
 | Delete a video | | | ✓ | ✓ | ✓ |
 | Grant analyst | | | ✓ | ✓ | ✓⁵ |
-| Enable a team for Nomal | | | | | in Wiedisync |
+| Enable a team for WiePlay | | | | | in Wiedisync |
 
-¹ A player a coach picks to help tag; Nomal-local grant per team lineage. Called "helper" in the
+¹ A player a coach picks to help tag; WiePlay-local grant per team lineage. Called "helper" in the
   app (team page → Helpers; built 17.10.2026). Any active club member in the mirror can be
   picked, from any team; grants are read on every request (never from the login token), so a
   removed helper loses the team at once; a disabled team hides its grants. Helpers are viewers
@@ -384,7 +387,7 @@ that enumerates this matrix. Every API route goes through it.
   302 to an object-storage URL **signed for 5 minutes, for one 4-second segment** (§7.6).
 - Exports (MP4) are for coaches only, **burned-in watermarked** ("KSCW intern · <name> ·
   <date>"), expire after 30 days, and are downloaded through the same redirect (signed at click).
-- No share-by-link feature exists. Sharing means "visible to the team in Nomal".
+- No share-by-link feature exists. Sharing means "visible to the team in WiePlay".
 
 ### 5.3 Adults only: nothing under 18 filmed or stored
 
@@ -393,8 +396,8 @@ Enforced in code, not just stated:
 1. **Hard check against `members.birthdate`.** For a recording date, a rostered person
    (players, guests, coaches, team managers) passes only if a birthdate exists and they are
    18 or older on that date. **No birthdate = fails** (the year of birth alone is not accepted).
-   The check runs inside Wiedisync (`adult-check`), so birthdates never reach Nomal.
-2. **Before filming**: the team page in Nomal shows each upcoming game as *filming allowed* or
+   The check runs inside Wiedisync (`adult-check`), so birthdates never reach WiePlay.
+2. **Before filming**: the team page in WiePlay shows each upcoming game as *filming allowed* or
    *blocked*, with the reason ("2 roster members without birthdate"), so a coach knows before
    setting up the camera. The filming guide says: no camera if blocked.
 3. **Before storing**: every upload, inbox file and YouTube link re-runs the check for the
@@ -402,11 +405,11 @@ Enforced in code, not just stated:
    checked before the first part is signed; refused inbox files are deleted from the share).
 4. **Nightly**: if someone who fails the check joins an enabled team, new uploads freeze, the
    coach and admin are notified, existing videos are flagged for review.
-5. **Opponents**: Nomal cannot verify opponents' ages. The club's position (15.10.2026): adult
+5. **Opponents**: WiePlay cannot verify opponents' ages. The club's position (15.10.2026): adult
    leagues have no under-18 opponents, so adult-league matches are filmed without a per-upload
    confirmation. Opponents appear by jersey number only, their data stays team-internal, and
    footage is deleted or trimmed on request. Recorded in `docs/PRIVACY.md`.
-6. **Guest clubs** (§4.5): Nomal has no birthdates of a guest club's people and never asks
+6. **Guest clubs** (§4.5): WiePlay has no birthdates of a guest club's people and never asks
    Wiedisync about a guest team. Instead a coach of the guest team declares once, before the
    first upload: "Everyone we film — our players, coaches and our opponents — is 18 or older
    (adult league). I confirm." (`team_lineage.guest_adults_declared_at/_by`). The same gate
@@ -416,14 +419,14 @@ Enforced in code, not just stated:
 
 **DU23-1: switched off for now** (decided 15.10.2026, evening). On the real rosters 6 of its
 15 people are under 18, so the team fails the hard check, and with matches only (below) and its
-matches not allowed it has nothing to film for Nomal anyway. Switching it off also stops Nomal
+matches not allowed it has nothing to film for WiePlay anyway. Switching it off also stops WiePlay
 from mirroring their names. Switch it back on (Admin → Teams) once its roster passes, e.g. next
 season; its stored policy below (no matches) still applies then.
 
 **DU23-1: trainings only** (decided 15.10.2026). Its opponents are U23 teams that very likely
-field under-18 players, which Nomal cannot check, so DU23-1 matches are not filmed for Nomal.
+field under-18 players, which WiePlay cannot check, so DU23-1 matches are not filmed for WiePlay.
 Its trainings pass the same hard check as everyone else: every rostered person needs a
-birthdate and must be 18 or older on the day, otherwise the training is blocked too. Nomal
+birthdate and must be 18 or older on the day, otherwise the training is blocked too. WiePlay
 enforces this with a per-team policy (`team_policy.matches_allowed = false`, §6.10): uploads
 linked to a game are refused for that team, and its upcoming games show *filming not allowed*.
 
@@ -447,7 +450,7 @@ the planned move (§8.6) needs an updated privacy page and a notice to members. 
 objects asks a coach or admin, who can delete a video or untag them. The adult gate (§5.3)
 and the team policy stay.
 
-The club's privacy policy on `kscw.ch` gets a Nomal section; Nomal has its own short privacy
+The club's privacy policy on `kscw.ch` gets a WiePlay section; WiePlay has its own short privacy
 page (what, why, who sees it, how long, processors, contact, rights).
 
 ### 5.5 Retention
@@ -471,10 +474,10 @@ A nightly `retention` job enforces this and logs what it deleted.
 
 | Processor | Data | Where | Note |
 |---|---|---|---|
-| Hetzner (VPS, Object Storage) | Everything Nomal stores | Germany / EU | Adequate country; DPA with Hetzner |
+| Hetzner (VPS, Object Storage) | Everything WiePlay stores | Germany / EU | Adequate country; DPA with Hetzner |
 | Cloudflare | HTML, JSON, redirects (no video bytes) | Global edge | Already the club's provider |
 | GPU processing | Analysis copies (video), no names, no IDs | **Now: club hardware at home** (no third party). Later: an EU or Swiss provider | The move needs a DPA (§8.6) |
-| YouTube (Google), Twitch | Source of imported videos from the club's and members' channels (§7.2.2); Nomal fetches them, the browser never talks to them | Google, Twitch | Only for imported videos |
+| YouTube (Google), Twitch | Source of imported videos from the club's and members' channels (§7.2.2); WiePlay fetches them, the browser never talks to them | Google, Twitch | Only for imported videos |
 
 **Decision (15.10.2026): GPU inference starts internal**, on club-controlled hardware at home,
 so no video leaves the club for processing. The later move (§8.6) goes to a **Swiss or EU
@@ -485,14 +488,14 @@ Framework certification or DPA was found (15.10.2026). After the move the same m
 applies: the provider receives only temporary, court-cropped analysis copies of the live
 segments, without audio unless a task needs it, with no names or IDs, deleted after the job.
 
-### 5.7 Things Nomal never does
+### 5.7 Things WiePlay never does
 
 - No face recognition, no face embeddings, no person re-identification across videos.
   Player attribution uses **jersey numbers and position on court only**. (Biometric data used
   for unique identification is sensitive personal data under the revDSG; avoid it entirely.)
 - Detection is masked to the court polygon plus a margin, which also excludes spectators.
 - No third-party analytics and no third party in the browser: imported YouTube/Twitch videos
-  are fetched by the worker and played from Nomal's own storage.
+  are fetched by the worker and played from WiePlay's own storage.
 
 ### 5.8 Audit log
 
@@ -566,17 +569,17 @@ adult_check      (team_id, date) → passed bool, failing_count, checked_at   --
 sync_state       last_run, last_ok, counts, error
 ```
 
-No email, phone, address or birthdate ever reaches Nomal from Wiedisync. Guest clubs' people
+No email, phone, address or birthdate ever reaches WiePlay from Wiedisync. Guest clubs' people
 (§4.5) live in the same `wd_member` / `wd_team_member` tables with ids from `guest_id_seq`
 (1 000 000 000 and up); the sync leaves them alone. Their logins hold an email (§6.10).
 
 ### 6.3 Seasons and team lineage
 
 Wiedisync **clones every team row on 1 June** (new IDs). A video belongs to the team row of its
-season (`video.team_id`). For "this team across seasons" Nomal has `team_lineage (id, sport,
+season (`video.team_id`). For "this team across seasons" WiePlay has `team_lineage (id, sport,
 label)`, matched at sync by `(sport, teams.team_id)`, falling back to `(sport, name)`; an admin
-can fix a wrong match. **Whether a team uses Nomal is a flag on its lineage**
-(`team_lineage.enabled`, set by full admins in Nomal; ADR-001), so it carries over to the new
+can fix a wrong match. **Whether a team uses WiePlay is a flag on its lineage**
+(`team_lineage.enabled`, set by full admins in WiePlay; ADR-001), so it carries over to the new
 season's team row. Sport is always part of the key: "H1" exists in both sports.
 
 A guest club's team (§4.5) is a lineage of its own, never matched by the sync: `guest_club`
@@ -771,7 +774,7 @@ player_cluster   id, video_id, model_run_id, key, team 'us'|'them', tracks jsonb
                  -- "a person in this video"; the coach's number is its only identity (§5.7)
 event_player     event_id, video_id, model_run_id, cluster_id, track_id, number, member_id,
                  method 'court'|'image', distance, confidence, contact_ms, applied_number,
-                 event_version   -- who made the action as Nomal sees it, beside the event
+                 event_version   -- who made the action as WiePlay sees it, beside the event
 ```
 
 and the artifacts `player_tracks` (every box, `.npz` on the NAS), `player_index` (boxes per
@@ -806,7 +809,7 @@ guest_invite     token_hash PK (sha256 of the link's token, shown once), member_
 
 ### 7.1 Capture standard (goes into `docs/FILMING_GUIDE.md`)
 
-Each team brings its own camera. Nomal does not need to know the model: it reads resolution,
+Each team brings its own camera. WiePlay does not need to know the model: it reads resolution,
 frame rate, codec and bitrate from every file and flags videos below the standard (§6.4). The
 guide states the standard; camera-specific tips are added only if a coach asks.
 
@@ -821,7 +824,7 @@ guide states the standard; camera-specific tips are added only if a coach asks.
 | Audio | On | Whistles drive dead-time detection |
 | Scoreboard | In frame if possible without losing court | Enables scoreboard OCR (§10.3) |
 | Start | From warm-up, continuous; split files are fine | Ingest joins parts |
-| Check | Nomal shows *filming allowed / blocked* for the game (§5.3) | Adults only |
+| Check | WiePlay shows *filming allowed / blocked* for the game (§5.3) | Adults only |
 
 **Basketball (Herren 1): side of the court, not behind it.** From behind the baseline (the
 volleyball position) the far basket is 28 m away and players stand in a line one behind the
@@ -836,12 +839,12 @@ distortion (§10.6). See §19, O8.
 
 | Path | For | How |
 |---|---|---|
-| **NAS inbox** (preferred at home) | Anyone with SD-card access at home | Copy files into the `nomal-inbox` share. The Lenovo worker sees stable files (size unchanged for 2 min), probes them, groups split parts, registers *inbox files*. In Nomal the coach picks the game (suggested from recording time vs. games that day). Nothing crosses the internet twice. |
+| **NAS inbox** (preferred at home) | Anyone with SD-card access at home | Copy files into the `nomal-inbox` share. The Lenovo worker sees stable files (size unchanged for 2 min), probes them, groups split parts, registers *inbox files*. In WiePlay the coach picks the game (suggested from recording time vs. games that day). Nothing crosses the internet twice. |
 | **Browser upload** | Coaches elsewhere | Resumable S3 **multipart** upload straight to object storage (`incoming/<video>/`), parts signed by the API (64 MB parts → files up to ~640 GB; 4 in parallel; survives reloads). Several files per video (split recordings). The Lenovo worker downloads, archives to NAS, deletes the staging object. |
 | **Import from a link** (planned, §7.2.2) | Matches someone already put on YouTube or Twitch | Paste a link from an allow-listed channel (the club's, members' own) or pick one Wiedisync already stores for the game; the Lenovo worker downloads it and it continues like an upload. Decided 16.10.2026; replaces the earlier plan to embed YouTube without downloading. |
 
 Before any of these is accepted: permission, team policy and adult gate (§5.3). Refused
-means no bytes stored. YouTube-hosted footage sits outside Nomal's access control (whoever has
+means no bytes stored. YouTube-hosted footage sits outside WiePlay's access control (whoever has
 the YouTube link can watch it), so the club and members should upload as *unlisted*; the
 adults-only rule applies just the same.
 
@@ -853,9 +856,9 @@ allow-list (§7.2.2).
 
 Action cameras split long recordings: DJI cameras start a new MP4 at about 4 GB and write a
 low-resolution proxy (`.LRF`) next to each part; GoPro writes `GX01xxxx`, `GX02xxxx`… plus
-`.LRV`/`.THM`. Today Nomal joins several files of one video in **file-name order** and the
+`.LRV`/`.THM`. Today WiePlay joins several files of one video in **file-name order** and the
 coach picks the files and the game by hand. Goal: the coach drops the **whole card or
-folder**, and Nomal finds the match recording, orders and joins its parts, and suggests the
+folder**, and WiePlay finds the match recording, orders and joins its parts, and suggests the
 game; no sorting by hand.
 
 1. **Skip sidecars.** `.LRF`, `.LRV`, `.THM`, `.SRT`, `.OSV`, photos and anything that is not a
@@ -897,7 +900,7 @@ clock, two cameras on one card, sidecars; a browser upload of a three-part match
 #### 7.2.2 Import from a link: YouTube and Twitch (planned)
 
 Many matches are already online (members' channels, club streams). Instead of downloading and
-re-uploading them by hand, the coach pastes the link and Nomal fetches the video itself.
+re-uploading them by hand, the coach pastes the link and WiePlay fetches the video itself.
 
 1. **Where:** the upload page gets a third source next to *this device* and *NAS inbox*:
    **From a link**. It also offers the links Wiedisync already has for that game.
@@ -987,14 +990,14 @@ database is backed up with Wiedisync's existing pipeline (§15.2).
 As decided: the authenticated API serves the playlist, segment URLs are signed with a TTL of
 minutes, and the player keeps going for the full match.
 
-1. hls.js loads `GET /api/media/{video}/{rendition}/index.m3u8` from `nomal.kscw.ch` with the
+1. hls.js loads `GET /api/media/{video}/{rendition}/index.m3u8` from `wieplay.kscw.ch` with the
    session cookie. The API checks permission and returns a VOD playlist whose segment URIs
    point back at the API: `/api/media/{video}/{rendition}/seg/{n}.m4s`.
 2. As the player needs each 4-second segment, it requests that URI; the API checks the
    session (cached per session + video for 60 s) and answers **302** to an object-storage URL
    **signed for 5 minutes, for that one segment**. Signing is a local HMAC, no network call.
 3. The browser fetches the bytes directly from object storage (bucket CORS allows
-   `nomal.kscw.ch`).
+   `wieplay.kscw.ch`).
 
 So signing happens continuously as playback advances: a 2 h match (~1 800 segments per
 rendition) plays without interruption, while any copied URL is either useless without the
@@ -1124,7 +1127,7 @@ container entrypoint:  nomal-ml run --spec spec.json   -> writes outputs, exits 
 | `cloud-<provider>` | The Lenovo dispatcher claims the job and **pushes** it to a provider adapter that starts the image on a rented GPU; inputs and outputs are pre-signed object URLs | Later: an EU or Swiss provider (§8.6) |
 | `fake` | Returns canned outputs | CI |
 
-The `nomal-ml` container never calls Nomal's API: inputs and outputs are URIs in the spec, and
+The `nomal-ml` container never calls WiePlay's API: inputs and outputs are URIs in the spec, and
 the agent or the dispatcher relays progress and results to the worker routes (§8.1). Moving to
 a provider touches only the adapter. For a provider, the analysis-copy input URLs are the only
 long-ish signed URLs in the system: they point at a temporary object no user ever sees, deleted
@@ -1235,7 +1238,7 @@ Questions to put to the providers before signing up: research note §4.
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-On phones Nomal is a viewer (library, condensed matches, reels, "my clips", comments). A
+On phones WiePlay is a viewer (library, condensed matches, reels, "my clips", comments). A
 touch layout with roster and skill buttons exists for tablets and as a fallback.
 
 ### 9.2 Keyboard (configurable, cheatsheet on `?`)
@@ -1654,7 +1657,7 @@ proposes the shot type.
 ### 10.4a Suggested actions (volleyball)
 
 **Built 17.10.2026** (`nomal/ml/actions.py`, `nomal/core/actions.py`, the `actions` and
-`train_actions` jobs; migration `0010`). Per rally (a proposal or a coach's), Nomal suggests
+`train_actions` jobs; migration `0010`). Per rally (a proposal or a coach's), WiePlay suggests
 the serve, receptions, sets, attacks, blocks, digs and freeballs at the ball's contacts, as
 tags with `source='model'`, `review='unreviewed'`, a `confidence` and their `model_run_id`.
 Each one carries what the player attribution (§10.5) needs to attach a player later: the
@@ -1734,7 +1737,7 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 
 ### 10.5 Player detection and tracking
 
-- Ultralytics YOLO person detector (AGPL-3.0, compatible with Nomal's licence) + ByteTrack
+- Ultralytics YOLO person detector (AGPL-3.0, compatible with WiePlay's licence) + ByteTrack
   (MIT), masked to the court polygon + margin, at 25 fps on live segments (tracker fills in).
 - Team assignment: side of the net (volleyball); kit-colour clustering (basketball).
 - No identity across videos (§5.7). Track IDs are per video.
@@ -1941,10 +1944,10 @@ sources: [`docs/research/competitors-2026-10.md`](research/competitors-2026-10.m
 ### 12.1 What the market looks like
 
 - **Balltime is now Hudl** (acquired 06.02.2025, sold as "Hudl Assist powered by Balltime AI")
-  and is **volleyball only**. Its pipeline runs in the same order as Nomal's tier 2: downtime
+  and is **volleyball only**. Its pipeline runs in the same order as WiePlay's tier 2: downtime
   removal → actions → teams → players → ball → court positions.
 - **Their recording spec is our setup**: centred on the end line, 8–10 ft high, 1080p, no
-  wide-angle lens, all four far-court corners visible. Footage filmed for Nomal would also
+  wide-angle lens, all four far-court corners visible. Footage filmed for WiePlay would also
   work there, and vice versa.
 - **Downtime is most of a match**: Balltime cites about 67 % downtime indoors. A condensed
   2-hour match is about 40 minutes; the GPU (§10.9) only needs to see that part.
@@ -1953,15 +1956,15 @@ sources: [`docs/research/competitors-2026-10.md`](research/competitors-2026-10.m
 - **Price context** (USD, US list prices): Hudl club volleyball from $500 per team per year
   (Core; Plus $1,250, Premier $1,600), club basketball from $400. SportsVisio volleyball season
   pack $900 per team (22 games). DataVolley 4 €299–799 per year (no video AI). For four teams,
-  Hudl Core alone is about USD 2,000 a year; Nomal's target is CHF 210.
+  Hudl Core alone is about USD 2,000 a year; WiePlay's target is CHF 210.
 
-### 12.2 Triage: what Nomal adds, and when
+### 12.2 Triage: what WiePlay adds, and when
 
-Difficulty for Nomal: **Easy** = days of evenings, no new ML; **Medium** = a couple of weeks
+Difficulty for WiePlay: **Easy** = days of evenings, no new ML; **Medium** = a couple of weeks
 or depends on a tier 2 output; **Hard** = new ML or 3D from one camera; **Out** = against a
 non-goal or policy.
 
-| Feature | Who has it | Nomal | When |
+| Feature | Who has it | WiePlay | When |
 |---|---|---|---|
 | **Skip dead time / condensed match** | Balltime/Hudl, Pixellot (basketball) | Planned | Manual M2, auto M5 (VB), M9 (BB) |
 | Timeouts and set breaks as separate segments | Nobody documents it | Easy (gap rules + `T`/`B` keys) | M2 manual, M5 auto |
@@ -2004,15 +2007,15 @@ non-goal or policy.
 
 - **Hudl's Review tab**: one place per video for everything that needs a human: set
   boundaries, starting rotations, court calibration, missing coordinates, unidentified
-  athletes, regrades. Number keys and auto-advance make it fast. Nomal's review screens (§10)
+  athletes, regrades. Number keys and auto-advance make it fast. WiePlay's review screens (§10)
   become one **Review** tab per video with the same order and the same keyboard-first style.
 - **ovscout2** (open source, R/Shiny) is the closest prior art to tier 1: fixed end-line
   camera, 4-corner calibration, typed codes, the video pausing for input after key touches,
   and .dvw output. Worth reading before M2.
 - **Pixellot** recognises players by height, kit colour and jersey number without face
-  recognition: the same line Nomal draws in §5.7.
+  recognition: the same line WiePlay draws in §5.7.
 
-### 12.4 What Nomal does that they don't (or don't document)
+### 12.4 What WiePlay does that they don't (or don't document)
 
 - Timeouts and set breaks as their own segments, not just "downtime".
 - Automatic scoring checked against the **official set scores** from Wiedisync, plus
@@ -2035,7 +2038,7 @@ anything not tied to one sport). `docs/brand/preview.png` shows them at every si
 | `nomal-icon-vb.svg`, `nomal-icon-bb.svg` | App icon: the mark on a white rounded square (512 × 512) |
 | `nomal-mark-vb.svg`, `nomal-mark-bb.svg` | The mark alone (a trail of dots and the ball), transparent, for the app bar, login and export watermark |
 
-The **wordmark** is lowercase "nomal" set as text in **Bricolage Grotesque ExtraBold** (there is
+The **wordmark** is "WiePlay" (until 17.10.2026 lowercase "nomal") set as text in **Bricolage Grotesque ExtraBold** (there is
 no wordmark SVG; an outlined one can be made from the font for the export watermark). The font
 is under the SIL Open Font License and is **self-hosted** (e.g. via `@fontsource`), not loaded
 from Google Fonts, so viewers' IP addresses are not sent to Google.
@@ -2092,12 +2095,12 @@ the navy app bar and in dark mode.
 Borrowed from Wiedisync's kscw-ui rules: the `Button` height scale (44 px touch targets),
 tables for lists of records, Swiss formats (`dd.mm.yyyy`, 24 h, locale `de-CH`), sentence-case
 labels, no native browser dialogs, dark mode from tokens, English first with German at minimum.
-The colours are Nomal's own.
+The colours are WiePlay's own.
 
 **The video page** (17.10.2026, owner's feedback "a loose pile under the player"): under the
 player only playback (trajectories, start at the first serve, quality, a "Keys" popover, clip
 in/out/save); length, picture and frame rate next to the date; the downloads (rallies only,
-game recap) in one "Export" menu in the header. What Nomal needs to know about the video is
+game recap) in one "Export" menu in the header. What WiePlay needs to know about the video is
 a "Setup" card (those who tag, volleyball), like Balltime's setup: one card per step with its
 state and action (rallies and score, ball path, court, scoreboard, players, team names), the
 open ones first, the completed ones grouped; folded until something needs the coach.
@@ -2157,7 +2160,7 @@ nomal/
 
 | | Dev | Prod |
 |---|---|---|
-| Web + API | `nomal-dev.kscw.ch` | `nomal.kscw.ch` |
+| Web + API | `wieplay-dev.kscw.ch` | `wieplay.kscw.ch` |
 | Wiedisync | `directus-dev.kscw.ch` (nightly scrubbed prod clone, IDs match) | `directus.kscw.ch` |
 | Database | `nomal_dev` | `nomal` |
 | Bucket | `…-nomal-dev` (lifecycle: 30 days) | `…-nomal` |
@@ -2224,7 +2227,7 @@ Everything goes to dev first, as in Wiedisync.
 
 ### 15.3 Monitoring
 
-Uptime Kuma: `nomal.kscw.ch/api/health`, worker heartbeat, oldest-queued-job age, GPU spend vs.
+Uptime Kuma: `wieplay.kscw.ch/api/health`, worker heartbeat, oldest-queued-job age, GPU spend vs.
 cap. Errors: structured JSON logs; frontend errors to the club's Sentry (new project).
 
 ---
@@ -2291,7 +2294,7 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 - An end-to-end run through the production image passed.
 - Wiedisync bridge: KSC-Wiedikon/wiedisync#8, merged and deployed to dev.
 
-**Live on dev since 15.10.2026**: https://nomal-dev.kscw.ch.
+**Live on dev since 15.10.2026**: https://wieplay-dev.kscw.ch.
 - `nomal_dev` database, Directus dev env and the `kscw-club` tunnel route are in place.
 - The first sync covered H3, D1, DU23-1 and Herren 1.
 
@@ -2327,11 +2330,11 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
 | **S0** | Spike (before M1); **run 16.10.2026 on H3's YouTube games** ([report](research/spike-s0-2026-10.md)) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court, run a draft `ml_analyse` and **measure GPU-hours per video**; one benchmark run on Infomaniak or OVHcloud (test-GPU line). Whistle detection on its audio. Done: ball trackers, YOLO, whistles; open: provider run, 4K originals, a whole match. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured on the Framework 16 and one provider |
-| **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the Nomal brand (icons already in `docs/brand/icons/`); Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `nomal-dev.kscw.ch` with a Wiedisync dev account and see your Nomal-enabled teams and games |
+| **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the WiePlay brand (icons already in `docs/brand/icons/`); Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `wieplay-dev.kscw.ch` with a Wiedisync dev account and see your WiePlay-enabled teams and games |
 | **M1** | Video in, video out | Job queue + Lenovo media worker; NAS inbox + browser multipart upload (split files); ingest + transcode + thumbnails; HLS with per-segment signing; adult hard gate + *filming allowed/blocked*; consent (dropped 16.10.2026, §5.4); audit log; DU23 decision applied | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403; a blocked team cannot upload |
 | **M2** | Tagging + condensed playback | Volleyball taxonomy; roster snapshot; grammar + hotkeys; timeline + event table; rally key + rally/score from tags; **skip dead time (manual)** with timeout/set-break keys; set boundaries + starting score; rally list filters (player, action, outcome, set); outbox; revision triggers | A full match tagged in ≤ 1.5× its length; condensed playback works; pulling the network cable loses nothing |
 | **M3** | Clips, reels, export, comments | Virtual clips; smart per-player reels; highlight builder across matches; comments pinned to a moment with @mentions and audience; drill segments for trainings; ffmpeg export with watermark (incl. condensed match) | A player opens "my attacks this season" on a phone; a coach downloads a watermarked condensed match |
-| **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in Nomal without a spreadsheet |
+| **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in WiePlay without a spreadsheet |
 | **M4** | Launch | Basketball taxonomy + grammar for Herren 1; import from YouTube/Twitch links (§7.2.2); automatic stitching of split recordings (§7.2.1); German UI; privacy page; filming/tagging guides; runbook; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
 | **M5** | Tier 2a: automatic dead time | CPU v0 (ball + whistles + motion) on the Lenovo worker; rally review UI; analysis copies; internal GPU worker on the Framework 16 (`local-agent`, busy guard) + GPU-hour ledger; learned v1 from the reviewed games. **16.10.2026**: analyse job, v0, v1 with its training loop and per-game scores built (§10.1); review UI, analysis copies and the GPU worker open | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
 | **M6** | Tier 2b: automatic scoring (VB) | Serve-side classifier from tier-1 serve tags; side-switch rules; official-set-score constraint; scoreboard region UI + OCR; score correction UI | ≥ 98 % correct rally winners with ≤ 5 % flagged on held-out matches |
@@ -2356,7 +2359,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | Provider data protection after the move | revDSG exposure | Swiss/EU only, DPA, minimised analysis copies, privacy page updated (§5.6, §8.6) |
 | DU23-1 and U23 opponents | Breaks "nothing under 18" | Trainings only (decided); `team_policy.matches_allowed = false` enforced |
 | Lenovo server is also the LAN's DNS and runs other services | Transcodes hurt the LAN | Container CPU/memory caps, `nice`, VAAPI |
-| VPS shared with prod Directus | Nomal hurts Wiedisync | Container limits; video never touches the VPS |
+| VPS shared with prod Directus | WiePlay hurts Wiedisync | Container limits; video never touches the VPS |
 | iOS playback quirks | iPhone users can't watch | Test in M1; playlist-refresh fallback (§7.6) |
 | Leaked export | Privacy incident | Coach-only, watermark, 30-day expiry, audit |
 | Imports break or get blocked | A platform change or block stops imports | Pinned `yt-dlp`, scheduled updates with tests; the original file upload always works |
@@ -2379,8 +2382,8 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | O6 ⚠ | After the move, 1.5 GPU-h/video stays within CHF 80 only at Infomaniak (≈ CHF 45, price to confirm); OVHcloud ≈ CHF 122, Exoscale ≈ CHF 204 (§16.2). | Design to ≤ 0.8 h (§10.9); measure in S0 on the Framework 16 and on Infomaniak or OVHcloud. |
 | O7 ⚠ | Hot storage (≈ CHF 68–80/season) is not in the budget breakdown. | Use the CHF 50 backup line for hot storage and drop past seasons' 1080p rendition. |
 | O8 | Basketball camera: side of the court at the half-court line, as high as possible (§7.1). Where in Herren 1's halls is there a gallery or a high spot on the long side? | Check the home hall first; away halls vary. |
-| O9 | YouTube sources | ✓ **Decided 15.10.2026: the club's channel and members' own channels**, on a coach-confirmed allow-list. Channel IDs are added as members propose them. **16.10.2026: Twitch too, and Nomal imports the file instead of embedding** (§7.2.2). |
-| O10 | Camera models | ✓ **Not needed**: Nomal reads the specs from each file. |
+| O9 | YouTube sources | ✓ **Decided 15.10.2026: the club's channel and members' own channels**, on a coach-confirmed allow-list. Channel IDs are added as members propose them. **16.10.2026: Twitch too, and WiePlay imports the file instead of embedding** (§7.2.2). |
+| O10 | Camera models | ✓ **Not needed**: WiePlay reads the specs from each file. |
 | O11 | Brand | ✓ **Done 15.10.2026**: assets in `docs/brand/`, icons generated, `mark-on-dark.svg` and the ball-only favicon approved (§13.3). |
 | O12 | Repo visibility | Private now; flip to public when you're happy, like Wiedisync. |
 | O13 ⚠ | Guest clubs (§4.5) on prod | Built 17.10.2026. Before inviting a real club: the club board's OK, a written agreement with each guest club (its footage, informing its people, adults only, training yes or no, deletion), and the privacy page text (`/privacy`, a draft) checked by the club's privacy contact. Runbook: `docs/runbooks/guest-club.md`. |

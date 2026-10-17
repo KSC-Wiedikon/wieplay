@@ -12,7 +12,7 @@ import { scoreboardKey, type ScoreboardState } from './scoreboard'
 import type { Analysis, Video, VideoSetupIn } from './types'
 
 /**
- * How far a step is: done; running (Nomal works on it); to do (the coach's turn); needs you
+ * How far a step is: done; running (WiePlay works on it); to do (the coach's turn); needs you
  * (something to check or a failure); waiting (nothing to do yet); optional (on demand).
  */
 export type StepState = 'done' | 'busy' | 'todo' | 'attention' | 'waiting' | 'optional'

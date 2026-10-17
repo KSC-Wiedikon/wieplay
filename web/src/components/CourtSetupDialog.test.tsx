@@ -246,7 +246,7 @@ describe('CourtSetupDialog', () => {
       />,
     )
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/Nomal’s best guess \(not sure\)/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/WiePlay’s best guess \(not sure\)/)).toBeInTheDocument()
     expect(within(dialog).getByText('The camera drifted slowly during the match: 2 setups follow it.')).toBeInTheDocument()
     expect(within(dialog).queryByRole('list', { name: 'Camera setups' })).toBeNull() // nothing set yet
   })

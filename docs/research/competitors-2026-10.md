@@ -87,7 +87,7 @@ Sources: [navigate video](https://www.hudl.com/support/hudl-volleyball/guides/na
   - Roles: Viewer, Editor, Manager ([Explore guide](https://www.hudl.com/support/hudl-volleyball/guides/explore)).
 - **AI overlays**: court, speed, contact height and net, plus serve, reception, set and dig
   trajectories.
-- **Review tab (human in the loop)**, the most useful pattern for Nomal:
+- **Review tab (human in the loop)**, the most useful pattern for WiePlay:
   - Fix set boundaries: drag a set's start, "+Add Set" at a timestamp, edit the starting score.
   - Enter each team's starting rotation per set (the Rotations report needs it).
   - **Court calibration**: drag 6 points (antenna tops left/right, far line left/right, middle
@@ -200,7 +200,7 @@ Sources: [FAQ](https://www.hudl.com/products/assist/faq),
     serve, set and attack.
   - Typed-code mode with remappable shortcuts; automatic pass grading.
   - Writes **.dvw** (also after every rally for the bench).
-  - The closest open prior art to Nomal's tier 1.
+  - The closest open prior art to WiePlay's tier 1.
 
 ## 6. Camera and AI platforms
 

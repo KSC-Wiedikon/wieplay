@@ -532,7 +532,7 @@ def _check_files(body: VideoCreateIn, settings: Settings) -> None:
         # The extension decides, never the browser's MIME type: the worker probes the
         # file, and a playlist (.m3u8) or other container must not reach ffprobe.
         if not f.name.lower().endswith(VIDEO_EXTENSIONS):
-            raise HTTPException(415, f"{f.name} is not a video file Nomal accepts")
+            raise HTTPException(415, f"{f.name} is not a video file WiePlay accepts")
 
 
 @router.post("/teams/{team_id}/videos", response_model=VideoOut, status_code=201)

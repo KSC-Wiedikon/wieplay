@@ -188,7 +188,7 @@ export interface VideoStats {
   rotation_columns?: StatColumn[]
   /** Suggested actions nobody has answered yet: not counted (absent from older servers). */
   suggested?: number
-  /** Whether Nomal suggests actions yet. */
+  /** Whether WiePlay suggests actions yet. */
   actions_gate?: ActionGate | null
 }
 

@@ -87,7 +87,7 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
 }
 
 /**
- * The review of Nomal's suggestions (PLAN §10.1): the suggestion on screen, its boundaries,
+ * The review of WiePlay's suggestions (PLAN §10.1): the suggestion on screen, its boundaries,
  * the answers as big buttons (tablets) with their keys, the progress, and "accept all sure ones".
  */
 export function ReviewPanel() {
@@ -258,7 +258,7 @@ function suggestedDetail(t: TFunction, parts: (string | null | undefined)[]): st
 
 /**
  * Who served, who won and the score after the rally, by the teams' names: the coach's facts,
- * else Nomal's suggestions; "check" with the reason when the automatic score disagrees with
+ * else WiePlay's suggestions; "check" with the reason when the automatic score disagrees with
  * something here. 1 and 2 call the serving team, 3 and 4 the winner (a fact the scoring keeps
  * to: the score line follows at once).
  */
@@ -379,7 +379,7 @@ function CallButtons({
   )
 }
 
-/** A break's label: what Nomal thinks it is, and the keys (W B T D O) to say what it is. */
+/** A break's label: what WiePlay thinks it is, and the keys (W B T D O) to say what it is. */
 function GapLabels({ gap }: { gap: Segment }) {
   const { t } = useTranslation()
   const { review, narrow, taxonomy } = useWorkspace()
@@ -410,7 +410,7 @@ function GapLabels({ gap }: { gap: Segment }) {
   )
 }
 
-/** Every suggestion is answered: the way to "rallies reviewed", which teaches Nomal. */
+/** Every suggestion is answered: the way to "rallies reviewed", which teaches WiePlay. */
 function Done({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   const { t } = useTranslation()
   const { reload } = useWorkspace()

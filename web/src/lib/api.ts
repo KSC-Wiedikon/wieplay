@@ -274,7 +274,7 @@ export const api = {
   taxonomy: (sport: string, signal?: AbortSignal) =>
     apiRequest<Taxonomy>(`/api/taxonomies/${encodeURIComponent(sport)}`, { signal }),
 
-  // Automatic analysis (PLAN §10.1): rally proposals, and "rallies reviewed" (Nomal retrains)
+  // Automatic analysis (PLAN §10.1): rally proposals, and "rallies reviewed" (WiePlay retrains)
   analysis: (videoId: string, signal?: AbortSignal) =>
     apiRequest<Analysis>(`/api/videos/${videoId}/analysis`, { signal }),
   analyse: (videoId: string) => apiRequest<unknown>(`/api/videos/${videoId}/analyse`, { method: 'POST' }),
@@ -285,7 +285,7 @@ export const api = {
       method: 'POST',
       body: { reviewed },
     }),
-  // Suggested actions (PLAN §10.4a): suggest again, and "actions reviewed" (Nomal retrains)
+  // Suggested actions (PLAN §10.4a): suggest again, and "actions reviewed" (WiePlay retrains)
   suggestActions: (videoId: string) => apiRequest<Analysis>(`/api/videos/${videoId}/actions`, { method: 'POST' }),
   setActionsReviewed: (videoId: string, reviewed: boolean) =>
     apiRequest<{ actions_reviewed_at?: string | null } | undefined>(`/api/videos/${videoId}/actions-reviewed`, {

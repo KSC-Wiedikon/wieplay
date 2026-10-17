@@ -177,16 +177,16 @@ describe('VideoSetup', () => {
     expect(screen.getByText('Found. “Trajectories” under the video draws it.')).toBeInTheDocument()
   })
 
-  it('asks for the court: set up, or check what Nomal set', async () => {
+  it('asks for the court: set up, or check what WiePlay set', async () => {
     show({ court: courtState() })
     expect(await screen.findByRole('button', { name: 'Set up the court' })).toBeInTheDocument()
     expect(screen.getByText('Not set up. With the court, the ball’s landings count in the tendencies.')).toBeInTheDocument()
   })
 
-  it('shows the analysis with its review link and the switch that teaches Nomal', async () => {
+  it('shows the analysis with its review link and the switch that teaches WiePlay', async () => {
     show({ analysis: analysis({ proposals: { unreviewed: 2, confirmed: 3, corrected: 0, rejected: 1 } }), video: { rallies_reviewed_at: null } })
     expect(await screen.findByRole('link', { name: 'Review suggestions (2)' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
-    expect(screen.getByText('Nomal suggested 6 rallies.')).toBeInTheDocument()
+    expect(screen.getByText('WiePlay suggested 6 rallies.')).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'Rallies reviewed' })).toBeInTheDocument()
     expect(steps()[0]).toEqual(['Rallies and score', 'attention'])
   })
@@ -204,7 +204,7 @@ describe('VideoSetup', () => {
         },
       },
     })
-    expect(await screen.findByText('Not marked. If the scoreboard is in the picture, Nomal reads it for the score line.')).toBeInTheDocument()
+    expect(await screen.findByText('Not marked. If the scoreboard is in the picture, WiePlay reads it for the score line.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'No scoreboard in this video' }))
     await waitFor(() => expect(patched).toEqual([{ no_scoreboard: true }]))
     expect(queryClient.getQueryData(['videos', ID])).toMatchObject({ no_scoreboard: true })

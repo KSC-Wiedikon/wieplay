@@ -13,8 +13,8 @@ export function PrivacyPage() {
   const { t } = useTranslation()
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8 sm:py-12">
-      <title>{`${t('guests.privacy.title')} · nomal`}</title>
-      <Link to="/" className="flex items-center gap-3 self-start" aria-label="nomal">
+      <title>{`${t('guests.privacy.title')} · WiePlay`}</title>
+      <Link to="/" className="flex items-center gap-3 self-start" aria-label="WiePlay">
         <Mark className="size-10" />
         <Wordmark className="text-2xl" />
       </Link>

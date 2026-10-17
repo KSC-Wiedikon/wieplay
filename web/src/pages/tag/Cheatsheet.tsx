@@ -93,7 +93,7 @@ export function Cheatsheet() {
             [['B'], t('tagging.keys.b')],
           ],
         },
-    // Reviewing Nomal's suggestions (volleyball: basketball has no rallies to suggest).
+    // Reviewing WiePlay's suggestions (volleyball: basketball has no rallies to suggest).
     ...(basketball
       ? []
       : [

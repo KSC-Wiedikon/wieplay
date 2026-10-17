@@ -1,4 +1,4 @@
-// Reviewing the actions Nomal suggested (docs/PLAN.md §10.4a, §11), like the rally review: the
+// Reviewing the actions WiePlay suggested (docs/PLAN.md §10.4a, §11), like the rally review: the
 // list goes through the open suggestions in time order, the player loops the one on screen
 // (1 s before the contact to 0.5 s after it), and every answer is a key:
 //

@@ -6,7 +6,7 @@ import type { Playhead } from '../lib/playhead'
 import type { GapKind } from '../lib/types'
 import { PlayheadMark } from './RallyPanel'
 
-/** A labelled break (warm-up, set break, timeout, …); Nomal's open suggestions are lighter. */
+/** A labelled break (warm-up, set break, timeout, …); WiePlay's open suggestions are lighter. */
 export interface BreakMark {
   id: string
   start_ms: number

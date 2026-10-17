@@ -99,7 +99,7 @@ export function ActionChip({ tag, className }: { tag: Tag; className?: string })
 }
 
 /**
- * The review of the actions Nomal suggested (PLAN §10.4a): the action on screen with its skill,
+ * The review of the actions WiePlay suggested (PLAN §10.4a): the action on screen with its skill,
  * grade, side, player and contact time, each a key (or a big button on a tablet), the progress,
  * "accept the rest of this rally", and "actions reviewed" once everything is answered.
  */
@@ -307,7 +307,7 @@ function Facts({ tag, number }: { tag: Tag; number: string }) {
 
 /**
  * Nothing suggested: below the bar (PLAN §10.4a) the reason plainly, and "actions reviewed" for
- * a game the coach tagged, which is how Nomal learns to suggest.
+ * a game the coach tagged, which is how WiePlay learns to suggest.
  */
 function Empty({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   const { t } = useTranslation()
@@ -336,7 +336,7 @@ function Empty({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   )
 }
 
-/** Every suggestion answered: on to "actions reviewed", which teaches Nomal. */
+/** Every suggestion answered: on to "actions reviewed", which teaches WiePlay. */
 function Done({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   const { t } = useTranslation()
   const { reload } = useWorkspace()

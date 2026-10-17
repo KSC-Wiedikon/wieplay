@@ -70,7 +70,7 @@ type Texts = ReturnType<typeof periodTexts>
  * The sets (basketball: quarters): add one at the playhead, end it, and compare its final score
  * with the official one. A basketball game has one official result, the final: it is compared
  * with the last quarter once that is the fourth or later and has ended. Volleyball: the sets
- * Nomal suggested (accept or reject them), and per set what the automatic score needs.
+ * WiePlay suggested (accept or reject them), and per set what the automatic score needs.
  */
 export function SetsBar() {
   const { t } = useTranslation()
@@ -208,11 +208,11 @@ function SetChip({
 }
 
 /**
- * Per set: the official score against the final of Nomal's score line, who served first and
- * where we started (Nomal's guess shown until a coach clicks), and our starting rotation. Each
+ * Per set: the official score against the final of WiePlay's score line, who served first and
+ * where we started (WiePlay's guess shown until a coach clicks), and our starting rotation. Each
  * is an ordinary set change; the server scores the match again with it.
  */
-/** Below this, Nomal asks the coach who served first in set 1 and where we started. */
+/** Below this, WiePlay asks the coach who served first in set 1 and where we started. */
 const SIDES_SURE = 0.9
 
 function SetDetails({ official }: { official: (p: Period) => [number, number] | null }) {
@@ -222,7 +222,7 @@ function SetDetails({ official }: { official: (p: Period) => [number, number] | 
   const view = useView()
   const scoring = useAnalysis(video.id, true).data?.scoring ?? null
   // Set 1's first serve and our side decide the score of the whole match (the rules derive the
-  // other sets): when Nomal is unsure about them and no coach set them, ask for that one click.
+  // other sets): when WiePlay is unsure about them and no coach set them, ask for that one click.
   const first = view.periods.find((p) => p.no === 1) ?? view.periods[0] ?? null
   const sides = scoring?.sides_confidence ?? null
   const unsure = scoring !== null && (sides === null || sides < SIDES_SURE)
@@ -458,12 +458,12 @@ function LineupDialog({ period, onClose, onSave }: { period: Period; onClose: ()
   )
 }
 
-/** "Official 25:21 · Nomal 25:21 ✓": the federation's score against the final of the score line. */
+/** "Official 25:21 · WiePlay 25:21 ✓": the federation's score against the final of the score line. */
 function SetScore({ period, official, segments }: { period: Period; official: [number, number] | null; segments: readonly Segment[] }) {
   const { t } = useTranslation()
   if (period.final_us === null || period.final_them === null) return official ? `${official[0]}:${official[1]}` : '–'
   const model = `${period.final_us}:${period.final_them}`
-  // Nomal's winners went into it where no coach decided a rally.
+  // WiePlay's winners went into it where no coach decided a rally.
   const suggested = segments.some((s) => s.kind === 'rally' && s.period_id === period.id && s.score_source === 'model')
   const same = official !== null && official[0] === period.final_us && official[1] === period.final_them
   const text = official
@@ -484,7 +484,7 @@ function SetScore({ period, official, segments }: { period: Period; official: [n
 }
 
 /**
- * Two buttons for one choice ("Us | Them", "Near | Far"). Nomal's guess shows as a dashed
+ * Two buttons for one choice ("Us | Them", "Near | Far"). WiePlay's guess shows as a dashed
  * suggestion until a coach picks one; picking it confirms it.
  */
 function Choice<T extends string>({

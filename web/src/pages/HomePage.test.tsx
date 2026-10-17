@@ -290,8 +290,8 @@ describe('HomePage', () => {
   it('shows the empty state without teams', async () => {
     stub([])
     renderRoute(<HomePage />, { me: me() })
-    expect(await screen.findByText('None of your teams uses Nomal yet.')).toBeInTheDocument()
-    expect(screen.getByText(/When an admin switches Nomal on/)).toBeInTheDocument()
+    expect(await screen.findByText('None of your teams uses WiePlay yet.')).toBeInTheDocument()
+    expect(screen.getByText(/When an admin switches WiePlay on/)).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Choose teams' })).not.toBeInTheDocument()
   })
 

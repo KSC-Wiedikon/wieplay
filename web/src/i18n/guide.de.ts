@@ -4,14 +4,14 @@ import type { Guide } from './guide.en'
 export const guideDe: Guide = {
   title: 'So hilfst du',
   subtitle:
-    'Für Clubmitglieder, die ein Coach als Helfer eines Teams ausgewählt hat: prüfen, was Nomal vorschlägt, und die Grundlagen taggen. Am schnellsten geht es am Computer mit Tastatur; zum Prüfen reicht ein Tablet.',
+    'Für Clubmitglieder, die ein Coach als Helfer eines Teams ausgewählt hat: prüfen, was WiePlay vorschlägt, und die Grundlagen taggen. Am schnellsten geht es am Computer mit Tastatur; zum Prüfen reicht ein Tablet.',
   onThisPage: 'Auf dieser Seite',
   key: 'Taste',
   meaning: 'Was sie macht',
   why: {
     title: 'Warum das zählt',
     body: [
-      'Nomal findet die Ballwechsel in einem Spielvideo selbst, lernt aber von Menschen. Jedes Spiel, dessen Ballwechsel jemand geprüft und als geprüft markiert hat, wird zu einem Beispiel, aus dem Nomal lernt. So werden die Vorschläge für die nächsten Spiele besser, für alle Teams im Club.',
+      'WiePlay findet die Ballwechsel in einem Spielvideo selbst, lernt aber von Menschen. Jedes Spiel, dessen Ballwechsel jemand geprüft und als geprüft markiert hat, wird zu einem Beispiel, aus dem WiePlay lernt. So werden die Vorschläge für die nächsten Spiele besser, für alle Teams im Club.',
       'Ein geprüftes Spiel gibt dem Team ausserdem das verdichtete Spiel (nur Ballwechsel), den Spielverlauf und, mit Tags, die Statistik.',
     ],
   },
@@ -19,20 +19,20 @@ export const guideDe: Guide = {
     title: 'So fängst du an',
     steps: [
       'Ein Coach hat dich als Helfer hinzugefügt. Das Team steht jetzt auf deiner Startseite, mit dem Chip «Helfer» und den Videos aller Saisons.',
-      'Öffne ein Spielvideo. Am Computer wählst du «Taggen»; um die Vorschläge von Nomal durchzugehen, stellst du den Modus auf «Vorschläge prüfen». Auf Tablet und Handy kommst du direkt zum Prüfen.',
+      'Öffne ein Spielvideo. Am Computer wählst du «Taggen»; um die Vorschläge von WiePlay durchzugehen, stellst du den Modus auf «Vorschläge prüfen». Auf Tablet und Handy kommst du direkt zum Prüfen.',
       'Mit ? siehst du jederzeit alle Tasten.',
     ],
   },
   review: {
     title: 'Vorgeschlagene Ballwechsel prüfen',
     intro:
-      'Ein Vorschlag ist ein Ballwechsel, den Nomal zu sehen glaubt, vom Aufschlag bis der Ball tot ist. Er läuft in einer Schleife ab einer Sekunde vor seinem Beginn. Du sagst, ob er stimmt.',
+      'Ein Vorschlag ist ein Ballwechsel, den WiePlay zu sehen glaubt, vom Aufschlag bis der Ball tot ist. Er läuft in einer Schleife ab einer Sekunde vor seinem Beginn. Du sagst, ob er stimmt.',
     steps: [
       'Schau die Schleife an. Ist es ein Ballwechsel, vom Aufschlag bis zum Ende des Spielzugs?',
       'Stimmt: Enter. Kein Ballwechsel (Einspielen, Timeout, eine Wiederholung, Spieler laufen herum): X.',
       'Beginnt oder endet zu früh oder zu spät: den Beginn mit ← → verschieben, das Ende mit Shift + ← →, dann Enter.',
       'Zwei Ballwechsel in einem Vorschlag: S teilt ihn am Abspielpunkt. Ein Ballwechsel in zwei Teilen: M verbindet ihn mit dem nächsten.',
-      'Sag, wer aufgeschlagen hat (1 wir, 2 sie) und wer den Ballwechsel gewonnen hat (3 wir, 4 sie), wenn Nomal unsicher ist oder falsch liegt: Daraus ergibt sich der Spielstand.',
+      'Sag, wer aufgeschlagen hat (1 wir, 2 sie) und wer den Ballwechsel gewonnen hat (3 wir, 4 sie), wenn WiePlay unsicher ist oder falsch liegt: Daraus ergibt sich der Spielstand.',
       'Jede Antwort geht zum nächsten Vorschlag weiter. Ein Fehler: U macht die letzte Antwort rückgängig.',
     ],
     keysTitle: 'Tasten beim Prüfen',
@@ -60,8 +60,8 @@ export const guideDe: Guide = {
   done: {
     title: 'Ballwechsel als geprüft markieren',
     body: [
-      'Ist jeder Vorschlag beantwortet, bietet das Prüfen «Ballwechsel als geprüft markieren» an; die Videoseite hat denselben Schalter. Erst dann lernt Nomal aus dem Spiel.',
-      'Sind noch Vorschläge offen, fragt Nomal zuerst. Später einen Fehler gefunden? Korrigier ihn einfach: Das Spiel bleibt als geprüft markiert.',
+      'Ist jeder Vorschlag beantwortet, bietet das Prüfen «Ballwechsel als geprüft markieren» an; die Videoseite hat denselben Schalter. Erst dann lernt WiePlay aus dem Spiel.',
+      'Sind noch Vorschläge offen, fragt WiePlay zuerst. Später einen Fehler gefunden? Korrigier ihn einfach: Das Spiel bleibt als geprüft markiert.',
     ],
   },
   tag: {
@@ -111,7 +111,7 @@ export const guideDe: Guide = {
   },
   actions: {
     title: 'Vorgeschlagene Aktionen prüfen',
-    body: 'Schlägt Nomal auch die Ballberührungen in den Ballwechseln vor (Aufschlag, Annahme, Zuspiel, Angriff…), hat das Prüfen eine zweite Liste, «Aktionen». Die Berührung läuft in einer Schleife, und du antwortest ähnlich wie bei den Ballwechseln; am Schluss markierst du auch die Aktionen als geprüft.',
+    body: 'Schlägt WiePlay auch die Ballberührungen in den Ballwechseln vor (Aufschlag, Annahme, Zuspiel, Angriff…), hat das Prüfen eine zweite Liste, «Aktionen». Die Berührung läuft in einer Schleife, und du antwortest ähnlich wie bei den Ballwechseln; am Schluss markierst du auch die Aktionen als geprüft.',
     keys: [
       { keys: ['Enter'], text: 'Die Aktion übernehmen' },
       { keys: ['X'], text: 'Sie ablehnen' },
@@ -125,13 +125,13 @@ export const guideDe: Guide = {
     canTitle: 'Du kannst',
     can: [
       'die Videos, Tags und Clips des Teams anschauen, jede Saison',
-      'die Vorschläge von Nomal prüfen, taggen, Ballwechsel markieren und Spielstände korrigieren',
+      'die Vorschläge von WiePlay prüfen, taggen, Ballwechsel markieren und Spielstände korrigieren',
       'ein Video hochladen oder verlinken und die Aufstellung eines Videos korrigieren',
       'eigene Clips und Reels anlegen, kommentieren und Clips und Reels mit dem Team teilen',
     ],
     cannotTitle: 'Du kannst nicht',
     cannot: ['Videos herunterladen', 'Videos löschen', 'weitere Helfer hinzufügen'],
     privacy:
-      'Die Videos bleiben in Nomal: Bitte nimm sie nicht auf und gib sie nicht ausserhalb des Clubs weiter. Ein Coach kann deinen Zugriff jederzeit beenden; deine Tags und Prüfungen bleiben.',
+      'Die Videos bleiben in WiePlay: Bitte nimm sie nicht auf und gib sie nicht ausserhalb des Clubs weiter. Ein Coach kann deinen Zugriff jederzeit beenden; deine Tags und Prüfungen bleiben.',
   },
 }

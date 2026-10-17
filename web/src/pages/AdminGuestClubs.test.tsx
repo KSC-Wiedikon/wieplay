@@ -46,7 +46,7 @@ describe('Admin → Teams → Guest clubs', () => {
       'href',
       `/teams/${GAST.id}`,
     )
-    fireEvent.click(within(table).getByRole('switch', { name: "VBC Gast Herren 2 2026/27's games may train Nomal" }))
+    fireEvent.click(within(table).getByRole('switch', { name: "VBC Gast Herren 2 2026/27's games may train WiePlay" }))
     await waitFor(() =>
       expect(requests(fetch, 'PUT', `/api/admin/guest-teams/${GAST.id}`)).toEqual([{ training_ok: true }]),
     )

@@ -20,13 +20,13 @@ export const guestsEn = {
     },
     join: {
       title: 'Join {{team}}',
-      intro: '{{club}} uses Nomal, the video analysis of KSC Wiedikon, to watch and tag its matches.',
+      intro: '{{club}} uses WiePlay, the video analysis of KSC Wiedikon, to watch and tag its matches.',
       who: '{{name}}, {{role}} of {{team}} ({{club}}), {{season}}',
       roleCoach: 'coach',
       rolePlayer: 'player',
       reset: 'You have a login already: choose a new password.',
       email: 'Email',
-      emailHint: 'You log in with it. Nomal sends no emails.',
+      emailHint: 'You log in with it. WiePlay sends no emails.',
       password: 'Password',
       passwordHint: 'At least 10 characters.',
       repeat: 'Repeat the password',
@@ -92,7 +92,7 @@ export const guestsEn = {
     adults: {
       title: 'Before your first upload',
       body: 'Everyone we film — our players, coaches and our opponents — is 18 or older (adult league). I confirm.',
-      why: 'Nomal films adults only. Uploads open once a coach of the team confirms this.',
+      why: 'WiePlay films adults only. Uploads open once a coach of the team confirms this.',
       confirm: 'I confirm',
       confirming: 'Saving…',
       failed: "Couldn't save. Try again.",
@@ -102,7 +102,7 @@ export const guestsEn = {
     quotaFull: 'The team has used all its videos for this season. Delete one, or ask a KSCW admin for more.',
     admin: {
       title: 'Guest clubs',
-      hint: "Other clubs' teams that use Nomal with their own logins. Create one only with the club's written OK (docs/runbooks/guest-club.md).",
+      hint: "Other clubs' teams that use WiePlay with their own logins. Create one only with the club's written OK (docs/runbooks/guest-club.md).",
       create: 'Create a guest team',
       createTitle: 'Create a guest team',
       club: 'Club',
@@ -112,7 +112,7 @@ export const guestsEn = {
       season: 'Season',
       limit: 'Video limit',
       limitHint: 'Videos per season. Empty: no limit.',
-      training: 'The club agreed that its reviewed games train Nomal',
+      training: 'The club agreed that its reviewed games train WiePlay',
       trainingHint: 'Without it, its games never go into a training run.',
       creating: 'Creating…',
       created: '{{team}} is set up. Invite its first coach now.',
@@ -123,9 +123,9 @@ export const guestsEn = {
       videos: 'Videos',
       videosOf: '{{count}} of {{limit}}',
       trainingShort: 'Training OK',
-      on: 'Uses Nomal',
-      onFor: '{{team}} uses Nomal',
-      trainingFor: "{{team}}'s games may train Nomal",
+      on: 'Uses WiePlay',
+      onFor: '{{team}} uses WiePlay',
+      trainingFor: "{{team}}'s games may train WiePlay",
       declared: 'Adults confirmed',
       notDeclared: 'Adults not confirmed yet',
       edit: 'Limit',
@@ -146,10 +146,10 @@ export const guestsEn = {
       title: 'Privacy',
       draft: 'Draft, for review by the club’s privacy contact.',
       intro:
-        'Nomal is the video analysis of KSC Wiedikon (the club): coaches and players watch, tag and discuss the footage of their own matches.',
+        'WiePlay is the video analysis of KSC Wiedikon (the club): coaches and players watch, tag and discuss the footage of their own matches.',
       sections: {
         what: {
-          title: 'What Nomal keeps',
+          title: 'What WiePlay keeps',
           body: 'The videos of your team’s matches; names, shirt numbers and roles of the team’s people; tags of actions (skill, grade, zone, time); comments, clips and reels; logins and an audit log. No address, no phone number, no birthdate. Guest clubs: the email you log in with and your password, stored as a hash.',
         },
         who: {
@@ -162,7 +162,7 @@ export const guestsEn = {
         },
         guests: {
           title: 'Guest clubs',
-          body: 'A guest club is responsible for its own footage and for informing its people. It confirms that everyone filmed is 18 or older. Its games train Nomal’s shared models only with the club’s OK. Logins exist only by invite from the team’s coach. On request, KSC Wiedikon deletes a guest club’s videos and logins.',
+          body: 'A guest club is responsible for its own footage and for informing its people. It confirms that everyone filmed is 18 or older. Its games train WiePlay’s shared models only with the club’s OK. Logins exist only by invite from the team’s coach. On request, KSC Wiedikon deletes a guest club’s videos and logins.',
         },
         keep: {
           title: 'How long',

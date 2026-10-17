@@ -18,7 +18,7 @@ interface WinnerPickerProps {
 
 /**
  * Who won a rally, for those who tag (the rally lists): the coach's call by the teams' names,
- * or none, which leaves Nomal's suggestion (shown muted in the empty choice). A fact the
+ * or none, which leaves WiePlay's suggestion (shown muted in the empty choice). A fact the
  * scoring keeps to: the score line follows.
  */
 export function WinnerPicker({ rally, n, names, onPick, disabled = false, className }: WinnerPickerProps) {

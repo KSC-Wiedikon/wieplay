@@ -50,7 +50,7 @@ function Spinning() {
  * The automatic analysis of a video and the learning loop (PLAN §10.1), for those who may tag:
  * its state (queued and running update by themselves), "Analyse" when there is none or it
  * failed, how well the suggestions matched the coach's own rallies, the automatic score
- * (§10.3), and "Rallies reviewed", which tells Nomal to learn from the game.
+ * (§10.3), and "Rallies reviewed", which tells WiePlay to learn from the game.
  */
 export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, actionTags = 0, plain = false, className }: AnalysisStatusProps) {
   const { t } = useTranslation()
@@ -141,9 +141,9 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
 }
 
 /**
- * The automatic score in short: per set the official score against where Nomal's serve
- * evidence alone ends it ("official 25:27 · Nomal 25:27 ✓"), the rallies to check, the breaks
- * found, and how often Nomal agreed with the rallies a coach decided.
+ * The automatic score in short: per set the official score against where WiePlay's serve
+ * evidence alone ends it ("official 25:27 · WiePlay 25:27 ✓"), the rallies to check, the breaks
+ * found, and how often WiePlay agreed with the rallies a coach decided.
  */
 function ScoringSummary({ scoring }: { scoring: Scoring }) {
   const { t } = useTranslation()
@@ -197,7 +197,7 @@ function ScoringSummary({ scoring }: { scoring: Scoring }) {
 /**
  * The suggested actions (PLAN §10.4a): below the bar, why there are none yet; else how many
  * and how many are open; the score against the coach's tags; "Actions reviewed", which makes a
- * game the coach tagged teach Nomal.
+ * game the coach tagged teach WiePlay.
  */
 function ActionsSummary({ videoId, actions, tags }: { videoId: string; actions: ActionsState; tags: number }) {
   const { t } = useTranslation()

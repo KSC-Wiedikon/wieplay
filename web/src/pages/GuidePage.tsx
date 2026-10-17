@@ -32,7 +32,7 @@ function GuideContent() {
 
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
-      <title>{`${g.title} · nomal`}</title>
+      <title>{`${g.title} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <>

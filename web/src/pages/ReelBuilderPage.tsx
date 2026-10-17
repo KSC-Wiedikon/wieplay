@@ -215,7 +215,7 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   return (
     // A form: it keeps a readable width on wide screens.
     <div className="flex max-w-5xl flex-col gap-6">
-      <title>{`${reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newTitle')} · nomal`}</title>
+      <title>{`${reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newTitle')} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <Link to="/reels" className="font-semibold link">
@@ -496,7 +496,7 @@ function ManualForm({ reel, initial }: { reel: Reel | null; initial: Piece[] }) 
 
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newManualTitle')} · nomal`}</title>
+      <title>{`${reel ? t('reels.builder.editTitle', { title: reel.title }) : t('reels.builder.newManualTitle')} · WiePlay`}</title>
       <div className="flex flex-col gap-1">
         <Link to="/reels" className="text-sm font-semibold link">
           {t('reels.back')}

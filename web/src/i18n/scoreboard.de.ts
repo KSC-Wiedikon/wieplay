@@ -6,11 +6,11 @@ export const scoreboardDe: typeof scoreboardEn = {
     edit: 'Anzeigetafel markiert',
     title: 'Anzeigetafel markieren',
     intro:
-      'Zieh auf dem angehaltenen Bild einen Rahmen um den Spielstand: die Punkte beider Teams, nichts anderes. Nomal liest ihn zweimal pro Sekunde und nutzt ihn für den Spielstand; wo er den Aufschlägen widerspricht, wird der Ballwechsel zur Prüfung markiert. In vielen Hallen ist keine Anzeigetafel im Bild: dann gibt es nichts zu markieren.',
+      'Zieh auf dem angehaltenen Bild einen Rahmen um den Spielstand: die Punkte beider Teams, nichts anderes. WiePlay liest ihn zweimal pro Sekunde und nutzt ihn für den Spielstand; wo er den Aufschlägen widerspricht, wird der Ballwechsel zur Prüfung markiert. In vielen Hallen ist keine Anzeigetafel im Bild: dann gibt es nichts zu markieren.',
     box: 'Rahmen',
     score: 'Spielstand',
     sets: 'Gewonnene Sätze (optional)',
-    setsHint: 'Ein zweiter Rahmen um die gewonnenen Sätze, falls die Tafel sie zeigt: So erkennt Nomal, wann ein neuer Satz beginnt.',
+    setsHint: 'Ein zweiter Rahmen um die gewonnenen Sätze, falls die Tafel sie zeigt: So erkennt WiePlay, wann ein neuer Satz beginnt.',
     kind: 'Tafel',
     kinds: {
       flip: 'Klapptafel',
@@ -27,7 +27,7 @@ export const scoreboardDe: typeof scoreboardEn = {
     useSuggestion: 'Letzten Rahmen übernehmen',
     clear: 'Diesen Rahmen entfernen',
     save: 'Speichern und lesen',
-    saved: 'Gespeichert. Nomal liest jetzt die Anzeigetafel; der Spielstand folgt.',
+    saved: 'Gespeichert. WiePlay liest jetzt die Anzeigetafel; der Spielstand folgt.',
     failed: 'Anzeigetafel konnte nicht gespeichert werden: {{detail}}',
     remove: 'Keine Anzeigetafel in diesem Video',
     removed: 'Die Anzeigetafel ist vergessen; der Spielstand kommt wieder aus den Aufschlägen.',

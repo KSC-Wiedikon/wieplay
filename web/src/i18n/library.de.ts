@@ -93,7 +93,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
     post: 'Kommentar senden',
     posting: 'Sendet…',
     posted: 'Kommentar gesendet.',
-    noPeople: 'Noch niemand zum Erwähnen oder Anschreiben: Das Team hat in Nomal noch keine Mitglieder.',
+    noPeople: 'Noch niemand zum Erwähnen oder Anschreiben: Das Team hat in WiePlay noch keine Mitglieder.',
     suggestions: 'Personen zum Erwähnen',
     goTo: 'Zu {{time}}',
     general: 'Ganzes Video',
@@ -191,7 +191,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
       moveUp: 'Szene {{n}} nach oben',
       moveDown: 'Szene {{n}} nach unten',
       remove: 'Szene {{n}} entfernen',
-      noTeams: 'Du bist in keinem Team, das Nomal nutzt.',
+      noTeams: 'Du bist in keinem Team, das WiePlay nutzt.',
     },
     player: {
       label: 'Reel',

@@ -1,13 +1,13 @@
 # Runbook: a guest club
 
 What it is: [PLAN §4.5](../PLAN.md#45-guest-clubs) and [PRIVACY §11](../PRIVACY.md#11-guest-clubs).
-A team of another volleyball club uses Nomal for its own matches, with logins of its own; it
+A team of another volleyball club uses WiePlay for its own matches, with logins of its own; it
 sees only its team, and KSCW's members never see it. Everything here is done in the app as a
 full admin (Admin → Teams → Guest clubs); nothing touches the database by hand.
 
 ## Before the first guest club on prod (once)
 
-- The club board agreed that Nomal hosts other clubs' footage.
+- The club board agreed that WiePlay hosts other clubs' footage.
 - The club's privacy contact checked the privacy page (`/privacy`, a draft) and the agreement
   below (PRIVACY §12, point 6).
 
@@ -17,15 +17,15 @@ full admin (Admin → Teams → Guest clubs); nothing touches the database by ha
    the team's head coach is enough). It says:
    - the club films its own adult-league matches and is responsible for that footage;
    - it informs its players and coaches (what is filmed, who sees it, the privacy page);
-   - everyone filmed is 18 or older (its coach confirms it again in Nomal);
-   - whether its reviewed games may **train Nomal's shared models** (yes or no);
+   - everyone filmed is 18 or older (its coach confirms it again in WiePlay);
+   - whether its reviewed games may **train WiePlay's shared models** (yes or no);
    - how many videos per season (30 unless agreed otherwise);
    - deletion on request (below).
 2. **Create the team**: Admin → Teams → Guest clubs → *Create a guest team*. Club as it is
    called ("VBC Zürich"), team ("Herren 2"), league (optional), season (the current one by
    default), video limit, and the training box only if the club said yes. It is switched on.
 3. **Invite the coach**: right after creating it (or *Invite a coach* in its row), give the
-   coach's name. Nomal shows a link `https://nomal.kscw.ch/join/…` **once**: copy it and send it
+   coach's name. WiePlay shows a link `https://wieplay.kscw.ch/join/…` **once**: copy it and send it
    to the coach only (a direct message, not a group chat). It works once, for 14 days.
 4. **The coach** opens the link, sets an email and a password and lands on the team page,
    where they:
@@ -46,7 +46,7 @@ full admin (Admin → Teams → Guest clubs); nothing touches the database by ha
   training run (the models trained before keep what they learned; retire a model if the club
   asks).
 - **Someone leaves the team**: a coach removes them under People. They lose access at once;
-  their name leaves Nomal (tags keep the number); their login is deleted 30 days later.
+  their name leaves WiePlay (tags keep the number); their login is deleted 30 days later.
 - **A new season**: not built yet (PLAN §4.5, *Not yet*). A team row takes the matches of its
   own season only, and a new guest team would be a new team with new people, whose emails are
   still taken by last season's logins. Build "next season" (same lineage, people carried over,
@@ -54,14 +54,14 @@ full admin (Admin → Teams → Guest clubs); nothing touches the database by ha
 
 ## Offboard a club (or delete on request)
 
-**Pause** (the agreement is on hold): the *Uses Nomal* switch in its row. Every session of its
+**Pause** (the agreement is on hold): the *Uses WiePlay* switch in its row. Every session of its
 people loses the team at once and its invite links stop working. Nothing is deleted; switch it
 on again to resume. Admins, too, see a switched-off team only in this list.
 
 **End and delete** (the agreement ends, or the club asks): with the team still switched on,
 
 1. open *Team page* and **remove its people** under People, the coaches last (an admin may
-   remove anyone). Their access ends at once, their names leave Nomal (tags keep the number),
+   remove anyone). Their access ends at once, their names leave WiePlay (tags keep the number),
    and their logins are disabled, then deleted after 30 days;
 2. **delete its videos** there (an admin may). The worker removes the originals on the NAS
    (`raw/<season>/vb-guest-<club>-<team>/`) and the analysis signals with them; the bucket

@@ -100,7 +100,7 @@ def plan(db: Session, bridge: BridgeClient | None, lines: list[Line]) -> list[Pl
         team = db.get(WdTeam, line.team_id)
         lineage = db.get(TeamLineage, team.lineage_id) if team else None
         if team is None or lineage is None or not lineage.enabled:
-            p.problem = "no such team, or the team is not enabled for Nomal"
+            p.problem = "no such team, or the team is not enabled for WiePlay"
             continue
         if team.guest:
             # The allow-list holds KSCW's channels (core/permissions.py, can_import_link).

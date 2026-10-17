@@ -41,7 +41,7 @@ export function HomePage() {
 
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
-      <title>{`${t('home.title')} · nomal`}</title>
+      <title>{`${t('home.title')} · WiePlay`}</title>
       <PageHeader
         title={name ? t('home.greeting', { name }) : t('home.greetingAnon')}
         subtitle={t('home.subtitle')}

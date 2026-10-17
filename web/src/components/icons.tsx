@@ -317,7 +317,7 @@ export function ChartIcon(props: IconProps) {
   )
 }
 
-/** Four-point stars: something Nomal suggested (a model's proposal). */
+/** Four-point stars: something WiePlay suggested (a model's proposal). */
 export function SparkleIcon(props: IconProps) {
   return (
     <Icon {...props}>

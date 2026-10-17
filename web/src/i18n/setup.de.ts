@@ -8,10 +8,10 @@ export const setupDe: Messages<typeof setupEn> = {
   },
   winner: {
     label: 'Punkt von Ballwechsel {{n}}',
-    nomal: '{{team}} (Nomal)',
+    nomal: '{{team}} (WiePlay)',
     none: '–',
     changed: 'Punkt von Ballwechsel {{n}}: {{team}}.',
-    cleared: 'Punkt von Ballwechsel {{n}}: wieder Nomals Vorschlag.',
+    cleared: 'Punkt von Ballwechsel {{n}}: wieder der Vorschlag von WiePlay.',
     undo: 'Rückgängig',
     failed: 'Der Punkt konnte nicht gespeichert werden: {{detail}}',
   },
@@ -37,14 +37,14 @@ export const setupDe: Messages<typeof setupEn> = {
     ball: {
       title: 'Ballflug',
       done: 'Gefunden. «Flugbahnen» unter dem Video zeichnet ihn.',
-      busy: 'Nomal verfolgt den Ball…',
+      busy: 'WiePlay verfolgt den Ball…',
       failed: 'Der Ballflug konnte nicht gefunden werden.',
-      none: 'Kommt nach der Analyse: Nomal verfolgt den Ball, sobald es die Ballwechsel gefunden hat.',
+      none: 'Kommt nach der Analyse: WiePlay verfolgt den Ball, sobald es die Ballwechsel gefunden hat.',
     },
     court: {
       title: 'Spielfeld',
       none: 'Nicht eingerichtet. Mit dem Spielfeld zählen die Aufpralle des Balls in den Tendenzen.',
-      busy: 'Nomal sucht das Spielfeld…',
+      busy: 'WiePlay sucht das Spielfeld…',
       auto: 'Automatisch gesetzt: prüf, ob die Linien auf dem Feld liegen.',
       done: 'Eingerichtet.',
       open: 'Spielfeld einrichten',
@@ -53,7 +53,7 @@ export const setupDe: Messages<typeof setupEn> = {
     },
     scoreboard: {
       title: 'Anzeigetafel',
-      none: 'Nicht markiert. Ist die Anzeigetafel im Bild, liest Nomal sie für den Spielstand.',
+      none: 'Nicht markiert. Ist die Anzeigetafel im Bild, liest WiePlay sie für den Spielstand.',
       absent: 'Keine Anzeigetafel in diesem Video.',
       waiting: 'Markiert: wartet aufs Lesen.',
       open: 'Anzeigetafel markieren',
@@ -72,7 +72,7 @@ export const setupDe: Messages<typeof setupEn> = {
       edit: 'Namen bearbeiten',
       dialogTitle: 'Teamnamen',
       intro:
-        'Stehen überall, wo sonst wir und Gegner stünde: wer aufschlug und gewann, der Spielstand, die Statistik, das CSV und die Spielzusammenfassung. Lass ein Feld leer für den Namen, den Nomal herausfindet.',
+        'Stehen überall, wo sonst wir und Gegner stünde: wer aufschlug und gewann, der Spielstand, die Statistik, das CSV und die Spielzusammenfassung. Lass ein Feld leer für den Namen, den WiePlay herausfindet.',
       us: 'Unser Team',
       them: 'Gegner',
       derived: 'Leer: {{name}}',

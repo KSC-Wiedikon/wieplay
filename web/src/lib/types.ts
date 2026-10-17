@@ -1,6 +1,6 @@
 import type { PlayersSummary } from './players'
 
-// Shapes returned by the Nomal API (backend/nomal/api).
+// Shapes returned by the WiePlay API (backend/nomal/api).
 
 export type SportName = 'volleyball' | 'basketball'
 
@@ -12,7 +12,7 @@ export interface Team {
   league: string | null
   /** The user's relations to the team (player, coach, captain, team_responsible). Empty for admins. */
   rel: string[]
-  /** A helper of the team: picked by a coach in Nomal (PLAN §5.1 "analyst"), every season. */
+  /** A helper of the team: picked by a coach in WiePlay (PLAN §5.1 "analyst"), every season. */
   helper?: boolean
   /** The same team across seasons (D1 2026/27 was D2 in 2025/26). */
   lineage_id: string
@@ -40,7 +40,7 @@ export interface TeamDetail extends Team {
   adults_declared_at?: string | null
 }
 
-/** A team helper (GET /api/teams/{id}/helpers): a Nomal grant for every season of the team. */
+/** A team helper (GET /api/teams/{id}/helpers): a WiePlay grant for every season of the team. */
 export interface Helper {
   id: string
   member_id: number
@@ -73,7 +73,7 @@ export interface Me {
   is_admin: boolean
   sport_admin: SportName[]
   teams: Team[]
-  /** A guest club's member (a Nomal login, not Wiedisync): the app hides what is KSCW's own. */
+  /** A guest club's member (a WiePlay login, not Wiedisync): the app hides what is KSCW's own. */
   guest?: boolean
   club?: string | null
 }
@@ -119,7 +119,7 @@ export interface VideoConfig {
   max_files: number
 }
 
-/** Nomal handles matches only (decided 16.10.2026). */
+/** WiePlay handles matches only (decided 16.10.2026). */
 export type VideoKind = 'match'
 /**
  * `importing`: a worker fetches the video from its YouTube or Twitch link, before the ingest.
@@ -135,7 +135,7 @@ export type ImportPlatform = 'youtube' | 'twitch'
 export interface ImportedFrom {
   /** An ImportPlatform. */
   platform: string
-  /** The canonical address Nomal fetched. */
+  /** The canonical address WiePlay fetched. */
   url: string
   /** The channel's name as the platform shows it. */
   channel: string | null
@@ -202,7 +202,7 @@ export interface Video {
   can_export: boolean
   files: VideoFile[]
   /**
-   * A coach marked the rally list complete and right (PLAN §10.1): Nomal learns from the game.
+   * A coach marked the rally list complete and right (PLAN §10.1): WiePlay learns from the game.
    * Absent from servers before the automatic analysis.
    */
   rallies_reviewed_at?: string | null
@@ -237,7 +237,7 @@ export interface VideoSetupIn {
   no_scoreboard?: boolean
 }
 
-/** "Ready" says a video plays; this says whether Nomal has analysed it (PLAN §10.1). */
+/** "Ready" says a video plays; this says whether WiePlay has analysed it (PLAN §10.1). */
 export interface AnalysisBrief {
   status: 'none' | 'queued' | 'running' | 'done' | 'failed'
   /** Rally suggestions nobody has answered yet. */
@@ -564,7 +564,7 @@ export interface Tagging {
   official_final: [number, number] | null
   /** See Video.rallies_reviewed_at. */
   rallies_reviewed_at?: string | null
-  /** A coach marked the video's actions complete and right (Nomal learns from them). */
+  /** A coach marked the video's actions complete and right (WiePlay learns from them). */
   actions_reviewed_at?: string | null
   /** The match's first serve (start of set 1, else the end of the warm-up): "Start at first serve". */
   first_serve_ms?: number | null
@@ -771,7 +771,7 @@ export interface ActionsVsCoach {
 }
 
 /**
- * Whether Nomal writes suggested actions (PLAN §10.4a): only once its held-out score on games
+ * Whether WiePlay writes suggested actions (PLAN §10.4a): only once its held-out score on games
  * whose actions a coach reviewed passes the bars (mode auto; on and off force it).
  */
 export interface ActionGate {

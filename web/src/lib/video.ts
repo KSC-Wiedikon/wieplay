@@ -48,7 +48,7 @@ export function platformName(platform: string): string {
 export interface VideoLink {
   platform: ImportPlatform
   id: string
-  /** The canonical address, the one Nomal fetches. */
+  /** The canonical address, the one WiePlay fetches. */
   url: string
 }
 
@@ -147,7 +147,7 @@ export function monthLabel(month: string, language: string): string {
   )
 }
 
-/** "Match"; null for a kind Nomal no longer offers (training rows from before 16.10.2026). */
+/** "Match"; null for a kind WiePlay no longer offers (training rows from before 16.10.2026). */
 export function kindLabel(t: TFunction, kind: string): string | null {
   return kind === 'match' ? t('video.kind.match') : null
 }

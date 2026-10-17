@@ -19,11 +19,11 @@ umask 077
 env="${1:-}"
 case "$env" in
   dev)
-    db=nomal_dev port=8090 public=https://nomal-dev.kscw.ch issuer=wiedisync-dev
+    db=nomal_dev port=8090 public=https://wieplay-dev.kscw.ch issuer=wiedisync-dev
     directus=directus-kscw-dev directus_env=/opt/directus-kscw-dev/.env
     directus_url=https://directus-dev.kscw.ch login=https://wiedisync-dev.kscw.ch/login ;;
   prod)
-    db=nomal port=8091 public=https://nomal.kscw.ch issuer=wiedisync-prod
+    db=nomal port=8091 public=https://wieplay.kscw.ch issuer=wiedisync-prod
     directus=directus-kscw directus_env=/opt/directus-kscw/.env
     directus_url=https://directus.kscw.ch login=https://wiedisync.kscw.ch/login ;;
   *) echo "usage: setup-env.sh dev|prod" >&2; exit 2 ;;

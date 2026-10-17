@@ -47,7 +47,7 @@ function Highlights({ teamId }: { teamId: number }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${title} · nomal`}</title>
+      <title>{`${title} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <Link to={`/teams/${teamId}`} className="font-semibold link">

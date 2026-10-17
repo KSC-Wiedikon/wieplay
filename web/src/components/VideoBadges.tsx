@@ -19,7 +19,7 @@ export function VideoStatusBadge({ status }: { status: VideoStatus }) {
   return <Badge tone={statusTone[status] ?? 'neutral'}>{t(`video.status.${status}`, status)}</Badge>
 }
 
-/** Whether Nomal has analysed a ready video and how many rally suggestions wait for a coach. */
+/** Whether WiePlay has analysed a ready video and how many rally suggestions wait for a coach. */
 export function AnalysisBadge({ video }: { video: Pick<Video, 'status' | 'analysis' | 'rallies_reviewed_at'> }) {
   const { t } = useTranslation()
   const analysis = video.analysis

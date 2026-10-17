@@ -1,4 +1,4 @@
-// Actions Nomal suggests per rally (docs/PLAN.md §10.4a): serve, reception, set, attack, block,
+// Actions WiePlay suggests per rally (docs/PLAN.md §10.4a): serve, reception, set, attack, block,
 // dig and freeball at the ball's contacts, as tags with source "model" and review "unreviewed".
 // Which tags are suggestions, the review list and its progress, and the change a review
 // answer sends. Pure, so the review controller and the pages share one reading of the data.
@@ -104,7 +104,7 @@ export function rejectChange(tag: Tag): Change {
 }
 
 /**
- * Why there are no suggested actions yet (PLAN §10.4a): Nomal writes them only once its score on
+ * Why there are no suggested actions yet (PLAN §10.4a): WiePlay writes them only once its score on
  * games whose actions a coach reviewed passes the bar. Null while the bar is passed (or unknown).
  */
 export function gateText(t: TFunction, gate: ActionGate | null | undefined): string | null {

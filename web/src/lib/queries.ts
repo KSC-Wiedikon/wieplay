@@ -60,7 +60,7 @@ function patchTeam(list: AdminTeam[] | undefined, id: number, patch: Partial<Adm
   return list?.map((team) => (team.id === id ? { ...team, ...patch } : team))
 }
 
-/** Turns Nomal on or off for a team; the switch flips at once and flips back with a toast on failure. */
+/** Turns WiePlay on or off for a team; the switch flips at once and flips back with a toast on failure. */
 export function useSetTeamEnabled() {
   const client = useQueryClient()
   const toast = useToast()

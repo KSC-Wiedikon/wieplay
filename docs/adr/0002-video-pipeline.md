@@ -18,7 +18,7 @@
 2. **The filming rules run before anything is stored** (`core/filming.py`).
    - The team policy: DU23-1 films trainings only.
    - Wiedisync's adult check: every rostered person must be 18 or older on the recording
-     day, and a missing birthdate fails. Birthdates never reach Nomal.
+     day, and a missing birthdate fails. Birthdates never reach WiePlay.
    - (Per-player consent was dropped on 16.10.2026: Swiss Volley allows recording matches,
      Volleyballreglement Art. 86; see PLAN §5.4.)
    - A refusal is a 409 with reason codes and an audit entry. No video row and no
@@ -73,7 +73,7 @@
 - The VPS publishes the API on its tailnet address too (`NOMAL_TAILNET_IP`), so the worker
   can reach it without Cloudflare. (Until 16.10.2026; since then `NOMAL_TAILNET_IP` is unset,
   see the update below.)
-- The bucket needs CORS for the Nomal origin and lifecycle rules: `incoming/` 14 days,
+- The bucket needs CORS for the WiePlay origin and lifecycle rules: `incoming/` 14 days,
   `exports/` 30 days, `analysis/` 3 days. `python -m nomal.cli storage-setup` applies them.
 - Before the bucket exists, the app runs without video features: `/api/video/config`
   reports `enabled: false`.

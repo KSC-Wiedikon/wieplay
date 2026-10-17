@@ -140,7 +140,7 @@ describe('TagPage, suggestions', () => {
   it('marks suggestions on the timeline and in the rally list, with a filter for those to review', async () => {
     const { container } = show()
     await screen.findByRole('region', { name: 'Tag entry' })
-    expect(screen.getByText('Nomal suggested 5 rallies.')).toBeInTheDocument()
+    expect(screen.getByText('WiePlay suggested 5 rallies.')).toBeInTheDocument()
     expect(screen.getByText('3 still to review.')).toBeInTheDocument()
     // Open suggestions are outlined on the timeline; an accepted one keeps a marker.
     expect(container.querySelectorAll('[data-suggestion="open"]').length).toBeGreaterThanOrEqual(2)

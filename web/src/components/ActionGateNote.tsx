@@ -6,7 +6,7 @@ import type { ActionGate } from '../lib/types'
 import { SparkleIcon } from './icons'
 
 /**
- * Why there are no suggested actions yet (PLAN §10.4a): Nomal writes them only once its score on
+ * Why there are no suggested actions yet (PLAN §10.4a): WiePlay writes them only once its score on
  * games whose actions a coach reviewed passes the bar. Nothing while the bar is passed.
  */
 export function ActionGateNote({ gate, className }: { gate: ActionGate | null | undefined; className?: string }) {

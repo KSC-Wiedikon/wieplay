@@ -20,7 +20,7 @@ export function Mark({ className, sport, onDark }: { className?: string; sport?:
   )
 }
 
-/** Lowercase "nomal" in Bricolage Grotesque ExtraBold. */
+/** "WiePlay" in Bricolage Grotesque ExtraBold (called "nomal" until 17.10.2026). */
 export function Wordmark({ className }: { className?: string }) {
-  return <span className={cx('font-wordmark leading-none font-extrabold tracking-tight', className)}>nomal</span>
+  return <span className={cx('font-wordmark leading-none font-extrabold tracking-tight', className)}>WiePlay</span>
 }

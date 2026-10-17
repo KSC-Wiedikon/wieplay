@@ -37,7 +37,7 @@ export const courtDe: typeof courtEn = {
       auto: 'Automatisch gefunden: Prüfe die Linien vor dem Speichern.',
       autoHall: 'Automatisch aus früheren Videos dieser Halle übernommen: Prüfe die Linien.',
       autoFound: 'Automatisch im Bild gefunden: Prüfe die Linien.',
-      guess: 'Beste Schätzung von Nomal (unsicher): Prüfe die Linien vor dem Speichern.',
+      guess: 'Beste Schätzung von WiePlay (unsicher): Prüfe die Linien vor dem Speichern.',
       yours: 'Von einer Trainerin oder einem Trainer eingerichtet.',
       confidence: 'Sicherheit {{pct}} %',
       moved_one: 'Die Kamera hat sich um {{at}} bewegt: {{count}} Einstellung.',

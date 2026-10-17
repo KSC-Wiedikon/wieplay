@@ -94,7 +94,7 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
   )
 }
 
-/** Nomal's suggested actions are not in the numbers until a coach accepts them (PLAN §10.4a). */
+/** WiePlay's suggested actions are not in the numbers until a coach accepts them (PLAN §10.4a). */
 export function SuggestedHint({ count }: { count: number }) {
   const { t } = useTranslation()
   return (

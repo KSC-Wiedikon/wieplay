@@ -49,7 +49,7 @@ function TeamView({ teamId }: { teamId: number }) {
 
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
-      <title>{`${name} · nomal`}</title>
+      <title>{`${name} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <>

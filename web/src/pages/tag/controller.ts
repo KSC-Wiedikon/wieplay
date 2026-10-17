@@ -444,7 +444,7 @@ export class TagController {
     if (period) this.commit([{ kind: 'period', payload: { ...periodToIn(period), ...patch } }])
   }
 
-  /** Accepts a set Nomal suggested as it is. */
+  /** Accepts a set WiePlay suggested as it is. */
   acceptPeriod = (id: string): void => {
     const period = this.store.getView().periods.find((p) => p.id === id)
     if (!period || period.source !== 'model' || period.review !== 'unreviewed') return
