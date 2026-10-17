@@ -22,6 +22,7 @@ from sqlalchemy import (
     Time,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -184,6 +185,43 @@ class TeamPolicy(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     set_by: Mapped[int | None] = mapped_column(Integer)
     set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TeamGrant(Base):
+    """A member who helps a team (PLAN §5.1 "analyst", §6.10): picked by a coach, a team
+    manager, a sport admin or an admin, for every season of the team's lineage. Nomal-local;
+    a revoked grant stays as history.
+
+    No foreign key on member_id: the mirror only keeps members of enabled teams, and a
+    helper may play in another team. The names are kept as they were when granted, for the
+    list once the mirror no longer has them (a name, nothing more)."""
+
+    __tablename__ = "team_grant"
+    __table_args__ = (
+        # One open grant per person, team and role.
+        Index(
+            "uq_team_grant_open",
+            "lineage_id",
+            "member_id",
+            "role",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    lineage_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("team_lineage.id", ondelete="CASCADE"), index=True
+    )
+    member_id: Mapped[int] = mapped_column(Integer, index=True)
+    member_name: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="analyst")  # analyst
+    note: Mapped[str | None] = mapped_column(Text)
+    granted_by: Mapped[int] = mapped_column(Integer)
+    granted_by_name: Mapped[str] = mapped_column(String(255))
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[int | None] = mapped_column(Integer)
 
 
 class Consent(Base):

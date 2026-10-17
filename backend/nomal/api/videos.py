@@ -827,7 +827,13 @@ def delete_video(
     _lock(db, video)
     if video.status == "deleted":
         raise HTTPException(404, "Video not found")
-    cancelling_own_upload = video.status == "uploading" and can_upload(viewer, access.ref)
+    # Whoever may upload cancels their own unfinished upload; deleting is for the team's
+    # coaches, sport admins and admins (helpers upload but do not delete).
+    cancelling_own_upload = (
+        video.status == "uploading"
+        and video.created_by == viewer.member_id
+        and can_upload(viewer, access.ref)
+    )
     if not (cancelling_own_upload or can_delete_video(viewer, access.ref, access.leads)):
         raise HTTPException(403, "Only the team's coaches, sport admins and admins delete videos")
     uploads = [(f.object_key, f.upload_id) for f in video.files if f.object_key and f.upload_id]

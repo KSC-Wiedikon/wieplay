@@ -1,10 +1,12 @@
-"""Who may see what (PLAN §5.1): team visibility, Nomal administration (M0), videos (M1).
+"""Who may see what (PLAN §5.1): team visibility, Nomal administration (M0), videos (M1),
+tagging and sharing (M2, M3), team helpers (analysts).
 
 Every rule lives here and is tested in tests/test_permissions.py; routes only call these.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -23,10 +25,16 @@ class Viewer:
     sport_admin: frozenset[str]
     # Wiedisync team row id -> relations of this member on that row.
     team_rels: Mapping[int, frozenset[str]]
+    # Lineages this member helps (open analyst grants in Nomal's team_grant). Loaded from the
+    # database on every request, never from the login token: a revoked grant ends at once.
+    analyst_lineages: frozenset[uuid.UUID] = frozenset()
 
     @property
     def is_admin(self) -> bool:
         return bool(self.roles & ADMIN_ROLES)
+
+    def with_grants(self, analyst_lineages: Iterable[uuid.UUID]) -> Viewer:
+        return dataclasses.replace(self, analyst_lineages=frozenset(analyst_lineages))
 
     @classmethod
     def from_claims(cls, claims: Mapping[str, Any]) -> Viewer:
@@ -66,6 +74,7 @@ def visible_team_ids(viewer: Viewer, teams: Iterable[TeamRef]) -> set[int]:
     - Members of a team row (player, guest, captain, coach, team manager) see that row:
       players see the seasons they were rostered in.
     - Coaches and team managers see every season of their team's lineage.
+    - Helpers (analysts) see every season of the lineages they were granted.
     """
     teams = [t for t in teams if t.enabled]
     if viewer.is_admin:
@@ -79,6 +88,7 @@ def visible_team_ids(viewer: Viewer, teams: Iterable[TeamRef]) -> set[int]:
         if t.sport in viewer.sport_admin
         or t.id in viewer.team_rels
         or t.lineage_id in lead_lineages
+        or t.lineage_id in viewer.analyst_lineages
     }
 
 
@@ -87,24 +97,37 @@ def lead_lineages(viewer: Viewer, teams: Iterable[TeamRef]) -> set[uuid.UUID]:
     return {t.lineage_id for t in teams if viewer.team_rels.get(t.id, frozenset()) & LEAD_RELS}
 
 
-def can_upload(viewer: Viewer, team: TeamRef) -> bool:
-    """Upload or link a video for this team row (§5.1).
-
-    Coaches and team managers of that season's team, and sport admins of its sport. Admins
-    without one of those roles watch and delete but do not upload.
-    """
-    if not team.enabled:
-        return False
-    return team.sport in viewer.sport_admin or bool(
-        viewer.team_rels.get(team.id, frozenset()) & LEAD_RELS
-    )
+def is_analyst(viewer: Viewer, team: TeamRef) -> bool:
+    """A helper of this team: an open analyst grant on its lineage (any season)."""
+    return team.enabled and team.lineage_id in viewer.analyst_lineages
 
 
-def can_delete_video(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+def _leads_team(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
     """Coaches and team managers of the team (any season), sport admins, admins."""
     if not team.enabled:
         return False
     return viewer.is_admin or team.sport in viewer.sport_admin or team.lineage_id in leads
+
+
+def can_upload(viewer: Viewer, team: TeamRef) -> bool:
+    """Upload or link a video for this team row, edit a video's roster (§5.1).
+
+    Coaches and team managers of that season's team, sport admins of its sport, and the
+    team's helpers. Admins without one of those roles watch and delete but do not upload.
+    """
+    if not team.enabled:
+        return False
+    return (
+        team.sport in viewer.sport_admin
+        or bool(viewer.team_rels.get(team.id, frozenset()) & LEAD_RELS)
+        or is_analyst(viewer, team)
+    )
+
+
+def can_delete_video(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Coaches and team managers of the team (any season), sport admins, admins. Not
+    helpers."""
+    return _leads_team(viewer, team, leads)
 
 
 def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
@@ -113,27 +136,31 @@ def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
 
 
 def can_tag(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
-    """Tag, mark rallies and sets, correct scores (§5.1): the team's coaches and team
-    managers (every season of the team), sport admins and admins (owner, 16.10.2026: the
-    admins do the first tagging). Analysts arrive with team grants."""
-    if not team.enabled:
-        return False
-    return viewer.is_admin or team.sport in viewer.sport_admin or team.lineage_id in leads
+    """Tag, mark rallies and sets, review and correct Nomal's suggestions and scores (§5.1):
+    the team's coaches and team managers (every season of the team), sport admins, admins
+    (owner, 16.10.2026: the admins do the first tagging) and the team's helpers."""
+    return _leads_team(viewer, team, leads) or is_analyst(viewer, team)
 
 
 def is_team_manager(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
     """Coaches and team managers (any season), sport admins, admins: they see coach-only
-    comments and manage the team's shared clips and reels."""
-    if not team.enabled:
-        return False
-    return viewer.is_admin or team.sport in viewer.sport_admin or team.lineage_id in leads
+    comments and manage the team's shared clips and reels. Not helpers."""
+    return _leads_team(viewer, team, leads)
 
 
 def can_share_with_team(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
-    """Share a clip or reel with the team (§5.1): whoever may tag."""
+    """Share a clip or reel with the team (§5.1): whoever may tag, helpers included."""
     return can_tag(viewer, team, leads)
 
 
 def can_export(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
-    """Download a watermarked MP4 (§5.1, §5.2): whoever may tag."""
-    return can_tag(viewer, team, leads)
+    """Download a watermarked MP4 (§5.1, §5.2): coaches and team managers, sport admins,
+    admins. Not helpers: they tag and share, nothing leaves Nomal through them."""
+    return _leads_team(viewer, team, leads)
+
+
+def can_grant_analyst(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Add or remove the team's helpers, see who they are (§5.1 "Grant analyst"): its
+    coaches and team managers (any season), sport admins and admins. Helpers do not pick
+    other helpers."""
+    return _leads_team(viewer, team, leads)

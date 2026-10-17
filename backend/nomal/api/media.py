@@ -58,6 +58,11 @@ class _PermissionCache:
         with self._lock:
             self._until = {k: v for k, v in self._until.items() if k[1] != video_id}
 
+    def clear(self) -> None:
+        """Forget every answer (a team helper was removed: their sessions ask again)."""
+        with self._lock:
+            self._until.clear()
+
 
 permission_cache = _PermissionCache()
 _viewed: set[tuple[str, uuid.UUID]] = set()

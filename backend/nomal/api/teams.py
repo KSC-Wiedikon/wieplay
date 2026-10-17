@@ -18,10 +18,12 @@ from nomal.core.permissions import (
     TeamRef,
     Viewer,
     can_export,
+    can_grant_analyst,
     can_manage_nomal,
     can_share_with_team,
     can_tag,
     can_upload,
+    is_analyst,
     lead_lineages,
     visible_team_ids,
 )
@@ -36,17 +38,22 @@ class TeamOut(BaseModel):
     season: str
     league: str | None
     rel: list[str]
+    # A helper of the team (a Nomal grant by a coach; PLAN §5.1 "analyst"): every season.
+    helper: bool
     # The same team across seasons (D1 2026/27 was D2 in 2025/26): the start page groups by it.
     lineage_id: uuid.UUID
-    # Coaches and team managers (any season) and sport admins: tag, share, download.
+    # Coaches and team managers (any season), sport admins, admins: tag, share, download;
+    # helpers tag and share.
     can_tag: bool
     can_share: bool
     can_export: bool
 
 
 class TeamDetailOut(TeamOut):
-    # Coach/team manager of this season's team or sport admin: upload videos.
+    # Coach/team manager of this season's team, sport admin or helper: upload videos.
     can_upload: bool
+    # Coaches and team managers (any season), sport admins, admins: pick the team's helpers.
+    can_grant: bool
 
 
 class MemberOut(BaseModel):
@@ -105,6 +112,7 @@ def _team_out(team: WdTeam, viewer: Viewer, leads: set[uuid.UUID]) -> TeamOut:
         season=team.season,
         league=team.league,
         rel=sorted(viewer.team_rels.get(team.id, frozenset())),
+        helper=is_analyst(viewer, ref),
         lineage_id=team.lineage_id,
         can_tag=can_tag(viewer, ref, leads),
         can_share=can_share_with_team(viewer, ref, leads),
@@ -144,8 +152,11 @@ def list_teams(viewer: ViewerDep, db: DbDep) -> list[TeamOut]:
 def get_team(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamDetailOut:
     team = _get_visible_team(db, viewer, team_id)
     leads = lead_lineages(viewer, team_refs(db))
+    ref = _ref(team)
     return TeamDetailOut(
-        **_team_out(team, viewer, leads).model_dump(), can_upload=can_upload(viewer, _ref(team))
+        **_team_out(team, viewer, leads).model_dump(),
+        can_upload=can_upload(viewer, ref),
+        can_grant=can_grant_analyst(viewer, ref, leads),
     )
 
 

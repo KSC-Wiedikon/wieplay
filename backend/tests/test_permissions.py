@@ -121,3 +121,69 @@ def test_tag_permission_matrix() -> None:
         assert can_tag(who, team, leads) is allowed, (who, team)
         assert can_share_with_team(who, team, leads) is allowed, (who, team)
         assert can_export(who, team, leads) is allowed, (who, team)
+
+
+# Team helpers (PLAN §5.1 "analyst"): a Nomal grant per lineage, loaded per request.
+from nomal.core.permissions import (  # noqa: E402
+    can_grant_analyst,
+    is_analyst,
+    is_team_manager,
+)
+
+ACTIONS = ("see", "upload", "tag", "share", "export", "delete", "grant", "manage")
+
+
+def allowed(who: Viewer, team: TeamRef) -> set[str]:
+    leads = lead_lineages(who, TEAMS)
+    checks = {
+        "see": team.id in visible_team_ids(who, TEAMS),
+        "upload": can_upload(who, team),
+        "tag": can_tag(who, team, leads),
+        "share": can_share_with_team(who, team, leads),
+        "export": can_export(who, team, leads),
+        "delete": can_delete_video(who, team, leads),
+        "grant": can_grant_analyst(who, team, leads),
+        "manage": is_team_manager(who, team, leads),  # coach-only comments, shared clips
+    }
+    return {action for action, ok in checks.items() if ok}
+
+
+D1_PLAYER = viewer(teams=[{"team": 80, "rel": ["player"]}])
+H3_HELPER = D1_PLAYER.with_grants({H3})  # a D1 player helping H3
+H3_PLAYER_HELPER = viewer(teams=[{"team": 92, "rel": ["player"]}]).with_grants({H3})
+HELPS = {"see", "upload", "tag", "share"}
+LEADS = set(ACTIONS)
+
+HELPER_MATRIX = [
+    # (who, team, what they may do)
+    (H3_HELPER, H3_NOW, HELPS),
+    (H3_HELPER, H3_PREV, HELPS),  # every season of the team, like a coach
+    (H3_HELPER, D1_NOW, {"see"}),  # their own team: a player there
+    (H3_HELPER, HERREN1_NOW, set()),  # another team
+    (D1_PLAYER, H3_NOW, set()),  # the grant revoked: nothing loaded for the request
+    (D1_PLAYER.with_grants({OFF}), OFF_TEAM, set()),  # a team that does not use Nomal
+    (H3_PLAYER_HELPER, H3_PREV, HELPS),  # a player picked to help sees earlier seasons too
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, {"see"}),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, LEADS),
+    (viewer(teams=[{"team": 12, "rel": ["team_responsible"]}]), H3_NOW, LEADS - {"upload"}),
+    (viewer(sport_admin=("volleyball",)), H3_NOW, LEADS),
+    (viewer(roles=("admin",)), H3_NOW, LEADS - {"upload"}),
+    (viewer(roles=("admin",)), OFF_TEAM, set()),
+    (viewer(roles=("vorstand",)), H3_NOW, set()),
+]
+
+
+def test_helper_permission_matrix() -> None:
+    for who, team, expected in HELPER_MATRIX:
+        assert allowed(who, team) == expected, (who, team)
+
+
+def test_helpers_see_their_teams_every_season_and_upload_there() -> None:
+    assert visible_team_ids(H3_HELPER, TEAMS) == {92, 12, 80}
+    assert is_analyst(H3_HELPER, H3_NOW) and not is_analyst(H3_HELPER, D1_NOW)
+    assert not is_analyst(D1_PLAYER.with_grants({OFF}), OFF_TEAM)
+    assert can_use_inbox(H3_HELPER, TEAMS)
+    assert not can_use_inbox(D1_PLAYER, TEAMS)
+    # Grants never come from the login token: the API reads them for every request.
+    claims = {"mid": 1, "sub": "u", "name": "x", "analyst_lineages": [str(H3)]}
+    assert Viewer.from_claims(claims).analyst_lineages == frozenset()
