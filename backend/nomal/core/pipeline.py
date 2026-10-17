@@ -121,9 +121,14 @@ def retention_until(day: date) -> date:
 
 
 def team_folder(team: WdTeam) -> str:
-    """A team's folder name on the NAS, e.g. vb-H3, bb-Herren-1: in raw/ and in the inbox."""
+    """A team's folder name on the NAS, e.g. vb-H3, bb-Herren-1: in raw/ and in the inbox.
+    A guest club's team gets its own, vb-guest-<club>-<team>, so its originals never mix with
+    a KSCW team of the same name and can be deleted together (PLAN §4.5)."""
     sport = "vb" if team.sport == "volleyball" else "bb"
     team_part = re.sub(r"[^A-Za-z0-9-]+", "-", team.name).strip("-") or str(team.id)
+    if team.guest:
+        club = re.sub(r"[^A-Za-z0-9-]+", "-", team.lineage.guest_club or "").strip("-")
+        return f"{sport}-guest-{club or team.id}-{team_part}"
     return f"{sport}-{team_part}"
 
 

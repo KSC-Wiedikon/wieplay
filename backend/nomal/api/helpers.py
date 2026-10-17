@@ -4,6 +4,9 @@ remove them; every change is in the audit log.
 
 What a helper may do is decided in core/permissions.py (they tag, review, upload and share;
 they do not download, delete or pick other helpers).
+
+Helpers are KSCW members for KSCW teams: guest clubs (PLAN §4.5) have none for now, a guest
+gets 403 here, and the search never lists a guest club's people.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from nomal.api.access import TeamAccess, visible_team
 from nomal.api.deps import DbDep, ViewerDep, audit
 from nomal.api.media import permission_cache
 from nomal.core.grants import ANALYST, open_grants
+from nomal.core.guests import GUEST_ID_BASE, is_guest_id
 from nomal.core.models import TeamGrant, WdMember, WdTeam, WdTeamMember
 from nomal.core.permissions import LEAD_RELS, Viewer, can_grant_analyst
 
@@ -57,6 +61,8 @@ class CandidateOut(BaseModel):
 
 
 def _granting(db: Session, viewer: Viewer, team_id: int) -> TeamAccess:
+    if viewer.guest:
+        raise HTTPException(403, "Guest clubs have no helpers")
     access = visible_team(db, viewer, team_id)
     if not can_grant_analyst(viewer, access.ref, access.leads):
         raise HTTPException(403, "Only the team's coaches, team managers and admins pick helpers")
@@ -136,14 +142,16 @@ def helper_candidates(
 ) -> list[CandidateOut]:
     """Active club members whose name matches every word of `q` (at least 2 letters), minus
     the team's helpers, coaches and team managers. The mirror holds the members of the teams
-    that use Nomal."""
+    that use Nomal; guest clubs' people are never listed."""
     access = _granting(db, viewer, team_id)
     words = q.split()[:4]
     if len("".join(words)) < 2:
         return []
     lineage = access.team.lineage_id
     taken = {g.member_id for g in open_grants(db, lineage)} | _lead_member_ids(db, lineage)
-    query = select(WdMember.id, WdMember.display_name).where(WdMember.active.is_(True))
+    query = select(WdMember.id, WdMember.display_name).where(
+        WdMember.active.is_(True), WdMember.id < GUEST_ID_BASE
+    )
     for word in words:
         query = query.where(WdMember.display_name.ilike(_like(word), escape="\\"))
     if taken:
@@ -157,7 +165,7 @@ def helper_candidates(
 def add_helper(team_id: int, body: HelperIn, viewer: ViewerDep, db: DbDep) -> HelperOut:
     access = _granting(db, viewer, team_id)
     lineage = access.team.lineage_id
-    member = db.get(WdMember, body.member_id)
+    member = None if is_guest_id(body.member_id) else db.get(WdMember, body.member_id)
     if member is None or not member.active:
         raise HTTPException(404, "No active club member with this id")
     if member.id in _lead_member_ids(db, lineage):

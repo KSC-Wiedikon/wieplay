@@ -26,7 +26,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nomal.core import names, tagging
+from nomal.core import guests, names, tagging
 from nomal.core.config import get_settings
 from nomal.core.models import Event, Period, Segment, Video, WdGame, WdTeam
 
@@ -435,9 +435,12 @@ def sides(db: Session, video: Video, lang: Lang) -> tuple[Sides, WdGame | None]:
     game = db.get(WdGame, video.game_id) if video.game_id is not None else None
     team = db.get(WdTeam, video.team_id)
     settings = get_settings()
-    found = names.for_video(
-        db, video, team.name if team else "", settings.club_short_name, settings.club_name
+    club_short, club_name = (
+        guests.club_names(team, settings.club_short_name, settings.club_name)
+        if team
+        else (settings.club_short_name, settings.club_name)
     )
+    found = names.for_video(db, video, team.name if team else "", club_short, club_name)
     them_short = found.them or TEXT[lang]["them"]
     them_full = found.them_set or found.them_full or TEXT[lang]["them"]
     if game is not None and game.home_name and game.away_name:

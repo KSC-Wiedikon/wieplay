@@ -38,7 +38,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from nomal.core import analysis, calibration, jobs, tagging
+from nomal.core import analysis, calibration, guests, jobs, tagging
 from nomal.core.config import Settings, get_settings
 from nomal.core.models import (
     AnalysisArtifact,
@@ -508,7 +508,12 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         )
         .order_by(Video.recorded_on, Video.id)
     )
+    # Guest clubs that have not agreed to train the shared models (PLAN §4.5).
+    no_training = guests.no_training_lineages(db)
     for video in videos:
+        if video.lineage_id in no_training:
+            skipped.append({"video_id": str(video.id), "reason": "guest club, no training"})
+            continue
         entry = video_inputs(db, video)
         if entry is None:
             continue

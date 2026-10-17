@@ -26,6 +26,7 @@ from nomal.api.deps import (
     audit,
     hash_session_id,
 )
+from nomal.core.guests import is_guest_id
 from nomal.core.models import LoginNonce, UserSession
 from nomal.core.tokens import TokenError, verify_bridge_token
 
@@ -101,6 +102,8 @@ def callback(
         return _login_failed("token")
     if not secrets.compare_digest(claims.state, state):
         return _login_failed("state")
+    if is_guest_id(claims.member_id):
+        return _login_failed("member")  # guest clubs' ids: never a Wiedisync member
 
     try:
         db.add(LoginNonce(jti=claims.jti))

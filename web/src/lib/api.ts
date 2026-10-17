@@ -4,13 +4,21 @@ import type {
   Blocker,
   ChangesIn,
   ChangesOut,
+  CoachInvited,
   EventRevision,
   FilmingCheck,
   Game,
+  GuestInvite,
+  GuestPerson,
+  GuestPersonIn,
+  GuestTeam,
+  GuestTeamCreate,
+  GuestTeamUpdate,
   Helper,
   HelperCandidate,
   ImportChannel,
   InboxFile,
+  InviteLink,
   Job,
   Me,
   PartUrl,
@@ -177,6 +185,24 @@ export function loginUrl(next: string): string {
   return `/api/auth/login?next=${encodeURIComponent(next)}`
 }
 
+/** Guest clubs log in with email and password (PLAN §4.5). A wrong one is a 401 like any other. */
+export function guestLogin(email: string, password: string): Promise<undefined> {
+  return send<undefined>('/api/auth/guest/login', { method: 'POST', body: { email, password } })
+}
+
+/** What an invite link is for; 404 unknown, 410 used or expired. Needs no session. */
+export function inviteInfo(token: string, signal?: AbortSignal): Promise<GuestInvite> {
+  return send<GuestInvite>(`/api/auth/guest/invite/${encodeURIComponent(token)}`, { signal })
+}
+
+/** Sets up the login (or a new password) from an invite link and logs in; answers where to go. */
+export function acceptInvite(
+  token: string,
+  body: { email: string | null; password: string; accept_privacy: true },
+): Promise<{ next: string }> {
+  return send<{ next: string }>(`/api/auth/guest/invite/${encodeURIComponent(token)}`, { method: 'POST', body })
+}
+
 export const api = {
   me: fetchMe,
   logout: () => apiRequest<undefined>('/api/auth/logout', { method: 'POST' }),
@@ -193,6 +219,25 @@ export const api = {
     apiRequest<Helper>(`/api/teams/${id}/helpers`, { method: 'POST', body: { member_id: memberId, note } }),
   removeHelper: (id: number, grantId: string) =>
     apiRequest<undefined>(`/api/teams/${id}/helpers/${grantId}`, { method: 'DELETE' }),
+  // A guest club's people (PLAN §4.5): its coaches and admins keep the roster and make invite links
+  teamPeople: (id: number, signal?: AbortSignal) => apiRequest<GuestPerson[]>(`/api/teams/${id}/people`, { signal }),
+  addPerson: (id: number, body: GuestPersonIn) =>
+    apiRequest<GuestPerson>(`/api/teams/${id}/people`, { method: 'POST', body }),
+  editPerson: (id: number, memberId: number, body: Partial<GuestPersonIn>) =>
+    apiRequest<GuestPerson>(`/api/teams/${id}/people/${memberId}`, { method: 'PATCH', body }),
+  removePerson: (id: number, memberId: number) =>
+    apiRequest<undefined>(`/api/teams/${id}/people/${memberId}`, { method: 'DELETE' }),
+  invitePerson: (id: number, memberId: number) =>
+    apiRequest<InviteLink>(`/api/teams/${id}/people/${memberId}/invite`, { method: 'POST' }),
+  declareAdults: (id: number) =>
+    apiRequest<{ adults_declared_at: string }>(`/api/teams/${id}/adults`, { method: 'POST' }),
+  guestTeams: (signal?: AbortSignal) => apiRequest<GuestTeam[]>('/api/admin/guest-teams', { signal }),
+  createGuestTeam: (body: GuestTeamCreate) =>
+    apiRequest<GuestTeam>('/api/admin/guest-teams', { method: 'POST', body }),
+  updateGuestTeam: (id: number, body: GuestTeamUpdate) =>
+    apiRequest<GuestTeam>(`/api/admin/guest-teams/${id}`, { method: 'PUT', body }),
+  inviteCoach: (id: number, body: { name: string; number: number | null }) =>
+    apiRequest<CoachInvited>(`/api/admin/guest-teams/${id}/coaches`, { method: 'POST', body }),
   adminTeams: (signal?: AbortSignal) => apiRequest<AdminTeam[]>('/api/admin/teams', { signal }),
   setTeamEnabled: (id: number, enabled: boolean) =>
     apiRequest<AdminTeam>(`/api/admin/teams/${id}`, { method: 'PUT', body: { enabled } }),

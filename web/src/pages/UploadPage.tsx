@@ -110,7 +110,10 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const today = todayIso()
   const oldest = addDaysIso(today, -OLDEST_DAYS)
 
-  const [match, setMatch] = useState('')
+  // A guest club's team (PLAN §4.5) has no Wiedisync games, no NAS inbox and no link imports:
+  // a date and a title, and the files from this device.
+  const guest = team.guest === true
+  const [match, setMatch] = useState(guest ? OTHER_MATCH : '')
   const [otherDate, setOtherDate] = useState(today)
   const [otherTitle, setOtherTitle] = useState('')
   const [source, setSource] = useState<Source>('device')
@@ -121,7 +124,7 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const [pairs, setPairs] = useState<FilePair[]>([])
 
   const games = useTeamGames(team.id)
-  const inbox = useInbox(true)
+  const inbox = useInbox(!guest)
   const me = useMe()
 
   const choices = useMemo<Choice[]>(
@@ -249,7 +252,7 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   return (
     <form onSubmit={onStart} className="flex flex-col gap-6">
       <Card className="flex flex-col gap-5 p-5">
-        {games.isPending ? (
+        {guest ? null : games.isPending ? (
           <Spinner />
         ) : games.isError ? (
           <LoadError onRetry={() => void games.refetch()} />
@@ -320,20 +323,22 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
       {on && filming.data?.allowed && (
         <>
           <Card className="flex flex-col gap-4 p-5">
-            <Segmented
-              legend={t('upload.sourceLegend')}
-              name={`${id}-source`}
-              value={chosenSource}
-              onChange={(next) => {
-                setSource(next)
-                create.reset()
-              }}
-              options={[
-                { value: 'device', label: t('upload.device') },
-                ...(inboxAvailable ? [{ value: 'inbox' as const, label: t('upload.inbox') }] : []),
-                { value: 'link', label: t('upload.link') },
-              ]}
-            />
+            {!guest && (
+              <Segmented
+                legend={t('upload.sourceLegend')}
+                name={`${id}-source`}
+                value={chosenSource}
+                onChange={(next) => {
+                  setSource(next)
+                  create.reset()
+                }}
+                options={[
+                  { value: 'device', label: t('upload.device') },
+                  ...(inboxAvailable ? [{ value: 'inbox' as const, label: t('upload.inbox') }] : []),
+                  { value: 'link', label: t('upload.link') },
+                ]}
+              />
+            )}
             {chosenSource === 'link' ? (
               <LinkPicker
                 value={link}

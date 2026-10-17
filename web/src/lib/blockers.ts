@@ -18,6 +18,8 @@ export function blockerMessage(t: TFunction, blocker: Blocker): string {
       return t('blockers.adult_check_unavailable')
     case 'roster_unavailable':
       return t('blockers.roster_unavailable')
+    case 'adults_not_declared':
+      return t('blockers.adults_not_declared')
     default:
       return t('blockers.unknown', { code: blocker.code })
   }

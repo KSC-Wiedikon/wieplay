@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, contains_eager
 
 from nomal.api.access import team_refs
 from nomal.api.deps import DbDep, ViewerDep
+from nomal.core import guests
 from nomal.core.models import TeamLineage, WdGame, WdTeam
 from nomal.core.permissions import (
     TeamRef,
@@ -20,6 +21,7 @@ from nomal.core.permissions import (
     can_export,
     can_grant_analyst,
     can_manage_nomal,
+    can_manage_people,
     can_share_with_team,
     can_tag,
     can_upload,
@@ -47,6 +49,8 @@ class TeamOut(BaseModel):
     can_tag: bool
     can_share: bool
     can_export: bool
+    # A guest club's team (PLAN §4.5): the club's name; None for a KSCW team.
+    club: str | None = None
 
 
 class TeamDetailOut(TeamOut):
@@ -54,6 +58,14 @@ class TeamDetailOut(TeamOut):
     can_upload: bool
     # Coaches and team managers (any season), sport admins, admins: pick the team's helpers.
     can_grant: bool
+    # A guest team: its coaches and admins keep the roster and send invite links.
+    guest: bool = False
+    can_manage_people: bool = False
+    # A guest team's videos this season and its limit ("12 of 30 videos").
+    video_count: int | None = None
+    video_limit: int | None = None
+    # The coach's "everyone we film is 18 or older" (PLAN §5.3); None: not yet.
+    adults_declared_at: datetime | None = None
 
 
 class MemberOut(BaseModel):
@@ -68,6 +80,9 @@ class MeOut(BaseModel):
     is_admin: bool
     sport_admin: list[str]
     teams: list[TeamOut]
+    # A guest club's member (PLAN §4.5): no Wiedisync, and the app hides what is KSCW's own.
+    guest: bool = False
+    club: str | None = None
 
 
 class GameOut(BaseModel):
@@ -93,14 +108,14 @@ def _visible_teams(db: Session, viewer: Viewer) -> list[WdTeam]:
         .join(WdTeam.lineage)
         .options(contains_eager(WdTeam.lineage))
     ).all()
-    refs = [TeamRef(t.id, t.sport, t.lineage_id, enabled) for t, enabled in rows]
+    refs = [TeamRef(t.id, t.sport, t.lineage_id, enabled, t.guest) for t, enabled in rows]
     ids = visible_team_ids(viewer, refs)
     teams = [t for t, _ in rows if t.id in ids]
     return sorted(teams, key=lambda t: (SPORT_ORDER.get(t.sport, 9), t.name, t.season))
 
 
 def _ref(team: WdTeam) -> TeamRef:
-    return TeamRef(team.id, team.sport, team.lineage_id, team.lineage.enabled)
+    return TeamRef(team.id, team.sport, team.lineage_id, team.lineage.enabled, team.guest)
 
 
 def _team_out(team: WdTeam, viewer: Viewer, leads: set[uuid.UUID]) -> TeamOut:
@@ -117,6 +132,7 @@ def _team_out(team: WdTeam, viewer: Viewer, leads: set[uuid.UUID]) -> TeamOut:
         can_tag=can_tag(viewer, ref, leads),
         can_share=can_share_with_team(viewer, ref, leads),
         can_export=can_export(viewer, ref, leads),
+        club=guests.club_of(team),
     )
 
 
@@ -140,6 +156,8 @@ def me(viewer: ViewerDep, db: DbDep) -> MeOut:
         is_admin=can_manage_nomal(viewer),
         sport_admin=sorted(viewer.sport_admin),
         teams=_team_list(db, viewer),
+        guest=viewer.guest,
+        club=viewer.club,
     )
 
 
@@ -153,11 +171,18 @@ def get_team(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamDetailOut:
     team = _get_visible_team(db, viewer, team_id)
     leads = lead_lineages(viewer, team_refs(db))
     ref = _ref(team)
-    return TeamDetailOut(
+    out = TeamDetailOut(
         **_team_out(team, viewer, leads).model_dump(),
         can_upload=can_upload(viewer, ref),
         can_grant=can_grant_analyst(viewer, ref, leads),
     )
+    if team.guest:
+        out.guest = True
+        out.can_manage_people = can_manage_people(viewer, ref, leads)
+        out.video_count = guests.video_count(db, team.id)
+        out.video_limit = team.lineage.guest_video_limit
+        out.adults_declared_at = team.lineage.guest_adults_declared_at
+    return out
 
 
 class SeasonOut(BaseModel):

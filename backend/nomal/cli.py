@@ -139,6 +139,7 @@ def import_batch(path: str, by: str, spacing_min: int, dry_run: bool) -> int:
 
     from nomal.core import batch
     from nomal.core.filming import CLUB_TZ
+    from nomal.core.guests import GUEST_ID_BASE
     from nomal.core.models import WdMember
     from nomal.core.sync import HttpBridgeClient
 
@@ -161,7 +162,12 @@ def import_batch(path: str, by: str, spacing_min: int, dry_run: bool) -> int:
         bridge = HttpBridgeClient(settings.bridge_api_url, settings.bridge_service_token)
     sessions = make_sessionmaker(make_engine(settings.database_url))
     with sessions() as db:
-        members = list(db.scalars(select(WdMember).where(WdMember.display_name == by)))
+        members = list(
+            db.scalars(
+                # A KSCW member: a guest club's person never imports for the club.
+                select(WdMember).where(WdMember.display_name == by, WdMember.id < GUEST_ID_BASE)
+            )
+        )
         if len(members) != 1:
             print(f"--by must name exactly one member, found {len(members)}", file=sys.stderr)
             return 2

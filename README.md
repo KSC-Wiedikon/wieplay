@@ -43,6 +43,10 @@ npm run dev                                # http://localhost:5173, proxies /api
 Log in with any persona on the fake bridge page. Log in as `admin` and open *Admin → Teams*
 to switch teams on and run the sync.
 
+Guest clubs (other clubs' teams with their own logins, `docs/PLAN.md` §4.5): as `admin`, *Admin
+→ Teams → Guest clubs* creates one and makes its coach's invite link; open the link in a private
+window to set up the guest login.
+
 Video needs the S3 settings in `backend/.env` and a worker:
 
 ```bash

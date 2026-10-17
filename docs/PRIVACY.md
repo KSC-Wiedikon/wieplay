@@ -1,19 +1,22 @@
 # Nomal: data protection
 
-**Draft, 15.10.2026, updated 16.10.2026**, for review by the club's privacy contact before
+**Draft, 15.10.2026, updated 17.10.2026** (guest clubs, §11), for review by the club's privacy contact before
 Nomal is used beyond the pilot teams. Not legal advice. It describes what Nomal does today and
 what the plan adds later; design background in `docs/PLAN.md` §5 and §10.1.
 
 ## 1. Who is responsible
 
 KSC Wiedikon (the club) is responsible for the processing. Contact: the club's privacy
-contact (to be named on the privacy page). Nomal is built and run by club volunteers.
+contact (to be named on the privacy page). Nomal is built and run by club volunteers. A guest
+club (§11) is responsible for its own footage and for informing its people; KSC Wiedikon
+hosts it.
 
 ## 2. What Nomal is for
 
-Video analysis for the club's own teams: coaches and players watch, tag and discuss
-footage of their **matches** to improve. Trainings are not filmed for Nomal for now. No
-publication, no commercial use, no scouting of other clubs, no use outside the team.
+Video analysis for the club's own teams, and for the teams of guest clubs the club lets in
+(§11): coaches and players watch, tag and discuss footage of their **matches** to improve.
+Trainings are not filmed for Nomal for now. No publication, no commercial use, no scouting of
+other clubs, no use outside the team.
 
 Videos come in three ways, all for a match (a game from Wiedisync, or a friendly, tournament
 or cup game with its date and a title):
@@ -34,8 +37,9 @@ All three go through the same checks (§5) and the same processing.
 | Other people in the hall (referees, spectators) | Incidentally in the video. The camera is framed on the court | Footage |
 | Everyone on court | Analysis signals derived from the video: ball positions, movement, sound levels and whistles (§6). No pictures, no sound, no names | Nomal |
 | Everyone who logs in | Session (8 hours), audit log entries (logins, videos watched, uploads, imports, deletions, exports, permission changes) | Nomal |
+| People of a guest club (§11) | As for the club's own players and coaches above; the email they log in with and their password (as a scrypt hash) | The guest club's coaches (names, numbers), the person (email, password) |
 
-**Not in Nomal**: email, phone, address, birthdate. Whether everyone on a roster is 18 or
+**Not in Nomal**: email (except a guest club's logins, §11), phone, address, birthdate. Whether everyone on a roster is 18 or
 older is answered by Wiedisync as yes or no with counts; birthdates never leave Wiedisync.
 
 ## 4. Why it is allowed
@@ -76,6 +80,9 @@ Enforced in code, not only stated:
   nobody films a blocked match.
 - Teams with minors on the roster are switched off in Nomal (DU23-1 since 15.10.2026),
   which also keeps their names out of Nomal.
+- A guest club's team (§11) is not in Wiedisync: instead a coach of the team confirms once,
+  before the first upload, that everyone filmed (players, coaches and opponents) is 18 or older
+  (an adult league). Without that confirmation Nomal refuses the team's videos.
 
 ## 6. Automatic analysis
 
@@ -142,13 +149,17 @@ R2, the NAS; encrypted before leaving the server).
 | Tags, rallies, scores, roster snapshots, comments | As long as the video |
 | Audit log | 12 months |
 | Sessions, login records | 30 days |
+| A guest club's login (email, password hash) | While its person is on a team; disabled when they leave it, deleted 30 days later |
+| Invite links | Work 14 days; deleted 30 days after they expired |
 | Members' names and numbers | While their team uses Nomal; removed when no Nomal team lists them |
 
 A nightly job enforces this and logs what it deleted.
 
 ## 9. Protection
 
-- Login only through Wiedisync; sessions expire after 8 hours.
+- Login only through Wiedisync; sessions expire after 8 hours. Guest clubs (§11) log in with
+  an email and a password set from an invite link; their sessions expire after 14 days, and 10
+  wrong passwords in a row lock the login for 15 minutes.
 - Who sees what follows the club's roles: players see their own teams and seasons, coaches
   their teams, sport admins their sport, admins everything (and that is logged).
 - **No public links.** Every piece of video is fetched through Nomal with the session; the
@@ -168,7 +179,39 @@ A nightly job enforces this and logs what it deleted.
 - **Object**: a member who does not want to be filmed or kept in a video tells a coach or
   admin. There is no consent to withdraw; the request is handled as above.
 
-## 11. Open points for the privacy contact
+## 11. Guest clubs
+
+Since 17.10.2026 KSC Wiedikon can let teams of other volleyball clubs (guest clubs) use Nomal
+for their own matches (`docs/PLAN.md` §4.5; how an admin sets one up:
+`docs/runbooks/guest-club.md`).
+
+- **The guest club is responsible for its footage**: it decides to film its matches, it
+  informs its players and coaches (what is filmed, who sees it, this notice), and it handles
+  their requests. It agrees to this in writing with KSC Wiedikon before its team is created,
+  including whether its games may train Nomal (below).
+- **KSC Wiedikon hosts it** with the same processors and rules as its own footage (§7): the
+  Hetzner server and storage in Germany, the club's hardware in Switzerland, no third party in
+  the browser, no public links, the same retention (§8).
+- **Adults only**: Nomal has no birthdates of a guest club's people. Before the first upload a
+  coach of the guest team confirms: "Everyone we film — our players, coaches and our opponents —
+  is 18 or older (adult league)." Without it, Nomal refuses its videos.
+- **Who sees it**: only the guest team's own people (players watch, tag and review; coaches
+  also upload, download, delete and keep the roster) and KSC Wiedikon's admins (logged). KSC Wiedikon's members
+  never see a guest team, and guest clubs never see KSC Wiedikon's teams, videos or people.
+- **Logins by invite only**: an admin invites the team's first coach, the coaches invite their
+  people. Each link works once, for 14 days; Nomal keeps only a hash of it and sends no email.
+  A person taken off the team loses access at once and their name leaves Nomal (their tags
+  keep the shirt number); their login is deleted 30 days later.
+- **Training**: the automatic analysis runs on a guest team's games like on the club's own
+  (§6), but its reviewed games train Nomal's shared models only if the guest club agreed to it.
+  Without that agreement they never go into a training run.
+- **Limits**: a guest team has a number of videos per season (30 unless agreed otherwise).
+- **Deletion on request**: on the guest club's request KSC Wiedikon deletes its videos (with
+  their originals and analysis signals), its people and their logins; the club or a person can
+  also ask for a single video or part of it to be deleted, or a person to be removed from its
+  tags (§10).
+
+## 12. Open points for the privacy contact
 
 1. Sign or record the DPA with Hetzner (the club's own account since 16.10.2026; server and
    object storage).
@@ -181,3 +224,6 @@ A nightly job enforces this and logs what it deleted.
    (what, why, who sees it, how long, processors including YouTube and Twitch for imports,
    the automatic analysis, contact, rights), and tell the members.
 5. Confirm the club's position on filming opponents in adult leagues (§4).
+6. Guest clubs (§11): agree the text of the written agreement with a guest club and check the
+   short privacy page in Nomal (`/privacy`, a draft written with this document) before the first
+   guest club is invited.

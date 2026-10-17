@@ -93,9 +93,9 @@ function TabNav({ items }: { items: NavItem[] }) {
   )
 }
 
-function MemberChip({ name }: { name: string }) {
+function MemberChip({ name, club }: { name: string; club?: string | null }) {
   return (
-    <span className="flex shrink-0 items-center gap-2 rounded-full xl:pr-2" title={name}>
+    <span className="flex shrink-0 items-center gap-2 rounded-full xl:pr-2" title={club ? `${name} · ${club}` : name}>
       <span
         aria-hidden="true"
         className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-xs font-bold text-on-accent"
@@ -151,7 +151,13 @@ export function Header({ me }: { me: Me }) {
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </Button>
           <span aria-hidden="true" className="mx-1 hidden h-6 w-px bg-hairline sm:block" />
-          <MemberChip name={me.member.name} />
+          {/* A guest club's member (PLAN §4.5): whose Nomal this is for them. */}
+          {me.guest && me.club && (
+            <span className="hidden max-w-40 truncate text-sm font-semibold text-muted sm:inline" title={me.club}>
+              {me.club}
+            </span>
+          )}
+          <MemberChip name={me.member.name} club={me.guest ? me.club : null} />
           <Button
             variant="ghost"
             className="max-xl:w-11 max-xl:px-0 max-xl:sm:w-9"

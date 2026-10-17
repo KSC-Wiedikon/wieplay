@@ -13,6 +13,7 @@ import { formatDate } from '../lib/format'
 import { useTeamVideos, useUpcomingFilming, useVideoConfig } from '../lib/queries'
 import type { TeamDetail, UpcomingFilming, Video } from '../lib/types'
 import { byMonth, monthLabel } from '../lib/video'
+import { QuotaLine } from './GuestSections'
 
 // Videos
 
@@ -37,6 +38,7 @@ export function VideosSection({ team }: { team: TeamDetail }) {
           ) : null
         }
       />
+      <QuotaLine team={team} />
       {disabled ? (
         <Message>{t('video.notConfigured')}</Message>
       ) : videos.isPending ? (

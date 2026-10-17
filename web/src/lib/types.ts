@@ -20,6 +20,8 @@ export interface Team {
   can_tag: boolean
   can_share: boolean
   can_export: boolean
+  /** A guest club's team (PLAN §4.5): the club's name; null or missing for a KSCW team. */
+  club?: string | null
 }
 
 export interface TeamDetail extends Team {
@@ -27,6 +29,15 @@ export interface TeamDetail extends Team {
   can_upload: boolean
   /** Coaches and team managers (any season), sport admins, admins: pick the team's helpers. */
   can_grant?: boolean
+  /** A guest club's team: no Wiedisync games, its coaches keep the roster (People). */
+  guest?: boolean
+  /** The team's coaches and admins: add and remove people, make invite links. */
+  can_manage_people?: boolean
+  /** A guest team's videos this season and its limit (null: no limit). */
+  video_count?: number | null
+  video_limit?: number | null
+  /** The coach confirmed that everyone filmed is 18 or older; null: not yet (no uploads). */
+  adults_declared_at?: string | null
 }
 
 /** A team helper (GET /api/teams/{id}/helpers): a Nomal grant for every season of the team. */
@@ -62,6 +73,9 @@ export interface Me {
   is_admin: boolean
   sport_admin: SportName[]
   teams: Team[]
+  /** A guest club's member (a Nomal login, not Wiedisync): the app hides what is KSCW's own. */
+  guest?: boolean
+  club?: string | null
 }
 
 export interface Game {
@@ -999,4 +1013,86 @@ export interface ExportIn {
   title?: string
   /** A game recap: the language of the words on the picture (the viewer's). */
   lang?: 'en' | 'de'
+}
+
+// Guest clubs (PLAN §4.5): other clubs' teams with their own logins.
+
+export type GuestRole = 'player' | 'coach'
+
+/** A person of a guest team (GET /api/teams/{id}/people). Login details for coaches and admins only. */
+export interface GuestPerson {
+  member_id: number
+  name: string
+  number: number | null
+  role: GuestRole
+  /** Has a login; null when the viewer may not see it (players). */
+  account: boolean | null
+  disabled: boolean | null
+  last_login_at: string | null
+  /** An invite link that still works, until then. */
+  invite_expires_at: string | null
+  /** The viewer themself. */
+  me: boolean
+}
+
+export interface GuestPersonIn {
+  name: string
+  number: number | null
+  role?: GuestRole
+}
+
+/** What an invite link is for (GET /api/auth/guest/invite/{token}). */
+export interface GuestInvite {
+  club: string
+  team: string
+  team_id: number
+  season: string
+  sport: SportName
+  name: string
+  role: GuestRole
+  /** A login exists: the link sets a new password. */
+  has_account: boolean
+}
+
+/** A new invite link: shown once (only its hash is kept). */
+export interface InviteLink {
+  link: string
+  expires_at: string
+}
+
+/** A guest team in Admin → Teams (GET /api/admin/guest-teams). */
+export interface GuestTeam {
+  id: number
+  lineage_id: string
+  club: string
+  name: string
+  sport: SportName
+  season: string
+  league: string | null
+  enabled: boolean
+  training_ok: boolean
+  video_limit: number | null
+  videos: number
+  people: number
+  accounts: number
+  adults_declared_at: string | null
+}
+
+export interface GuestTeamCreate {
+  club: string
+  name: string
+  league: string | null
+  season: string | null
+  video_limit: number | null
+  training_ok: boolean
+}
+
+export interface GuestTeamUpdate {
+  video_limit?: number | null
+  training_ok?: boolean
+  enabled?: boolean
+}
+
+export interface CoachInvited extends InviteLink {
+  person: GuestPerson
 }

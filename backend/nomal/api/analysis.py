@@ -26,7 +26,7 @@ from sqlalchemy import select
 
 from nomal.api.access import TeamAccess, visible_video
 from nomal.api.deps import DbDep, SettingsDep, ViewerDep, audit
-from nomal.core import actions, analysis, players, scoring, tagging
+from nomal.core import actions, analysis, guests, players, scoring, tagging
 from nomal.core.config import Settings
 from nomal.core.models import Job, ModelRun, Segment, Video
 from nomal.core.permissions import (
@@ -478,7 +478,7 @@ def analysis_out(
             status=job.status,
             progress=job.progress,
             message=job.message,
-            error=job.error if manager else None,
+            error=guests.error_for(viewer, job.error) if manager else None,
             created_at=job.created_at,
             started_at=job.started_at,
             finished_at=job.finished_at,

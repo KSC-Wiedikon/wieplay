@@ -7,9 +7,17 @@ import { PageHeader } from '../components/PageHeader'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { guideDe } from '../i18n/guide.de'
 import { guideEn, type Guide, type GuideKey } from '../i18n/guide.en'
+import { useIsGuest } from '../lib/guests'
+import { NotFoundPage } from './NotFoundPage'
 
 /** The guide for team helpers (PLAN §5.1 "analyst"): reviewing suggestions, tagging, why it matters. */
 export function GuidePage() {
+  // KSCW's helpers' guide: guest clubs have no helpers.
+  if (useIsGuest()) return <NotFoundPage />
+  return <GuideContent />
+}
+
+function GuideContent() {
   const { t, i18n } = useTranslation()
   const g: Guide = i18n.language === 'de' ? guideDe : guideEn
   const sections: [string, string][] = [

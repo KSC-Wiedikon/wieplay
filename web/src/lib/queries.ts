@@ -1,6 +1,7 @@
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, UnauthorizedError } from './api'
+import { markLoggedOut } from './guests'
 import { keys } from './queryClient'
 import { useToast } from './toast'
 import type { AdminTeam, ImportChannel, Job, Policy, PolicyUpdate, Video, Worker } from './types'
@@ -39,6 +40,8 @@ export function useLogout() {
   const toast = useToast()
   const { t } = useTranslation()
   const loggedOut = () => {
+    // The login page stays: it must not send a KSCW member straight back into Wiedisync.
+    markLoggedOut()
     client.removeQueries({ predicate: (query) => query.queryKey[0] !== keys.me[0] })
     client.setQueryData(keys.me, null)
   }

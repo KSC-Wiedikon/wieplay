@@ -2,13 +2,14 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
-import { Chip, SportBadge } from '../../components/Badge'
+import { Badge, Chip, SportBadge } from '../../components/Badge'
 import { Mark } from '../../components/Brand'
 import { Card } from '../../components/Card'
 import { CalendarIcon, ChevronDownIcon, FilmIcon, HistoryIcon } from '../../components/icons'
 import { VideoPoster } from '../../components/VideoPoster'
 import { cx } from '../../lib/cx'
 import { formatDate } from '../../lib/format'
+import { useIsGuest } from '../../lib/guests'
 import { teamRoleLabels } from '../../lib/roles'
 import { sportOf } from '../../lib/sport'
 import type { Team, Video } from '../../lib/types'
@@ -44,6 +45,7 @@ export function TeamCard({
   videos: UseQueryResult<Video[]> | undefined
 }) {
   const { t } = useTranslation()
+  const guest = useIsGuest()
   const list = videos?.data ? newestFirst(videos.data) : null
   const poster = list?.find((video) => video.status === 'ready' && video.has_thumbs)
   const newest = list?.[0]
@@ -67,8 +69,10 @@ export function TeamCard({
             <Mark sport={sportOf(latest.sport)} className="size-14 opacity-90" />
           </div>
         )}
-        <span className="absolute top-3 left-3">
+        <span className="absolute top-3 left-3 flex gap-1.5">
           <SportBadge sport={latest.sport} />
+          {/* A guest club's team (PLAN §4.5): admins see it beside KSCW's own. */}
+          {latest.club && !guest && <Badge>{t('guests.badge')}</Badge>}
         </span>
       </div>
 
@@ -86,7 +90,7 @@ export function TeamCard({
               {latest.name}
             </Link>
           </h3>
-          <p className="text-sm text-muted">{[latest.league, latest.season].filter(Boolean).join(' · ')}</p>
+          <p className="text-sm text-muted">{[latest.club, latest.league, latest.season].filter(Boolean).join(' · ')}</p>
         </div>
 
         <Roles team={latest} />

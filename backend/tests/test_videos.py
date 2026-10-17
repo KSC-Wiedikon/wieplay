@@ -685,9 +685,19 @@ def test_housekeeping_applies_the_retention_rules(
                 "VALUES (now() - interval '400 days', 'ancient', '{}')"
             )
         )
+        # A guest club's logins: one disabled long ago, one recently, one in use.
+        conn.execute(
+            text(
+                "INSERT INTO guest_account (member_id, email, password_hash, disabled_at) VALUES "
+                "(1000000001, 'a@x.ch', 'h', now() - interval '31 days'), "
+                "(1000000002, 'b@x.ch', 'h', now() - interval '29 days'), "
+                "(1000000003, 'c@x.ch', 'h', NULL)"
+            )
+        )
     with app.state.sessionmaker() as db:
         done = run_housekeeping(db)
     assert done.videos == 1 and done.nonces >= 1 and done.sessions >= 1 and done.audit == 1
+    assert done.guest_accounts == 1
     assert [str(video_id) for video_id in done.video_ids] == [video["id"]]
     with db_engine.connect() as conn:
         assert conn.execute(text("SELECT status FROM video")).scalar() == "deleted"

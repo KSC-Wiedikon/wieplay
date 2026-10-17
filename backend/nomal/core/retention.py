@@ -6,6 +6,8 @@
 | Audit log | 12 months |
 | Sessions, login nonces | 30 days |
 | Inbox entries that left the share, adult-check answers | 30 days |
+| A guest club's login (email, password hash) | 30 days after it was disabled (PLAN §4.5) |
+| Invite links | 30 days after they expired |
 
 Expired videos go the same way as a coach's delete: soft-deleted, NAS originals and analysis
 signals purged by the worker, bucket objects swept by the API (videos.sweep_deleted), inbox
@@ -25,6 +27,8 @@ from nomal.core import pipeline
 from nomal.core.models import (
     AdultCheck,
     AuditLog,
+    GuestAccount,
+    GuestInvite,
     InboxFile,
     LoginNonce,
     UserSession,
@@ -43,6 +47,8 @@ class Housekeeping:
     audit: int
     inbox: int
     adult_checks: int
+    guest_accounts: int = 0
+    guest_invites: int = 0
     video_ids: tuple[uuid.UUID, ...] = ()  # the expired videos, so the API forgets them
 
     def counts(self) -> dict[str, int]:
@@ -97,6 +103,11 @@ def run_housekeeping(db: Session, now: datetime | None = None) -> Housekeeping:
             )
         ),
         adult_checks=purge(delete(AdultCheck).where(AdultCheck.on_date < today - SHORT_KEEP)),
+        # Taken off every team (or removed on request): the email goes 30 days later.
+        guest_accounts=purge(
+            delete(GuestAccount).where(GuestAccount.disabled_at < now - SHORT_KEEP)
+        ),
+        guest_invites=purge(delete(GuestInvite).where(GuestInvite.expires_at < now - SHORT_KEEP)),
         video_ids=tuple(video.id for video in expired),
     )
     if done.any():

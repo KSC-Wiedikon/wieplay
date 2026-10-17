@@ -1,3 +1,4 @@
+import dataclasses
 import uuid
 
 from nomal.core.permissions import TeamRef, Viewer, can_manage_nomal, visible_team_ids
@@ -190,3 +191,97 @@ def test_helpers_see_their_teams_every_season_and_upload_there() -> None:
     # Grants never come from the login token: the API reads them for every request.
     claims = {"mid": 1, "sub": "u", "name": "x", "analyst_lineages": [str(H3)]}
     assert Viewer.from_claims(claims).analyst_lineages == frozenset()
+
+
+# Guest clubs (PLAN §4.5): walled off both ways; only full admins see both sides.
+from nomal.core.permissions import (  # noqa: E402
+    can_import_link,
+    can_manage_people,
+    can_run_analysis,
+)
+
+GAST = uuid.uuid4()  # a guest club's team (two seasons)
+GAST_NOW = TeamRef(1_000_000_001, "volleyball", GAST, True, guest=True)
+GAST_PREV = TeamRef(1_000_000_002, "volleyball", GAST, True, guest=True)
+OTHER_GAST = TeamRef(1_000_000_003, "volleyball", uuid.uuid4(), True, guest=True)
+GAST_OFF = TeamRef(1_000_000_004, "volleyball", uuid.uuid4(), False, guest=True)
+ALL_TEAMS = [*TEAMS, GAST_NOW, GAST_PREV, OTHER_GAST, GAST_OFF]
+
+
+def guest(teams: list[dict[str, object]], roles: tuple[str, ...] = ()) -> Viewer:
+    """A guest session: team rows from the database, never roles."""
+    base = viewer(roles=roles, teams=teams)
+    return dataclasses.replace(base, guest=True, club="VBC Gast")
+
+
+def allowed_all(who: Viewer, team: TeamRef) -> set[str]:
+    leads = lead_lineages(who, ALL_TEAMS)
+    checks = {
+        "see": team.id in visible_team_ids(who, ALL_TEAMS),
+        "upload": can_upload(who, team),
+        "tag": can_tag(who, team, leads),
+        "share": can_share_with_team(who, team, leads),
+        "export": can_export(who, team, leads),
+        "delete": can_delete_video(who, team, leads),
+        "grant": can_grant_analyst(who, team, leads),
+        "manage": is_team_manager(who, team, leads),
+        "people": can_manage_people(who, team, leads),
+        "run": can_run_analysis(who, team, leads),  # the long jobs, by hand
+    }
+    return {action for action, ok in checks.items() if ok}
+
+
+GUEST_COACH = guest([{"team": GAST_NOW.id, "rel": ["coach"]}])
+GUEST_PLAYER = guest([{"team": GAST_NOW.id, "rel": ["player"]}])
+COACHES = {"see", "upload", "tag", "share", "export", "delete", "manage", "people", "run"}
+ADMIN_ON_GUESTS = COACHES - {"upload"}
+
+GUEST_MATRIX = [
+    # (who, team, what they may do)
+    (GUEST_COACH, GAST_NOW, COACHES),
+    (GUEST_COACH, GAST_PREV, COACHES - {"upload"}),  # every season, like a coach
+    (GUEST_COACH, OTHER_GAST, set()),  # another guest club
+    (GUEST_COACH, GAST_OFF, set()),  # switched off
+    (GUEST_COACH, H3_NOW, set()),  # no KSCW team, ever
+    (GUEST_PLAYER, GAST_NOW, {"see", "tag"}),  # players tag their own games (17.10.2026)
+    (GUEST_PLAYER, GAST_PREV, set()),  # players: the seasons they were on
+    (GUEST_PLAYER, H3_NOW, set()),
+    # A guest viewer with Wiedisync-looking roles or rows gets nothing from them.
+    (guest([{"team": 92, "rel": ["coach"]}], roles=("admin",)), H3_NOW, set()),
+    (guest([], roles=("admin",)), GAST_NOW, set()),
+    # KSCW members never see a guest team: players, coaches, sport admins, helpers.
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), GAST_NOW, set()),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), GAST_NOW, set()),
+    (viewer(sport_admin=("volleyball",)), GAST_NOW, set()),
+    (D1_PLAYER.with_grants({GAST}), GAST_NOW, set()),  # a grant on a guest team counts not
+    (viewer(teams=[{"team": GAST_NOW.id, "rel": ["coach"]}]), GAST_NOW, set()),  # forged row
+    # Full admins see both sides; they manage a guest team's people but pick no helpers.
+    (viewer(roles=("admin",)), GAST_NOW, ADMIN_ON_GUESTS),
+    (viewer(roles=("admin",)), GAST_OFF, set()),
+    # KSCW coaches keep their teams; their rosters are Wiedisync's, never edited in Nomal.
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, LEADS | {"run"}),
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, {"see", "tag"}),
+]
+
+
+def test_guest_permission_matrix() -> None:
+    for who, team, expected in GUEST_MATRIX:
+        assert allowed_all(who, team) == expected, (who, team)
+
+
+def test_guests_see_only_their_own_teams() -> None:
+    assert visible_team_ids(GUEST_COACH, ALL_TEAMS) == {GAST_NOW.id, GAST_PREV.id}
+    assert visible_team_ids(GUEST_PLAYER, ALL_TEAMS) == {GAST_NOW.id}
+    assert visible_team_ids(viewer(sport_admin=("volleyball",)), ALL_TEAMS) == {92, 12, 80}
+    admin = viewer(roles=("admin",))
+    assert visible_team_ids(admin, ALL_TEAMS) == {92, 12, 80, 86, GAST_NOW.id, GAST_PREV.id,
+                                                  OTHER_GAST.id}  # fmt: skip
+    assert not GUEST_COACH.is_admin and not guest([], roles=("superuser",)).is_admin
+    assert not can_manage_nomal(guest([], roles=("admin",)))
+
+
+def test_guests_neither_use_the_inbox_nor_import_links() -> None:
+    assert not can_use_inbox(GUEST_COACH, ALL_TEAMS)
+    assert can_use_inbox(viewer(teams=[{"team": 92, "rel": ["coach"]}]), ALL_TEAMS)
+    assert not can_import_link(GAST_NOW)
+    assert can_import_link(H3_NOW)
