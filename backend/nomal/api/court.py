@@ -412,7 +412,7 @@ def solve(video_id: uuid.UUID, body: PointsIn, viewer: ViewerDep, db: DbDep) -> 
 def _editable(db: DbDep, viewer: ViewerDep, video_id: uuid.UUID) -> Video:
     video, access = _readable(db, viewer, video_id)
     if not can_tag(viewer, access.ref, access.leads):
-        raise HTTPException(403, "Only the team's coaches and sport admins set up the court")
+        raise HTTPException(403, "Only the team's members, coaches and helpers set up the court")
     if video.status != "ready":
         raise HTTPException(409, "Set up the court once the video is ready")
     return video

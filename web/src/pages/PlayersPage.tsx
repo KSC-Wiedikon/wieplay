@@ -179,9 +179,11 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
                 <Button onClick={() => setAskSwap(true)} disabled={swap.isPending} title={t('players.swapHint')}>
                   {t('players.swap')}
                 </Button>
-                <Button variant="ghost" onClick={() => find.mutate()} disabled={find.isPending || busy} title={t('players.findAgainHint')}>
-                  {t('players.findAgain')}
-                </Button>
+                {(data.can_find ?? true) && (
+                  <Button variant="ghost" onClick={() => find.mutate()} disabled={find.isPending || busy} title={t('players.findAgainHint')}>
+                    {t('players.findAgain')}
+                  </Button>
+                )}
               </div>
             </div>
           )}
