@@ -276,6 +276,67 @@ sequenceDiagram
 No `CORS_ORIGIN` change is needed. A Cloudflare Tunnel public hostname `nomal.kscw.ch`
 (and `nomal-dev.kscw.ch`) pointing at the API's local port is.
 
+### 4.5 Guest clubs
+
+Built 17.10.2026. The owner wants to hand Nomal to other volleyball clubs' teams: they upload
+their games, see only their own, and (with their OK) give the models more training data. They
+have no Wiedisync account, so they get a Nomal login of their own. Onboarding and offboarding:
+`docs/runbooks/guest-club.md`.
+
+**Flow.**
+
+1. An admin creates the guest team (Admin → Teams → Guest clubs: club, team, league, season,
+   video limit, training OK) and invites its first coach: Nomal makes a link
+   `<public URL>/join/<token>`, shown once, valid 14 days. Only with the club's written OK.
+2. The coach opens the link, sets an email and a password (at least 10 characters), accepts
+   the privacy notice (`/privacy`) and lands on the team page. Nomal sends no email.
+3. On the team page (People) the coach adds the players and coaches (name, number, role) and
+   makes each one their own invite link. Players see the roster read-only.
+4. Before the first upload, a coach of the team confirms once: "Everyone we film — our
+   players, coaches and our opponents — is 18 or older (adult league)." (§5.3).
+5. Guests log in on the login page's guest form (email and password); KSCW members keep the
+   Wiedisync button, which the page remembers and follows without a click.
+
+Forgotten password = a new invite link from a coach or an admin: for someone with a login it
+sets a new password. A newer link replaces older ones.
+
+**Logins.** `POST /api/auth/guest/login` starts the same server-side session as the
+Wiedisync callback, for 14 days (guests cannot renew silently). Every failure answers "Wrong
+email or password" (unknown emails cost a dummy hash too); 10 wrong in a row lock the account
+for 15 minutes. Passwords: stdlib scrypt (n 2^15, r 8, p 1, 16-byte salt), at most 4 hashes at
+once. Guest sessions are rebuilt from the database on every request: a person taken off the
+roster, a disabled account or a switched-off team ends access at once. A person on no team any
+more has their login disabled (housekeeping deletes it 30 days later) and their name row
+removed, as the sync does for a KSCW member who leaves (tags keep the shirt number).
+
+**Data.** A guest team is a lineage with `guest_club` and a `wd_team` row with `guest = true`;
+its people are `wd_member` / `wd_team_member` rows like KSCW members, with ids from
+`guest_id_seq` (1 000 000 000 and up, far above Wiedisync's), so tagging, rosters, players,
+comments and stats work unchanged. The hourly Wiedisync sync never touches a guest row
+(rosters, the member purge, the `listed` flag, the lineage match by name). Logins in
+`guest_account`, links in `guest_invite` (§6.10).
+
+**Isolation (the wall).** Guests reach guest teams only, and only the rows they are on (a
+guest coach every season of the team). KSCW members, sport admins and helpers included, never
+see a guest team, its people or videos; only full admins see both sides (marked with the
+club). In `core/permissions.py`: a guest viewer has no roles, a Wiedisync login never carries
+guest ids, sport admins are Wiedisync's (KSCW teams only), helper grants never count on guest
+teams. Also: no helpers on guest teams (the member search is closed to guests and never lists
+guest people), no NAS inbox and no link imports (the allow-list holds KSCW's channels), court
+and scoreboard suggestions from other videos stay on their side, exports are watermarked
+"<club> intern", a guest team's originals get their own NAS folder (`vb-guest-<club>-<team>`).
+
+**Limits and training.** A video limit per team row (30 by default; `guest_video_limit`),
+counting every video not deleted; the team page shows "12 of 30 videos". Training runs
+(`train_rallies`, `train_actions`) leave out a guest team's games unless
+`guest_training_ok` (the club agreed); its games still get the models' suggestions.
+
+**Not yet.** Helpers on guest teams, link imports from a guest club's own channel, basketball
+guest teams, emails, and **the next season** (needed before 1 June 2027): a team row takes the
+matches of its own season only, so a guest team needs a new season's row in the same lineage
+with its people carried over (their logins keep working) and the adults confirmation asked
+again; today an admin can only create a new guest team, whose people would need new emails.
+
 ---
 
 ## 5. Permissions, privacy and revDSG
@@ -288,7 +349,7 @@ reasonable; have the club's privacy contact read §5 before launch.*
 Relations come from the login token and Nomal's `team_grant` table (analysts). "Team" means
 the team's **lineage** (§6.3) unless a season is named.
 
-| Action | Player | Analyst¹ | Coach / team manager | Sport admin (that sport) | Admin / superuser² |
+| Action⁶ | Player | Analyst¹ | Coach / team manager | Sport admin (that sport) | Admin / superuser² |
 |---|---|---|---|---|---|
 | Watch team videos, tags, clips | own seasons³ | ✓ | ✓ all seasons | ✓ | ✓ (logged, banner) |
 | Create own private reels, comment on clips | ✓ | ✓ | ✓ | ✓ | |
@@ -309,6 +370,10 @@ the team's **lineage** (§6.3) unless a season is named.
 ³ Players see the seasons they were rostered in; they lose access when they leave.
 ⁴ Owner, 16.10.2026: admins do the first tagging, so they tag, share and export too.
 ⁵ Since 17.10.2026: admins, too, add and remove a team's helpers.
+⁶ Guest clubs (§4.5): a guest club's coaches and players have the coach and player columns on
+  their own guest team only, plus the team's People (roster and invite links, coaches only).
+  Guest teams have no helpers, no sport admins (Wiedisync's are KSCW's) and no NAS inbox or link
+  imports. KSCW members never see a guest team; only full admins see both sides.
 
 The rules live in **one module** (`nomal/core/permissions.py`) with a table-driven test
 that enumerates this matrix. Every API route goes through it.
@@ -341,6 +406,13 @@ Enforced in code, not just stated:
    leagues have no under-18 opponents, so adult-league matches are filmed without a per-upload
    confirmation. Opponents appear by jersey number only, their data stays team-internal, and
    footage is deleted or trimmed on request. Recorded in `docs/PRIVACY.md`.
+6. **Guest clubs** (§4.5): Nomal has no birthdates of a guest club's people and never asks
+   Wiedisync about a guest team. Instead a coach of the guest team declares once, before the
+   first upload: "Everyone we film — our players, coaches and our opponents — is 18 or older
+   (adult league). I confirm." (`team_lineage.guest_adults_declared_at/_by`). The same gate
+   (`core/filming.py`) passes a guest team on that declaration and blocks it without one
+   (`adults_not_declared`); the team policy still applies. Uploads, the camera's own date and
+   the batch import all go through it; guest teams have no NAS inbox and no link imports.
 
 **DU23-1: switched off for now** (decided 15.10.2026, evening). On the real rosters 6 of its
 15 people are under 18, so the team fails the hard check, and with matches only (below) and its
@@ -391,6 +463,7 @@ page (what, why, who sees it, how long, processors, contact, rights).
 | ML datasets, models | NAS | Until the model using them is retired; listed in a dataset manifest |
 | Audit log | Postgres | 12 months |
 | Sessions, login nonces | Postgres | Purged after 30 days |
+| Guest clubs' logins (email, password hash), invite links (§4.5) | Postgres | A login until its person is on no team (then disabled), deleted 30 days later; links 30 days after they expired |
 
 A nightly `retention` job enforces this and logs what it deleted.
 
@@ -483,6 +556,7 @@ wd_member        id int PK (= members.id), uuid, display_name, number, positions
 wd_team          id int PK (= teams.id), lineage_id → team_lineage, name, sport
                  ('volleyball'|'basketball'), season '2026/27', league, team_key, listed, synced_at
                  -- every listed team (metadata only); personal data only for enabled lineages
+                 guest bool -- a guest club's team (§4.5): id from guest_id_seq, never synced
 wd_team_member   (team_id, member_id, rel, is_guest)  rel ∈ player|coach|team_responsible|captain
 wd_game          id int PK (= games.id), team_id, date, time, home_name, away_name,
                  our_side 'home'|'away', league, hall_name, home_score, away_score,
@@ -492,7 +566,9 @@ adult_check      (team_id, date) → passed bool, failing_count, checked_at   --
 sync_state       last_run, last_ok, counts, error
 ```
 
-No email, phone, address or birthdate ever reaches Nomal.
+No email, phone, address or birthdate ever reaches Nomal from Wiedisync. Guest clubs' people
+(§4.5) live in the same `wd_member` / `wd_team_member` tables with ids from `guest_id_seq`
+(1 000 000 000 and up); the sync leaves them alone. Their logins hold an email (§6.10).
 
 ### 6.3 Seasons and team lineage
 
@@ -502,6 +578,10 @@ label)`, matched at sync by `(sport, teams.team_id)`, falling back to `(sport, n
 can fix a wrong match. **Whether a team uses Nomal is a flag on its lineage**
 (`team_lineage.enabled`, set by full admins in Nomal; ADR-001), so it carries over to the new
 season's team row. Sport is always part of the key: "H1" exists in both sports.
+
+A guest club's team (§4.5) is a lineage of its own, never matched by the sync: `guest_club`
+(the club's name; NULL = a KSCW team), `guest_training_ok`, `guest_video_limit`,
+`guest_adults_declared_at/_by` (migration `0016`, 17.10.2026).
 
 ### 6.4 Videos
 
@@ -713,6 +793,11 @@ youtube_channel  channel_id, label, owner ('club' | member_id), proposed_by, con
 team_policy      lineage_id, matches_allowed bool, trainings_allowed bool, reason, set_by, set_at
                  -- e.g. DU23-1: matches_allowed = false (§5.3)
 audit_log        id, at, actor_member_id, action, object_type, object_id, details jsonb
+guest_account    member_id PK (= the wd_member id of the person), email UNIQUE (lower case),
+                 password_hash (scrypt$n$r$p$salt$hash), created_at, last_login_at,
+                 disabled_at, failed_logins, locked_until   -- §4.5; deleted 30 days after disabled
+guest_invite     token_hash PK (sha256 of the link's token, shown once), member_id,
+                 team_id → wd_team, created_by, created_at, expires_at (14 days), used_at
 ```
 
 ---
@@ -2298,3 +2383,4 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | O10 | Camera models | ✓ **Not needed**: Nomal reads the specs from each file. |
 | O11 | Brand | ✓ **Done 15.10.2026**: assets in `docs/brand/`, icons generated, `mark-on-dark.svg` and the ball-only favicon approved (§13.3). |
 | O12 | Repo visibility | Private now; flip to public when you're happy, like Wiedisync. |
+| O13 ⚠ | Guest clubs (§4.5) on prod | Built 17.10.2026. Before inviting a real club: the club board's OK, a written agreement with each guest club (its footage, informing its people, adults only, training yes or no, deletion), and the privacy page text (`/privacy`, a draft) checked by the club's privacy contact. Runbook: `docs/runbooks/guest-club.md`. |
