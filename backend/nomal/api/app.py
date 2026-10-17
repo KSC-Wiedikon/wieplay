@@ -19,6 +19,7 @@ from nomal.api import (
     analysis,
     auth,
     court,
+    guests,
     helpers,
     library,
     media,
@@ -147,7 +148,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "version": __version__}
 
     app.include_router(auth.router)
+    app.include_router(guests.auth_router)
     app.include_router(teams.router)
+    app.include_router(guests.router)
     app.include_router(helpers.router)
     app.include_router(admin.router)
     app.include_router(videos.router)

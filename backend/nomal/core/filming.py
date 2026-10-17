@@ -5,7 +5,10 @@ Two rules, enforced here and nowhere else:
 1. The team's policy: an admin can switch a team's matches off (team_policy), e.g. when
    its opponents may be under 18.
 2. Adults only: every rostered person is 18 or older on the day. Wiedisync answers this
-   (`adult-check`); birthdates never reach Nomal. Missing birthdate = fails.
+   (`adult-check`); birthdates never reach Nomal. Missing birthdate = fails. A guest club's
+   team (PLAN §4.5) has no birthdates anywhere Nomal can ask: its coach declares once that
+   everyone filmed is 18 or older, and that declaration is the check. Nomal never asks
+   Wiedisync about a guest team.
 
 No per-player consent: Swiss Volley allows anyone to record a match (Volleyballreglement
 2026/27, Art. 86), and the club decided on 16.10.2026 not to ask for it (docs/PRIVACY.md).
@@ -38,7 +41,7 @@ CAMERA_DATE_WINDOW_DAYS = 60
 @dataclass(frozen=True)
 class Blocker:
     # policy_matches | under_18 | no_birthdate | no_roster | adult_check_unavailable |
-    # roster_unavailable
+    # roster_unavailable | adults_not_declared (a guest team)
     code: str
     count: int | None = None
     detail: str | None = None
@@ -62,8 +65,11 @@ def camera_day(capture: Mapping[str, Any]) -> date | None:
     return stamp.astimezone(CLUB_TZ).date()
 
 
-def refresh_rosters(db: Session, bridge: BridgeClient | None) -> bool:
-    """Sync rosters right before an upload is accepted (PLAN §4.3). Commits."""
+def refresh_rosters(db: Session, bridge: BridgeClient | None, team: WdTeam | None = None) -> bool:
+    """Sync rosters right before an upload is accepted (PLAN §4.3). Commits. A guest team's
+    roster is Nomal's own: nothing to fetch, it is always fresh."""
+    if team is not None and team.guest:
+        return True
     if bridge is None:
         return False
     try:
@@ -127,12 +133,18 @@ def check_filming(
 ) -> FilmingCheck:
     now = now or datetime.now(UTC)
     blockers: list[Blocker] = []
-    if not roster_fresh:
+    if not roster_fresh and not team.guest:
         blockers.append(Blocker("roster_unavailable"))
 
     policy = db.get(TeamPolicy, team.lineage_id)
     if policy is not None and not policy.matches_allowed:
         blockers.append(Blocker("policy_matches", detail=policy.reason))
+
+    if team.guest:
+        declared = team.lineage.guest_adults_declared_at
+        if declared is None:
+            blockers.append(Blocker("adults_not_declared"))
+        return FilmingCheck(not blockers, tuple(blockers), declared)
 
     adult, checked_at = _adult_blockers(db, bridge, team, on, fresh, now)
     blockers += adult

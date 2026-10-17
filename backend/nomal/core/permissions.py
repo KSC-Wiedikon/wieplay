@@ -1,5 +1,9 @@
 """Who may see what (PLAN §5.1): team visibility, Nomal administration (M0), videos (M1),
-tagging and sharing (M2, M3), team helpers (analysts).
+tagging and sharing (M2, M3), team helpers (analysts), guest clubs (PLAN §4.5).
+
+Guest clubs are walled off both ways: a guest sees only the guest team rows they are on,
+and KSCW members (players, coaches, sport admins, helpers) never see a guest team. Only
+full admins see both sides.
 
 Every rule lives here and is tested in tests/test_permissions.py; routes only call these.
 """
@@ -28,10 +32,14 @@ class Viewer:
     # Lineages this member helps (open analyst grants in Nomal's team_grant). Loaded from the
     # database on every request, never from the login token: a revoked grant ends at once.
     analyst_lineages: frozenset[uuid.UUID] = frozenset()
+    # A guest club's member (a Nomal login, not Wiedisync; PLAN §4.5): no roles, and their
+    # team rows come from the database on every request. `club` is their club's name.
+    guest: bool = False
+    club: str | None = None
 
     @property
     def is_admin(self) -> bool:
-        return bool(self.roles & ADMIN_ROLES)
+        return not self.guest and bool(self.roles & ADMIN_ROLES)
 
     def with_grants(self, analyst_lineages: Iterable[uuid.UUID]) -> Viewer:
         return dataclasses.replace(self, analyst_lineages=frozenset(analyst_lineages))
@@ -59,6 +67,17 @@ class TeamRef:
     sport: str
     lineage_id: uuid.UUID
     enabled: bool
+    # A guest club's team (wd_team.guest).
+    guest: bool = False
+
+
+def _same_side(viewer: Viewer, team: TeamRef) -> bool:
+    """Guests reach guest teams only, KSCW members KSCW teams only; admins both."""
+    return viewer.is_admin or team.guest == viewer.guest
+
+
+def _reachable(viewer: Viewer, teams: Iterable[TeamRef]) -> list[TeamRef]:
+    return [t for t in teams if t.enabled and _same_side(viewer, t)]
 
 
 def can_manage_nomal(viewer: Viewer) -> bool:
@@ -75,8 +94,10 @@ def visible_team_ids(viewer: Viewer, teams: Iterable[TeamRef]) -> set[int]:
       players see the seasons they were rostered in.
     - Coaches and team managers see every season of their team's lineage.
     - Helpers (analysts) see every season of the lineages they were granted.
+    - Guest clubs: a guest sees their own guest team rows (a guest coach every season of
+      the team); KSCW members, sport admins included, never see a guest team.
     """
-    teams = [t for t in teams if t.enabled]
+    teams = _reachable(viewer, teams)
     if viewer.is_admin:
         return {t.id for t in teams}
     lead_lineages = {
@@ -88,25 +109,35 @@ def visible_team_ids(viewer: Viewer, teams: Iterable[TeamRef]) -> set[int]:
         if t.sport in viewer.sport_admin
         or t.id in viewer.team_rels
         or t.lineage_id in lead_lineages
-        or t.lineage_id in viewer.analyst_lineages
+        or (t.lineage_id in viewer.analyst_lineages and not t.guest)
     }
 
 
 def lead_lineages(viewer: Viewer, teams: Iterable[TeamRef]) -> set[uuid.UUID]:
     """Lineages the viewer coaches or manages in any season."""
-    return {t.lineage_id for t in teams if viewer.team_rels.get(t.id, frozenset()) & LEAD_RELS}
+    return {
+        t.lineage_id
+        for t in teams
+        if _same_side(viewer, t) and viewer.team_rels.get(t.id, frozenset()) & LEAD_RELS
+    }
 
 
 def is_analyst(viewer: Viewer, team: TeamRef) -> bool:
-    """A helper of this team: an open analyst grant on its lineage (any season)."""
-    return team.enabled and team.lineage_id in viewer.analyst_lineages
+    """A helper of this team: an open analyst grant on its lineage (any season). Guest teams
+    have no helpers (for now)."""
+    return team.enabled and not team.guest and team.lineage_id in viewer.analyst_lineages
+
+
+def _sport_admin_of(viewer: Viewer, team: TeamRef) -> bool:
+    """A sport admin of the team's sport: Wiedisync's, so KSCW teams only."""
+    return not team.guest and team.sport in viewer.sport_admin
 
 
 def _leads_team(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
     """Coaches and team managers of the team (any season), sport admins, admins."""
-    if not team.enabled:
+    if not team.enabled or not _same_side(viewer, team):
         return False
-    return viewer.is_admin or team.sport in viewer.sport_admin or team.lineage_id in leads
+    return viewer.is_admin or _sport_admin_of(viewer, team) or team.lineage_id in leads
 
 
 def can_upload(viewer: Viewer, team: TeamRef) -> bool:
@@ -115,10 +146,10 @@ def can_upload(viewer: Viewer, team: TeamRef) -> bool:
     Coaches and team managers of that season's team, sport admins of its sport, and the
     team's helpers. Admins without one of those roles watch and delete but do not upload.
     """
-    if not team.enabled:
+    if not team.enabled or not _same_side(viewer, team):
         return False
     return (
-        team.sport in viewer.sport_admin
+        _sport_admin_of(viewer, team)
         or bool(viewer.team_rels.get(team.id, frozenset()) & LEAD_RELS)
         or is_analyst(viewer, team)
     )
@@ -131,8 +162,15 @@ def can_delete_video(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bo
 
 
 def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
-    """See the NAS inbox: anyone who may upload for at least one enabled team."""
-    return any(can_upload(viewer, t) for t in teams)
+    """See the NAS inbox: anyone who may upload for at least one enabled KSCW team. The inbox
+    is the club's NAS share: never for guest clubs."""
+    return not viewer.guest and any(can_upload(viewer, t) for t in teams if not t.guest)
+
+
+def can_import_link(team: TeamRef) -> bool:
+    """Import a YouTube or Twitch video (PLAN §7.2.2): the allow-list holds KSCW's and its
+    members' channels, so links are for KSCW teams only. Guest clubs upload their files."""
+    return not team.guest
 
 
 def can_tag(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
@@ -174,5 +212,11 @@ def can_export(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
 def can_grant_analyst(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
     """Add or remove the team's helpers, see who they are (§5.1 "Grant analyst"): its
     coaches and team managers (any season), sport admins and admins. Helpers do not pick
-    other helpers."""
-    return _leads_team(viewer, team, leads)
+    other helpers. Guest teams have no helpers (for now): the search lists KSCW members."""
+    return not team.guest and _leads_team(viewer, team, leads)
+
+
+def can_manage_people(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """A guest team's roster and invite links (PLAN §4.5): its coaches (any season) and
+    admins. KSCW rosters come from Wiedisync and are never edited in Nomal."""
+    return team.guest and _leads_team(viewer, team, leads)

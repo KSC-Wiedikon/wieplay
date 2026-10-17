@@ -29,7 +29,7 @@ from nomal.api.deps import (
     audit,
 )
 from nomal.api.media import permission_cache
-from nomal.core import imports, names, pipeline
+from nomal.core import guests, imports, names, pipeline
 from nomal.core.config import Settings
 from nomal.core.filming import (
     Blocker,
@@ -43,6 +43,7 @@ from nomal.core.permissions import (
     Viewer,
     can_delete_video,
     can_export,
+    can_import_link,
     can_share_with_team,
     can_tag,
     can_upload,
@@ -345,7 +346,10 @@ def _video_out(
     progress = progress_by_video.get(video.id)
     fps = video.fps_num / video.fps_den if video.fps_num and video.fps_den else None
     found = names.for_video(
-        db, video, access.team.name, settings.club_short_name, settings.club_name
+        db,
+        video,
+        access.team.name,
+        *guests.club_names(access.team, settings.club_short_name, settings.club_name),
     )
     return VideoOut(
         id=video.id,
@@ -544,6 +548,10 @@ def create_video(
     if not can_upload(viewer, access.ref):
         raise HTTPException(403, "Only the team's coaches and sport admins upload videos")
     _check_files(body, settings)
+    if body.inbox_file_ids and access.ref.guest:
+        raise HTTPException(403, "The NAS inbox is for KSCW teams; upload the files instead")
+    if body.import_url is not None and not can_import_link(access.ref):
+        raise HTTPException(403, "Links are imported for KSCW teams only; upload the files instead")
     link: imports.ImportSource | None = None
     allowed: set[str] = set()
     if body.import_url is not None:
@@ -562,7 +570,7 @@ def create_video(
     if on > club_today():
         raise HTTPException(422, "The recording date is in the future")
 
-    synced = refresh_rosters(db, bridge)
+    synced = refresh_rosters(db, bridge, access.team)
     check = check_filming(db, bridge, access.team, on, fresh=True, roster_fresh=synced)
     if not check.allowed:
         audit(
@@ -577,6 +585,13 @@ def create_video(
         )
         db.commit()
         raise FilmingBlocked(check)
+    # A guest team's videos per season are limited (PLAN §4.5); holds a lock on the team row.
+    if problem := guests.quota_problem(db, access.team):
+        db.rollback()
+        audit(db, viewer.member_id, "upload_refused", "team", str(team_id), on=on.isoformat(),
+              blockers=["video_limit"])  # fmt: skip
+        db.commit()
+        raise HTTPException(409, problem)
 
     inbox: list[InboxFile] = []
     if body.inbox_file_ids:
@@ -816,7 +831,7 @@ def complete_file(
 
     # The last file: check the filming rules again, with fresh rosters, before ingesting
     # (a roster or the team's policy may have changed while the upload ran; PLAN §5.3).
-    synced = refresh_rosters(db, bridge)
+    synced = refresh_rosters(db, bridge, access.team)
     _lock(db, video)
     if video.status != "uploading":
         return _video_out(db, video, access, viewer, settings)  # someone else finished it
@@ -970,7 +985,7 @@ def list_inbox(viewer: ViewerDep, db: DbDep) -> list[InboxFileOut]:
     refs = team_refs(db)
     if not can_use_inbox(viewer, refs):
         raise HTTPException(403, "Coaches and sport admins only")
-    upload_ids = {r.id for r in refs if can_upload(viewer, r)}
+    upload_ids = {r.id for r in refs if can_upload(viewer, r) and not r.guest}
     folders = {
         pipeline.team_folder(t).lower()
         for t in db.scalars(select(WdTeam).where(WdTeam.id.in_(upload_ids)))

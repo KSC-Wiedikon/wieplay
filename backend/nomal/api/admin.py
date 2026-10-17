@@ -72,7 +72,8 @@ def _state(db: DbDep) -> SyncStateOut:
 
 @router.get("/teams", response_model=list[AdminTeamOut])
 def admin_teams(_: AdminDep, db: DbDep) -> list[AdminTeamOut]:
-    teams = db.scalars(select(WdTeam).where(WdTeam.listed.is_(True))).all()
+    # Wiedisync's teams; the guest clubs' have their own section (/api/admin/guest-teams).
+    teams = db.scalars(select(WdTeam).where(WdTeam.listed.is_(True), WdTeam.guest.is_(False))).all()
     # Sport, then newest season first ("2026/27" sorts after "2025/26"), then name.
     ordered = sorted(teams, key=lambda t: (SPORT_ORDER.get(t.sport, 9), t.name))
     ordered = sorted(ordered, key=lambda t: t.season, reverse=True)
@@ -83,7 +84,7 @@ def admin_teams(_: AdminDep, db: DbDep) -> list[AdminTeamOut]:
 @router.put("/teams/{team_id}", response_model=AdminTeamOut)
 def set_team_enabled(team_id: int, body: EnableIn, viewer: AdminDep, db: DbDep) -> AdminTeamOut:
     team = db.get(WdTeam, team_id)
-    if team is None or not team.listed:
+    if team is None or not team.listed or team.guest:
         raise HTTPException(404, "Team not found")
     lineage = team.lineage
     if lineage.enabled != body.enabled:
@@ -356,11 +357,13 @@ def list_policies(_: AdminDep, db: DbDep) -> list[PolicyOut]:
 
 
 def _lineage_label(db: DbDep, lineage: TeamLineage) -> str:
-    """The newest season's team name (D2 became D1 after promotion)."""
+    """The newest season's team name (D2 became D1 after promotion); a guest club's team
+    with its club ("VBC Gast · Herren 1")."""
     newest = db.scalars(
         select(WdTeam).where(WdTeam.lineage_id == lineage.id).order_by(WdTeam.season.desc())
     ).first()
-    return newest.name if newest else lineage.label
+    name = newest.name if newest else lineage.label
+    return f"{lineage.guest_club} · {name}" if lineage.guest_club else name
 
 
 @router.put("/policies/{lineage_id}", response_model=PolicyOut)

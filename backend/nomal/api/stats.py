@@ -30,7 +30,7 @@ from nomal.api.access import visible_team
 from nomal.api.analysis import ActionGateOut, gate_out
 from nomal.api.deps import DbDep, SettingsDep, ViewerDep
 from nomal.api.tagging import _readable
-from nomal.core import names, stats, tagging
+from nomal.core import guests, names, stats, tagging
 from nomal.core.models import (
     Event,
     Period,
@@ -586,8 +586,12 @@ def video_stats_csv(
     else:
         scopes = [(match, result.box, result.team), *((no, s.box, s.team) for no, s in sets)]
         team = db.get(WdTeam, video.team_id)
+        assert team is not None
         found = names.for_video(
-            db, video, team.name if team else "", settings.club_short_name, settings.club_name
+            db,
+            video,
+            team.name,
+            *guests.club_names(team, settings.club_short_name, settings.club_name),
         )
         # The team's and the opponent's rows carry their names ("KSCW H3", "Volero").
         labels = {"team": found.us, "opponent": found.name("them", words["opponent"])}

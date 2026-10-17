@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
-from nomal.core import jobs, pipeline, scoring, tagging
+from nomal.core import guests, jobs, pipeline, scoring, tagging
 from nomal.core.models import (
     AnalysisArtifact,
     AnalysisTrack,
@@ -298,6 +298,8 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     train: list[dict[str, Any]] = []
     others: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    # Guest clubs that have not agreed to train the shared models (PLAN §4.5).
+    no_training = guests.no_training_lineages(db)
     for video in videos:
         artifact = features.get(video.id)
         if artifact is None:
@@ -309,7 +311,10 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
             "tracks": sorted(have_tracks.get(video.id, set())),
         }
         rallies = human_rallies(db, video.id) if video.rallies_reviewed_at else []
-        if rallies and open_proposals(db, video.id):
+        if rallies and video.lineage_id in no_training:
+            # Reviewed, but not ours to learn from: no labels, and no new proposals either.
+            skipped.append({**entry, "reason": "guest club, no training"})
+        elif rallies and open_proposals(db, video.id):
             # Reopened after "done": not complete now, so no labels from it until it is.
             skipped.append({**entry, "reason": "open proposals"})
         elif rallies:

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from nomal.api.access import TeamAccess, team_refs, visible_team, visible_video
 from nomal.api.deps import DbDep, SettingsDep, StoreDep, ViewerDep, audit
-from nomal.core import pipeline, recap, reels, tagging
+from nomal.core import guests, pipeline, recap, reels, tagging
 from nomal.core.models import (
     Clip,
     Comment,
@@ -857,12 +857,14 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
     videos = {
         v.id: v for v in db.scalars(select(Video).where(Video.id.in_({p.video_id for p in pieces})))
     }
+    clubs: set[str | None] = set()
     for video in videos.values():
         _, access = visible_video(db, viewer, video.id)
         if not can_export(viewer, access.ref, access.leads):
             raise HTTPException(403, "Only coaches and sport admins download videos")
         if not all(f.nas_path and f.offset_ms is not None for f in video.files):
             raise HTTPException(409, f"The originals of {video.title} are not available")
+        clubs.add(guests.club_of(access.team))
 
     export = VideoExport(
         id=uuid.uuid4(),
@@ -896,7 +898,9 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
         # The score bug of each clip goes with it (worker/recap.py draws it).
         for item, bug in zip(job_pieces, recap_params.pop("bugs"), strict=True):
             item["bug"] = bug
-    watermark = f"KSCW intern · {viewer.name} · {datetime.now(UTC):%d.%m.%Y}"
+    # Whose footage it is: a guest club's own name on its videos (PLAN §4.5), else KSCW's.
+    club = next(iter(clubs)) if len(clubs) == 1 else None
+    watermark = f"{club or 'KSCW'} intern · {viewer.name} · {datetime.now(UTC):%d.%m.%Y}"
     pipeline.enqueue_export(db, export, job_pieces, watermark, recap=recap_params)
     audit(db, viewer.member_id, "export_requested", "export", str(export.id), kind=body.kind,
           pieces=len(pieces), duration_ms=export.duration_ms)  # fmt: skip

@@ -1,5 +1,6 @@
 """Tables: the Wiedisync mirror, team lineage, sessions and the audit log (M0); videos, jobs,
 workers, filming policy, consent and the adult-check cache (M1). Tags arrive with M2 (PLAN §6).
+Guest clubs (PLAN §4.5) add their logins and invite links (0016).
 """
 
 from __future__ import annotations
@@ -43,12 +44,23 @@ class TeamLineage(Base):
     enabled_by: Mapped[int | None] = mapped_column(Integer)
     enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # A guest club's team (PLAN §4.5): the club's name; None = a KSCW team from Wiedisync.
+    guest_club: Mapped[str | None] = mapped_column(String(255))
+    # The club agreed that its reviewed games train Nomal's shared models.
+    guest_training_ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # At most this many videos (not deleted) per team row, i.e. per season.
+    guest_video_limit: Mapped[int | None] = mapped_column(Integer)
+    # "Everyone we film is 18 or older": the guest coach's declaration replaces Wiedisync's
+    # adult check for a guest team (PLAN §5.3).
+    guest_adults_declared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    guest_adults_declared_by: Mapped[int | None] = mapped_column(Integer)
 
     teams: Mapped[list[WdTeam]] = relationship(back_populates="lineage")
 
 
 class WdTeam(Base):
-    """Team metadata for every listed Wiedisync team (no personal data)."""
+    """Team metadata for every listed Wiedisync team (no personal data), and the guest clubs'
+    teams (`guest`, ids from guest_id_seq), which the Wiedisync sync never touches."""
 
     __tablename__ = "wd_team"
 
@@ -61,12 +73,15 @@ class WdTeam(Base):
     team_key: Mapped[str | None] = mapped_column(String(255))
     listed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    guest: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     lineage: Mapped[TeamLineage] = relationship(back_populates="teams")
 
 
 class WdMember(Base):
-    """Members of enabled teams only; purged when no enabled team references them."""
+    """Members of enabled teams only; purged when no enabled team references them. Guest
+    clubs' people have ids from GUEST_ID_BASE up (nomal/core/guests.py) and are kept by
+    their team's coaches, never by the sync."""
 
     __tablename__ = "wd_member"
 
@@ -148,6 +163,38 @@ class UserSession(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     user_agent: Mapped[str | None] = mapped_column(String(255))
+
+
+class GuestAccount(Base):
+    """A guest club member's login (PLAN §4.5): one per roster person, set up from an invite
+    link. The email is stored lower case; the password as an scrypt hash."""
+
+    __tablename__ = "guest_account"
+
+    member_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Removed from every team: no more logins, and running sessions end at once.
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GuestInvite(Base):
+    """An invite link for one person of a guest team: sets up their account, or resets its
+    password. Only the hash of the token is kept; the link is shown once."""
+
+    __tablename__ = "guest_invite"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    member_id: Mapped[int] = mapped_column(Integer, index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("wd_team.id", ondelete="CASCADE"), index=True)
+    created_by: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LoginNonce(Base):

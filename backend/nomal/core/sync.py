@@ -4,6 +4,9 @@
    and map each row to its lineage, so a team keeps its identity across the 1 June rollover.
 2. Ask the bridge for a snapshot of the *enabled* teams only: rosters, games, trainings.
 3. Replace the mirror for those teams and purge members no enabled team references.
+
+Guest clubs' teams and people (PLAN §4.5, wd_team.guest, ids from GUEST_ID_BASE up) live in
+the same tables and are kept by their coaches: every step here leaves them alone.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from nomal.core.guests import GUEST_ID_BASE
 from nomal.core.models import (
     SyncState,
     TeamLineage,
@@ -116,7 +120,8 @@ def _lineage_for(session: Session, team: Mapping[str, Any]) -> TeamLineage:
     if existing is not None:
         return existing.lineage
     sport, key, name = team["sport"], team.get("team_key") or None, team["name"]
-    query = select(TeamLineage).where(TeamLineage.sport == sport)
+    # A guest club's lineage may carry the same name ("H1"): never a Wiedisync team's.
+    query = select(TeamLineage).where(TeamLineage.sport == sport, TeamLineage.guest_club.is_(None))
     query = (
         query.where(TeamLineage.team_key == key)
         if key
@@ -139,6 +144,8 @@ def _upsert_teams(session: Session, listing: Mapping[str, Any], now: datetime) -
     for team in teams:
         if team.get("sport") not in SPORTS or not isinstance(team.get("id"), int):
             continue
+        if team["id"] >= GUEST_ID_BASE:
+            raise BridgeError(f"team id {team['id']} is in the guest clubs' range")
         lineage = _lineage_for(session, team)
         row = session.get(WdTeam, team["id"]) or WdTeam(id=team["id"])
         row.lineage = lineage
@@ -152,7 +159,9 @@ def _upsert_teams(session: Session, listing: Mapping[str, Any], now: datetime) -
         session.add(row)
         rows.append(row)
         listed_ids.add(team["id"])
-    for stale in session.scalars(select(WdTeam).where(WdTeam.id.not_in(listed_ids))):
+    for stale in session.scalars(
+        select(WdTeam).where(WdTeam.id.not_in(listed_ids), WdTeam.guest.is_(False))
+    ):
         stale.listed = False
     session.flush()
     return rows
@@ -161,7 +170,11 @@ def _upsert_teams(session: Session, listing: Mapping[str, Any], now: datetime) -
 def _apply_snapshot(
     session: Session, enabled_ids: set[int], snap: Mapping[str, Any], now: datetime
 ) -> tuple[int, int, int]:
-    members = {m["id"]: m for m in snap.get("members", []) if isinstance(m.get("id"), int)}
+    members = {
+        m["id"]: m
+        for m in snap.get("members", [])
+        if isinstance(m.get("id"), int) and m["id"] < GUEST_ID_BASE
+    }
     memberships = [
         m
         for m in snap.get("memberships", [])
@@ -184,7 +197,12 @@ def _apply_snapshot(
         session.add(row)
     session.flush()
 
-    session.execute(delete(WdTeamMember))
+    # Every KSCW roster is replaced; the guest clubs' rosters are not Wiedisync's.
+    session.execute(
+        delete(WdTeamMember).where(
+            WdTeamMember.team_id.not_in(select(WdTeam.id).where(WdTeam.guest.is_(True)))
+        )
+    )
     seen = set()
     for m in memberships:
         key = (m["team"], m["member"], m["rel"])
@@ -200,7 +218,9 @@ def _apply_snapshot(
             )
         )
 
-    session.execute(delete(WdGame).where(WdGame.team_id.in_(enabled_ids)))
+    session.execute(
+        delete(WdGame).where(WdGame.team_id.in_(enabled_ids), WdGame.team_id < GUEST_ID_BASE)
+    )
     games = [g for g in snap.get("games", []) if g.get("team") in enabled_ids]
     for g in games:
         session.add(
@@ -221,7 +241,11 @@ def _apply_snapshot(
             )
         )
 
-    session.execute(delete(WdTraining).where(WdTraining.team_id.in_(enabled_ids)))
+    session.execute(
+        delete(WdTraining).where(
+            WdTraining.team_id.in_(enabled_ids), WdTraining.team_id < GUEST_ID_BASE
+        )
+    )
     trainings = [t for t in snap.get("trainings", []) if t.get("team") in enabled_ids]
     for t in trainings:
         session.add(
@@ -237,8 +261,11 @@ def _apply_snapshot(
         )
     session.flush()
 
-    # Data minimisation: nobody stays in the mirror without an enabled team.
-    session.execute(delete(WdMember).where(WdMember.id.not_in(referenced)))
+    # Data minimisation: nobody stays in the mirror without an enabled team. Guest clubs'
+    # people are not the mirror's: their coaches and admins remove them.
+    session.execute(
+        delete(WdMember).where(WdMember.id.not_in(referenced), WdMember.id < GUEST_ID_BASE)
+    )
     return len(referenced), len(games), len(trainings)
 
 

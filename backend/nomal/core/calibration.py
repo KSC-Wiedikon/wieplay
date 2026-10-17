@@ -49,7 +49,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from nomal.core import court, jobs
 from nomal.core.db import Base
-from nomal.core.models import AnalysisArtifact, Job, ModelRun, Video, WdGame
+from nomal.core.models import AnalysisArtifact, Job, ModelRun, TeamLineage, Video, WdGame
 
 KINDS = frozenset({"trajectory", "court"})
 CAPS = ("analyse", "nas")
@@ -394,18 +394,24 @@ def references(db: Session, video: Video) -> list[dict[str, Any]]:
     and hall's first, then everyone's (a team plays away, another team plays in our hall);
     a coach's calibrations before the court job's."""
     hall = hall_of(db, video)
-    rows = db.execute(
+    query = (
         select(Calibration, Video.lineage_id)
         .join(Video, Video.id == Calibration.video_id)
+        .join(TeamLineage, TeamLineage.id == Video.lineage_id)
         .where(
             Calibration.status == "confirmed",
             Calibration.video_id != video.id,
             Video.status != "deleted",
             Calibration.checked.is_(True) | (Calibration.confidence >= REFERENCE_MIN),
         )
-        .order_by(Calibration.updated_at.desc())
-        .limit(200)
-    ).all()
+    )
+    # A guest club's pictures stay with its own team, and it sees none of KSCW's (PLAN §4.5).
+    own = db.get(TeamLineage, video.lineage_id)
+    if own is not None and own.guest_club is not None:
+        query = query.where(Video.lineage_id == video.lineage_id)
+    else:
+        query = query.where(TeamLineage.guest_club.is_(None))
+    rows = db.execute(query.order_by(Calibration.updated_at.desc()).limit(200)).all()
     ranked = sorted(
         rows,
         key=lambda r: (

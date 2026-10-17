@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
+from nomal.core import guests
 from nomal.core.config import Settings
 from nomal.core.grants import analyst_lineages
 from nomal.core.models import AuditLog, UserSession
@@ -50,14 +51,29 @@ def current_viewer(request: Request, db: DbDep) -> Viewer:
     now = datetime.now(UTC)
     if row is None or row.expires_at <= now:
         raise HTTPException(401, "Session expired")
+    if row.claims.get("guest") is True:
+        # A guest club's session (PLAN §4.5): everything from the database, every request, so
+        # a person taken off the roster, a disabled account or team ends it at once.
+        guest = guests.guest_viewer(db, row.member_id)
+        if guest is None:
+            raise HTTPException(401, "Session expired")
+        viewer = guest
+    else:
+        # Team helper grants are Nomal's own and change while a session runs: read them on
+        # every request, so a new helper sees the team at once and a removed one loses it.
+        viewer = _wiedisync_viewer(row.claims).with_grants(analyst_lineages(db, row.member_id))
     if now - row.last_seen_at > LAST_SEEN_EVERY:
         row.last_seen_at = now
         db.commit()
-    # Team helper grants are Nomal's own and change while a session runs: read them on every
-    # request, so a new helper sees the team at once and a removed one loses it at once.
-    viewer = Viewer.from_claims(row.claims).with_grants(analyst_lineages(db, row.member_id))
     request.state.viewer = viewer
     return viewer
+
+
+def _wiedisync_viewer(claims: dict[str, Any]) -> Viewer:
+    """A KSCW member from the bridge's claims. Guest team ids are dropped: a Wiedisync login
+    never reaches a guest club's team."""
+    teams = [t for t in claims.get("teams", []) if not guests.is_guest_id(int(t["team"]))]
+    return Viewer.from_claims({**claims, "teams": teams})
 
 
 ViewerDep = Annotated[Viewer, Depends(current_viewer)]

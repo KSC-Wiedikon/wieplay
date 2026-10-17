@@ -32,7 +32,16 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from nomal.core import jobs
 from nomal.core.db import Base
-from nomal.core.models import AnalysisArtifact, AnalysisTrack, Job, ModelRun, Period, Segment, Video
+from nomal.core.models import (
+    AnalysisArtifact,
+    AnalysisTrack,
+    Job,
+    ModelRun,
+    Period,
+    Segment,
+    TeamLineage,
+    Video,
+)
 from nomal.ml import board as bd
 from nomal.ml import scoring as sc
 
@@ -118,10 +127,18 @@ def suggestion(db: Session, video: Video) -> Suggestion | None:
     base = (
         select(ScoreboardRegion, Video.title, Video.recorded_on)
         .join(Video, Video.id == ScoreboardRegion.video_id)
+        .join(TeamLineage, TeamLineage.id == Video.lineage_id)
         .where(ScoreboardRegion.video_id != video.id, Video.status != "deleted")
         .order_by(ScoreboardRegion.updated_at.desc())
         .limit(1)
     )
+    # The suggestion names its video: a guest club's stay with its team, and it sees none of
+    # KSCW's (PLAN §4.5).
+    own = db.get(TeamLineage, video.lineage_id)
+    if own is not None and own.guest_club is not None:
+        base = base.where(Video.lineage_id == video.lineage_id)
+    else:
+        base = base.where(TeamLineage.guest_club.is_(None))
     if hall:
         row = db.execute(base.where(ScoreboardRegion.hall_name == hall)).first()
         if row is not None:

@@ -102,6 +102,10 @@ def plan(db: Session, bridge: BridgeClient | None, lines: list[Line]) -> list[Pl
         if team is None or lineage is None or not lineage.enabled:
             p.problem = "no such team, or the team is not enabled for Nomal"
             continue
+        if team.guest:
+            # The allow-list holds KSCW's channels (core/permissions.py, can_import_link).
+            p.problem = "a guest club's team: links are imported for KSCW teams only"
+            continue
         p.team = team
         try:
             p.source = imports.parse_link(line.link)

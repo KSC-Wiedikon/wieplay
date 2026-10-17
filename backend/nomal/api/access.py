@@ -22,11 +22,11 @@ class TeamAccess:
 
 def team_refs(db: Session) -> list[TeamRef]:
     rows = db.execute(
-        select(WdTeam.id, WdTeam.sport, WdTeam.lineage_id, TeamLineage.enabled).join(
+        select(WdTeam.id, WdTeam.sport, WdTeam.lineage_id, TeamLineage.enabled, WdTeam.guest).join(
             TeamLineage, TeamLineage.id == WdTeam.lineage_id
         )
     ).all()
-    return [TeamRef(r.id, r.sport, r.lineage_id, r.enabled) for r in rows]
+    return [TeamRef(r.id, r.sport, r.lineage_id, r.enabled, r.guest) for r in rows]
 
 
 def visible_team(db: Session, viewer: Viewer, team_id: int) -> TeamAccess:
