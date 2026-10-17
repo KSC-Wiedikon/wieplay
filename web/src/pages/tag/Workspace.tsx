@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from 'react-i18next'
 import { Link, useSearchParams } from 'react-router'
 import { AnalysisStatus } from '../../components/AnalysisStatus'
+import { PlayersStep } from '../../components/PlayersStep'
 import { Button, ButtonLink } from '../../components/Button'
 import { ClipDialog } from '../../components/ClipDialog'
 import { AlertIcon, CheckIcon, KeyboardIcon, PauseIcon, PlayIcon, RedoIcon, UndoIcon } from '../../components/icons'
@@ -455,6 +456,8 @@ function DeskLayout({
       {!reviewing && ui.segmentId && <SegmentPanel key={ui.segmentId} id={ui.segmentId} />}
       {reviewingActions ? <EventTable /> : reviewing ? <RallyList mode="review" /> : <Lists rallies={rallies.length} />}
       {reviewing && status}
+      {/* After the rallies: who played (docs/PLAN.md §10.5). */}
+      {reviewing && status && <PlayersStep video={video} canEdit={video.can_tag} />}
       <Cheatsheet />
       <WorkspaceClipDialog />
     </div>

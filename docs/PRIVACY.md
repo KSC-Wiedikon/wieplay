@@ -97,6 +97,21 @@ What Nomal never does: no face recognition, no face embeddings, no recognising a
 across videos. A player is linked to an action only through the shirt number in the team's
 roster (`docs/PLAN.md` §5.7).
 
+**Players in a match** (`docs/PLAN.md` §10.5, since 17.10.2026): on the same server, Nomal
+finds the people on the court during the rallies, follows them from frame to frame and
+groups them into "a person in this video". It keeps their boxes per frame and a few
+**pictures of each person** (crops, mostly of the back with the shirt number) so a coach can
+say once which roster number each card is; Nomal then links the actions to the players.
+
+| | |
+|---|---|
+| Purpose | Tag who made each action without a coach typing every number |
+| What is used | Position on court, the colour of the kit and the number on the shirt. **No faces, no face embeddings, no person re-identification model, nothing across videos**: each video starts from zero, and a card is anonymous until a coach gives it a roster number (the number reader only suggests one) |
+| Data kept | Boxes per frame (numbers), the crops (JPEG), the clusters and the coach's numbers |
+| Where | On the club NAS next to the signals, and the crops in the video's own storage |
+| Who sees it | The crops: those who may watch the video (they show what the video shows). Naming, merging and splitting: the team's coaches |
+| Retention | As the video: deleted with it |
+
 Later stages (players and ball tracking on a GPU) run on club hardware first. A move to a
 GPU provider in Switzerland or the EU needs a DPA and an updated privacy page; the provider
 would get only short, temporary, court-cropped copies of the rallies, with no names or IDs.
