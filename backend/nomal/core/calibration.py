@@ -53,7 +53,7 @@ from nomal.core.models import AnalysisArtifact, Job, ModelRun, Video, WdGame
 
 KINDS = frozenset({"trajectory", "court"})
 CAPS = ("analyse", "nas")
-PRIORITY = -10  # with the analyses: below everything that leads to playback
+PRIORITY = jobs.FOLLOW_UP_PRIORITY  # quick: before the next analysis
 TRACK_FORMAT = "json"
 TRACK_SCHEMA = 1
 NAS_PATH = re.compile(r"[A-Za-z0-9._/-]+")

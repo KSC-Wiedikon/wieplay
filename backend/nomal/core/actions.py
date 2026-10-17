@@ -54,7 +54,7 @@ from nomal.ml import action_eval
 
 KINDS = frozenset({"actions", "train_actions"})
 CAPS = ("analyse", "nas")
-PRIORITY = analysis.ANALYSE_PRIORITY
+PRIORITY = analysis.FOLLOW_UP_PRIORITY
 TRAIN_PRIORITY = analysis.TRAIN_PRIORITY
 SPORTS = frozenset({"volleyball"})
 MODELS_SUBDIR = "models/actions"

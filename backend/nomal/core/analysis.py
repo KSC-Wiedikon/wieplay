@@ -46,6 +46,7 @@ TRAIN_CAPS = ("analyse", "nas")
 # model as soon as it exists.
 ANALYSE_PRIORITY = -10
 TRAIN_PRIORITY = -5
+FOLLOW_UP_PRIORITY = jobs.FOLLOW_UP_PRIORITY
 KINDS = frozenset({"analyse", "train_rallies"})
 SPORTS = frozenset({"volleyball"})
 MAX_PROPOSALS = 1000

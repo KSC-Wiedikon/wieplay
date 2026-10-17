@@ -32,6 +32,13 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+# The quick jobs after an analysis (trajectory, court, actions, scoreboard: seconds to
+# minutes) come before the next hour-long analysis (-10), so a game's ball path, court and
+# suggestions appear right after its own analysis instead of after the whole backlog; still
+# below everything that leads to playback.
+FOLLOW_UP_PRIORITY = -7
+
+
 def enqueue(
     db: Session,
     kind: str,
