@@ -176,7 +176,8 @@ def test_permissions(ready: Any, club: dict[str, TestClient], as_: Any) -> None:
     seen = player.get(f"{url}/analysis")
     assert seen.status_code == 200 and seen.json()["can_analyse"] is False
     assert player.post(f"{url}/analyse").status_code == 403
-    assert player.post(f"{url}/rallies-reviewed", json={"reviewed": True}).status_code == 403
+    # Players tag and review their own games (owner, 17.10.2026).
+    assert player.post(f"{url}/rallies-reviewed", json={"reviewed": True}).status_code != 403
     assert as_("basketball-player").get(f"{url}/analysis").status_code == 404
     assert as_("vb-sport-admin").post(f"{url}/analyse").status_code == 202
     anonymous = TestClient(club["coach"].app)  # type: ignore[arg-type]

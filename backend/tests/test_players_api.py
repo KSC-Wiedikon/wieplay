@@ -355,15 +355,18 @@ def test_permissions(
     cid = by_key(gallery(club["coach"], ready))[1]["id"]
     member = as_("player-h3")
     state = gallery(member, ready)
-    assert state["can_edit"] is False and len(state["clusters"]) == 5
+    # Players name the cards of their own game (17.10.2026); finding them (~2 h of CPU)
+    # stays with coaches and helpers.
+    assert state["can_edit"] is True and state["can_find"] is False
+    assert len(state["clusters"]) == 5
     assert (
         member.patch(
             f"/api/videos/{ready['id']}/players/clusters/{cid}", json={"number": 7}
         ).status_code
-        == 403
+        == 200
     )
-    assert member.post(f"/api/videos/{ready['id']}/players/swap-teams").status_code == 403
     assert member.post(f"/api/videos/{ready['id']}/players/find").status_code == 403
+    assert gallery(club["coach"], ready)["can_find"] is True
     outsider = as_("basketball-player")
     assert outsider.get(f"/api/videos/{ready['id']}/players").status_code == 404
     assert outsider.get(f"/api/videos/{ready['id']}/players/sheets/0").status_code == 404

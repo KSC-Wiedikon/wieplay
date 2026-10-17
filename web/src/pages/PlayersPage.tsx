@@ -271,7 +271,7 @@ function JobState({ data, onFind, finding }: { data: Players; onFind: () => void
       {busy && data.job?.progress != null && <ProgressBar value={data.job.progress} label={t(`players.status.${data.status}`)} />}
       {busy && data.job?.message && <p className="text-sm text-muted">{data.job.message}</p>}
       {failed && data.job?.error && <p className="text-sm wrap-anywhere text-muted">{data.job.error}</p>}
-      {data.can_edit && !busy && (
+      {(data.can_find ?? data.can_edit) && !busy && (
         <div>
           <Button variant="primary" onClick={onFind} disabled={finding}>
             {t('players.find')}

@@ -37,7 +37,7 @@ from nomal.api.deps import DbDep, StoreDep, ViewerDep, audit
 from nomal.api.tagging import RosterOut, _readable, _roster_out
 from nomal.core import players, tagging
 from nomal.core.models import Event, Video
-from nomal.core.permissions import Viewer, can_tag
+from nomal.core.permissions import Viewer, can_run_analysis, can_tag
 from nomal.core.players import EventPlayer, PlayerCluster
 from nomal.core.storage import ObjectStore
 
@@ -124,6 +124,8 @@ class PlayersOut(BaseModel):
     video_id: uuid.UUID
     available: bool
     can_edit: bool
+    # Start finding the players (~2 h of CPU): coaches and helpers, not every player.
+    can_find: bool = False
     status: str  # none | queued | running | done | failed
     job: JobStateOut | None
     run: RunOut | None
@@ -239,6 +241,7 @@ def players_out(
         video_id=video.id,
         available=video.sport in players.SPORTS,
         can_edit=can_edit,
+        can_find=can_edit and can_run_analysis(viewer, access.ref, access.leads),
         status=status,
         job=JobStateOut(
             id=job.id,
@@ -386,6 +389,8 @@ def find_players(video_id: uuid.UUID, request: Request, viewer: ViewerDep, db: D
     the clusters; numbers the coach gave stay where the same number is read on the same
     team."""
     video, access = _editable(db, viewer, video_id)
+    if not can_run_analysis(viewer, access.ref, access.leads):
+        raise HTTPException(403, "Only the team's coaches and helpers start finding the players")
     reason = players.can_run(video)
     if reason:
         raise HTTPException(409, reason)

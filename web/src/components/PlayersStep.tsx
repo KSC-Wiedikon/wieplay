@@ -27,7 +27,7 @@ export function PlayersStep({ video, canEdit, className }: { video: Video; canEd
   const busy = players.status === 'queued' || players.status === 'running'
   const failed = players.status === 'failed'
   const done = players.run_id !== null
-  const canFind = canEdit && !done && !busy
+  const canFind = canEdit && (analysis.data?.can_run ?? true) && !done && !busy
   return (
     <Card role="region" aria-label={t('players.step.title')} className={cx('flex flex-wrap items-center justify-between gap-3 p-4', className)}>
       <div className="flex min-w-0 flex-[1_1_18rem] flex-col gap-1">

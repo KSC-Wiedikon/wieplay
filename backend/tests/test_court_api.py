@@ -235,7 +235,7 @@ def test_save_load_and_prefill_the_next_video(
 ) -> None:
     url = f"/api/videos/{ready['id']}/court"
     body = {"points": points([*court.CORNERS, "net_left", "net_right"]), "method": "manual"}
-    assert as_("player-h3").put(url, json=body).status_code == 403
+    assert as_("basketball-player").put(url, json=body).status_code == 404  # another team
     saved = club["coach"].put(url, json=body)
     assert saved.status_code == 200, saved.text
     cal = saved.json()
@@ -245,9 +245,9 @@ def test_save_load_and_prefill_the_next_video(
     state = club["coach"].get(url).json()
     assert state["calibration"]["id"] == cal["id"] and state["can_edit"] is True
     assert state["suggestions"] == []  # it has its own
-    # A player sees it but may not change it.
+    # A player of the team sees it and may fix it too (players tag since 17.10.2026).
     seen = as_("player-h3").get(url).json()
-    assert seen["calibration"]["id"] == cal["id"] and seen["can_edit"] is False
+    assert seen["calibration"]["id"] == cal["id"] and seen["can_edit"] is True
     # Saving again replaces it.
     again = club["coach"].put(url, json={"points": points()})
     assert again.json()["id"] == cal["id"] and again.json()["error_cm"] is None
@@ -262,9 +262,9 @@ def test_save_load_and_prefill_the_next_video(
         json={"points": team["points"], "method": "copied", "copied_from": team["calibration_id"]},
     )
     assert copied.status_code == 200 and copied.json()["copied_from"] == cal["id"]
-    # Removing it.
-    assert as_("player-h3").delete(url).status_code == 403
-    assert club["coach"].delete(url).status_code == 204
+    # Removing it: anyone who tags it may (players tag since 17.10.2026), not another team.
+    assert as_("basketball-player").delete(url).status_code == 404
+    assert as_("player-h3").delete(url).status_code == 204
     assert club["coach"].get(url).json()["calibration"] is None
     assert club["coach"].delete(url).status_code == 404
 

@@ -88,8 +88,8 @@ def test_the_box_is_marked_read_and_remembered_for_the_hall(
     url = f"/api/videos/{video['id']}/scoreboard"
     state = coach.get(url).json()
     assert state["can_edit"] and state["region"] is None and state["suggestion"] is None
-    assert as_("player-h3").get(url).json()["can_edit"] is False
-    assert as_("player-h3").put(url, json={"rect": BOX}).status_code == 403
+    assert as_("player-h3").get(url).json()["can_edit"] is True  # players tag (17.10.2026)
+    assert as_("basketball-player").put(url, json={"rect": BOX}).status_code == 404
     assert coach.put(url, json={"rect": {**BOX, "x": 0.99}}).status_code == 422  # off the picture
 
     saved = coach.put(url, json={"rect": BOX, "sets": SETS, "kind": "flip", "at_ms": 1_000})

@@ -443,13 +443,14 @@ def test_a_scoring_on_request_queues_the_actions_once(
 # --- permissions ----------------------------------------------------------------------------------
 
 
-def test_only_coaches_ask_for_actions_or_mark_them_done(
+def test_only_coaches_and_helpers_ask_for_actions_players_mark_them_done(
     ready: Any, club: dict[str, TestClient], as_: Any
 ) -> None:
     player = as_("player-h3")
     url = f"/api/videos/{ready['id']}"
     assert player.post(f"{url}/actions").status_code == 403
-    assert player.post(f"{url}/actions-reviewed", json={"reviewed": True}).status_code == 403
+    # Players tag and review their own games (owner, 17.10.2026).
+    assert player.post(f"{url}/actions-reviewed", json={"reviewed": True}).status_code != 403
     # Not analysed yet: nothing to suggest from.
     assert club["coach"].post(f"{url}/actions").status_code == 409
     analysis = player.get(f"{url}/analysis").json()

@@ -65,7 +65,8 @@ def test_the_workspace_bundle_and_roster_snapshot(
     assert bundle["official_sets"][0] == [20, 25]
 
     player = as_("player-h3").get(f"/api/videos/{ready['id']}/tagging").json()
-    assert player["can_tag"] is False and len(player["roster"]) == 4
+    # Players tag and review their own games (owner, 17.10.2026).
+    assert player["can_tag"] is True and len(player["roster"]) == 4
     assert as_("basketball-player").get(f"/api/videos/{ready['id']}/tagging").status_code == 404
 
 
@@ -149,7 +150,9 @@ def test_single_put_and_validation(ready: dict[str, Any], club: dict[str, TestCl
 
 def test_who_may_tag(ready: dict[str, Any], club: dict[str, TestClient], as_: Any) -> None:
     url = f"/api/videos/{ready['id']}/changes"
-    assert as_("player-h3").post(url, json={"events": [tag("A", 1)]}).status_code == 403
+    # Players tag and review their own games (owner, 17.10.2026).
+    assert as_("player-h3").post(url, json={"events": [tag("A", 1)]}).status_code == 200
+    assert as_("basketball-player").post(url, json={"events": [tag("A", 3)]}).status_code == 404
     assert as_("vb-sport-admin").post(url, json={"events": [tag("A", 1)]}).status_code == 200
     assert club["admin"].post(url, json={"events": [tag("A", 2)]}).status_code == 200
 
@@ -345,7 +348,8 @@ def test_roster_candidates_are_the_teams_players(
     assert [c["number"] for c in people] == [1, 3, 7, 11]  # every player: no consent to ask
     assert set(people[0]) == {"member_id", "name", "number"}
     assert as_("vb-sport-admin").get(url).status_code == 200
-    assert as_("player-h3").get(url).status_code == 403
+    # Players tag and review their own games (owner, 17.10.2026).
+    assert as_("player-h3").get(url).status_code == 200
 
 
 def test_basketball_quarters_and_score_from_made_shots(

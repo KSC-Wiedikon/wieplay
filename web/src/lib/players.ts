@@ -75,6 +75,8 @@ export interface Players {
   video_id: string
   available: boolean
   can_edit: boolean
+  /** Start finding the players (~2 h of CPU): coaches and helpers. Older servers: absent. */
+  can_find?: boolean
   status: AnalysisStatus
   job: PlayersJob | null
   run: { id: string; created_at: string; stats: Record<string, unknown>; timing: Record<string, unknown> } | null

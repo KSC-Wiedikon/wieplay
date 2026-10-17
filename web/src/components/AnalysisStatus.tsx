@@ -62,7 +62,8 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
   const total = live?.total ?? proposalTotal(data.proposals)
   const open = live?.open ?? data.proposals.unreviewed
   const metrics = data.metrics_vs_human
-  const canAnalyse = data.status === 'none' || data.status === 'failed'
+  // Starting it by hand is for coaches and helpers (players tag and review; older servers: allowed).
+  const canAnalyse = (data.can_run ?? true) && (data.status === 'none' || data.status === 'failed')
   const action =
     reviewHref && open > 0 ? (
       <ButtonLink to={reviewHref} variant="primary">
