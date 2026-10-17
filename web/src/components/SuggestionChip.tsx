@@ -6,7 +6,7 @@ import type { Segment } from '../lib/types'
 import { SparkleIcon } from './icons'
 
 /**
- * Where a rally (or a break's label) comes from, when Nomal suggested it: "Suggested · 87%"
+ * Where a rally (or a break's label) comes from, when WiePlay suggested it: "Suggested · 87%"
  * with a dashed outline while nobody has answered it; a small marker once it is accepted or
  * corrected (it is a rally like any other then). A part split off in this review session waits
  * for an answer too.

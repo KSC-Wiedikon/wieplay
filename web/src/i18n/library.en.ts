@@ -92,7 +92,7 @@ export const libraryEn = {
     post: 'Post comment',
     posting: 'Posting…',
     posted: 'Comment posted.',
-    noPeople: 'No one to mention or address yet: the team has no members in Nomal.',
+    noPeople: 'No one to mention or address yet: the team has no members in WiePlay.',
     suggestions: 'People to mention',
     goTo: 'Go to {{time}}',
     general: 'Whole video',
@@ -190,7 +190,7 @@ export const libraryEn = {
       moveUp: 'Move moment {{n}} up',
       moveDown: 'Move moment {{n}} down',
       remove: 'Remove moment {{n}}',
-      noTeams: 'You are not on a team that uses Nomal.',
+      noTeams: 'You are not on a team that uses WiePlay.',
     },
     player: {
       label: 'Reel',

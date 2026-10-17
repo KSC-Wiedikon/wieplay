@@ -7,11 +7,11 @@ export const scoreboardEn = {
     edit: 'Scoreboard marked',
     title: 'Mark the scoreboard',
     intro:
-      'Drag a box around the score on the paused picture: both teams’ points, nothing else. Nomal reads it twice a second and uses it for the score line; where it disagrees with the serves, the rally is marked for a check. Many halls have no scoreboard in the picture: then there is nothing to mark.',
+      'Drag a box around the score on the paused picture: both teams’ points, nothing else. WiePlay reads it twice a second and uses it for the score line; where it disagrees with the serves, the rally is marked for a check. Many halls have no scoreboard in the picture: then there is nothing to mark.',
     box: 'Box',
     score: 'Score',
     sets: 'Sets won (optional)',
-    setsHint: 'A second box around the sets won, if the board shows them: it tells Nomal when a new set starts.',
+    setsHint: 'A second box around the sets won, if the board shows them: it tells WiePlay when a new set starts.',
     kind: 'Board',
     kinds: {
       flip: 'Flip cards',
@@ -28,7 +28,7 @@ export const scoreboardEn = {
     useSuggestion: 'Use the last box',
     clear: 'Remove this box',
     save: 'Save and read',
-    saved: 'Saved. Nomal reads the scoreboard now; the score line follows.',
+    saved: 'Saved. WiePlay reads the scoreboard now; the score line follows.',
     failed: 'Couldn’t save the scoreboard: {{detail}}',
     remove: 'No scoreboard in this video',
     removed: 'The scoreboard is forgotten; the score comes from the serves again.',

@@ -148,7 +148,7 @@ describe('TeamPage videos', () => {
     expect(within(card('Stäfa')).getByText('Rallies reviewed')).toBeInTheDocument()
   })
 
-  it('still lists a training video from before Nomal handled matches only', async () => {
+  it('still lists a training video from before WiePlay handled matches only', async () => {
     stub(team(), [video({ title: 'Training 12.10.2026', kind: 'training', game_id: null })])
     const section = await screen.findByRole('region', { name: 'Videos' })
     const [card] = (await within(section).findAllByRole('listitem')) as [HTMLElement]

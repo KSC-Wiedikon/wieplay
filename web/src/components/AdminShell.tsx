@@ -45,7 +45,7 @@ export function AdminShell({ title, children }: { title: string; children: React
   const me = useSession()
   return (
     <div className="flex flex-col gap-8">
-      <title>{`${title} · nomal`}</title>
+      <title>{`${title} · WiePlay`}</title>
       <div className="flex flex-col gap-4">
         <PageHeader title={t('admin.title')} subtitle={t('admin.subtitle')} />
         <AdminNav />

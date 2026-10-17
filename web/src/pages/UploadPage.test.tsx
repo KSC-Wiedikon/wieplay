@@ -293,7 +293,7 @@ describe('UploadPage', () => {
     vi.stubGlobal('fetch', vi.fn(uploadApi()))
     renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
     await pickGameAndFile('clip.webm')
-    expect(await screen.findByText(/clip\.webm is not a video file Nomal takes/)).toBeInTheDocument()
+    expect(await screen.findByText(/clip\.webm is not a video file WiePlay takes/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Start upload' })).toBeDisabled()
     expect(screen.getByLabelText('Choose files')).toHaveAttribute('accept', expect.stringContaining('.m2ts'))
   })

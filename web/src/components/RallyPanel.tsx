@@ -167,7 +167,7 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
                   const n = numbers.get(rally.id) ?? 0
                   const current = rally.id === currentId
                   const set = rally.period_id ? sets.get(rally.period_id) : undefined
-                  // Where no coach decided the point, Nomal's winner fills the score line (muted).
+                  // Where no coach decided the point, WiePlay's winner fills the score line (muted).
                   const score = scoreAfter(rally)
                   const winner = effectiveWinner(rally)
                   return (

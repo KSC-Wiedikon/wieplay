@@ -100,8 +100,8 @@ try {
 }
 
 const manifest = {
-  name: 'nomal',
-  short_name: 'nomal',
+  name: 'WiePlay',
+  short_name: 'WiePlay',
   start_url: '/',
   display: 'standalone',
   theme_color: NAVY,

@@ -61,7 +61,7 @@ TEXT: dict[str, dict[str, str]] = {
         "long": "Long rally",
         "set_point": "Set point",
         "match_point": "Match point",
-        "footer": "Best plays · nomal · KSC Wiedikon",
+        "footer": "Best plays · WiePlay · {club}",
         "title": "{title} (recap)",
         "them": "Opponent",
     },
@@ -74,7 +74,7 @@ TEXT: dict[str, dict[str, str]] = {
         "long": "Langer Ballwechsel",
         "set_point": "Satzball",
         "match_point": "Matchball",
-        "footer": "Die besten Szenen · nomal · KSC Wiedikon",
+        "footer": "Die besten Szenen · WiePlay · {club}",
         "title": "{title} (Zusammenfassung)",
         "them": "Gegner",
     },
@@ -419,6 +419,7 @@ class Sides:
     left_is_us: bool
     left_short: str = ""
     right_short: str = ""
+    club: str = ""  # our club, for the footer (a guest club's own name)
 
     def order(self, score: tuple[int, int]) -> tuple[int, int]:
         return score if self.left_is_us else (score[1], score[0])
@@ -450,8 +451,8 @@ def sides(db: Session, video: Video, lang: Lang) -> tuple[Sides, WdGame | None]:
             them_full = game.away_name if home else game.home_name
         left, right = (us_full, them_full) if home else (them_full, us_full)
         short = (found.us, them_short) if home else (them_short, found.us)
-        return Sides(left, right, home, *short), game
-    return Sides(found.us_full, them_full, True, found.us, them_short), game
+        return Sides(left, right, home, *short, club=club_name), game
+    return Sides(found.us_full, them_full, True, found.us, them_short, club=club_name), game
 
 
 def set_scores(
@@ -490,7 +491,7 @@ def card(db: Session, video: Video, lang: Lang) -> tuple[Card, Sides]:
             result=f"{won[0]}:{won[1]}" if sets else None,
             sets=" · ".join(f"{a}:{b}" for a, b in sets) if sets else None,
             when=f"{when} · {hall}" if hall else when,
-            footer=TEXT[lang]["footer"],
+            footer=TEXT[lang]["footer"].format(club=side.club or get_settings().club_name),
         ),
         side,
     )

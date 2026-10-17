@@ -3,7 +3,7 @@ import { cx } from '../lib/cx'
 interface SwitchProps {
   checked: boolean
   onChange: (checked: boolean) => void
-  /** Accessible name, e.g. "H3 uses Nomal". */
+  /** Accessible name, e.g. "H3 uses WiePlay". */
   label: string
   disabled?: boolean
   /** Id of a text that says more about the setting. */

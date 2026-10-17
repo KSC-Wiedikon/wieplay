@@ -63,7 +63,7 @@ def _decode_state(value: str | None) -> tuple[str, str] | None:
 
 def _login_failed(code: str) -> HTMLResponse:
     body = (
-        "<!doctype html><meta charset=utf-8><title>nomal</title>"
+        "<!doctype html><meta charset=utf-8><title>WiePlay</title>"
         "<body style='font-family:system-ui;margin:3rem;color:#13203A;background:#EEF1F5'>"
         f"<p>Login failed ({html.escape(code)}).</p><p><a href='/'>Try again</a></p>"
     )

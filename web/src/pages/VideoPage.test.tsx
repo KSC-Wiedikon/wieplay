@@ -358,7 +358,7 @@ describe('VideoPage', () => {
 
     it("keeps open suggestions out of the rallies and links coaches to their review", async () => {
       showAnalysis({ analysis: analysis({ proposals: counts({ unreviewed: 1, confirmed: 1, rejected: 1 }) }) })
-      expect(await screen.findByText('Nomal suggested 3 rallies.')).toBeInTheDocument()
+      expect(await screen.findByText('WiePlay suggested 3 rallies.')).toBeInTheDocument()
       expect(screen.getByText('1 still to review.')).toBeInTheDocument()
       expect(screen.getByRole('link', { name: 'Review suggestions (1)' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
       // Nothing is shown as fact until it is reviewed (PLAN §10): the accepted one is a rally, the open one not.
@@ -378,7 +378,7 @@ describe('VideoPage', () => {
     it('analyses on request, and shows the analysis queued, running and failed', async () => {
       const state = { analysis: analysis({ status: 'none' }) }
       const { posts, queryClient } = showAnalysis(state, { segments: [r1] })
-      expect(await screen.findByText('Nomal has not analysed this video yet.')).toBeInTheDocument()
+      expect(await screen.findByText('WiePlay has not analysed this video yet.')).toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: 'Analyse' }))
       expect(await screen.findByText('Analysis queued.')).toBeInTheDocument()
       expect(posts).toEqual([{ path: `/api/videos/${ID}/analyse`, body: undefined }])
@@ -387,7 +387,7 @@ describe('VideoPage', () => {
 
       state.analysis = analysis({ status: 'running' })
       await queryClient.invalidateQueries()
-      expect(await screen.findByText('Nomal is finding the rallies…')).toBeInTheDocument()
+      expect(await screen.findByText('WiePlay is finding the rallies…')).toBeInTheDocument()
 
       state.analysis = analysis({ status: 'failed' })
       await queryClient.invalidateQueries()
@@ -401,9 +401,9 @@ describe('VideoPage', () => {
         { analysis: analysis({ metrics_vs_human: { f1_1s: 0.94, precision: 0.95, recall: 0.93, iou: 0.88, rallies_human: 185, rallies_model: 181 } }) },
         { segments: [r1] },
       )
-      expect(await screen.findByText('Nomal compared its rally finder with your rallies.')).toBeInTheDocument()
+      expect(await screen.findByText('WiePlay compared its rally finder with your rallies.')).toBeInTheDocument()
       expect(screen.getByText('Suggestions matched your rallies: F1 94% at ±1 s')).toBeInTheDocument()
-      expect(screen.getByText('Precision 95%, recall 93%. Nomal: 181 rallies, you: 185.')).toBeInTheDocument()
+      expect(screen.getByText('Precision 95%, recall 93%. WiePlay: 181 rallies, you: 185.')).toBeInTheDocument()
     })
 
     it('asks to mark the rallies reviewed once every suggestion is answered, and can take it back', async () => {
@@ -412,9 +412,9 @@ describe('VideoPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Mark rallies reviewed' }))
       const reviewed = await screen.findByRole('switch', { name: 'Rallies reviewed' })
       expect(reviewed).toHaveAttribute('aria-checked', 'true')
-      expect(await screen.findByText('Rallies marked reviewed. Nomal learns from this game.')).toBeInTheDocument()
+      expect(await screen.findByText('Rallies marked reviewed. WiePlay learns from this game.')).toBeInTheDocument()
       expect(posts).toEqual([{ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: true } }])
-      await waitFor(() => expect(reviewed).toHaveAccessibleDescription('Marked reviewed on 16.10.2026 21:12. Nomal learns from this game.'))
+      await waitFor(() => expect(reviewed).toHaveAccessibleDescription('Marked reviewed on 16.10.2026 21:12. WiePlay learns from this game.'))
 
       fireEvent.click(reviewed)
       await waitFor(() => expect(posts.at(-1)).toEqual({ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: false } }))
@@ -424,7 +424,7 @@ describe('VideoPage', () => {
     it('lets a coach mark a game tagged by hand reviewed (training data without suggestions)', async () => {
       const { posts } = showAnalysis({ analysis: analysis({ status: 'none' }) }, { segments: [r1] })
       const reviewed = await screen.findByRole('switch', { name: 'Rallies reviewed' })
-      expect(reviewed).toHaveAccessibleDescription(/Nomal learns from reviewed games/)
+      expect(reviewed).toHaveAccessibleDescription(/WiePlay learns from reviewed games/)
       fireEvent.click(reviewed)
       await waitFor(() => expect(posts).toEqual([{ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: true } }]))
     })
@@ -432,7 +432,7 @@ describe('VideoPage', () => {
     it('shows players neither the analysis nor open suggestions', async () => {
       showAnalysis({ analysis: analysis({ proposals: counts({ unreviewed: 1 }) }) }, { canTag: false })
       expect(await screen.findByRole('table', { name: 'Rallies' })).toBeInTheDocument()
-      expect(screen.queryByText(/Nomal suggested/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/WiePlay suggested/)).not.toBeInTheDocument()
       expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row').slice(1)).toHaveLength(2)
     })
   })
@@ -470,7 +470,7 @@ describe('VideoPage', () => {
 
     it('lets a coach set who won a rally: shown at once, sent as a fact, with undo', async () => {
       const posts: unknown[] = []
-      // The server: the winner kept as a fact, the score line from it (Nomal's winner without one).
+      // The server: the winner kept as a fact, the score line from it (WiePlay's winner without one).
       let second = r2
       show(video({ names, can_tag: true }), 200, {
         [`/api/videos/${ID}/tagging`]: { body: () => tagged({ can_tag: true, segments: [r1, second] }) },
@@ -487,17 +487,17 @@ describe('VideoPage', () => {
       })
       const list = await screen.findByRole('table', { name: 'Rallies' })
       const point = within(list).getByRole('combobox', { name: 'Point of rally 2' })
-      expect(within(point).getAllByRole('option').map((o) => o.textContent)).toEqual(['Volley Näfels (Nomal)', 'KSCW H3', 'Volley Näfels'])
+      expect(within(point).getAllByRole('option').map((o) => o.textContent)).toEqual(['Volley Näfels (WiePlay)', 'KSCW H3', 'Volley Näfels'])
       expect(point).toHaveValue('')
 
-      // Nomal had Volley Näfels; KSCW H3 won it. The score follows at once, the server gets the fact.
+      // WiePlay had Volley Näfels; KSCW H3 won it. The score follows at once, the server gets the fact.
       fireEvent.change(point, { target: { value: 'us' } })
       expect(screen.getByText('Point of rally 2: KSCW H3.')).toBeInTheDocument()
       await waitFor(() => expect(within(list).getAllByRole('row')[2]).toHaveTextContent('2:0'))
       await waitFor(() => expect(posts).toHaveLength(1))
       expect(posts[0]).toEqual({ events: [], periods: [], segments: [expect.objectContaining({ id: r2.id, won_by: 'us', base_version: 3, kind: 'rally', start_ms: 60_000, end_ms: 70_000 })] })
 
-      // Undo: back to Nomal's suggestion.
+      // Undo: back to WiePlay's suggestion.
       fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
       await waitFor(() => expect(posts).toHaveLength(2))
       expect(posts[1]).toEqual({ events: [], periods: [], segments: [expect.objectContaining({ id: r2.id, won_by: null, base_version: 4 })] })
@@ -512,7 +512,7 @@ describe('VideoPage', () => {
       })
       const setup = await screen.findByRole('button', { name: /^Setup/ })
       await waitFor(() => expect(setup).toHaveAttribute('aria-expanded', 'true')) // the analysis waits for the coach
-      expect(await screen.findByText('Nomal has not analysed this video yet.')).toBeInTheDocument()
+      expect(await screen.findByText('WiePlay has not analysed this video yet.')).toBeInTheDocument()
       // The length, picture and frame rate sit next to the date; the keys behind a button.
       expect(screen.getByText('1:32:10 · 1920×1080 · 50 fps')).toBeInTheDocument()
       expect(screen.queryByText(/Keys: space to play/)).not.toBeInTheDocument()
@@ -644,7 +644,7 @@ describe('VideoPage', () => {
     })
 
     it('counts facts only and says how many suggested actions wait', async () => {
-      // Nomal suggested a third attack of #7; nobody has accepted it: not a number, not a play.
+      // WiePlay suggested a third attack of #7; nobody has accepted it: not a number, not a play.
       const suggested = tag({ t_ms: 40_000, code: 'A', number: 7, source: 'model', review: 'unreviewed', confidence: 0.7 })
       showStats({ tagging: { ...tagging, events: [kill, suggested, error] }, stats: { ...stats, suggested: 1 } })
       expect(await screen.findByText('Suggested, not reviewed: 1 action. It counts once a coach accepts it.')).toBeInTheDocument()
@@ -658,7 +658,7 @@ describe('VideoPage', () => {
         contact_recall: null, min_precision: 0.7, min_recall: 0.6, trained_at: null,
       }
       showStats({ stats: { ...stats, suggested: 0, actions_gate: gate } })
-      expect(await screen.findByText(/Action suggestions start once Nomal gets them right often enough/)).toBeInTheDocument()
+      expect(await screen.findByText(/Action suggestions start once WiePlay gets them right often enough/)).toBeInTheDocument()
       expect(screen.getByText(/\(now: 1 game\)/)).toBeInTheDocument()
     })
 
@@ -719,7 +719,7 @@ describe('VideoPage', () => {
       expect(screen.queryByRole('button', { name: 'Start at first serve' })).not.toBeInTheDocument()
     })
 
-    it("marks breaks and set starts below the player, Nomal's suggestions lighter", async () => {
+    it("marks breaks and set starts below the player, WiePlay's suggestions lighter", async () => {
       show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
       const strip = await screen.findByTestId('moments-strip')
       const marks = [...strip.querySelectorAll('[data-marker]')].map((m) => [m.getAttribute('data-marker'), m.getAttribute('title'), m.hasAttribute('data-suggested')])
@@ -733,7 +733,7 @@ describe('VideoPage', () => {
       expect(screen.getByText('Plays only the rallies: 0:27 of 1:32:10.')).toBeInTheDocument()
     })
 
-    it("shows Nomal's winners as suggestions in the rally list", async () => {
+    it("shows WiePlay's winners as suggestions in the rally list", async () => {
       show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
       const list = await screen.findByRole('table', { name: 'Rallies' })
       const rows = within(list).getAllByRole('row').slice(1)
@@ -769,10 +769,10 @@ describe('VideoPage', () => {
         [`/api/videos/${ID}/analysis`]: { body: analysis },
       })
       const card = await screen.findByRole('region', { name: 'Automatic score' })
-      expect(within(card).getByText('Set 1: official 25:27 · Nomal 25:27')).toBeInTheDocument()
+      expect(within(card).getByText('Set 1: official 25:27 · WiePlay 25:27')).toBeInTheDocument()
       expect(within(card).getByText('matches')).toBeInTheDocument()
       // Against the official score: where the serve evidence alone ends the set.
-      expect(within(card).getByText('Set 2: official 25:20 · Nomal 24:20')).toBeInTheDocument()
+      expect(within(card).getByText('Set 2: official 25:20 · WiePlay 24:20')).toBeInTheDocument()
       expect(within(card).getByText('differs')).toBeInTheDocument()
       expect(within(card).getByText('12 rallies to check')).toBeInTheDocument()
       expect(within(card).getByText('Breaks found: 1 warm-up · 3 set breaks · 5 timeouts')).toBeInTheDocument()

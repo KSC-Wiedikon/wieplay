@@ -40,7 +40,7 @@ import { useToast } from '../lib/toast'
 import { isUuid } from '../lib/video'
 
 /**
- * /videos/:id/players — "Players in this video" (docs/PLAN.md §10.5): one card per person Nomal
+ * /videos/:id/players — "Players in this video" (docs/PLAN.md §10.5): one card per person WiePlay
  * found, with pictures of their back, the actions attributed to them and the number a coach
  * gives them once. Merge, split, "not a player", swap teams. Keyboard: type a number, Enter
  * saves it and moves to the next card.
@@ -64,7 +64,7 @@ function PlayersView({ videoId }: { videoId: string }) {
   const v = video.data
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${t('players.title')} · ${v.title} · nomal`}</title>
+      <title>{`${t('players.title')} · ${v.title} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <>

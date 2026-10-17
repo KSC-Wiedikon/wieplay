@@ -54,7 +54,7 @@ describe('AdminTeamsPage', () => {
 
     fireEvent.change(season, { target: { value: '2025/26' } })
     await waitFor(() => expect(rowNames(screen.getByRole('table', { name: 'Volleyball' }))).toEqual(['H3']))
-    expect(screen.getByRole('switch', { name: 'H3 2025/26 uses Nomal' })).toBeChecked()
+    expect(screen.getByRole('switch', { name: 'H3 2025/26 uses WiePlay' })).toBeChecked()
     expect(router.state.location.search).toBe('?season=2025%2F26')
   })
 

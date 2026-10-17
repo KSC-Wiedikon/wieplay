@@ -1,4 +1,4 @@
-// Reviewing the rallies Nomal suggested (docs/PLAN.md §10, §10.1, §11), modelled on Hudl's
+// Reviewing the rallies WiePlay suggested (docs/PLAN.md §10, §10.1, §11), modelled on Hudl's
 // review: the list goes through the open suggestions in time order, the player loops the one
 // on screen (1 s before it to just after it), and every answer is one key:
 //

@@ -25,7 +25,7 @@ function label(team: GuestTeam): string {
 /**
  * Admin → Teams → Guest clubs (PLAN §4.5): other clubs' teams with their own logins. Create one,
  * invite its first coach (a link shown once), set its video limit and whether its games may train
- * Nomal, switch it off. Its people and their new password links are on its team page.
+ * WiePlay, switch it off. Its people and their new password links are on its team page.
  */
 export function GuestClubsSection() {
   const { t } = useTranslation()

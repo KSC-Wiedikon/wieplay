@@ -59,7 +59,7 @@ function VideoNotFound() {
   const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-6">
-      <title>nomal</title>
+      <title>WiePlay</title>
       <Message>{t('video.notFound')}</Message>
     </div>
   )
@@ -103,7 +103,7 @@ function VideoView({ videoId }: { videoId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${v.title} · nomal`}</title>
+      <title>{`${v.title} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <>
@@ -313,7 +313,7 @@ function Ready({ video }: { video: Video }) {
 
   // "KSCW H3", "Volero" wherever the page would say us and them.
   const names = useMemo(() => sideNamesOf(video, t), [video, t])
-  // Nomal's suggestions are not rallies or tags until a coach reviews them (PLAN §10, §10.4a):
+  // WiePlay's suggestions are not rallies or tags until a coach reviews them (PLAN §10, §10.4a):
   // the rally list, skipping dead time, the counts, the plays and the diagrams leave them out.
   const data = useMemo(
     () =>
@@ -326,7 +326,7 @@ function Ready({ video }: { video: Video }) {
   const tagCount = data?.events.length ?? 0
   const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
   const duration = video.duration_ms ?? playhead.getState().duration_ms
-  // Breaks and set starts on the strip below the player; Nomal's open suggestions lighter (PLAN §10.3).
+  // Breaks and set starts on the strip below the player; WiePlay's open suggestions lighter (PLAN §10.3).
   const breaks = useMemo<BreakMark[]>(
     () =>
       (data?.segments ?? []).flatMap((s) =>

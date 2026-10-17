@@ -41,7 +41,7 @@ function reveal(container: HTMLElement | null, id: string | null): void {
 }
 
 /**
- * The rallies of the video. While tagging: every rally, with Nomal's suggestions marked and a
+ * The rallies of the video. While tagging: every rally, with WiePlay's suggestions marked and a
  * filter for those still to review (accept or reject them right here); who served and who won,
  * suggested values muted, and "check" where the automatic score disagrees with something.
  * While reviewing: the suggestions (rallies and breaks) in time order with their state, the one
@@ -171,7 +171,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                         </span>
                       </Td>
                       {!reviewing && (
-                        // Who won: the coach's call (a fact the score line follows), else Nomal's, muted.
+                        // Who won: the coach's call (a fact the score line follows), else WiePlay's, muted.
                         <Td tight className="hidden md:table-cell">
                           <WinnerPicker rally={rally} n={n} names={names} onPick={(won_by) => controller.updateSegment(rally.id, { won_by })} />
                         </Td>
@@ -221,7 +221,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
   )
 }
 
-/** An answered suggestion in the review list: accepted or corrected, and how sure Nomal was. */
+/** An answered suggestion in the review list: accepted or corrected, and how sure WiePlay was. */
 function ReviewedState({ rally }: { rally: Segment }) {
   const { t } = useTranslation()
   const confidence = formatPercent(rally.confidence)

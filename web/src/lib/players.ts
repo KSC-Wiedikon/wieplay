@@ -1,6 +1,6 @@
 // Players in a video (docs/PLAN.md §10.5, §5.7): the gallery a coach names once (GET
 // /api/videos/{id}/players, polled while the job runs), its actions (name, merge, split, not a
-// player, swap teams, find again) and "apply", which takes Nomal's players for the coach's tags
+// player, swap teams, find again) and "apply", which takes WiePlay's players for the coach's tags
 // without a number. A card is "a person in this video": no faces, nothing across videos; the
 // number a coach picks is the only identity.
 

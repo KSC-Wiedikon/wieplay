@@ -171,7 +171,7 @@ interface DeskProps extends WorkspaceProps {
 }
 
 /**
- * Leaving the review after changes: once they are sent, Nomal scores the match again with them
+ * Leaving the review after changes: once they are sent, WiePlay scores the match again with them
  * (who served, who won, sets, breaks) and the page takes over the new suggestions. Nothing to
  * wait for: a failure (or a sport without scoring, 409) leaves things as they are.
  */
@@ -378,7 +378,7 @@ function DeskLayout({
   useLoopPlayback(element, current?.start_ms ?? action?.t_ms ?? null, current?.end_ms ?? action?.t_ms ?? null)
 
   // The analysis card counts rally proposals ("rallies reviewed" waits for those only); the
-  // review goes through the breaks Nomal labelled too.
+  // review goes through the breaks WiePlay labelled too.
   const rallyProgress = useMemo(() => reviewProgress(view.segments, review.seen, review.rejectedBefore), [view.segments, review.seen, review.rejectedBefore])
   const live = useMemo(() => ({ total: rallyProgress.total, open: rallyProgress.total - rallyProgress.done }), [rallyProgress])
   const progress = useMemo(
@@ -391,7 +391,7 @@ function DeskLayout({
   const factCount = useMemo(() => factTags(view.events).length, [view.events])
   // Below the bar (PLAN §10.4a) the Actions queue says why there are no suggestions.
   const gate = useAnalysis(video.id, controller.playsRallies).data?.actions?.gate
-  // The review is offered once Nomal suggested something (volleyball: basketball marks no rallies).
+  // The review is offered once WiePlay suggested something (volleyball: basketball marks no rallies).
   const canReview = controller.playsRallies && (progress.total > 0 || actionCount > 0 || reviewing)
   const status =
     controller.playsRallies && video.can_tag ? (
@@ -408,7 +408,7 @@ function DeskLayout({
 
   return (
     <div className="flex flex-col gap-4">
-      <title>{`${t(reviewing ? 'tagging.review.title' : 'tagging.pageTitle', { title: video.title })}${reviewing ? ` · ${video.title}` : ''} · nomal`}</title>
+      <title>{`${t(reviewing ? 'tagging.review.title' : 'tagging.pageTitle', { title: video.title })}${reviewing ? ` · ${video.title}` : ''} · WiePlay`}</title>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h1 className="text-xl font-bold wrap-break-word">{video.title}</h1>
@@ -470,7 +470,7 @@ function DeskLayout({
   )
 }
 
-/** Tag or review: the review goes through Nomal's suggestions one by one. */
+/** Tag or review: the review goes through WiePlay's suggestions one by one. */
 function ModeSwitch({ open }: { open: number }) {
   const { t } = useTranslation()
   const { review } = useWorkspace()
@@ -493,7 +493,7 @@ function ModeSwitch({ open }: { open: number }) {
   )
 }
 
-/** In the review: Nomal's rallies (and breaks) or its suggested actions. */
+/** In the review: WiePlay's rallies (and breaks) or its suggested actions. */
 function QueueSwitch({ rallies, actions: open }: { rallies: number; actions: number }) {
   const { t } = useTranslation()
   const { actions } = useWorkspace()
@@ -516,7 +516,7 @@ function QueueSwitch({ rallies, actions: open }: { rallies: number; actions: num
   )
 }
 
-/** Below the timeline: the tags, or (volleyball) the rallies with Nomal's suggestions. */
+/** Below the timeline: the tags, or (volleyball) the rallies with WiePlay's suggestions. */
 function Lists({ rallies }: { rallies: number }) {
   const { t } = useTranslation()
   const { controller } = useWorkspace()
@@ -738,7 +738,7 @@ function SetState() {
     ? factTags(view.events).find((e) => serves.has(e.code) && e.t_ms >= open.start_ms - SERVE_SLACK_MS && e.t_ms <= t_ms)
     : undefined
   const serving = serveTag?.side ?? state.serving
-  // The score counts winners Nomal suggested (no coach decided those rallies yet).
+  // The score counts winners WiePlay suggested (no coach decided those rallies yet).
   const suggested = !serveTag && state.suggested === true
 
   return (

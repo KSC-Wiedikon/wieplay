@@ -75,7 +75,7 @@ describe('rescore (same rules as the server)', () => {
     const r2 = rally({ start_ms: 30_000, end_ms: 40_000, serving_manual: 'them', model_serving: 'us' })
     const r3 = rally({ start_ms: 50_000, end_ms: 60_000, model_serving: 'them' })
     const out = rescore([set], [r1, r2, r3], [], S)
-    // After a rally without a coach's winner, who serves is not known from facts (Nomal suggests it).
+    // After a rally without a coach's winner, who serves is not known from facts (WiePlay suggests it).
     expect(out.segments.map((r) => r.serving)).toEqual(['us', 'them', null])
     // A serve tag still wins over the call.
     const serve = tag({ code: 'S', side: 'us', t_ms: 31_000 })

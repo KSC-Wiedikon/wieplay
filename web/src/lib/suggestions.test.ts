@@ -87,13 +87,13 @@ describe('suggestions', () => {
     expect(scoreAfter({ score_us_after: null, score_them_after: null, score_source: null })).toBeNull()
   })
 
-  it('tells a set Nomal suggested until a coach accepts it', () => {
+  it('tells a set WiePlay suggested until a coach accepts it', () => {
     expect(isSetSuggestion(period({ no: 1, start_ms: 0, source: 'model', review: 'unreviewed' }))).toBe(true)
     expect(isSetSuggestion(period({ no: 1, start_ms: 0, source: 'model', review: 'confirmed' }))).toBe(false)
     expect(isSetSuggestion(period({ no: 1, start_ms: 0 }))).toBe(false)
   })
 
-  it('picks the open suggestions Nomal is at least 90% sure of', () => {
+  it('picks the open suggestions WiePlay is at least 90% sure of', () => {
     expect(sureSuggestions(all).map((s) => s.id)).toEqual(['a'])
     expect(sureSuggestions(all, 0.7).map((s) => s.id)).toEqual(['a', 'c'])
     expect(sureSuggestions([rally({ start_ms: 0, end_ms: 1, source: 'model', confidence: null })])).toEqual([])

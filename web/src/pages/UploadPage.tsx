@@ -69,7 +69,7 @@ function UploadView({ teamId }: { teamId: number }) {
   return (
     // A form: it keeps a readable width on wide screens.
     <div className="flex max-w-3xl flex-col gap-6">
-      <title>{`${t('upload.title')} · ${team.data.name} · nomal`}</title>
+      <title>{`${t('upload.title')} · ${team.data.name} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <>

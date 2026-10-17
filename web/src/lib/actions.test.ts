@@ -122,7 +122,7 @@ describe('the bar for suggestions', () => {
 
   it('says plainly why there are none yet, and nothing once the bar is passed', () => {
     expect(gateText(t, gate({}))).toBe(
-      'Action suggestions start once Nomal gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: 2 games, last score 41%).',
+      'Action suggestions start once WiePlay gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: 2 games, last score 41%).',
     )
     expect(gateText(t, gate({ games: 1, precision: null, reason: 'too_few_games' }))).toMatch(/\(now: 1 game\)\.$/)
     expect(gateText(t, gate({ mode: 'off', reason: 'off' }))).toBe('Action suggestions are switched off.')

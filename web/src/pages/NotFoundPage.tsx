@@ -8,7 +8,7 @@ export function NotFoundPage() {
   const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${t('notFound.title')} · nomal`}</title>
+      <title>{`${t('notFound.title')} · WiePlay`}</title>
       <PageHeader title={t('notFound.title')} />
       <EmptyState
         icon={<AlertIcon />}

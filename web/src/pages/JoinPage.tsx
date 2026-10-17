@@ -41,7 +41,7 @@ export function JoinPage() {
         ) : invite.isError ? (
           invite.error instanceof ApiError && (invite.error.status === 404 || invite.error.status === 410) ? (
             <div className="flex flex-col gap-4">
-              <title>nomal</title>
+              <title>WiePlay</title>
               <p role="alert">{invite.error.status === 410 ? t('guests.join.gone') : t('guests.join.unknown')}</p>
               <ButtonLink to="/" className="self-start">
                 {t('guests.join.toLogin')}
@@ -101,7 +101,7 @@ function JoinForm({ token, invite }: { token: string; invite: GuestInvite }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <title>{`${t('guests.join.title', { team: invite.team })} · nomal`}</title>
+      <title>{`${t('guests.join.title', { team: invite.team })} · WiePlay`}</title>
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold tracking-tight">{t('guests.join.title', { team: invite.team })}</h1>
         <p className="text-muted">{t('guests.join.intro', { club: invite.club })}</p>

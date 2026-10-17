@@ -17,7 +17,7 @@ export function roleLabel(t: TFunction, rel: string): string {
   }
 }
 
-/** The viewer's roles in a team as labels: the Wiedisync relations, then "Helper" (a Nomal grant). */
+/** The viewer's roles in a team as labels: the Wiedisync relations, then "Helper" (a WiePlay grant). */
 export function teamRoleLabels(t: TFunction, team: Pick<Team, 'rel' | 'helper'>): string[] {
   const labels = team.rel.map((rel) => roleLabel(t, rel))
   if (team.helper) labels.push(t('roles.helper'))

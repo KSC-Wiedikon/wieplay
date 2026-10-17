@@ -30,7 +30,7 @@ describe('PlayersPage', () => {
     expect(screen.getByText('25% of actions identified')).toBeInTheDocument()
     expect(screen.getByText('3 cards: 2 ours, 1 theirs')).toBeInTheDocument()
     expect(screen.getByText(/0 of 3 cards named/)).toBeInTheDocument()
-    expect(screen.getByText(/Nomal agreed 75%/)).toBeInTheDocument()
+    expect(screen.getByText(/WiePlay agreed 75%/)).toBeInTheDocument()
     const ours = screen.getByRole('region', { name: 'Our team' })
     expect(within(ours).getAllByRole('article')).toHaveLength(2)
     const first = within(ours).getByRole('article', { name: 'Player 1' })
@@ -103,7 +103,7 @@ describe('PlayersPage', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
-  it('swaps the teams after asking, and applies Nomal’s players to the coach’s tags', async () => {
+  it('swaps the teams after asking, and applies WiePlay’s players to the coach’s tags', async () => {
     const fetch = show(playersState(), {
       [`POST /api/videos/${ID}/players/swap-teams`]: { body: playersState() },
       [`POST /api/videos/${ID}/players/apply`]: { body: { applied: 2, players: playersState({ open_suggestions: 0 }) } },
@@ -112,9 +112,9 @@ describe('PlayersPage', () => {
     const dialog = await screen.findByRole('alertdialog', { name: 'Swap the teams?' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Swap teams' }))
     await waitFor(() => expect(calls(fetch, 'POST', `/api/videos/${ID}/players/swap-teams`)).toHaveLength(1))
-    fireEvent.click(screen.getByRole('button', { name: 'Use Nomal’s players for 2 of your tags' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use WiePlay’s players for 2 of your tags' }))
     expect(await screen.findByText('2 tags got their player')).toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Use Nomal’s players/ })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Use WiePlay’s players/ })).not.toBeInTheDocument())
   })
 
   it('is read-only for those who may not tag', async () => {

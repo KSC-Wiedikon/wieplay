@@ -796,7 +796,7 @@ SAFE = re.compile(r"[^A-Za-z0-9._ -]+")
 
 
 def _filename(export: VideoExport) -> str:
-    stem = SAFE.sub("", export.title).strip()[:80] or "nomal-export"
+    stem = SAFE.sub("", export.title).strip()[:80] or "wieplay-export"
     return f"{stem}.mp4"
 
 

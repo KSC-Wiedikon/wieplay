@@ -151,7 +151,7 @@ export function Header({ me }: { me: Me }) {
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </Button>
           <span aria-hidden="true" className="mx-1 hidden h-6 w-px bg-hairline sm:block" />
-          {/* A guest club's member (PLAN §4.5): whose Nomal this is for them. */}
+          {/* A guest club's member (PLAN §4.5): whose WiePlay this is for them. */}
           {me.guest && me.club && (
             <span className="hidden max-w-40 truncate text-sm font-semibold text-muted sm:inline" title={me.club}>
               {me.club}

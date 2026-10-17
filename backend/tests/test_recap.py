@@ -43,6 +43,7 @@ def test_a_recap_is_cut_from_the_facts(
     assert card["matchup"] == "Testclub B \N{EN DASH} KSC Wiedikon H3"
     assert card["result"] == "3:1" and card["sets"] == "25:20 · 23:25 · 25:18 · 25:22"
     assert card["when"].endswith("· Auswärtshalle")
+    assert card["footer"] == "Die besten Szenen · WiePlay · KSC Wiedikon"
     assert params["recap"]["card_ms"] == recap.TITLE_MS and params["recap"]["source"] == "facts"
     first, second = params["pieces"]
     # Rally 1 (10-20 s): our kill by #7; rally 2 (21-30 s): the last of the match.

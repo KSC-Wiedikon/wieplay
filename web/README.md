@@ -1,6 +1,6 @@
-# Nomal web
+# WiePlay web
 
-The browser app for Nomal: React 19, TypeScript, Vite, Tailwind CSS v4, React Router 7
+The browser app for WiePlay: React 19, TypeScript, Vite, Tailwind CSS v4, React Router 7
 (library mode), TanStack Query 5 and i18next (English, German). See `../docs/PLAN.md` §13 for
 the brand and UI rules this follows.
 
@@ -44,7 +44,7 @@ they change, run `npm run sync-brand` and commit the copies in `public/`:
 - `nomal-mark-vb.svg`, `nomal-mark-bb.svg` and the two `mark-on-dark.svg` files go to
   `public/brand/` (the dark ones as `nomal-mark-vb-dark.svg` and `nomal-mark-bb-dark.svg`).
 
-The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted through
+The wordmark is the text "WiePlay" in Bricolage Grotesque ExtraBold, self-hosted through
 `@fontsource/bricolage-grotesque` (Latin subset, weight 800 only).
 
 ## How the UI is put together
@@ -118,7 +118,7 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     narrowed down to the one bad change by splitting the batch.
   - `src/lib/rallies.ts` mirrors the server's scoring for the moments when changes are still
     queued; after each sync the server's scores are shown.
-- **Nomal's rally suggestions and their review** (PLAN §10.1, §11; `src/lib/suggestions.ts`,
+- **WiePlay's rally suggestions and their review** (PLAN §10.1, §11; `src/lib/suggestions.ts`,
   `src/lib/analysis.ts`, `src/pages/tag/review.ts`, `ReviewPanel.tsx`, `RallyList.tsx`): the
   analysis proposes rallies as segments with `source: "model"`, a `confidence` and a `review`
   state. Open ones (`unreviewed`) are outlined (dashed) on the timeline and carry a "Suggested ·
@@ -138,7 +138,7 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
   - `AnalysisStatus` (video page and tagging page, for those who may tag, volleyball): the
     analysis state from `GET /api/videos/{id}/analysis` (polled while queued or running),
     "Analyse" (`POST …/analyse`) when there is none or it failed, the F1 against the coach's own
-    rallies, and "Rallies reviewed" (`POST …/rallies-reviewed`), which makes Nomal learn from the
+    rallies, and "Rallies reviewed" (`POST …/rallies-reviewed`), which makes WiePlay learn from the
     game; with suggestions still open it asks first (the server accepts them as they are), and it
     is offered prominently once every suggestion is answered. On the video page it is the first
     step of the setup (below).

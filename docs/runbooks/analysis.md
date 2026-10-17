@@ -195,7 +195,7 @@ python -m nomal.cli score --all-ready        # every ready volleyball video (aft
 python -m nomal.cli train-rallies            # also brings the missing series of old games
 ```
 
-What a coach does: in the Sets bar, "First serve" and "We start" for set 1 when Nomal is not
+What a coach does: in the Sets bar, "First serve" and "We start" for set 1 when WiePlay is not
 sure (the scoring card says so); the rules carry it to the other sets. In the review, `1`/`2`
 call the serving team, gap labels are answered like rallies (`W B T D O` relabel). Nothing the
 model writes overwrites a coach's winner, serve, set or label: its server and winner are in

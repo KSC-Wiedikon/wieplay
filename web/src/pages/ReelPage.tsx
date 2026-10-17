@@ -37,7 +37,7 @@ export function ReelPage() {
   const pieces = items.data ?? []
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${reel.title} · nomal`}</title>
+      <title>{`${reel.title} · WiePlay`}</title>
       <PageHeader
         eyebrow={
           <Link to="/reels" className="font-semibold link">

@@ -12,7 +12,7 @@ import { AlertIcon, UsersIcon } from './icons'
 
 /**
  * "Players in this video" (docs/PLAN.md §10.5, beta) in short, as a step after the rallies:
- * how many cards Nomal made (honestly: many more than the players), how many have their
+ * how many cards WiePlay made (honestly: many more than the players), how many have their
  * number, how many actions have a player, and the way to the gallery. Finding the players
  * is on demand (about 2 h of the club server per match): "Find players" when nobody has.
  * On the video page and below the review of the suggestions.

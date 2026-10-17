@@ -37,14 +37,14 @@ export interface Guide {
 export const guideEn: Guide = {
   title: 'How to help',
   subtitle:
-    'For club members a coach picked to help a team: review what Nomal suggests, and tag the basics. A computer with a keyboard is fastest; a tablet works for reviewing.',
+    'For club members a coach picked to help a team: review what WiePlay suggests, and tag the basics. A computer with a keyboard is fastest; a tablet works for reviewing.',
   onThisPage: 'On this page',
   key: 'Key',
   meaning: 'What it does',
   why: {
     title: 'Why it matters',
     body: [
-      'Nomal finds the rallies in a game video by itself, but it learns from people. Every game whose rallies someone checked and marked reviewed becomes an example Nomal trains on, so the suggestions for the next games get better, for every team in the club.',
+      'WiePlay finds the rallies in a game video by itself, but it learns from people. Every game whose rallies someone checked and marked reviewed becomes an example WiePlay trains on, so the suggestions for the next games get better, for every team in the club.',
       'A reviewed game also gives the team its condensed match (rallies only), the score line and, with tags, the statistics.',
     ],
   },
@@ -52,20 +52,20 @@ export const guideEn: Guide = {
     title: 'Getting started',
     steps: [
       'A coach added you as a helper. The team now shows on your start page with a “Helper” chip, with every season of its videos.',
-      'Open a game video. On a computer, choose “Tag”; to go through Nomal’s suggestions, switch the mode to “Review suggestions”. On a tablet or phone you get the review straight away.',
+      'Open a game video. On a computer, choose “Tag”; to go through WiePlay’s suggestions, switch the mode to “Review suggestions”. On a tablet or phone you get the review straight away.',
       'Press ? at any time for every key.',
     ],
   },
   review: {
     title: 'Review rally suggestions',
     intro:
-      'A suggestion is a rally Nomal thinks it saw, from the serve to the moment the ball is dead. It plays in a loop from a second before it starts. You say whether it is right.',
+      'A suggestion is a rally WiePlay thinks it saw, from the serve to the moment the ball is dead. It plays in a loop from a second before it starts. You say whether it is right.',
     steps: [
       'Watch the loop. Is it one rally, from the serve to the end of play?',
       'Right: press Enter. Not a rally (warm-up, timeout, a replay, players walking): press X.',
       'Starts or ends too early or too late: move the start with ← →, the end with Shift + ← →, then Enter.',
       'Two rallies in one suggestion: S splits it at the playhead. One rally cut in two: M merges it with the next one.',
-      'Say who served (1 us, 2 them) and who won the rally (3 us, 4 them) when Nomal is unsure or wrong: the score line follows from it.',
+      'Say who served (1 us, 2 them) and who won the rally (3 us, 4 them) when WiePlay is unsure or wrong: the score line follows from it.',
       'Each answer moves on to the next suggestion. A mistake: U undoes the last answer.',
     ],
     keysTitle: 'Keys while reviewing',
@@ -93,8 +93,8 @@ export const guideEn: Guide = {
   done: {
     title: 'Mark the rallies reviewed',
     body: [
-      'When every suggestion is answered, the review offers “Mark rallies reviewed”; the video page has the same switch. Only then does Nomal learn from the game.',
-      'If suggestions are still open, Nomal asks first. Found a mistake later? Just correct it: the game stays marked reviewed.',
+      'When every suggestion is answered, the review offers “Mark rallies reviewed”; the video page has the same switch. Only then does WiePlay learn from the game.',
+      'If suggestions are still open, WiePlay asks first. Found a mistake later? Just correct it: the game stays marked reviewed.',
     ],
   },
   tag: {
@@ -144,7 +144,7 @@ export const guideEn: Guide = {
   },
   actions: {
     title: 'Review suggested actions',
-    body: 'When Nomal also suggests the touches inside the rallies (serve, reception, set, attack…), the review has a second queue, “Actions”. The contact plays in a loop and you answer much like for rallies; at the end, mark the actions reviewed too.',
+    body: 'When WiePlay also suggests the touches inside the rallies (serve, reception, set, attack…), the review has a second queue, “Actions”. The contact plays in a loop and you answer much like for rallies; at the end, mark the actions reviewed too.',
     keys: [
       { keys: ['Enter'], text: 'Accept the action' },
       { keys: ['X'], text: 'Reject it' },
@@ -158,13 +158,13 @@ export const guideEn: Guide = {
     canTitle: 'You can',
     can: [
       'watch the team’s videos, tags and clips, every season',
-      'review Nomal’s suggestions, tag, mark rallies and correct scores',
+      'review WiePlay’s suggestions, tag, mark rallies and correct scores',
       'upload or link a video, and correct a video’s roster',
       'keep your own clips and reels, comment, and share clips and reels with the team',
     ],
     cannotTitle: 'You can’t',
     cannot: ['download videos', 'delete videos', 'add other helpers'],
     privacy:
-      'The videos stay in Nomal: please don’t record or pass them on outside the club. A coach can end your access at any time; your tags and reviews stay.',
+      'The videos stay in WiePlay: please don’t record or pass them on outside the club. A coach can end your access at any time; your tags and reviews stay.',
   },
 }

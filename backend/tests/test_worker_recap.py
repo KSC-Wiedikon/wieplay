@@ -32,7 +32,7 @@ CARD = {
     "result": "3:1",
     "sets": "25:20 · 23:25 · 25:18 · 25:22",
     "when": "Mittwoch, 17. September 2026 · Halle Test",
-    "footer": "Die besten Szenen · nomal · KSC Wiedikon",
+    "footer": "Die besten Szenen · WiePlay · KSC Wiedikon",
 }
 
 

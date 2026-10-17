@@ -33,7 +33,7 @@ export function ExportsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${t('exports.title')} · nomal`}</title>
+      <title>{`${t('exports.title')} · WiePlay`}</title>
       <div className="flex flex-col gap-4">
         <PageHeader title={t('exports.title')} />
         <p className="flex max-w-4xl items-start gap-3 rounded-card border border-hairline bg-accent-soft p-4 text-sm">

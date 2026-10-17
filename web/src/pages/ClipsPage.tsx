@@ -20,7 +20,7 @@ function clipUrl(clip: Clip): string {
   return `/videos/${clip.video_id}?clip=${clip.id}`
 }
 
-/** /clips — "my clips" across videos, newest first (PLAN §9.1: on phones Nomal is a viewer). */
+/** /clips — "my clips" across videos, newest first (PLAN §9.1: on phones WiePlay is a viewer). */
 export function ClipsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -31,7 +31,7 @@ export function ClipsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <title>{`${t('clips.myTitle')} · nomal`}</title>
+      <title>{`${t('clips.myTitle')} · WiePlay`}</title>
       <PageHeader title={t('clips.myTitle')} subtitle={t('clips.myHint')} />
       {clips.isPending ? (
         <PageSpinner />

@@ -16,7 +16,7 @@ from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from nomal.api.dev_bridge import FixtureBridgeClient
-from nomal.core import actions, analysis, guests
+from nomal.core import actions, analysis, guests, recap
 from nomal.core.models import (
     AnalysisArtifact,
     Job,
@@ -610,6 +610,11 @@ def test_a_guest_export_carries_the_clubs_name(
     # Its originals live in a folder of their own on the NAS.
     [(raw,)] = sql(db_engine, "SELECT params->>'raw_subdir' FROM job WHERE kind = 'ingest'")
     assert "/vb-guest-VBC-Gast-Herren-2/" in raw
+    # The game recap's footer names the guest club, not KSC Wiedikon.
+    with app.state.sessionmaker() as db:
+        row = db.get(Video, uuid.UUID(video["id"]))
+        assert row is not None
+        assert recap.card(db, row, "en")[0].footer == "Best plays · WiePlay · VBC Gast"
 
 
 # --- the Wiedisync sync -----------------------------------------------------------------------

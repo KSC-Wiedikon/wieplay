@@ -201,7 +201,7 @@ describe('TagPage, suggested actions', () => {
 
     fireEvent.click(within(panel()).getByRole('button', { name: 'Mark actions reviewed' }))
     await waitFor(() => expect(reviewed).toHaveBeenCalled())
-    expect(await within(panel()).findByText('The actions are marked reviewed. Nomal learns from this game.')).toBeInTheDocument()
+    expect(await within(panel()).findByText('The actions are marked reviewed. WiePlay learns from this game.')).toBeInTheDocument()
   })
 
   it('opens the actions queue from the address and leaves the review with Esc', async () => {
@@ -241,7 +241,7 @@ describe('TagPage, below the bar for action suggestions', () => {
       },
     },
   }
-  // The coach tagged the rally by hand; Nomal suggested nothing.
+  // The coach tagged the rally by hand; WiePlay suggested nothing.
   const tagged = (): Tagging => ({ ...data(), events: [tag({ t_ms: 11_000, code: 'S', number: 7, segment_id: R1 }), tag({ t_ms: 12_200, code: 'R', side: 'them', number: 4, segment_id: R1 })] })
 
   it('says why in the Actions queue and keeps "Mark actions reviewed" for a tagged game', async () => {
@@ -249,7 +249,7 @@ describe('TagPage, below the bar for action suggestions', () => {
     const region = await screen.findByRole('region', { name: 'Review actions' })
     expect(
       await within(region).findByText(
-        'Action suggestions start once Nomal gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: 2 games, last score 41%).',
+        'Action suggestions start once WiePlay gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: 2 games, last score 41%).',
       ),
     ).toBeInTheDocument()
     fireEvent.click(within(region).getByRole('button', { name: 'Mark actions reviewed' }))

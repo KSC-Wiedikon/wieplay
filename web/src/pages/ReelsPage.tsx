@@ -27,7 +27,7 @@ export function ReelsPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <title>{`${t('reels.title')} · nomal`}</title>
+      <title>{`${t('reels.title')} · WiePlay`}</title>
       <PageHeader
         title={t('reels.title')}
         subtitle={<p className="max-w-3xl">{t('reels.hint')}</p>}

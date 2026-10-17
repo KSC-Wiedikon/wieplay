@@ -21,13 +21,13 @@ export const guestsDe: Messages<typeof guestsEn> = {
     },
     join: {
       title: '{{team}} beitreten',
-      intro: '{{club}} nutzt Nomal, die Videoanalyse des KSC Wiedikon, um seine Spiele anzuschauen und zu taggen.',
+      intro: '{{club}} nutzt WiePlay, die Videoanalyse des KSC Wiedikon, um seine Spiele anzuschauen und zu taggen.',
       who: '{{name}}, {{role}} von {{team}} ({{club}}), {{season}}',
       roleCoach: 'Coach',
       rolePlayer: 'Spieler/in',
       reset: 'Du hast schon ein Login: Wähle ein neues Passwort.',
       email: 'E-Mail',
-      emailHint: 'Damit meldest du dich an. Nomal verschickt keine E-Mails.',
+      emailHint: 'Damit meldest du dich an. WiePlay verschickt keine E-Mails.',
       password: 'Passwort',
       passwordHint: 'Mindestens 10 Zeichen.',
       repeat: 'Passwort wiederholen',
@@ -94,7 +94,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
     adults: {
       title: 'Vor dem ersten Upload',
       body: 'Alle, die wir filmen – unsere Spieler/innen, Coaches und unsere Gegner – sind 18 oder älter (Erwachsenenliga). Das bestätige ich.',
-      why: 'Nomal filmt nur Erwachsene. Uploads gehen, sobald ein Coach des Teams das bestätigt.',
+      why: 'WiePlay filmt nur Erwachsene. Uploads gehen, sobald ein Coach des Teams das bestätigt.',
       confirm: 'Ich bestätige',
       confirming: 'Speichert…',
       failed: 'Speichern hat nicht geklappt. Versuch es nochmals.',
@@ -104,7 +104,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
     quotaFull: 'Das Team hat alle Videos dieser Saison gebraucht. Lösch eines oder frag einen KSCW-Admin nach mehr.',
     admin: {
       title: 'Gastvereine',
-      hint: 'Teams anderer Vereine, die Nomal mit eigenen Logins nutzen. Nur mit dem schriftlichen OK des Vereins anlegen (docs/runbooks/guest-club.md).',
+      hint: 'Teams anderer Vereine, die WiePlay mit eigenen Logins nutzen. Nur mit dem schriftlichen OK des Vereins anlegen (docs/runbooks/guest-club.md).',
       create: 'Gastteam anlegen',
       createTitle: 'Gastteam anlegen',
       club: 'Verein',
@@ -114,7 +114,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
       season: 'Saison',
       limit: 'Video-Limit',
       limitHint: 'Videos pro Saison. Leer: kein Limit.',
-      training: 'Der Verein ist einverstanden, dass seine geprüften Spiele Nomal trainieren',
+      training: 'Der Verein ist einverstanden, dass seine geprüften Spiele WiePlay trainieren',
       trainingHint: 'Ohne das kommen seine Spiele nie in ein Training.',
       creating: 'Legt an…',
       created: '{{team}} ist eingerichtet. Lade jetzt den ersten Coach ein.',
@@ -125,9 +125,9 @@ export const guestsDe: Messages<typeof guestsEn> = {
       videos: 'Videos',
       videosOf: '{{count}} von {{limit}}',
       trainingShort: 'Training OK',
-      on: 'Nutzt Nomal',
-      onFor: '{{team}} nutzt Nomal',
-      trainingFor: 'Die Spiele von {{team}} dürfen Nomal trainieren',
+      on: 'Nutzt WiePlay',
+      onFor: '{{team}} nutzt WiePlay',
+      trainingFor: 'Die Spiele von {{team}} dürfen WiePlay trainieren',
       declared: 'Erwachsene bestätigt',
       notDeclared: 'Erwachsene noch nicht bestätigt',
       edit: 'Limit',
@@ -148,10 +148,10 @@ export const guestsDe: Messages<typeof guestsEn> = {
       title: 'Datenschutz',
       draft: 'Entwurf, zur Prüfung durch die Datenschutz-Ansprechperson des Vereins.',
       intro:
-        'Nomal ist die Videoanalyse des KSC Wiedikon (des Vereins): Coaches und Spieler/innen schauen, taggen und besprechen die Aufnahmen ihrer eigenen Spiele.',
+        'WiePlay ist die Videoanalyse des KSC Wiedikon (des Vereins): Coaches und Spieler/innen schauen, taggen und besprechen die Aufnahmen ihrer eigenen Spiele.',
       sections: {
         what: {
-          title: 'Was Nomal speichert',
+          title: 'Was WiePlay speichert',
           body: 'Die Videos der Spiele deines Teams; Namen, Trikotnummern und Rollen der Personen im Team; Tags von Aktionen (Element, Bewertung, Zone, Zeit); Kommentare, Clips und Reels; Logins und ein Protokoll. Keine Adresse, keine Telefonnummer, kein Geburtsdatum. Gastvereine: die E-Mail, mit der du dich anmeldest, und dein Passwort, gespeichert als Hash.',
         },
         who: {
@@ -164,7 +164,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
         },
         guests: {
           title: 'Gastvereine',
-          body: 'Ein Gastverein ist für seine Aufnahmen verantwortlich und informiert seine Leute. Er bestätigt, dass alle Gefilmten 18 oder älter sind. Seine Spiele trainieren die gemeinsamen Modelle von Nomal nur mit dem OK des Vereins. Logins gibt es nur auf Einladung des Coachs. Auf Anfrage löscht der KSC Wiedikon die Videos und Logins eines Gastvereins.',
+          body: 'Ein Gastverein ist für seine Aufnahmen verantwortlich und informiert seine Leute. Er bestätigt, dass alle Gefilmten 18 oder älter sind. Seine Spiele trainieren die gemeinsamen Modelle von WiePlay nur mit dem OK des Vereins. Logins gibt es nur auf Einladung des Coachs. Auf Anfrage löscht der KSC Wiedikon die Videos und Logins eines Gastvereins.',
         },
         keep: {
           title: 'Wie lange',

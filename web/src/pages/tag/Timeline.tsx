@@ -29,8 +29,8 @@ import { useActionReview, useReview, useUi, useView, useWorkspace } from './cont
 const SPANS = [30_000, 60_000, 120_000, 300_000] as const
 
 /**
- * Nomal's open suggestions are outlined (dashed), not filled: they are not rallies (or breaks)
- * yet. A break Nomal labelled is a lighter, dashed band in its colour.
+ * WiePlay's open suggestions are outlined (dashed), not filled: they are not rallies (or breaks)
+ * yet. A break WiePlay labelled is a lighter, dashed band in its colour.
  */
 function segmentClass(segment: Pick<Segment, 'kind' | 'source' | 'review'>): string {
   if (isSuggestion(segment)) return 'border-2 border-dashed border-accent bg-accent-soft'
@@ -139,7 +139,7 @@ function Overview({ duration, span }: { duration: number; span: number }) {
             data-set-start={p.no}
             className={cx(
               'absolute top-0 h-1.5 border-l-2',
-              // A set Nomal suggested: lighter, until a coach accepts it.
+              // A set WiePlay suggested: lighter, until a coach accepts it.
               isSetSuggestion(p) ? 'border-dashed border-fg/40 bg-fg/15' : cx('border-fg', i % 2 === 0 ? 'bg-fg/40' : 'bg-fg/25'),
             )}
             style={{ left: pct(p.start_ms), width: pct((p.end_ms ?? duration) - p.start_ms) }}

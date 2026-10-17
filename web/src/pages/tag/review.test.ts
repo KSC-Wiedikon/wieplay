@@ -292,7 +292,7 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
   const gap = (id: string, kind: Segment['kind'], start_ms: number, end_ms: number, patch: Partial<Segment> = {}) =>
     rally({ id, kind, start_ms, end_ms, source: 'model', confidence: 0.8, model_run_id: 'run-1', version: 1, ...patch })
 
-  /** Nomal's warm-up before the first rally and a timeout between two rallies. */
+  /** WiePlay's warm-up before the first rally and a timeout between two rallies. */
   function scored() {
     return bundle({
       segments: [
@@ -304,7 +304,7 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     })
   }
 
-  it('lists the breaks Nomal labelled with the rallies, in time order, and counts them in the progress', async () => {
+  it('lists the breaks WiePlay labelled with the rallies, in time order, and counts them in the progress', async () => {
     const { review } = await setup(scored())
     expect(review.items().map((s) => s.id)).toEqual(['w', 's1', 'g', 's2'])
     expect(review.getState().currentId).toBe('w')
