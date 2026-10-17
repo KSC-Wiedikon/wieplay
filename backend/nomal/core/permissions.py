@@ -181,7 +181,7 @@ def can_tag(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
     tag and review their own games. Every change is in the revision log."""
     if _leads_team(viewer, team, leads) or is_analyst(viewer, team):
         return True
-    return team.enabled and team.id in viewer.team_rels
+    return team.enabled and _same_side(viewer, team) and team.id in viewer.team_rels
 
 
 def is_team_manager(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:

@@ -382,6 +382,8 @@ def test_coaches_keep_the_roster_and_players_read_it(
     assert player.post(f"{url}/{pia['member_id']}/invite").status_code == 403
     team = player.get(f"/api/teams/{gast['id']}").json()
     assert team["can_manage_people"] is False and team["can_upload"] is False
+    # A player of the team, as at KSCW: tags and reviews, shares and downloads nothing.
+    assert (team["can_tag"], team["can_share"], team["can_export"]) == (True, False, False)
     assert team["guest"] is True and team["club"] == "VBC Gast"
 
     # Admins manage a guest team's people too (and re-invite: a password reset link).

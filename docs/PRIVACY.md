@@ -195,8 +195,8 @@ for their own matches (`docs/PLAN.md` §4.5; how an admin sets one up:
 - **Adults only**: Nomal has no birthdates of a guest club's people. Before the first upload a
   coach of the guest team confirms: "Everyone we film — our players, coaches and our opponents —
   is 18 or older (adult league)." Without it, Nomal refuses its videos.
-- **Who sees it**: only the guest team's own people (players watch; coaches upload, tag,
-  download, delete, keep the roster) and KSC Wiedikon's admins (logged). KSC Wiedikon's members
+- **Who sees it**: only the guest team's own people (players watch, tag and review; coaches
+  also upload, download, delete and keep the roster) and KSC Wiedikon's admins (logged). KSC Wiedikon's members
   never see a guest team, and guest clubs never see KSC Wiedikon's teams, videos or people.
 - **Logins by invite only**: an admin invites the team's first coach, the coaches invite their
   people. Each link works once, for 14 days; Nomal keeps only a hash of it and sends no email.

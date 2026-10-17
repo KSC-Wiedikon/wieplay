@@ -194,7 +194,11 @@ def test_helpers_see_their_teams_every_season_and_upload_there() -> None:
 
 
 # Guest clubs (PLAN §4.5): walled off both ways; only full admins see both sides.
-from nomal.core.permissions import can_import_link, can_manage_people  # noqa: E402
+from nomal.core.permissions import (  # noqa: E402
+    can_import_link,
+    can_manage_people,
+    can_run_analysis,
+)
 
 GAST = uuid.uuid4()  # a guest club's team (two seasons)
 GAST_NOW = TeamRef(1_000_000_001, "volleyball", GAST, True, guest=True)
@@ -222,13 +226,14 @@ def allowed_all(who: Viewer, team: TeamRef) -> set[str]:
         "grant": can_grant_analyst(who, team, leads),
         "manage": is_team_manager(who, team, leads),
         "people": can_manage_people(who, team, leads),
+        "run": can_run_analysis(who, team, leads),  # the long jobs, by hand
     }
     return {action for action, ok in checks.items() if ok}
 
 
 GUEST_COACH = guest([{"team": GAST_NOW.id, "rel": ["coach"]}])
 GUEST_PLAYER = guest([{"team": GAST_NOW.id, "rel": ["player"]}])
-COACHES = {"see", "upload", "tag", "share", "export", "delete", "manage", "people"}
+COACHES = {"see", "upload", "tag", "share", "export", "delete", "manage", "people", "run"}
 ADMIN_ON_GUESTS = COACHES - {"upload"}
 
 GUEST_MATRIX = [
@@ -238,7 +243,7 @@ GUEST_MATRIX = [
     (GUEST_COACH, OTHER_GAST, set()),  # another guest club
     (GUEST_COACH, GAST_OFF, set()),  # switched off
     (GUEST_COACH, H3_NOW, set()),  # no KSCW team, ever
-    (GUEST_PLAYER, GAST_NOW, {"see"}),
+    (GUEST_PLAYER, GAST_NOW, {"see", "tag"}),  # players tag their own games (17.10.2026)
     (GUEST_PLAYER, GAST_PREV, set()),  # players: the seasons they were on
     (GUEST_PLAYER, H3_NOW, set()),
     # A guest viewer with Wiedisync-looking roles or rows gets nothing from them.
@@ -254,7 +259,8 @@ GUEST_MATRIX = [
     (viewer(roles=("admin",)), GAST_NOW, ADMIN_ON_GUESTS),
     (viewer(roles=("admin",)), GAST_OFF, set()),
     # KSCW coaches keep their teams; their rosters are Wiedisync's, never edited in Nomal.
-    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, LEADS),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, LEADS | {"run"}),
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, {"see", "tag"}),
 ]
 
 

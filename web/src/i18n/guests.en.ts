@@ -154,7 +154,7 @@ export const guestsEn = {
         },
         who: {
           title: 'Who sees it',
-          body: 'Your team only: its players watch, its coaches upload, tag, download and delete. KSC Wiedikon’s admins can see everything, and that is logged. Guest clubs and KSC Wiedikon’s teams never see each other’s videos or people.',
+          body: 'Your team only: its players watch and tag, its coaches also upload, download and delete. KSC Wiedikon’s admins can see everything, and that is logged. Guest clubs and KSC Wiedikon’s teams never see each other’s videos or people.',
         },
         where: {
           title: 'Where it is',

@@ -156,7 +156,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
         },
         who: {
           title: 'Wer es sieht',
-          body: 'Nur dein Team: Seine Spieler/innen schauen, seine Coaches laden hoch, taggen, laden herunter und löschen. Die Admins des KSC Wiedikon sehen alles, und das wird protokolliert. Gastvereine und die Teams des KSC Wiedikon sehen nie die Videos oder Personen der anderen.',
+          body: 'Nur dein Team: Seine Spieler/innen schauen und taggen, seine Coaches laden auch hoch, laden herunter und löschen. Die Admins des KSC Wiedikon sehen alles, und das wird protokolliert. Gastvereine und die Teams des KSC Wiedikon sehen nie die Videos oder Personen der anderen.',
         },
         where: {
           title: 'Wo es liegt',
