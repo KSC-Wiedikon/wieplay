@@ -448,7 +448,9 @@ def _changes_scoring(
     db: Session, periods: list[tagging.PeriodIn], segments: list[tagging.SegmentIn]
 ) -> bool:
     """Whether a batch changes what the automatic scoring stands on: a set (its bounds, its
-    number, who served first, our side) or a serve a coach called in review."""
+    number, who served first, our side), a serve a coach called in review, or who won a
+    rally (a coach's winner is a fact the model must keep to: the rallies around it, the
+    sides and the check marks follow)."""
     for item in periods:
         row = db.get(Period, item.id)
         if row is None or (row.deleted_at is not None) != item.deleted:
@@ -458,10 +460,13 @@ def _changes_scoring(
         if item.review is not None and item.review != row.review:
             return True
     for seg in segments:
-        if "serving_manual" in seg.model_fields_set:
-            found = db.get(Segment, seg.id)
-            if found is None or found.serving_manual != seg.serving_manual:
-                return True
+        found = db.get(Segment, seg.id)
+        if "serving_manual" in seg.model_fields_set and (
+            found is None or found.serving_manual != seg.serving_manual
+        ):
+            return True
+        if seg.kind == "rally" and found is not None and found.won_by != seg.won_by:
+            return True
     return False
 
 

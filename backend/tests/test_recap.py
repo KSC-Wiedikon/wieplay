@@ -54,6 +54,7 @@ def test_a_recap_is_cut_from_the_facts(
         "after": "0:1",  # home (them) first
         "point_ms": 20_000,
         "label": "Angriffspunkt #7",
+        "teams": "Testclub B \N{EN DASH} KSCW H3",  # whose score is whose, short names
     }
     assert second["bug"]["label"] == "Matchball" and second["bug"]["after"] == "1:1"
     assert (
@@ -63,6 +64,24 @@ def test_a_recap_is_cut_from_the_facts(
 
     english = coach.post("/api/exports", json={**body, "lang": "en"}).json()
     assert english["title"].endswith("(recap)")
+
+
+def test_a_friendly_s_card_names_the_opponent_not_the_title(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    video = make_ready(app, club, store, k=0)
+    with app.state.sessionmaker() as db:
+        row = db.get(Video, uuid.UUID(video["id"]))
+        assert row is not None
+        row.game_id, row.title = None, "Testspiel gegen Volero Zürich"
+        db.commit()
+        side, _ = recap.sides(db, row, "de")
+        assert (side.left, side.right, side.left_is_us) == ("KSCW H3", "Volero Zürich", True)
+        assert side.teams == "KSCW H3 \N{EN DASH} Volero Zürich"
+        row.name_them = "Volero"  # a coach's name wins
+        assert recap.sides(db, row, "de")[0].right == "Volero"
+        row.title, row.name_them = "Testspiel", None  # nobody named: "Gegner"
+        assert recap.sides(db, row, "de")[0].right == "Gegner"
 
 
 def test_without_tags_the_rally_finder_s_longest_rallies(
@@ -207,7 +226,7 @@ def test_bug_text_for_each_case() -> None:
                       before=(21, 20), after=(22, 20))  # fmt: skip
     assert recap.bug(full, side, "de") == {
         "set": "Satz 2", "before": "21:20", "after": "22:20", "point_ms": 1,
-        "label": "Angriffspunkt #7",
+        "label": "Angriffspunkt #7", "teams": "A \N{EN DASH} B",
     }  # fmt: skip
     set_only = recap.Play(
         start_ms=0, end_ms=1, point_ms=1, kinds=["ace"], set_no=2, before=(21, 20)

@@ -10,8 +10,10 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from nomal.core.config import Settings
+from nomal.core.models import ModelRun
 from nomal.ml import tracks
 from tests.fakes import FakeStore
 from tests.media_helpers import worker_client
@@ -226,6 +228,49 @@ def test_the_coach_is_never_overwritten(
     assert again[first["id"]]["won_by"] == wrong
     assert again[first["id"]]["review"] == "corrected"  # accepted with another winner
     assert again[second["id"]]["serving_manual"] == "them"
+
+
+def score_runs(app: FastAPI, video: Any) -> list[str]:
+    """The reasons of the video's scoring runs, oldest first."""
+    with app.state.sessionmaker() as db:
+        runs = db.scalars(
+            select(ModelRun)
+            .where(ModelRun.video_id == uuid.UUID(video["id"]), ModelRun.kind == "score")
+            .order_by(ModelRun.created_at)
+        ).all()
+        return [str((r.params or {}).get("reason")) for r in runs]
+
+
+def test_a_winner_set_in_review_is_a_fact_and_scores_again(
+    app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    played, _ = match()
+    analysed(analyser, played)
+    first, second = rallies_of(tagging(club["coach"], ready))[:2]
+    right = played[0][3]
+    wrong = "them" if right == "us" else "us"
+    before = score_runs(app, ready)
+    # Key 4 or 3 in the review: the winner, the proposal's state passed through as it is.
+    out = change(club["coach"], ready, {**_seg_in(first), "won_by": wrong})
+    by_id = {s["id"]: s for s in out["segments"]}
+    seg = by_id[first["id"]]
+    assert seg["won_by"] == wrong
+    assert seg["review"] == "corrected"  # a winner answers the proposal
+    # The score line follows the coach in the same answer, as a fact.
+    assert (seg["score_us_after"], seg["score_them_after"]) == ((1, 0) if wrong == "us" else (0, 1))
+    assert seg["score_source"] == "tags"
+    # The model scored again and keeps to it; the next rally's serve follows the new winner.
+    assert score_runs(app, ready) == [*before, "changes"]
+    assert seg["model_won_by"] == wrong
+    assert by_id[second["id"]]["serving"] == wrong
+    # Undo (U): the proposal is open again, the model's winner back, scored again.
+    back = change(club["coach"], ready, {**_seg_in(seg), "won_by": None, "review": "unreviewed"})
+    seg = next(s for s in back["segments"] if s["id"] == first["id"])
+    assert (seg["won_by"], seg["review"], seg["model_won_by"]) == (None, "unreviewed", right)
+    assert score_runs(app, ready) == [*before, "changes", "changes"]
+    # A change that leaves the winner as it is does not score again.
+    change(club["coach"], ready, {**_seg_in(seg), "end_ms": seg["end_ms"] + 250})
+    assert len(score_runs(app, ready)) == len(before) + 2
 
 
 def _seg_in(seg: dict[str, Any]) -> dict[str, Any]:

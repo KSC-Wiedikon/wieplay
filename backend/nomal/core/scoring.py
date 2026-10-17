@@ -8,8 +8,9 @@ small series per video (nomal/ml/tracks.py: the serve evidence and the activity)
 `analysis_track` with each analysis or training.
 
 Runs after the analysis and after every training (new rallies, new serve evidence), when a
-coach marks the rallies done, changes a set (who served first, our side, its bounds) or calls
-a serve in review, and on request (POST /api/videos/{id}/scoring).
+coach marks the rallies done, changes a set (who served first, our side, its bounds), calls
+a serve in review or changes who won a rally (a fact the model keeps to), and on request
+(POST /api/videos/{id}/scoring).
 
 What it writes, always next to the coach's work and never in its place (PLAN §10, §11):
 

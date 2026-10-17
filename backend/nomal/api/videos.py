@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Literal
 
@@ -28,7 +29,7 @@ from nomal.api.deps import (
     audit,
 )
 from nomal.api.media import permission_cache
-from nomal.core import imports, pipeline
+from nomal.core import imports, names, pipeline
 from nomal.core.config import Settings
 from nomal.core.filming import (
     Blocker,
@@ -127,6 +128,20 @@ class AnalysisBriefOut(BaseModel):
     open: int = 0
 
 
+class NamesOut(BaseModel):
+    """What the app writes instead of us and them (nomal/core/names.py)."""
+
+    us: str  # short: "KSCW H3"
+    them: str | None  # short; None: not known ("Opponent")
+    us_full: str  # the official name, for tooltips
+    them_full: str | None
+    # Where the opponent's name came from: set by a coach, the game, the video's title.
+    them_from: Literal["set", "game", "title"] | None
+    # What a coach set for this video (the setup's fields); None: derived.
+    us_set: str | None
+    them_set: str | None
+
+
 class VideoOut(BaseModel):
     id: uuid.UUID
     team_id: int
@@ -164,6 +179,19 @@ class VideoOut(BaseModel):
     rallies_reviewed_at: datetime | None = None
     # The automatic analysis; None while the video is not ready.
     analysis: AnalysisBriefOut | None = None
+    # The two teams' names, for where the app would say us and them.
+    names: NamesOut | None = None
+    # A coach said there is no scoreboard in the picture (the setup's scoreboard step).
+    no_scoreboard: bool = False
+
+
+class SetupIn(BaseModel):
+    """The video's setup a coach changes on the video page. Fields left out stay; a name set
+    to null or "" goes back to the derived one."""
+
+    name_us: str | None = Field(default=None, max_length=80)
+    name_them: str | None = Field(default=None, max_length=80)
+    no_scoreboard: bool | None = None
 
 
 class FileIn(BaseModel):
@@ -316,6 +344,9 @@ def _video_out(
         analysis_by_video = _analysis(db, [video])
     progress = progress_by_video.get(video.id)
     fps = video.fps_num / video.fps_den if video.fps_num and video.fps_den else None
+    found = names.for_video(
+        db, video, access.team.name, settings.club_short_name, settings.club_name
+    )
     return VideoOut(
         id=video.id,
         team_id=video.team_id,
@@ -354,6 +385,8 @@ def _video_out(
         can_export=can_export(viewer, access.ref, access.leads),
         rallies_reviewed_at=video.rallies_reviewed_at,
         analysis=analysis_by_video.get(video.id),
+        names=NamesOut(**asdict(found)),
+        no_scoreboard=video.no_scoreboard,
         files=[
             FileOut(
                 id=f.id,
@@ -445,6 +478,10 @@ def team_videos(
         db.scalars(query.order_by(Video.recorded_on.desc(), Video.created_at.desc())).all()
     )
     progress, analysis = _progress(db, videos), _analysis(db, videos)
+    # Their games in one query: the names (_video_out) find them in the session.
+    game_ids = {v.game_id for v in videos if v.game_id is not None}
+    if game_ids:
+        db.scalars(select(WdGame).where(WdGame.id.in_(game_ids))).all()
     return [_video_out(db, v, access, viewer, settings, progress, analysis) for v in videos]
 
 
@@ -642,6 +679,34 @@ def get_video(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: Setti
     video, access = visible_video(db, viewer, video_id)
     if video.status != "ready" and not _manages(viewer, access):
         raise HTTPException(404, "Video not found")
+    return _video_out(db, video, access, viewer, settings)
+
+
+@router.patch("/videos/{video_id}/setup", response_model=VideoOut)
+def update_setup(
+    video_id: uuid.UUID, body: SetupIn, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> VideoOut:
+    """The video's setup (the video page's "Setup"): the two teams' names, and "no
+    scoreboard in this video" (which forgets a box drawn before and scores again)."""
+    video, access = visible_video(db, viewer, video_id)
+    if not can_tag(viewer, access.ref, access.leads):
+        raise HTTPException(403, "Only the team's coaches and sport admins set up a video")
+    fields = body.model_fields_set
+    changed: dict[str, Any] = {}
+    if "name_us" in fields:
+        video.name_us = changed["name_us"] = names.clean(body.name_us)
+    if "name_them" in fields:
+        video.name_them = changed["name_them"] = names.clean(body.name_them)
+    if body.no_scoreboard is not None and body.no_scoreboard != video.no_scoreboard:
+        video.no_scoreboard = changed["no_scoreboard"] = body.no_scoreboard
+        if body.no_scoreboard:
+            from nomal.core import scoreboard, scoring
+
+            if scoreboard.remove(db, video):
+                scoring.score_video(db, video, reason="scoreboard")
+    if changed:
+        audit(db, viewer.member_id, "video_setup", "video", str(video.id), **changed)
+    db.commit()
     return _video_out(db, video, access, viewer, settings)
 
 

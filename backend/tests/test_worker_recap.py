@@ -49,6 +49,19 @@ def test_the_bug_shows_the_new_score_from_the_point(tmp_path: Path) -> None:
     assert width >= rp.text_width("Angriffspunkt #7", 28, False) + 64
 
 
+def test_the_bug_names_the_teams_above_the_score(tmp_path: Path) -> None:
+    texts = rp.Texts(tmp_path)
+    filters = rp.bug_filters({**BUG, "teams": "KSCW H3 \N{EN DASH} Volero"}, 4.5, texts, FONTS)
+    written = [p.read_text() for p in sorted(tmp_path.glob("text_*.txt"))]
+    assert written[:2] == ["Satz 2", "KSCW H3 \N{EN DASH} Volero"]
+    assert "h=220:" in filters[0]  # 38 + 36 + 74 + 44 + 28
+    # Without a score there is nothing to name.
+    no_score = rp.bug_filters(
+        {**BUG, "before": "", "after": "", "teams": "A \N{EN DASH} B"}, 4.5, texts, FONTS
+    )
+    assert "h=110:" in no_score[0]
+
+
 def test_a_bug_shows_only_what_it_was_given(tmp_path: Path) -> None:
     texts = rp.Texts(tmp_path)
     # The score before the point only: until the point, then no score.

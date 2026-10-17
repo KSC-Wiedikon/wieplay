@@ -149,8 +149,10 @@ def test_match_csv(ready: dict[str, Any], club: dict[str, TestClient]) -> None:
     assert (seven["Player"], seven["Serve attempts"], seven["Hitting %"]) == (
         "Alex Muster", "2", "-100.0",
     )  # fmt: skip
-    team = next(line for line in lines if line["Player"] == "Team")
+    # The team's and the opponent's rows by the teams' names (nomal/core/names.py).
+    team = next(line for line in lines if line["Player"] == "KSCW H3")
     assert (team["Rallies won"], team["Break-point %"]) == ("1", "50.0")
+    assert sum(line["Player"] == ready["names"]["them"] for line in lines) == 2
     german = club["coach"].get(f"/api/videos/{ready['id']}/stats.csv?lang=de")
     head = next(csv.reader(io.StringIO(german.content.decode("utf-8-sig"))))
     assert head[:4] == ["Satz", "Nummer", "Spieler", "Punkte"]

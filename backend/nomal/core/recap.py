@@ -26,7 +26,8 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nomal.core import tagging
+from nomal.core import names, tagging
+from nomal.core.config import get_settings
 from nomal.core.models import Event, Period, Segment, Video, WdGame, WdTeam
 
 Lang = Literal["de", "en"]
@@ -62,7 +63,6 @@ TEXT: dict[str, dict[str, str]] = {
         "match_point": "Match point",
         "footer": "Best plays · nomal · KSC Wiedikon",
         "title": "{title} (recap)",
-        "us": "KSCW {team}",
         "them": "Opponent",
     },
     "de": {
@@ -76,7 +76,6 @@ TEXT: dict[str, dict[str, str]] = {
         "match_point": "Matchball",
         "footer": "Die besten Szenen · nomal · KSC Wiedikon",
         "title": "{title} (Zusammenfassung)",
-        "us": "KSCW {team}",
         "them": "Gegner",
     },
 }
@@ -412,23 +411,44 @@ def long_date(day: date, lang: Lang) -> str:
 @dataclass
 class Sides:
     """Which team is written first: home when the game is known (the official order), else
-    us; `left_is_us` turns (us, them) into that order."""
+    us; `left_is_us` turns (us, them) into that order. The short names head the score bug
+    ("KSCW H3 - Volero"), in the same order."""
 
     left: str
     right: str
     left_is_us: bool
+    left_short: str = ""
+    right_short: str = ""
 
     def order(self, score: tuple[int, int]) -> tuple[int, int]:
         return score if self.left_is_us else (score[1], score[0])
 
+    @property
+    def teams(self) -> str:
+        left, right = self.left_short or self.left, self.right_short or self.right
+        return f"{left} \N{EN DASH} {right}" if left and right else ""
+
 
 def sides(db: Session, video: Video, lang: Lang) -> tuple[Sides, WdGame | None]:
+    """The teams' names (nomal/core/names.py): the official ones on the title card when the
+    game is known (unless a coach set one for the video), the short ones on the bug."""
     game = db.get(WdGame, video.game_id) if video.game_id is not None else None
     team = db.get(WdTeam, video.team_id)
-    ours = TEXT[lang]["us"].format(team=team.name if team else "").strip()
+    settings = get_settings()
+    found = names.for_video(
+        db, video, team.name if team else "", settings.club_short_name, settings.club_name
+    )
+    them_short = found.them or TEXT[lang]["them"]
+    them_full = found.them_set or found.them_full or TEXT[lang]["them"]
     if game is not None and game.home_name and game.away_name:
-        return Sides(game.home_name, game.away_name, game.our_side != "away"), game
-    return Sides(ours, video.title, True), game
+        home = game.our_side != "away"
+        us_full = found.us_set or (game.home_name if home else game.away_name)
+        if not found.them_set:
+            them_full = game.away_name if home else game.home_name
+        left, right = (us_full, them_full) if home else (them_full, us_full)
+        short = (found.us, them_short) if home else (them_short, found.us)
+        return Sides(left, right, home, *short), game
+    return Sides(found.us_full, them_full, True, found.us, them_short), game
 
 
 def set_scores(
@@ -505,6 +525,8 @@ def bug(play: Play, side: Sides, lang: Lang) -> dict[str, Any] | None:
     }
     if not (out["set"] or out["before"] or out["after"] or out["label"]):
         return None
+    if out["after"] and side.teams:
+        out["teams"] = side.teams  # whose score is whose, in the score's order
     return out
 
 

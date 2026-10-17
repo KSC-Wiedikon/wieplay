@@ -30,7 +30,7 @@ from nomal.api.access import visible_team
 from nomal.api.analysis import ActionGateOut, gate_out
 from nomal.api.deps import DbDep, SettingsDep, ViewerDep
 from nomal.api.tagging import _readable
-from nomal.core import stats, tagging
+from nomal.core import names, stats, tagging
 from nomal.core.models import (
     Event,
     Period,
@@ -567,7 +567,12 @@ def video_stats(
 
 @router.get("/videos/{video_id}/stats.csv")
 def video_stats_csv(
-    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, lang: Lang = "en", part: Part = "box"
+    video_id: uuid.UUID,
+    viewer: ViewerDep,
+    db: DbDep,
+    settings: SettingsDep,
+    lang: Lang = "en",
+    part: Part = "box",
 ) -> Response:
     video, result, cols = _video_stats(db, viewer, video_id)
     words = stats.HEADERS[lang]
@@ -580,7 +585,13 @@ def video_stats_csv(
         body = stats.setter_csv([(match, result.setter), *((no, s.setter) for no, s in sets)], lang)
     else:
         scopes = [(match, result.box, result.team), *((no, s.box, s.team) for no, s in sets)]
-        body = stats.to_csv(cols, scopes, lang)
+        team = db.get(WdTeam, video.team_id)
+        found = names.for_video(
+            db, video, team.name if team else "", settings.club_short_name, settings.club_name
+        )
+        # The team's and the opponent's rows carry their names ("KSCW H3", "Volero").
+        labels = {"team": found.us, "opponent": found.name("them", words["opponent"])}
+        body = stats.to_csv(cols, scopes, lang, labels=labels)
     name = f"nomal-{_PART_NAME[part]}-{video.recorded_on.isoformat()}-{_slug(video.title)}.csv"
     return _csv(body, name)
 
