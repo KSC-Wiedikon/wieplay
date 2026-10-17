@@ -31,6 +31,7 @@ from nomal.core.models import Event, Period, Segment, Video, WdGame, WdTeam
 
 Lang = Literal["de", "en"]
 Kind = Literal["ace", "kill", "block", "long", "set_point", "match_point"]
+Ending = Literal["set_point", "match_point"]
 
 TARGET_MS = 150_000  # the plays, without the title card
 MAX_MS = 180_000
@@ -105,6 +106,7 @@ class Play:
     after: tuple[int, int] | None = None
     number: int | None = None  # the shirt number of the tag that made it (ours)
     side: str | None = None  # whose play it was
+    ends: Ending | None = None  # the last rally of a set or of the match (maybe a guess)
 
     @property
     def length_ms(self) -> int:
@@ -167,31 +169,106 @@ def _point_kind(event: Event) -> Kind | None:
     return {"S": "ace", "A": "kill", "B": "block"}.get(event.code)  # type: ignore[return-value]
 
 
-def _scores(rallies: list[Segment], periods: list[Period]) -> dict[uuid.UUID, tuple[Any, ...]]:
-    """Per rally: its set number, the score before and after it (us, them), and whether it
-    ended its set or the match (the last rally of a set with a score)."""
-    out: dict[uuid.UUID, tuple[Any, ...]] = {}
+@dataclass(frozen=True)
+class RallyFacts:
+    """What the recap may write about a rally: only facts (the score bug never guesses)."""
+
+    set_no: int | None  # the set, when it is a fact
+    before: tuple[int, int] | None  # the score before it (us, them), when a fact
+    after: tuple[int, int] | None  # the score after it, when a fact
+    ended: Ending | None  # the last rally of its set or of the match (also a guess)
+    ended_fact: bool  # ... and that is a fact
+
+
+def _period_fact(period: Period, official: list[tuple[int, int]] | None) -> bool:
+    """A set that is a fact: a coach's (made, accepted or corrected), or one whose final
+    score is Wiedisync's official score of that set."""
+    if period.source != "model" or period.review in ("confirmed", "corrected"):
+        return True
+    if not official or not 1 <= period.no <= len(official):
+        return False
+    return (period.final_us, period.final_them) == official[period.no - 1]
+
+
+def _board_check(db: Session, video: Video) -> Any:
+    """A test: does the scoreboard show this score right after a rally (sure, no conflict)?"""
+    from nomal.core import scoreboard as sboard
+    from nomal.core import scoring
+    from nomal.ml import board as bd
+
+    tl = sboard.timeline(db, video.id)
+    run = scoring.latest_run(db, video.id)
+    told = (run.metrics or {}).get("board") if run is not None else None
+    if tl is None or not told:
+        return None
+    left_is_us = bool(told.get("left_is_us", True))
+
+    def shows(after: tuple[int, int], end_ms: int, next_mid: int | None) -> bool:
+        if next_mid is not None:
+            found = tl.at(next_mid)
+        else:
+            later = [s for s in tl.within(end_ms, end_ms + 60_000) if s.first_ms > end_ms]
+            found = later[0] if later else None
+        if found is None or found.confidence < bd.MIN_CONF:
+            return False
+        seen = (found.left, found.right) if left_is_us else (found.right, found.left)
+        return seen == after
+
+    return shows
+
+
+def _scores(db: Session, video: Video, rallies: list[Segment]) -> dict[uuid.UUID, RallyFacts]:
+    """Per rally the facts the bug may show: its set (a coach's set, or Wiedisync's official
+    score at its end), the score before and after it when every point up to it is a fact (the
+    coach's winners, the rallies marked done without a check, or the scoreboard showing that
+    score, sure and without a check), and whether it ended its set or the match."""
+    from nomal.core import scoring
+
+    official = scoring.official_sets(db, video)
+    board = _board_check(db, video)
+    reviewed = video.rallies_reviewed_at is not None
+    out: dict[uuid.UUID, RallyFacts] = {}
     by_period: dict[uuid.UUID, list[Segment]] = {}
     for r in rallies:
         if r.period_id is not None:
             by_period.setdefault(r.period_id, []).append(r)
-    played = [p for p in periods if by_period.get(p.id)]
+    played = [p for p in _periods(db, video) if by_period.get(p.id)]
     last_period = played[-1].id if played else None
     for period in played:
         rs = by_period[period.id]
-        before: tuple[int, int] | None = (period.start_us, period.start_them)
+        set_fact = _period_fact(period, official)
+        before: tuple[int, int] | None = (period.start_us, period.start_them) if set_fact else None
         for i, r in enumerate(rs):
             after = (
                 (r.score_us_after, r.score_them_after)
                 if r.score_us_after is not None and r.score_them_after is not None
                 else None
             )
-            last = i == len(rs) - 1 and after is not None
-            ended: str | None = None
-            if last:
+            fact = set_fact and after is not None and before is not None
+            if fact and after is not None:
+                nxt = rs[i + 1] if i + 1 < len(rs) else None
+                fact = (
+                    r.score_source == "tags"
+                    or (reviewed and not r.score_conflict)
+                    or (
+                        board is not None
+                        and not r.score_conflict
+                        and board(
+                            after, r.end_ms, (nxt.start_ms + nxt.end_ms) // 2 if nxt else None
+                        )
+                    )
+                )
+            ended: Ending | None = None
+            if i == len(rs) - 1 and after is not None:
                 ended = "match_point" if period.id == last_period else "set_point"
-            out[r.id] = (period.no, before, after, ended)
-            before = after
+            out[r.id] = RallyFacts(
+                period.no if set_fact else None,
+                before,
+                after if fact else None,
+                ended,
+                ended is not None and fact,
+            )
+            before = after if fact else None
     return out
 
 
@@ -204,19 +281,20 @@ def select_plays(db: Session, video: Video) -> Selection:
     human = any(r.source != "model" or r.review in ("confirmed", "corrected") for r in every)
     facts = bool(points) or video.rallies_reviewed_at is not None or human
     rallies = _rallies(db, video, facts) if facts else every
-    scores = _scores(rallies, _periods(db, video))
+    scores = _scores(db, video, rallies)
     plays: dict[uuid.UUID, Play] = {}
     for r in rallies:
-        set_no, before, after, ended = scores.get(r.id, (None, None, None, None))
+        known = scores.get(r.id) or RallyFacts(None, None, None, None, False)
         play = Play(
             start_ms=max(0, r.start_ms - PRE_MS),
             end_ms=r.end_ms + POST_MS,
             point_ms=r.end_ms,
             rally_id=r.id,
-            set_no=set_no,
-            before=before,
-            after=after,
+            set_no=known.set_no,
+            before=known.before,
+            after=known.after,
         )
+        ended = known.ended
         length = r.end_ms - r.start_ms
         unchecked = r.source == "model" and r.review == "unreviewed"
         if length >= LONG_MS and not (unchecked and length > SUSPECT_MS):
@@ -225,9 +303,12 @@ def select_plays(db: Session, video: Video) -> Selection:
             if unchecked and length > 20_000:
                 # The longer an unchecked proposal, the likelier it holds dead time too.
                 play.score -= (length - 20_000) / 5_000
-        if ended == "match_point" or ended == "set_point":
-            play.kinds.append(ended)
+        if ended is not None:
+            # Chosen like one either way; called one only when it is a fact.
+            if known.ended_fact:
+                play.kinds.append(ended)
             play.score += MATCH_POINT if ended == "match_point" else SET_POINT
+            play.ends = ended
         won = r.won_by or r.model_won_by
         if won == "us" and play.score > 0:
             play.score += WON_BY_US
@@ -280,7 +361,7 @@ def _choose(candidates: list[Play]) -> list[Play]:
     total = 0
     for p in ordered:
         length = min(p.length_ms, MAX_CLIP_MS)
-        if total + length > TARGET_MS and "match_point" not in p.kinds:
+        if total + length > TARGET_MS and p.ends != "match_point":
             continue
         if total + length > MAX_MS:
             continue
@@ -408,19 +489,23 @@ def label(play: Play, lang: Lang) -> str | None:
 
 
 def bug(play: Play, side: Sides, lang: Lang) -> dict[str, Any] | None:
-    """The score bug of a clip: the set, the score until the point, the score after it."""
-    if play.set_no is None and play.before is None:
-        return None
+    """The score bug of a clip, facts only: the set when it is a fact, the score before the
+    point and after it when they are facts (see `_scores`), what the play was. Nothing to
+    show: no bug."""
     head = TEXT[lang]["set"].format(no=play.set_no) if play.set_no is not None else ""
-    before = side.order(play.before) if play.before else None
+    # The score only with the point's result as a fact (then the score before it is one too).
     after = side.order(play.after) if play.after else None
-    return {
+    before = side.order(play.before) if play.before and after else None
+    out = {
         "set": head,
         "before": f"{before[0]}:{before[1]}" if before else "",
         "after": f"{after[0]}:{after[1]}" if after else "",
         "point_ms": play.point_ms,
         "label": label(play, lang) or "",
     }
+    if not (out["set"] or out["before"] or out["after"] or out["label"]):
+        return None
+    return out
 
 
 def title_of(video: Video, lang: Lang) -> str:

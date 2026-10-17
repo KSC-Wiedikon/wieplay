@@ -49,10 +49,21 @@ def test_the_bug_shows_the_new_score_from_the_point(tmp_path: Path) -> None:
     assert width >= rp.text_width("Angriffspunkt #7", 28, False) + 64
 
 
-def test_a_bug_without_a_new_score_shows_one_and_nothing_shows_nothing(tmp_path: Path) -> None:
+def test_a_bug_shows_only_what_it_was_given(tmp_path: Path) -> None:
     texts = rp.Texts(tmp_path)
-    one = rp.bug_filters({**BUG, "after": ""}, 4.5, texts, FONTS)
-    assert sum("drawtext" in f for f in one) == 3 and not any("enable" in f for f in one)
+    # The score before the point only: until the point, then no score.
+    before = rp.bug_filters({**BUG, "after": ""}, 4.5, texts, FONTS)
+    assert sum("drawtext" in f for f in before) == 3
+    assert [f for f in before if "enable" in f] and all(
+        "lt(t," in f for f in before if "enable" in f
+    )
+    # The set and the play, no score: two rows.
+    set_only = rp.bug_filters({**BUG, "before": "", "after": ""}, 4.5, texts, FONTS)
+    assert sum("drawtext" in f for f in set_only) == 2
+    assert "h=110:" in set_only[0]  # 38 + 44 + 28
+    # The play only.
+    note = rp.bug_filters({"set": "", "before": "", "after": "", "label": "Ass"}, 4.5, texts, FONTS)
+    assert sum("drawtext" in f for f in note) == 1 and "h=72:" in note[0]
     assert rp.bug_filters({"set": "", "before": "", "after": ""}, 1.0, texts, FONTS) == []
 
 

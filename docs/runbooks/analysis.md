@@ -257,9 +257,10 @@ club's machines.
   2 min 16 s, 44.6 MB, 1080p50 H.264: the title card (no set scores: the game had no official
   result in this check and the scoring's own sets are not written on it), six of the finder's
   long rallies (15-22 s, each with its point and the bug switching to the new score there) and
-  the last rally as "Matchball". Without tags and with the scoring's unchecked sets (it cut
-  this match into two sets), the set number and score on the bug are the scoring's guesses:
-  a coach's review makes them facts.
+  the last rally. That render still showed the scoring's guesses on the bug; since then the bug
+  shows facts only (PLAN §7.7): on an untagged game like this one it says what the play was
+  and nothing else, until a coach's sets and winners (or a sure scoreboard) make set and
+  score facts.
 
 ## Suggested actions (serve, reception, set, attack, block, dig, freeball)
 

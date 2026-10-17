@@ -71,16 +71,21 @@ def text_width(text: str, size: int, bold: bool) -> int:
 def bug_filters(
     bug: dict[str, Any], switch_s: float | None, texts: Texts, fonts: Fonts
 ) -> list[str]:
-    """The score bug, top left: the set, the score (the new one from `switch_s`, the moment
-    of the point, in the piece's own time), what the play was."""
-    head, before, after = (
-        str(bug.get("set") or ""),
-        str(bug.get("before") or ""),
-        str(bug.get("after") or ""),
-    )
+    """The score bug, top left, with what the API sent (facts only): the set, the score (the
+    score before the point until `switch_s`, the moment of the point in the piece's own
+    time, the new one from there; either alone when only it is known), what the play was.
+    Rows that are empty are left out; nothing at all, no bug."""
+    head, before, after = (str(bug.get(k) or "") for k in ("set", "before", "after"))
     note = str(bug.get("label") or "")
-    if not (head or before or after):
+    if not (head or before or after or note):
         return []
+    rows: list[tuple[str, int]] = []  # (row, height)
+    if head:
+        rows.append(("head", 38))
+    if before or after:
+        rows.append(("score", 74))
+    if note:
+        rows.append(("note", 44))
     width = (
         max(
             text_width(head, 28, True),
@@ -91,20 +96,28 @@ def bug_filters(
         )
         + 64
     )
-    height = 130 + (44 if note else 0)
+    height = sum(h for _, h in rows) + 28
     x, y = BUG_X, BUG_Y
     out = [drawbox(x, y, width, height, f"{NAVY}@0.88"), drawbox(x, y, 8, height, YELLOW)]
-    if head:
-        out.append(drawtext(texts(head), fonts.bold, 28, YELLOW, x + 32, y + 18))
-    if before and after and before != after and switch_s is not None:
-        at = f"{max(0.0, switch_s):.3f}"
-        out.append(drawtext(texts(before), fonts.bold, 56, LIGHT, x + 32, y + 56, f"lt(t,{at})"))
-        out.append(drawtext(texts(after), fonts.bold, 56, LIGHT, x + 32, y + 56, f"gte(t,{at})"))
-    elif after or before:
-        shown = after if switch_s is not None and switch_s <= 0 else (before or after)
-        out.append(drawtext(texts(shown), fonts.bold, 56, LIGHT, x + 32, y + 56))
-    if note:
-        out.append(drawtext(texts(note), fonts.regular, 28, f"{LIGHT}@0.9", x + 32, y + 132))
+    top = y + 18
+    at = f"{max(0.0, switch_s):.3f}" if switch_s is not None else None
+    for row, h in rows:
+        if row == "head":
+            out.append(drawtext(texts(head), fonts.bold, 28, YELLOW, x + 32, top))
+        elif row == "note":
+            out.append(drawtext(texts(note), fonts.regular, 28, f"{LIGHT}@0.9", x + 32, top))
+        elif before == after or at is None:
+            out.append(drawtext(texts(after or before), fonts.bold, 56, LIGHT, x + 32, top))
+        else:
+            if before:
+                out.append(
+                    drawtext(texts(before), fonts.bold, 56, LIGHT, x + 32, top, f"lt(t,{at})")
+                )
+            if after:
+                out.append(
+                    drawtext(texts(after), fonts.bold, 56, LIGHT, x + 32, top, f"gte(t,{at})")
+                )
+        top += h
     return out
 
 

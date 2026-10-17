@@ -943,9 +943,14 @@ follows redirects. **Test on an iPhone in M1.**
     "Spielzusammenfassung", the teams (home first, as in Wiedisync; two lines when long),
     the sets won and the set scores (Wiedisync's, else the sets a coach stands behind; never
     sets only the scoring proposed), the date and the hall. In the requester's language.
-  - **Score bug** on every clip, top left: "Satz 2" / "Set 2", the score before the rally,
-    switching to the new score at the moment of the point, and what the play was ("Kill #7",
-    "Set point", "Long rally"). Short fades between clips; the watermark as on every export.
+  - **Score bug** on every clip, top left, **facts only, never a guess**: "Satz 2" / "Set 2"
+    when the set is a fact (a coach's set, or one ending on Wiedisync's official score); the
+    score before the rally, switching to the new one at the moment of the point, when every
+    point up to it is a fact (the coach's winners, the rallies marked done without a check, or
+    the scoreboard showing it, sure and without a check); what the play was ("Kill #7", "Long
+    rally"; "Set point" / "Match point" only when that is a fact too). Set a fact, score not:
+    "Satz 2" and the play; neither: the play alone. Short fades between clips; the watermark
+    as on every export.
   - Same pipeline as the other exports: H.264/AAC 1080p50 pieces joined without re-encoding,
     30 days under Downloads; the app says when it is ready (a toast on any page, while the tab
     that asked is open).
