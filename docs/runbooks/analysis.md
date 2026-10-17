@@ -129,6 +129,39 @@ counts as the coach's). A court job stuck on the NAS logs "no frame at … s" an
 too few frames fails the job, the video plays on. Delete a hall reference by removing that
 video's calibration.
 
+## Players (players job)
+
+**Beta, off by default** (`NOMAL_PLAYERS_AUTO=false` on the API): nothing queues the job by
+itself. A coach clicks "Find players (beta, takes ~2 h)" on the video page (`POST
+/api/videos/{id}/players/find`), or an admin runs the CLI below. With `NOMAL_PLAYERS_AUTO=true`
+it follows each court job. The `players` job (same `analyse` capability and background lane,
+priority −12 so a backlog's analyses go first) finds the people on the court in the rally
+windows, tracks them, groups them into clusters and reads shirt numbers (a suggestion). The
+coach names the clusters once on the video's "Players in this video" page; the actions then
+get their player (PLAN §10.5).
+
+- **Weights**: in the worker image at `/opt/nomal-weights` (YOLO26s ONNX, PaddleOCR detector
+  and recogniser), built by `Dockerfile.worker`'s first stage from SHA-256-pinned downloads
+  (`scripts/ml/player_weights.py`; `MANIFEST.json` lists sources, licences, hashes). Local
+  runs: `NOMAL_WORKER_PLAYERS_WEIGHTS=/path`. Without the OCR files the job still runs (no
+  number suggestions).
+- **A GPU worker later**: start it with caps `gpu,nas`, `NOMAL_WORKER_PLAYERS_PROVIDERS=
+  CUDAExecutionProvider,CPUExecutionProvider` and an onnxruntime-gpu image; set
+  `NOMAL_PLAYERS_CAPS=gpu,nas` on the API so new jobs ask for it.
+- **On demand** for videos with a ball track:
+
+  ```bash
+  python -m nomal.cli players --all-ready --dry-run
+  python -m nomal.cli players --video <id>    # one video
+  python -m nomal.cli players --all-ready     # --force: also videos that have players
+  ```
+
+  A rerun replaces the clusters; a coach's number stays where the same number is read on
+  the same team.
+- **Cost** (PLAN §10.9): a 2 h 12 min match, 26 k frames of rally windows: 1 h 51 min on
+  the Lenovo with 4 threads beside the prod backfill (~1.9× its analyse job), 5.2 CPU-hours;
+  the API's index ~1.7 MB, 76 contact sheets (~250 kB each).
+
 ## The learning loop
 
 1. A coach tags or corrects a game's rallies (every proposal accepted, corrected, merged or
@@ -244,6 +277,11 @@ analysis[-dev]/
                                                                   audio numbers, whistles
   videos/…/ball-track-<job8>.json.gz                              the ball's path (bucket copy
                                                                   is what browsers get)
+  videos/…/players-<job8>.npz                                     every player box per analysed
+                                                                  frame, tracks, windows
+  videos/…/players-<job8>/index.json.gz, sheet-<n>.jpg            the API's box index and the
+                                                                  gallery's crops (bucket copies
+                                                                  under media/<video>/analysis/)
   models/rallies/rally-v1-<job8>.pkl                              trained finders
   models/rallies/serve-v1-<job8>.pkl                              trained serve models
   models/actions/actions-v1-<job8>.pkl                            trained action proposers

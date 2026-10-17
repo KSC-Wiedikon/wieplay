@@ -21,6 +21,7 @@ from nomal.api import (
     court,
     library,
     media,
+    players,
     stats,
     tagging,
     teams,
@@ -154,6 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(stats.router)
     app.include_router(analysis.router)
     app.include_router(court.router)
+    app.include_router(players.router)
 
     if settings.web_dist:
         _mount_web(app, Path(settings.web_dist))

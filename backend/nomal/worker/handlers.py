@@ -499,6 +499,12 @@ def actions(ctx: Context) -> dict[str, Any]:
     return job.run(ctx)
 
 
+def players(ctx: Context) -> dict[str, Any]:
+    from nomal.worker import players as job  # numpy, ONNX Runtime: the worker image only
+
+    return job.run(ctx)
+
+
 def train_actions(ctx: Context) -> dict[str, Any]:
     from nomal.worker import actions as job  # numpy, scikit-learn: the worker image only
 
@@ -518,6 +524,15 @@ HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "court": court,
     "actions": actions,
     "train_actions": train_actions,
+    "players": players,
 }
 # Long CPU jobs that run on a worker's background lane (runner.py), next to the media jobs.
-BACKGROUND_KINDS = ("analyse", "train_rallies", "trajectory", "court", "actions", "train_actions")
+BACKGROUND_KINDS = (
+    "analyse",
+    "train_rallies",
+    "trajectory",
+    "court",
+    "actions",
+    "train_actions",
+    "players",
+)

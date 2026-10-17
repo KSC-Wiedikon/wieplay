@@ -366,7 +366,7 @@ def complete(
     settings: Settings | None = None,
 ) -> None:
     """Validate a worker's result and write it. Raises ValueError on a bad result."""
-    from nomal.core import actions, analysis, calibration
+    from nomal.core import actions, analysis, calibration, players
 
     if job.kind in analysis.KINDS:
         analysis.complete(db, video, job, payload)
@@ -375,6 +375,8 @@ def complete(
     if job.kind == "court":
         calibration.complete_court(db, video, job, payload)
         actions.after_trajectory(db, video, job)  # the actions' floor positions follow
+        # The players, on that court (PLAN §10.5), when they are switched on (players_auto).
+        players.after_court(db, video, job, auto=bool(settings and settings.players_auto))
         return
     if job.kind in calibration.KINDS:
         calibration.complete(db, video, job, payload)
@@ -382,6 +384,9 @@ def complete(
         return
     if job.kind in actions.KINDS:
         actions.complete(db, video, job, payload, settings)
+        return
+    if job.kind in players.KINDS:
+        players.complete(db, video, job, payload)
         return
     if job.kind == "purge":
         jobs.succeed(job, payload)
@@ -415,9 +420,14 @@ def complete(
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
     """A job failed for good: the video failed, its other jobs stop. A failed export only
     fails that export. Failed analysis leaves the video as it is: it plays without it."""
-    from nomal.core import actions, analysis, calibration
+    from nomal.core import actions, analysis, calibration, players
 
-    if job.kind in analysis.KINDS or job.kind in calibration.KINDS or job.kind in actions.KINDS:
+    if (
+        job.kind in analysis.KINDS
+        or job.kind in calibration.KINDS
+        or job.kind in actions.KINDS
+        or job.kind in players.KINDS
+    ):
         return
     if job.kind == "export":
         export = db.get(VideoExport, uuid.UUID(job.params["export_id"]))
@@ -435,10 +445,12 @@ def on_failed(db: Session, video: Video | None, job: Job) -> None:
 
 def may_sign(job: Job, op: str, key: str) -> bool:
     """Object keys a worker may touch for this job (PLAN §8.1: workers hold no credentials)."""
-    from nomal.core import calibration
+    from nomal.core import calibration, players
 
     if job.kind in calibration.KINDS:
         return calibration.may_sign(job, op, key)
+    if job.kind in players.KINDS:
+        return players.may_sign(job, op, key)
     video = job.params.get("video_id")
     if job.kind == "ingest":
         staged = {f["object_key"] for f in job.params.get("files", []) if f.get("object_key")}

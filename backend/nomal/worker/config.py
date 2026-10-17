@@ -34,6 +34,11 @@ class WorkerSettings(BaseSettings):
     # CPU's area filter (16.10.2026); "vaapi" falls back to the CPU by itself.
     analysis_hwaccel: Literal["vaapi", "none"] = "none"
     analysis_threads: int = 6
+    # The players job (PLAN §10.5): its weights' folder (the image has them in
+    # /opt/nomal-weights) and ONNX Runtime providers (empty: the CPU; a GPU worker sets
+    # e.g. CUDAExecutionProvider,CPUExecutionProvider).
+    players_weights: Path | None = None
+    players_providers: Annotated[list[str], NoDecode] = Field(default_factory=list)
     inbox_scan_seconds: int = 60
     inbox_stable_seconds: int = 120
 
@@ -48,7 +53,7 @@ class WorkerSettings(BaseSettings):
     heartbeat_seconds: int = 30
     upload_concurrency: int = 6
 
-    @field_validator("caps", mode="before")
+    @field_validator("caps", "players_providers", mode="before")
     @classmethod
     def _split(cls, value: object) -> object:
         if isinstance(value, str):

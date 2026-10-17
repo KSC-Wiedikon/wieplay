@@ -15,6 +15,7 @@ python -m nomal.cli court-eval [--json]        the court job against the coaches
 python -m nomal.cli actions --video ID | --all-ready   suggest the actions (serve, reception, …)
 python -m nomal.cli train-actions              train the action proposer now
 python -m nomal.cli action-eval [--run ID]      per-game scores of the action proposers
+python -m nomal.cli players --video ID | --all-ready [--force]   find the players (beta)
 """
 
 from __future__ import annotations
@@ -526,6 +527,55 @@ def action_eval(run_id: str | None, as_json: bool) -> int:
     return 0
 
 
+def players(video: str | None, all_ready: bool, force: bool, dry_run: bool) -> int:
+    """Queue the players job (PLAN §10.5, beta, ~2 h of CPU a match) on demand: one video, or
+    every ready volleyball video with a ball track. Videos that have players are skipped
+    unless --force (a rerun keeps the coach's numbers where the same shirt number is read).
+    Nothing queues the job by itself unless NOMAL_PLAYERS_AUTO is on."""
+    from nomal.core import players as found
+    from nomal.core.models import AnalysisArtifact, Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        tracked = set(
+            db.scalars(
+                select(AnalysisArtifact.video_id).where(AnalysisArtifact.kind == "ball_track")
+            )
+        )
+        query = select(Video).where(Video.status == "ready").order_by(Video.recorded_on)
+        if video:
+            query = query.where(Video.id == uuid.UUID(video))
+        elif not all_ready:
+            print("name --video or --all-ready", file=sys.stderr)
+            return 2
+        queued = 0
+        for row in db.scalars(query):
+            label = f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id})"
+            reason = found.can_run(row)
+            if reason is None and row.id not in tracked:
+                reason = "no ball track yet (analysis and trajectory first)"
+            if reason is None and found.active_job(db, row.id) is not None:
+                reason = "players job already queued or running"
+            if reason is None and found.latest_run(db, row.id) is not None and not force:
+                reason = "has players (--force to find them again)"
+            if reason:
+                print(f"skip {label}: {reason}")
+                continue
+            if dry_run:
+                print(f"would queue {label}")
+                continue
+            job = found.queue_players(db, row)
+            queued += 1
+            print(f"queued {label}: job {job.id}")
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        print(f"{queued} queued")
+    return 0
+
+
 def _pct(value: Any) -> str:
     return f"{100 * float(value):5.1f}" if isinstance(value, int | float) else "    -"
 
@@ -635,7 +685,15 @@ def main(argv: list[str] | None = None) -> int:
     action_evaluation = sub.add_parser("action-eval", help="per-game scores of the proposers")
     action_evaluation.add_argument("--run", help="a training run id (default: the latest)")
     action_evaluation.add_argument("--json", action="store_true")
+    players_cmd = sub.add_parser("players", help="find the players (PLAN §10.5, beta)")
+    which_players = players_cmd.add_mutually_exclusive_group(required=True)
+    which_players.add_argument("--video", help="one video id")
+    which_players.add_argument("--all-ready", action="store_true", help="every tracked video")
+    players_cmd.add_argument("--force", action="store_true", help="also videos that have them")
+    players_cmd.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "players":
+        return players(args.video, args.all_ready, args.force, args.dry_run)
     if args.command == "actions":
         return actions_cmd(args.video, args.all_ready, args.dry_run)
     if args.command == "train-actions":

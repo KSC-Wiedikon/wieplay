@@ -1,3 +1,5 @@
+import type { PlayersSummary } from './players'
+
 // Shapes returned by the Nomal API (backend/nomal/api).
 
 export type SportName = 'volleyball' | 'basketball'
@@ -748,6 +750,8 @@ export interface Analysis {
   scoring?: Scoring | null
   /** Absent from servers before the suggested actions; null for basketball. */
   actions?: ActionsState | null
+  /** The players of the video (docs/PLAN.md §10.5); absent from older servers. */
+  players?: PlayersSummary | null
 }
 
 // Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).

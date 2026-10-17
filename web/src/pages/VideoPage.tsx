@@ -14,6 +14,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CourtTools } from '../components/CourtTools'
 import { ExportButton } from '../components/ExportButton'
 import { AnalysisStatus } from '../components/AnalysisStatus'
+import { PlayersStep } from '../components/PlayersStep'
 import { AlertIcon, CheckIcon, ChevronRightIcon, PlayIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
 import { MomentsStrip, type BreakMark, type StartMark } from '../components/MomentsStrip'
@@ -453,6 +454,7 @@ function Ready({ video }: { video: Video }) {
           {data?.can_tag && video.sport === 'volleyball' && (
             <AnalysisStatus video={video} rallies={rallyCount} actionTags={tagCount} reviewHref={`/videos/${video.id}/tag?mode=review`} />
           )}
+          {data?.can_tag && video.sport === 'volleyball' && <PlayersStep video={video} canEdit />}
           {video.meets_standard === false && (
             <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
               <p className="flex flex-wrap items-center gap-2 font-semibold">

@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # after a burst of games).
     analysis_auto: bool = True
     analysis_train_delay_seconds: int = 600
+    # Players in a video (PLAN §10.5, beta): ~2 h of the Lenovo's CPU a match and many cards
+    # for the coach to merge, so off by default: nothing queues the players job by itself
+    # (not after the court job, not in a court backfill); a coach finds them on demand
+    # (POST /api/videos/{id}/players/find) or an admin with `nomal.cli players`. The
+    # attribution of actions runs whenever a video has players.
+    players_auto: bool = False
     # Suggested actions (PLAN §10.4a) are written only once the action finder's held-out score
     # on games whose actions a coach reviewed passes the bars (auto); "on" writes them anyway
     # (testing), "off" never. Below the bars the finder still runs and measures itself.

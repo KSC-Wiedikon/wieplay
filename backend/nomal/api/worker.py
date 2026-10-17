@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nomal.api.deps import BridgeDep, DbDep, SettingsDep, audit
-from nomal.core import actions, analysis, jobs, pipeline
+from nomal.core import actions, analysis, jobs, pipeline, players
 from nomal.core.filming import CAMERA_DATE_WINDOW_DAYS, camera_day, check_filming
 from nomal.core.models import InboxFile, Job, Video, WdTeam, Worker
 from nomal.core.storage import ObjectStore
@@ -248,6 +248,10 @@ def job_inputs(job_id: uuid.UUID, worker: WorkerDep, db: DbDep) -> dict[str, Any
             raise HTTPException(409, str(exc)) from exc
         db.rollback()
         return out
+    if job.kind in players.KINDS:
+        out = players.job_inputs(db, job)  # the rallies with their sides, the court's setups
+        db.rollback()
+        return out
     if job.kind not in analysis.KINDS:
         raise HTTPException(404, "This job has no inputs")
     out = analysis.job_inputs(db, job)
@@ -255,10 +259,21 @@ def job_inputs(job_id: uuid.UUID, worker: WorkerDep, db: DbDep) -> dict[str, Any
     return out
 
 
+def _attribute(db: Session, video: Video, store: ObjectStore) -> None:
+    """New players or new suggested actions: attribute the video's actions now (PLAN
+    §10.5). A failure leaves it to the next read of the players."""
+    try:
+        with db.begin_nested():
+            players.attribute(db, video, store.read)
+    except Exception:  # an optional follow-up: never fails the job's completion
+        log.exception("attribution of %s failed", video.id)
+
+
 @router.post("/jobs/{job_id}/complete", status_code=204)
 def complete(
     job_id: uuid.UUID,
     body: dict[str, Any],
+    request: Request,
     worker: WorkerDep,
     db: DbDep,
     bridge: BridgeDep,
@@ -278,6 +293,13 @@ def complete(
         raise HTTPException(422, f"Invalid result: {exc}") from exc
     if job.kind == "ingest" and video is not None and video.status == "processing":
         _check_camera_day(db, bridge, video)
+    if (
+        (job.kind in players.KINDS or job.kind in actions.KINDS)
+        and video is not None
+        and request.app.state.store is not None
+        and players.latest_run(db, video.id) is not None
+    ):
+        _attribute(db, video, request.app.state.store)
     if video is not None and pipeline.finish_if_done(db, video):
         audit(db, None, "video_ready", "video", str(video.id), worker=worker.name)
         analysis.on_video_ready(db, video, settings.analysis_auto)

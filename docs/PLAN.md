@@ -671,6 +671,23 @@ few MB, §10.1); only derived facts (segments, scores, serve placements, propose
 become rows. Built in migration `0006` (16.10.2026) with `video.rallies_reviewed_at/_by`
 (§10.1). Migration `0007` (16.10.2026) adds `analysis_track`, two small per-video series the
 API scores with (§10.3), and the scoring's fields on `segment` and `period` (§6.6).
+Migration `0011` (17.10.2026, §10.5) adds the players of a video:
+
+```text
+player_cluster   id, video_id, model_run_id, key, team 'us'|'them', tracks jsonb (per track:
+                 id, times, detections, side, read number, crop), crops jsonb, detections,
+                 ocr_number NULL, ocr_confidence NULL   -- the number reader's suggestion
+                 number NULL, member_id NULL, not_player, referee_guess, merged_into NULL,
+                 source 'model'|'split', assigned_by, assigned_at
+                 -- "a person in this video"; the coach's number is its only identity (§5.7)
+event_player     event_id, video_id, model_run_id, cluster_id, track_id, number, member_id,
+                 method 'court'|'image', distance, confidence, contact_ms, applied_number,
+                 event_version   -- who made the action as Nomal sees it, beside the event
+```
+
+and the artifacts `player_tracks` (every box, `.npz` on the NAS), `player_index` (boxes per
+analysed frame for the API, JSON in the bucket and on the NAS) and `player_sheets` (the
+contact sheets of crops, JPEG in the bucket under `media/{video}/analysis/` and on the NAS).
 
 ### 6.10 People, access, privacy
 
@@ -1005,6 +1022,8 @@ the job waits in `waiting_budget` and admins are told.
 | `train_rallies` (16.10.2026) | `analyse`, `nas` | Rally finder v1 from every reviewed game, held-out scores of v0 and v1, new proposals when v1 wins (§10.1). Priority −5, debounced |
 | `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
+| `trajectory` (16.10.2026) | `analyse`, `nas` | The ball's path with contacts, the court finder's proposal (§10.4, §10.6). Background lane |
+| `players` (17.10.2026, beta) | `analyse`, `nas` (`NOMAL_PLAYERS_CAPS`, e.g. `gpu,nas` for a GPU worker) | People on the court in the rally windows (YOLO26s ONNX, ByteTrack), tracks → clusters, back crops, shirt-number suggestions (§10.5). On demand (`NOMAL_PLAYERS_AUTO` off by default; on: after each `court` job). Priority −12, background lane |
 | `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
 | `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
@@ -1509,6 +1528,57 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   (MIT), masked to the court polygon + margin, at 25 fps on live segments (tracker fills in).
 - Team assignment: side of the net (volleyball); kit-colour clustering (basketball).
 - No identity across videos (§5.7). Track IDs are per video.
+- **Built 17.10.2026** (`players` job, `nomal/ml/{people,bytetrack,players}.py`, migration
+  `0011`): see "Players in a video" below.
+
+**Players in a video (17.10.2026, beta).** Off by default (`NOMAL_PLAYERS_AUTO=false`): ~2 h
+of the Lenovo's CPU per match and many more cards than players (§10.9), so a coach finds them
+on demand ("Find players" on the video page, `POST /api/videos/{id}/players/find`) or an admin
+with `nomal.cli players --video ID | --all-ready`; switched on, the job follows the court job
+(§10.6). The attribution runs whenever a video has players. On the Lenovo's background
+lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, §8.3):
+
+1. **Detection and tracking**: the rally windows (±1 s, joined when < 2 s apart) are decoded
+   per camera file at 10 fps, cropped to the court's ROI (the mask: side lines ± 1.75 m, end
+   lines ± 5 m, 2.8 m of head room; each window through the camera's setup it starts in;
+   without a calibration the floor below 30 % of the frame).
+   Ultralytics **YOLO26s** (COCO, person class, AGPL-3.0) at 1280 px on the ROI's longer side,
+   ONNX Runtime CPU: no PyTorch in the worker image (a throw-away Docker stage exports the
+   ONNX, `scripts/ml/player_weights.py`). YOLO26's end-to-end head needs no NMS and was as fast
+   as YOLO11s and found as many people (spike on the Legends hall: 18 people a frame at
+   1280 px, 87 ms per frame with 4 threads; YOLO11m/26m 245 ms). ByteTrack (Kalman + two-round
+   IoU association, written in numpy/scipy: Ultralytics' tracker needs PyTorch, supervision
+   brings matplotlib and more) gives per-window tracks; a box whose feet are outside the mask is
+   dropped; a track whose feet stay past a side line is a referee, line judge or the bench.
+2. **Teams**: the side of the net (feet in court metres, the net at 9 m; uncalibrated: the
+   foot height between the two teams) and which team was at the camera's end in that rally
+   (where the server stood and who served, else the set's side; else kit colours learnt from
+   the known rallies, with "near in the first rally = us" as the start, and "swap teams").
+3. **Clusters**: the tracks of a team become people: the same read shirt number links tracks,
+   tracks seen at the same time (two people) or with different numbers never join, the rest
+   by average linkage on appearance (colour of head, shirt, shorts and legs regions: no face,
+   no re-identification model). Up to four back crops per cluster (largest, sharpest, one
+   whose number reads as the cluster's preferred), one per track for splitting.
+4. **Shirt numbers** (a suggestion only): PaddleOCR's text detector and English recogniser
+   (Apache-2.0, ONNX via RapidOCR) on the torso of each track's best crops, decoded to digits
+   only; a track's number needs repeated readings. Precise but misses many single digits.
+5. **Gallery** (`/videos/{id}/players`, `GET/PATCH/POST /api/videos/{id}/players…`): per
+   team one card per cluster with its crops, the reader's suggestion and its action count;
+   the coach types the number (Enter moves on), merges, splits, marks "not a player", swaps
+   teams. A rerun keeps a number where the same number is read on the same team.
+6. **Attribution** (API, pure Python): for every action, the ball at the contact (the
+   suggestion's own `ball_x/ball_y` when it has them, else the ball track's nearest contact,
+   bounces excluded), the analysed frame nearest it, the boxes of the action's team there,
+   the nearest player in the image (distance to the box in box heights); confidence from the
+   distance and the margin to the second nearest. A floor distance through the camera (the
+   ball 0.8 m up for receptions, digs and free balls, 2.3 m for the rest, the camera's setup
+   at that time) is built but off: on the Legends game it was 4.7 m off at the median.
+   A model's unanswered action gets `number`/`member_id`/`track_ref` written (taken back when
+   the gallery no longer supports it); a person's number is never overwritten; the coach's
+   tags without a number get a suggestion beside them that "apply" turns into the coach's.
+   Recomputed on every gallery change and, for new or changed tags, on the next read.
+   Metrics: "% of actions identified" and the agreement with the coach's numbers, in the
+   players run's `metrics.attribution` and `GET /api/videos/{id}/analysis` (`players`).
 
 ### 10.6 Court homography
 
@@ -1611,6 +1681,17 @@ live part ≈ 25 min, to bring down with batching in M8). The provider benchmark
 models run one after another in FP16 with small batches. The L4 figures also matter for the
 later move (§8.6, §16.2).
 
+**Players on the Lenovo's CPU, measured 17.10.2026** (§10.5; the Legends game, 2 h 12 min):
+183 rally windows, 2,647 s, 26,468 frames at 10 fps; YOLO26s at 1280 px with 4 threads:
+**1 h 51 min wall** (detection and tracking 6,629 s, number reading 172 s, clusters 16 s),
+5.2 CPU-hours, on a busy box (load 15–20: the prod worker's backfill ran beside it). The
+analyse job of the same game took 59 min there with 4 threads, so the players are ~1.9× the
+analyse job. On a quiet box the detector alone runs at 87 ms a frame (~40 min a match).
+Detection only around contacts (±1 s) would save little: contacts cover most of a rally.
+The result is honest but rough: 4,601 tracks became 449 cards (260 ours, 188 theirs; 121 seen
+≥ 30 s); cards with a read shirt number are mostly one player, the rest mix teammates. Hence
+the beta, on demand.
+
 ---
 
 ## 11. Tier 1 as training data for tier 3
@@ -1626,7 +1707,8 @@ later move (§8.6, §16.2).
    code, *including the exact frame to tag* ("attack = the frame the hand touches the ball").
 5. **Link labels to tracks**: once tracks exist, each event gets a `track_ref` (player track
    nearest the ball at the contact frame, on the correct side), confirmed with the event. That
-   is the player-attribution label.
+   is the player-attribution label. Built 17.10.2026 (§10.5): written into a model's actions
+   with the player, beside the coach's tags in `event_player`.
 6. **Datasets are snapshots**: `nomal-ml export-dataset` writes a manifest (query, IDs, taxonomy
    version, video SHA-256s) and cuts short labelled windows from the NAS originals into
    `nomal/datasets/<name>/`. Models record their dataset manifest. Once a raw file is deleted
