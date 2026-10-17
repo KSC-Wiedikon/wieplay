@@ -103,24 +103,27 @@ def test_inbox_is_for_people_who_upload_somewhere() -> None:
 from nomal.core.permissions import can_export, can_share_with_team, can_tag  # noqa: E402
 
 TAG_MATRIX = [
-    # (who, team, may tag, share and export)
-    (viewer(roles=("superuser",)), H3_NOW, True),
-    (viewer(roles=("admin",)), HERREN1_NOW, True),
-    (viewer(roles=("admin",)), OFF_TEAM, False),  # not enabled
-    (viewer(sport_admin=("volleyball",)), H3_PREV, True),
-    (viewer(sport_admin=("volleyball",)), HERREN1_NOW, False),
-    (viewer(teams=[{"team": 12, "rel": ["coach"]}]), H3_NOW, True),  # any season of the team
-    (viewer(teams=[{"team": 92, "rel": ["player", "captain"]}]), H3_NOW, False),
-    (viewer(roles=("vorstand",)), H3_NOW, False),
+    # (who, team, may tag, may share with the team and export)
+    (viewer(roles=("superuser",)), H3_NOW, True, True),
+    (viewer(roles=("admin",)), HERREN1_NOW, True, True),
+    (viewer(roles=("admin",)), OFF_TEAM, False, False),  # not enabled
+    (viewer(sport_admin=("volleyball",)), H3_PREV, True, True),
+    (viewer(sport_admin=("volleyball",)), HERREN1_NOW, False, False),
+    (viewer(teams=[{"team": 12, "rel": ["coach"]}]), H3_NOW, True, True),  # any season
+    # Players tag their own season's games (owner, 17.10.2026), not other seasons.
+    (viewer(teams=[{"team": 92, "rel": ["player", "captain"]}]), H3_NOW, True, False),
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_PREV, False, False),
+    (viewer(teams=[{"team": 99, "rel": ["player"]}]), OFF_TEAM, False, False),
+    (viewer(roles=("vorstand",)), H3_NOW, False, False),
 ]
 
 
 def test_tag_permission_matrix() -> None:
-    for who, team, allowed in TAG_MATRIX:
+    for who, team, tag, share_export in TAG_MATRIX:
         leads = lead_lineages(who, TEAMS)
-        assert can_tag(who, team, leads) is allowed, (who, team)
-        assert can_share_with_team(who, team, leads) is allowed, (who, team)
-        assert can_export(who, team, leads) is allowed, (who, team)
+        assert can_tag(who, team, leads) is tag, (who, team)
+        assert can_share_with_team(who, team, leads) is share_export, (who, team)
+        assert can_export(who, team, leads) is share_export, (who, team)
 
 
 # Team helpers (PLAN §5.1 "analyst"): a Nomal grant per lineage, loaded per request.
@@ -158,12 +161,12 @@ HELPER_MATRIX = [
     # (who, team, what they may do)
     (H3_HELPER, H3_NOW, HELPS),
     (H3_HELPER, H3_PREV, HELPS),  # every season of the team, like a coach
-    (H3_HELPER, D1_NOW, {"see"}),  # their own team: a player there
+    (H3_HELPER, D1_NOW, {"see", "tag"}),  # their own team: a player there
     (H3_HELPER, HERREN1_NOW, set()),  # another team
     (D1_PLAYER, H3_NOW, set()),  # the grant revoked: nothing loaded for the request
     (D1_PLAYER.with_grants({OFF}), OFF_TEAM, set()),  # a team that does not use Nomal
     (H3_PLAYER_HELPER, H3_PREV, HELPS),  # a player picked to help sees earlier seasons too
-    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, {"see"}),
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, {"see", "tag"}),
     (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, LEADS),
     (viewer(teams=[{"team": 12, "rel": ["team_responsible"]}]), H3_NOW, LEADS - {"upload"}),
     (viewer(sport_admin=("volleyball",)), H3_NOW, LEADS),

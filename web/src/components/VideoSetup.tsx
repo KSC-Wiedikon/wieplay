@@ -138,7 +138,7 @@ export function VideoSetup({ video, element, rallies, actionTags }: VideoSetupPr
       node: (state) => <ScoreboardStep key="scoreboard" state={state} video={video} board={board.data} element={element} />,
     },
     ...(players
-      ? [{ key: 'players' as const, state: playersState(players), node: (state: StepState) => <PlayersStep key="players" state={state} video={video} players={players} /> }]
+      ? [{ key: 'players' as const, state: playersState(players), node: (state: StepState) => <PlayersStep key="players" state={state} video={video} players={players} canFind={analysis.data?.can_run ?? true} /> }]
       : []),
     ...(video.names ? [{ key: 'names' as const, state: namesState(video), node: (state: StepState) => <NamesStep key="names" state={state} video={video} /> }] : []),
   ]
@@ -309,7 +309,7 @@ function ScoreboardStep({ state, video, board, element }: { state: StepState; vi
   )
 }
 
-function PlayersStep({ state, video, players }: { state: StepState; video: Video; players: PlayersSummary }) {
+function PlayersStep({ state, video, players, canFind }: { state: StepState; video: Video; players: PlayersSummary; canFind: boolean }) {
   const { t } = useTranslation()
   const find = useFindPlayers(video.id)
   const done = players.run_id !== null
@@ -337,7 +337,7 @@ function PlayersStep({ state, video, players }: { state: StepState; video: Video
           <ButtonLink to={`/videos/${video.id}/players`} variant={players.named < players.clusters ? 'primary' : 'secondary'}>
             {t('players.step.open')}
           </ButtonLink>
-        ) : state === 'busy' ? null : (
+        ) : state === 'busy' || !canFind ? null : (
           <Button variant="secondary" disabled={find.isPending} title={t('players.findHint')} onClick={() => find.mutate(undefined)}>
             {t('players.find')}
           </Button>

@@ -806,6 +806,8 @@ export interface Analysis {
   actions?: ActionsState | null
   /** The players of the video (docs/PLAN.md §10.5); absent from older servers. */
   players?: PlayersSummary | null
+  /** Start long jobs by hand (analysis, actions, players): coaches and helpers, not every player. */
+  can_run?: boolean
 }
 
 // Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).

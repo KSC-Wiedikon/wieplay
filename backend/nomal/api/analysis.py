@@ -29,7 +29,13 @@ from nomal.api.deps import DbDep, SettingsDep, ViewerDep, audit
 from nomal.core import actions, analysis, players, scoring, tagging
 from nomal.core.config import Settings
 from nomal.core.models import Job, ModelRun, Segment, Video
-from nomal.core.permissions import Viewer, can_delete_video, can_tag, can_upload
+from nomal.core.permissions import (
+    Viewer,
+    can_delete_video,
+    can_run_analysis,
+    can_tag,
+    can_upload,
+)
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -231,6 +237,8 @@ class AnalysisOut(BaseModel):
     metrics_vs_human: MetricsVsHumanOut | None
     available: bool  # the sport has automatic analysis
     can_analyse: bool
+    # Start long jobs by hand (analysis, action suggestions, finding the players).
+    can_run: bool = False
     job: JobStateOut | None
     human_rallies: int
     rallies_reviewed_at: datetime | None
@@ -462,7 +470,8 @@ def analysis_out(
         proposals=analysis.proposal_counts(db, video.id),
         metrics_vs_human=vs_human,
         available=video.sport in analysis.SPORTS,
-        can_analyse=can_tag(viewer, access.ref, access.leads)
+        can_run=can_run_analysis(viewer, access.ref, access.leads),
+        can_analyse=can_run_analysis(viewer, access.ref, access.leads)
         and analysis.can_analyse(video) is None,
         job=JobStateOut(
             id=job.id,
@@ -493,10 +502,18 @@ def get_analysis(
     return analysis_out(db, video, viewer, access, settings)
 
 
+def _runner(db: DbDep, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, TeamAccess]:
+    """Starting a long job by hand: coaches, helpers, sport admins and admins (players tag)."""
+    video, access = _readable(db, viewer, video_id)
+    if not can_run_analysis(viewer, access.ref, access.leads):
+        raise HTTPException(403, "Only the team's coaches and helpers start the analysis")
+    return video, access
+
+
 def _taggable(db: DbDep, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, TeamAccess]:
     video, access = _readable(db, viewer, video_id)
     if not can_tag(viewer, access.ref, access.leads):
-        raise HTTPException(403, "Only the team's coaches and sport admins run the analysis")
+        raise HTTPException(403, "Only the team's members, coaches and helpers tag this video")
     db.execute(
         select(Video)
         .where(Video.id == video.id)
@@ -512,6 +529,7 @@ def analyse(
 ) -> AnalysisOut:
     """Queue the analysis (again): new signals, new proposals for a video nobody has done
     the rallies of yet, else a new score against the coach's rallies."""
+    _runner(db, viewer, video_id)
     video, access = _taggable(db, viewer, video_id)
     reason = analysis.can_analyse(video)
     if reason:
@@ -599,6 +617,7 @@ def suggest_actions(
 ) -> AnalysisOut:
     """Suggest the actions again: untouched suggestions are replaced, nothing a coach tagged
     or answered is changed."""
+    _runner(db, viewer, video_id)
     video, access = _taggable(db, viewer, video_id)
     reason = actions.can_propose(db, video)
     if reason:

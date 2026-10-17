@@ -142,8 +142,9 @@ def test_a_coach_sets_the_names_for_a_video(club: dict[str, TestClient], as_: An
         None,
         None,
     )
-    # Players watch; they don't set up a video.
-    assert as_("player-h3").patch(url, json={"name_them": "x"}).status_code in (403, 404)
+    # Players set it up too (they tag since 17.10.2026); another team's people don't see it.
+    assert as_("basketball-player").patch(url, json={"name_them": "x"}).status_code == 404
+    assert as_("player-h3").patch(url, json={"name_them": "Näfels"}).status_code == 200
 
 
 def test_a_coach_s_name_wins_over_the_game_and_the_official_one_stays(

@@ -340,9 +340,11 @@ def test_team_and_video_say_what_the_viewer_may_do(
     coach, player = club["coach"], as_("player-h3")
     flags = ("can_tag", "can_share", "can_export")
     assert [coach.get("/api/teams/9101").json()[f] for f in flags] == [True] * 3
-    assert [player.get("/api/teams/9101").json()[f] for f in flags] == [False] * 3
+    # Players tag their games (17.10.2026); sharing with the team and downloads stay with coaches.
+    assert [player.get("/api/teams/9101").json()[f] for f in flags] == [True, False, False]
     assert [coach.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [True] * 3
-    assert [player.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [False] * 3
+    seen = player.get(f"/api/videos/{tagged['id']}").json()
+    assert [seen[f] for f in flags] == [True, False, False]
     admin = club["admin"]
     assert [admin.get(f"/api/videos/{tagged['id']}").json()[f] for f in flags] == [True] * 3
 

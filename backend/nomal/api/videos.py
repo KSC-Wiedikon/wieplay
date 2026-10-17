@@ -690,7 +690,7 @@ def update_setup(
     scoreboard in this video" (which forgets a box drawn before and scores again)."""
     video, access = visible_video(db, viewer, video_id)
     if not can_tag(viewer, access.ref, access.leads):
-        raise HTTPException(403, "Only the team's coaches and sport admins set up a video")
+        raise HTTPException(403, "Only the team's members, coaches and helpers set up this video")
     fields = body.model_fields_set
     changed: dict[str, Any] = {}
     if "name_us" in fields:

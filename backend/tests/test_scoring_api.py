@@ -465,7 +465,7 @@ def test_bad_series_fail_the_job(
 
 def test_scoring_permissions(ready: Any, club: dict[str, TestClient], as_: Any) -> None:
     url = f"/api/videos/{ready['id']}/scoring"
-    assert as_("player-h3").post(url).status_code == 403
+    assert as_("basketball-player").post(url).status_code == 404  # another team
     r = club["coach"].post(url)
     assert r.status_code == 200 and r.json()["scoring"]["rallies"] == 0
 

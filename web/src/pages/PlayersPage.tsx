@@ -179,9 +179,11 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
                 <Button onClick={() => setAskSwap(true)} disabled={swap.isPending} title={t('players.swapHint')}>
                   {t('players.swap')}
                 </Button>
-                <Button variant="ghost" onClick={() => find.mutate()} disabled={find.isPending || busy} title={t('players.findAgainHint')}>
-                  {t('players.findAgain')}
-                </Button>
+                {(data.can_find ?? true) && (
+                  <Button variant="ghost" onClick={() => find.mutate()} disabled={find.isPending || busy} title={t('players.findAgainHint')}>
+                    {t('players.findAgain')}
+                  </Button>
+                )}
               </div>
             </div>
           )}
@@ -271,7 +273,7 @@ function JobState({ data, onFind, finding }: { data: Players; onFind: () => void
       {busy && data.job?.progress != null && <ProgressBar value={data.job.progress} label={t(`players.status.${data.status}`)} />}
       {busy && data.job?.message && <p className="text-sm text-muted">{data.job.message}</p>}
       {failed && data.job?.error && <p className="text-sm wrap-anywhere text-muted">{data.job.error}</p>}
-      {data.can_edit && !busy && (
+      {(data.can_find ?? data.can_edit) && !busy && (
         <div>
           <Button variant="primary" onClick={onFind} disabled={finding}>
             {t('players.find')}

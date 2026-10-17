@@ -138,8 +138,12 @@ def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
 def can_tag(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
     """Tag, mark rallies and sets, review and correct Nomal's suggestions and scores (§5.1):
     the team's coaches and team managers (every season of the team), sport admins, admins
-    (owner, 16.10.2026: the admins do the first tagging) and the team's helpers."""
-    return _leads_team(viewer, team, leads) or is_analyst(viewer, team)
+    (owner, 16.10.2026: the admins do the first tagging), the team's helpers, and (owner,
+    17.10.2026: "have everyone be able to tag") every member of that season's team: players
+    tag and review their own games. Every change is in the revision log."""
+    if _leads_team(viewer, team, leads) or is_analyst(viewer, team):
+        return True
+    return team.enabled and team.id in viewer.team_rels
 
 
 def is_team_manager(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
@@ -149,8 +153,16 @@ def is_team_manager(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> boo
 
 
 def can_share_with_team(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
-    """Share a clip or reel with the team (§5.1): whoever may tag, helpers included."""
-    return can_tag(viewer, team, leads)
+    """Share a clip or reel with the team (§5.1): coaches, team managers, sport admins,
+    admins and helpers. Players tag (since 17.10.2026) but keep their reels to themselves."""
+    return _leads_team(viewer, team, leads) or is_analyst(viewer, team)
+
+
+def can_run_analysis(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Start the long jobs on the club's machine by hand (an analysis ~30 min, action
+    suggestions, finding the players ~2 h of CPU): coaches, team managers, sport admins,
+    admins and helpers. Players tag and review, they don't queue hours of work."""
+    return _leads_team(viewer, team, leads) or is_analyst(viewer, team)
 
 
 def can_export(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
