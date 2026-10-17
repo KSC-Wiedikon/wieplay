@@ -462,7 +462,7 @@ def _reference_setup(row: Calibration, frames: AnalysisArtifact) -> dict[str, An
 class SetupIn(BaseModel):
     from_ms: int = Field(ge=0)
     to_ms: int = Field(ge=0)
-    start: Literal["start", "bump", "drift"] = "start"
+    start: Literal["start", "bump", "drift", "moved"] = "start"  # moved: to another view
     shift_px: float = Field(default=0.0, ge=0, le=10_000)
     samples: int = Field(default=0, ge=0)
     view: int = Field(default=0, ge=0, le=15)  # the camera carried elsewhere: another view
