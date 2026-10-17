@@ -11,6 +11,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from nomal.core.config import Settings
+from nomal.core.grants import analyst_lineages
 from nomal.core.models import AuditLog, UserSession
 from nomal.core.permissions import Viewer, can_manage_nomal
 from nomal.core.storage import ObjectStore
@@ -52,7 +53,9 @@ def current_viewer(request: Request, db: DbDep) -> Viewer:
     if now - row.last_seen_at > LAST_SEEN_EVERY:
         row.last_seen_at = now
         db.commit()
-    viewer = Viewer.from_claims(row.claims)
+    # Team helper grants are Nomal's own and change while a session runs: read them on every
+    # request, so a new helper sees the team at once and a removed one loses it at once.
+    viewer = Viewer.from_claims(row.claims).with_grants(analyst_lineages(db, row.member_id))
     request.state.viewer = viewer
     return viewer
 

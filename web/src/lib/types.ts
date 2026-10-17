@@ -12,17 +12,40 @@ export interface Team {
   league: string | null
   /** The user's relations to the team (player, coach, captain, team_responsible). Empty for admins. */
   rel: string[]
+  /** A helper of the team: picked by a coach in Nomal (PLAN §5.1 "analyst"), every season. */
+  helper?: boolean
   /** The same team across seasons (D1 2026/27 was D2 in 2025/26). */
   lineage_id: string
-  /** Coaches and team managers (any season of the team) and sport admins: tag, share, download. */
+  /** Coaches and team managers (any season of the team), sport admins, admins and helpers: tag, share. */
   can_tag: boolean
   can_share: boolean
   can_export: boolean
 }
 
 export interface TeamDetail extends Team {
-  /** Coach or team manager of this season's team, or sport admin. */
+  /** Coach or team manager of this season's team, sport admin, or helper. */
   can_upload: boolean
+  /** Coaches and team managers (any season), sport admins, admins: pick the team's helpers. */
+  can_grant?: boolean
+}
+
+/** A team helper (GET /api/teams/{id}/helpers): a Nomal grant for every season of the team. */
+export interface Helper {
+  id: string
+  member_id: number
+  name: string
+  /** The teams they play in now; empty once the club mirror no longer has them. */
+  teams: string[]
+  note: string | null
+  granted_by_name: string
+  granted_at: string
+}
+
+/** A club member who could help (GET /api/teams/{id}/helpers/candidates): name and teams only. */
+export interface HelperCandidate {
+  id: number
+  name: string
+  teams: string[]
 }
 
 /** A season of a team's lineage that the user can see (GET /api/teams/{id}/seasons, newest first). */

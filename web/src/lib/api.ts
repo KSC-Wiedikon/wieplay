@@ -7,6 +7,8 @@ import type {
   EventRevision,
   FilmingCheck,
   Game,
+  Helper,
+  HelperCandidate,
   ImportChannel,
   InboxFile,
   Job,
@@ -183,6 +185,14 @@ export const api = {
   teamSeasons: (id: number, signal?: AbortSignal) => apiRequest<Season[]>(`/api/teams/${id}/seasons`, { signal }),
   teamGames: (id: number, signal?: AbortSignal) =>
     apiRequest<Game[]>(`/api/teams/${id}/games`, { signal }),
+  // Team helpers (PLAN §5.1 "analyst"): coaches, team managers, sport admins and admins pick them
+  teamHelpers: (id: number, signal?: AbortSignal) => apiRequest<Helper[]>(`/api/teams/${id}/helpers`, { signal }),
+  helperCandidates: (id: number, q: string, signal?: AbortSignal) =>
+    apiRequest<HelperCandidate[]>(`/api/teams/${id}/helpers/candidates?q=${encodeURIComponent(q)}`, { signal }),
+  addHelper: (id: number, memberId: number, note: string | null) =>
+    apiRequest<Helper>(`/api/teams/${id}/helpers`, { method: 'POST', body: { member_id: memberId, note } }),
+  removeHelper: (id: number, grantId: string) =>
+    apiRequest<undefined>(`/api/teams/${id}/helpers/${grantId}`, { method: 'DELETE' }),
   adminTeams: (signal?: AbortSignal) => apiRequest<AdminTeam[]>('/api/admin/teams', { signal }),
   setTeamEnabled: (id: number, enabled: boolean) =>
     apiRequest<AdminTeam>(`/api/admin/teams/${id}`, { method: 'PUT', body: { enabled } }),

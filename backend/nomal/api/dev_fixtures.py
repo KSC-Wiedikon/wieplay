@@ -38,6 +38,7 @@ MEMBERS = [
     (108, "Lou Dunk", 5, ["center"]),
     (109, "Ada Admin", None, []),
     (110, "Lia Jung", 14, ["outside"]),
+    (111, "Pia Helfer", 8, ["outside"]),
 ]
 
 # Fictional birthdates for the adult check. Lia Jung (DU23-1) is under 18, so DU23-1 shows
@@ -53,6 +54,7 @@ BIRTHDATES: dict[int, date | None] = {
     108: date(2000, 6, 6),
     109: None,
     110: date(2010, 2, 11),
+    111: date(1997, 4, 21),
 }
 
 
@@ -96,7 +98,7 @@ ROSTERS: dict[int, list[tuple[int, str]]] = {
         (101, "captain"),
         (106, "coach"),
     ],
-    2: [(105, "player"), (102, "player")],
+    2: [(105, "player"), (102, "player"), (111, "player")],
     3: [(105, "player"), (110, "player")],
     4: [(107, "player"), (108, "player"), (106, "team_responsible")],
 }
@@ -211,6 +213,12 @@ def personas(today: date) -> dict[str, dict[str, Any]]:
             ],
         ),
         "vb-sport-admin": claims(105, ["vb_admin"], [], ["volleyball"]),
+        # Plays in D1; an H3 coach can add her as a helper of H3 (a Nomal grant, not a claim).
+        "player-d1": claims(
+            111,
+            ["user"],
+            [{"team": 9102, "season": current, "rel": ["player"]}],
+        ),
     }
 
 

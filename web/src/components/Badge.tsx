@@ -27,12 +27,13 @@ export function Badge({ tone = 'neutral', className, ...props }: ComponentProps<
   )
 }
 
-/** A rounded label, e.g. the viewer's roles in a team. */
-export function Chip({ className, ...props }: ComponentProps<'span'>) {
+/** A rounded label, e.g. the viewer's roles in a team; `accent` for one that stands out (Helper). */
+export function Chip({ className, accent, ...props }: ComponentProps<'span'> & { accent?: boolean }) {
   return (
     <span
       className={cx(
-        'inline-flex items-center rounded-full bg-sunken px-2.5 py-0.5 text-xs leading-5 font-semibold text-fg ring-1 ring-hairline ring-inset',
+        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs leading-5 font-semibold ring-1 ring-inset',
+        accent ? 'bg-accent-soft text-on-accent-soft ring-transparent' : 'bg-sunken text-fg ring-hairline',
         className,
       )}
       {...props}

@@ -24,6 +24,11 @@ describe('mayUpload', () => {
     expect(mayUpload(team(1, 'H3'), { sport_admin: ['volleyball'] })).toBe(true)
     expect(mayUpload(team(1, 'Herren 1', { sport: 'basketball' }), { sport_admin: ['volleyball'] })).toBe(false)
   })
+
+  it('lets a team helper upload for the team they help', () => {
+    expect(mayUpload(team(1, 'H3', { helper: true }), { sport_admin: [] })).toBe(true)
+    expect(mayUpload(team(1, 'H3', { helper: false, rel: ['player'] }), { sport_admin: [] })).toBe(false)
+  })
 })
 
 describe('teamEntries', () => {

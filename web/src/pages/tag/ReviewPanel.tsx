@@ -27,6 +27,7 @@ import {
 } from '../../lib/suggestions'
 import type { GapKind, Segment, Side } from '../../lib/types'
 import { useReview, useView, useWorkspace } from './context'
+import { GuideLink } from './GuideLink'
 import { GAP_KEYS, type ReviewNotice } from './review'
 
 /**
@@ -231,6 +232,7 @@ export function ReviewPanel() {
           <KeyLegend />
         </div>
       )}
+      <GuideLink />
 
       <ConfirmDialog
         open={state.confirmAll}

@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next'
+import type { Team } from './types'
 
 /** A team relation from Wiedisync as a label; unknown ones as they are. */
 export function roleLabel(t: TFunction, rel: string): string {
@@ -14,4 +15,11 @@ export function roleLabel(t: TFunction, rel: string): string {
     default:
       return rel
   }
+}
+
+/** The viewer's roles in a team as labels: the Wiedisync relations, then "Helper" (a Nomal grant). */
+export function teamRoleLabels(t: TFunction, team: Pick<Team, 'rel' | 'helper'>): string[] {
+  const labels = team.rel.map((rel) => roleLabel(t, rel))
+  if (team.helper) labels.push(t('roles.helper'))
+  return labels
 }

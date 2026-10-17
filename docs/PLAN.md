@@ -297,13 +297,18 @@ the team's **lineage** (§6.3) unless a season is named.
 | Tag, mark rallies, correct scores and model output | | ✓ | ✓ | ✓ | ✓⁴ |
 | Download / export MP4 (watermarked) | | | ✓ | ✓ | ✓⁴ |
 | Delete a video | | | ✓ | ✓ | ✓ |
-| Grant analyst | | | ✓ | ✓ | |
+| Grant analyst | | | ✓ | ✓ | ✓⁵ |
 | Enable a team for Nomal | | | | | in Wiedisync |
 
-¹ A player a coach picks to help tag; Nomal-local grant per team lineage.
+¹ A player a coach picks to help tag; Nomal-local grant per team lineage. Called "helper" in the
+  app (team page → Helpers; built 17.10.2026). Any active club member in the mirror can be
+  picked, from any team; grants are read on every request (never from the login token), so a
+  removed helper loses the team at once; a disabled team hides its grants. Helpers are viewers
+  for the filming rules (§5.3): only the roster is checked. Their guide: `/how-to-help`.
 ² Board members without an admin scope get no access.
 ³ Players see the seasons they were rostered in; they lose access when they leave.
 ⁴ Owner, 16.10.2026: admins do the first tagging, so they tag, share and export too.
+⁵ Since 17.10.2026: admins, too, add and remove a team's helpers.
 
 The rules live in **one module** (`nomal/core/permissions.py`) with a table-driven test
 that enumerates this matrix. Every API route goes through it.
@@ -419,7 +424,8 @@ segments, without audio unless a task needs it, with no names or IDs, deleted af
 ### 5.8 Audit log
 
 Records logins, video views (once per video per session), uploads, deletions, exports and
-downloads, permission and consent changes, admin "view as", GPU submissions (which video,
+downloads, permission and consent changes (helpers added and removed: `helper_added`,
+`helper_removed`), admin "view as", GPU submissions (which video,
 which provider), retention deletions. Coaches see the log for their team's videos; members can
 request their own entries.
 
@@ -697,7 +703,9 @@ contact sheets of crops, JPEG in the bucket under `media/{video}/analysis/` and 
 ```text
 session          id_hash, member_id, claims jsonb, created_at, expires_at, last_seen_at, user_agent
 login_nonce      jti, used_at
-team_grant       lineage_id, member_id, grant 'analyst', granted_by, granted_at, revoked_at
+team_grant       id, lineage_id, member_id (no FK: the mirror purges), member_name, role 'analyst',
+                 note, granted_by, granted_by_name, granted_at, revoked_at, revoked_by
+                 -- one open grant per (lineage, member, role); revoked rows stay as history
 consent          (unused since 16.10.2026, §5.4; dropped after M4) member_id, scope 'nomal', notice_version, status 'accepted'|'withdrawn',
                  via 'nomal'|'paper', recorded_by, at
 youtube_channel  channel_id, label, owner ('club' | member_id), proposed_by, confirmed_by,
