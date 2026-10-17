@@ -291,14 +291,18 @@ function InviteCoachForm({ team, onDone }: { team: GuestTeam; onDone: () => void
   const id = useId()
   const invite = useInviteCoach(team.id)
   const [name, setName] = useState('')
+  const [number, setNumber] = useState('')
   const [made, setMade] = useState<CoachInvited | null>(null)
+  const numberOk = number.trim() === '' || /^\d{1,2}$/.test(number.trim())
+  const ready = name.trim() !== '' && numberOk && !invite.isPending
 
   if (made) return <InviteLinkNotice name={made.person.name} invite={made} reset={false} onDone={onDone} />
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    if (!name.trim() || invite.isPending) return
-    invite.mutate({ name: name.trim(), number: null }, { onSuccess: setMade })
+    if (!ready) return
+    const parsed = number.trim() === '' ? null : Number(number.trim())
+    invite.mutate({ name: name.trim(), number: parsed }, { onSuccess: setMade })
   }
 
   return (
@@ -306,6 +310,18 @@ function InviteCoachForm({ team, onDone }: { team: GuestTeam; onDone: () => void
       <p className="text-sm text-muted">{t('guests.admin.inviteHint')}</p>
       <Field label={t('guests.admin.coachName')} htmlFor={`${id}-name`}>
         <TextInput id={`${id}-name`} value={name} required maxLength={120} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field label={t('guests.people.number')} hint={t('guests.people.numberHint')} htmlFor={`${id}-number`}>
+        <TextInput
+          id={`${id}-number`}
+          inputMode="numeric"
+          value={number}
+          maxLength={2}
+          inline
+          className="w-24"
+          aria-invalid={numberOk ? undefined : true}
+          onChange={(e) => setNumber(e.target.value)}
+        />
       </Field>
       {invite.isError && (
         <p role="alert" className="text-sm text-danger">
@@ -316,7 +332,7 @@ function InviteCoachForm({ team, onDone }: { team: GuestTeam; onDone: () => void
       )}
       <div className="flex flex-wrap justify-end gap-2 border-t border-hairline pt-4">
         <Button onClick={onDone}>{t('common.cancel')}</Button>
-        <Button type="submit" variant="primary" disabled={!name.trim() || invite.isPending}>
+        <Button type="submit" variant="primary" disabled={!ready}>
           {invite.isPending ? t('guests.admin.inviting') : t('guests.admin.invite')}
         </Button>
       </div>
