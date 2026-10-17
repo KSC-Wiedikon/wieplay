@@ -1,19 +1,18 @@
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate } from 'react-router'
 import { ButtonLink } from '../components/Button'
 import { Card } from '../components/Card'
 import { CalendarIcon, FilmIcon, UploadIcon } from '../components/icons'
 import { EmptyState, LoadError, Message } from '../components/Message'
 import { SectionHeader } from '../components/PageHeader'
 import { Spinner } from '../components/Spinner'
-import { Table, TBody, Td, Th, THead, Tr } from '../components/Table'
-import { BlockerList, FilmingBadge, VideoStatusBadge } from '../components/VideoBadges'
-import { VideoPoster } from '../components/VideoPoster'
-import { formatDate, formatDuration } from '../lib/format'
+import { Table, TBody, Td, Th, THead } from '../components/Table'
+import { BlockerList, FilmingBadge } from '../components/VideoBadges'
+import { VIDEO_GRID, VideoCard } from '../components/VideoCard'
+import { formatDate } from '../lib/format'
 import { useTeamVideos, useUpcomingFilming, useVideoConfig } from '../lib/queries'
 import type { TeamDetail, UpcomingFilming, Video } from '../lib/types'
-import { kindLabel, newestFirst } from '../lib/video'
+import { byMonth, monthLabel } from '../lib/video'
 
 // Videos
 
@@ -49,58 +48,33 @@ export function VideosSection({ team }: { team: TeamDetail }) {
           {team.can_upload ? t('home.noVideosUpload') : t('home.noVideosPlayer')}
         </EmptyState>
       ) : (
-        <Card className="overflow-hidden">
-          <VideoTable videos={newestFirst(videos.data)} />
-        </Card>
+        <VideoMonths videos={videos.data} />
       )}
     </section>
   )
 }
 
-function VideoTable({ videos }: { videos: Video[] }) {
-  const { t } = useTranslation()
-  const navigate = useNavigate()
+/** The team's videos as poster cards, one group per month, newest first. */
+function VideoMonths({ videos }: { videos: Video[] }) {
+  const { i18n } = useTranslation()
   return (
-    <Table caption={t('team.videos')}>
-      <THead>
-        <tr>
-          <Th className="w-0">
-            <span className="sr-only">{t('columns.preview')}</span>
-          </Th>
-          <Th>{t('columns.title')}</Th>
-          <Th className="hidden sm:table-cell">{t('columns.date')}</Th>
-          <Th className="hidden sm:table-cell">{t('columns.duration')}</Th>
-          <Th>{t('columns.status')}</Th>
-        </tr>
-      </THead>
-      <TBody>
-        {videos.map((video) => (
-          <Tr key={video.id} onActivate={() => navigate(`/videos/${video.id}`)}>
-            <Td className="pr-0">
-              <VideoPoster video={video} small className="w-16 rounded-md sm:w-20" />
-            </Td>
-            <Td>
-              <Link to={`/videos/${video.id}`} className="font-semibold link">
-                {video.title}
-              </Link>
-              <span className="mt-0.5 block text-xs text-muted tabular-nums sm:hidden">
-                {[formatDate(video.recorded_on), formatDuration(video.duration_ms)].filter(Boolean).join(' · ')}
-              </span>
-              {kindLabel(t, video.kind) && (
-                <span className="mt-0.5 hidden text-xs text-muted sm:block">{kindLabel(t, video.kind)}</span>
-              )}
-            </Td>
-            <Td className="hidden whitespace-nowrap tabular-nums sm:table-cell">{formatDate(video.recorded_on)}</Td>
-            <Td className="hidden whitespace-nowrap tabular-nums sm:table-cell">
-              {formatDuration(video.duration_ms) || '–'}
-            </Td>
-            <Td>
-              <VideoStatusBadge status={video.status} />
-            </Td>
-          </Tr>
-        ))}
-      </TBody>
-    </Table>
+    <div className="flex flex-col gap-6">
+      {byMonth(videos).map(({ month, videos }) => {
+        const label = monthLabel(month, i18n.language)
+        return (
+          <section key={month} aria-label={label} className="flex flex-col gap-2.5">
+            <h3 className="text-sm font-semibold text-muted">{label}</h3>
+            <ul aria-label={label} className={VIDEO_GRID}>
+              {videos.map((video) => (
+                <li key={video.id}>
+                  <VideoCard video={video} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      })}
+    </div>
   )
 }
 

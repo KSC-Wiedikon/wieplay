@@ -167,6 +167,15 @@ export interface Video {
    * Absent from servers before the automatic analysis.
    */
   rallies_reviewed_at?: string | null
+  /** Where the automatic analysis stands; null while the video is not ready (older servers: absent). */
+  analysis?: AnalysisBrief | null
+}
+
+/** "Ready" says a video plays; this says whether Nomal has analysed it (PLAN §10.1). */
+export interface AnalysisBrief {
+  status: 'none' | 'queued' | 'running' | 'done' | 'failed'
+  /** Rally suggestions nobody has answered yet. */
+  open: number
 }
 
 /** A match: a Wiedisync game, or a date and a title for one that is not in Wiedisync. */

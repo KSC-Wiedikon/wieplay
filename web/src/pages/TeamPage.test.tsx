@@ -83,7 +83,7 @@ describe('TeamPage videos', () => {
     expect(within(section).queryByRole('link', { name: /Upload video/ })).not.toBeInTheDocument()
   })
 
-  it('lists videos newest first with poster, length and status, and offers the upload to coaches', async () => {
+  it('shows videos as cards newest first with poster, length and status, and offers the upload to coaches', async () => {
     stub(
       team({ can_upload: true, rel: ['coach'] }),
       [
@@ -102,20 +102,21 @@ describe('TeamPage videos', () => {
     )
 
     const section = await screen.findByRole('region', { name: 'Videos' })
-    const table = await within(section).findByRole('table', { name: 'Videos' })
-    const rows = within(table).getAllByRole('row').slice(1)
-    expect(rows.map((row) => within(row).getByRole('link').textContent)).toEqual([
+    const october = await within(section).findByRole('list', { name: 'October 2026' })
+    const cards = within(october).getAllByRole('listitem')
+    expect(cards.map((card) => within(card).getByRole('link').textContent)).toEqual([
       'Friendly vs. VBC Zürich',
       'Older match',
     ])
 
-    const [friendly, match] = rows as [HTMLElement, HTMLElement]
+    const [friendly, match] = cards as [HTMLElement, HTMLElement]
     expect(within(friendly).getByRole('link')).toHaveAttribute('href', '/videos/00000000-0000-4000-8000-000000000002')
     expect(within(friendly).getByText('Processing')).toBeInTheDocument()
     expect(friendly.querySelector('img')).toBeNull()
 
-    expect(within(match).getByText('Ready')).toBeInTheDocument()
-    expect(within(match).getAllByText(/1:32:10/).length).toBeGreaterThan(0)
+    // A ready video says nothing about being ready: it plays.
+    expect(within(match).queryByText('Ready')).not.toBeInTheDocument()
+    expect(within(match).getByText('1:32:10')).toBeInTheDocument()
     expect(match.querySelector('img')).toHaveAttribute('src', '/api/media/00000000-0000-4000-8000-000000000001/poster.jpg')
 
     expect(within(section).getByRole('link', { name: /Upload video/ })).toHaveAttribute('href', '/teams/92/upload')
@@ -125,17 +126,34 @@ describe('TeamPage videos', () => {
     stub(team({ can_upload: true, rel: ['coach'] }), [
       video({ title: 'Cup vs. VBC Zürich', source: 'import', status: 'importing', has_thumbs: false, duration_ms: null }),
     ])
-    const table = await screen.findByRole('table', { name: 'Videos' })
-    const [row] = within(table).getAllByRole('row').slice(1) as [HTMLElement]
-    expect(within(row).getByText('Importing')).toBeInTheDocument()
+    const section = await screen.findByRole('region', { name: 'Videos' })
+    const [card] = (await within(section).findAllByRole('listitem')) as [HTMLElement]
+    expect(within(card).getByText('Importing')).toBeInTheDocument()
+  })
+
+  it('groups the videos by month and says where the analysis stands', async () => {
+    stub(team({ can_tag: true }), [
+      video({ id: '00000000-0000-4000-8000-000000000011', title: 'Legends', recorded_on: '2026-10-02', analysis: { status: 'queued', open: 0 } }),
+      video({ id: '00000000-0000-4000-8000-000000000012', title: 'VBC Swiss', recorded_on: '2026-09-28', analysis: { status: 'done', open: 12 } }),
+      video({ id: '00000000-0000-4000-8000-000000000013', title: 'H1', recorded_on: '2026-09-23', analysis: { status: 'running', open: 0 } }),
+      video({ id: '00000000-0000-4000-8000-000000000014', title: 'Stäfa', recorded_on: '2026-01-23', analysis: { status: 'done', open: 0 }, rallies_reviewed_at: '2026-10-17T08:00:00Z' }),
+    ])
+    const section = await screen.findByRole('region', { name: 'Videos' })
+    const months = await within(section).findAllByRole('list')
+    expect(months.map((list) => list.getAttribute('aria-label'))).toEqual(['October 2026', 'September 2026', 'January 2026'])
+    const card = (title: string) => screen.getByRole('link', { name: title }).closest('li') as HTMLElement
+    expect(within(card('Legends')).getByText('Analysis queued')).toBeInTheDocument()
+    expect(within(card('VBC Swiss')).getByText('12 suggestions to review')).toBeInTheDocument()
+    expect(within(card('H1')).getByText('Analysing…')).toBeInTheDocument()
+    expect(within(card('Stäfa')).getByText('Rallies reviewed')).toBeInTheDocument()
   })
 
   it('still lists a training video from before Nomal handled matches only', async () => {
     stub(team(), [video({ title: 'Training 12.10.2026', kind: 'training', game_id: null })])
-    const table = await screen.findByRole('table', { name: 'Videos' })
-    const [row] = within(table).getAllByRole('row').slice(1) as [HTMLElement]
-    expect(within(row).getByRole('link', { name: 'Training 12.10.2026' })).toBeInTheDocument()
-    expect(row).not.toHaveTextContent(/video\.kind|Match/)
+    const section = await screen.findByRole('region', { name: 'Videos' })
+    const [card] = (await within(section).findAllByRole('listitem')) as [HTMLElement]
+    expect(within(card).getByRole('link', { name: 'Training 12.10.2026' })).toBeInTheDocument()
+    expect(card).not.toHaveTextContent(/video\.kind|Match/)
   })
 
   it('says so when video storage is not set up', async () => {
