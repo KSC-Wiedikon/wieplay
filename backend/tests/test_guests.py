@@ -414,6 +414,8 @@ def test_a_removed_person_loses_the_team_at_once(
     assert new_client().post("/api/auth/guest/login", json=login).status_code == 401
     [(_, _, details)] = audit_rows(db_engine, "guest_person_removed")
     assert details == {"member_id": gast["player_id"], "account_disabled": True}
+    # Their name leaves Nomal too, as for a KSCW member who leaves.
+    assert sql(db_engine, "SELECT id FROM wd_member WHERE id = :m", m=gast["player_id"]) == []
 
 
 # --- the wall between guest clubs and KSCW ----------------------------------------------------

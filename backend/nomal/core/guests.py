@@ -351,8 +351,9 @@ def update_person(
 
 
 def remove_person(db: Session, team: WdTeam, member_id: int, now: datetime | None = None) -> bool:
-    """Take a person off this team row. On no other team, their account is disabled and their
-    sessions end. True when that happened."""
+    """Take a person off this team row. On no other team, their account is disabled, their
+    sessions end and their name leaves Nomal, as the Wiedisync sync does for a KSCW member who
+    leaves (their tags keep the shirt number). True when an account was disabled."""
     now = now or datetime.now(UTC)
     if not is_guest_id(member_id) or not on_team(db, team, member_id):
         raise NotOnTeam("No such person on this team")
@@ -377,8 +378,9 @@ def remove_person(db: Session, team: WdTeam, member_id: int, now: datetime | Non
         return False
     account = db.get(GuestAccount, member_id)
     if account is not None and account.disabled_at is None:
-        account.disabled_at = now
+        account.disabled_at = now  # deleted by the housekeeping 30 days later
     db.execute(delete(UserSession).where(UserSession.member_id == member_id))
+    db.execute(delete(WdMember).where(WdMember.id == member_id))
     db.flush()
     return account is not None
 
