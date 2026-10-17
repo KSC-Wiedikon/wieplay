@@ -12,6 +12,12 @@ export const en = {
     draft: 'Draft',
     close: 'Close',
   },
+  // When a download someone asked for in this session is ready (any page).
+  notify: {
+    exportReady: '“{{title}}” is ready under Downloads.',
+    recapReady: 'The game recap “{{title}}” is ready under Downloads.',
+    exportFailed: '“{{title}}” couldn’t be made.',
+  },
   sport: {
     volleyball: 'Volleyball',
     basketball: 'Basketball',

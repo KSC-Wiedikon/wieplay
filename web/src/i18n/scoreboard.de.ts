@@ -1,0 +1,46 @@
+import type { scoreboardEn } from './scoreboard.en'
+
+export const scoreboardDe: typeof scoreboardEn = {
+  scoreboard: {
+    open: 'Anzeigetafel markieren',
+    edit: 'Anzeigetafel markiert',
+    title: 'Anzeigetafel markieren',
+    intro:
+      'Zieh auf dem angehaltenen Bild einen Rahmen um den Spielstand: die Punkte beider Teams, nichts anderes. Nomal liest ihn zweimal pro Sekunde und nutzt ihn für den Spielstand; wo er den Aufschlägen widerspricht, wird der Ballwechsel zur Prüfung markiert. In vielen Hallen ist keine Anzeigetafel im Bild: dann gibt es nichts zu markieren.',
+    box: 'Rahmen',
+    score: 'Spielstand',
+    sets: 'Gewonnene Sätze (optional)',
+    setsHint: 'Ein zweiter Rahmen um die gewonnenen Sätze, falls die Tafel sie zeigt: So erkennt Nomal, wann ein neuer Satz beginnt.',
+    kind: 'Tafel',
+    kinds: {
+      flip: 'Klapptafel',
+      led: 'Leuchtziffern',
+      auto: 'Weiss nicht',
+    },
+    image: 'Das angehaltene Bild: ziehen, um den Rahmen zu zeichnen',
+    nudge: 'Pfeiltasten verschieben den Rahmen, mit Umschalt um zehn Pixel',
+    noFrame: 'Halte das Video an, wo die Anzeigetafel zu sehen ist, und markiere sie dann.',
+    noImage: 'Das Bild kann hier nicht angezeigt werden; der Rahmen wird trotzdem dort gespeichert, wo du ihn zeichnest.',
+    need: 'Zieh einen Rahmen um den Spielstand.',
+    fromHall: 'Der Rahmen aus dem letzten Video in dieser Halle: {{title}} ({{date}}). Prüfe, ob er noch auf dem Spielstand sitzt.',
+    fromTeam: 'Der Rahmen aus dem letzten Video des Teams: {{title}} ({{date}}). Prüfe, ob er noch auf dem Spielstand sitzt.',
+    useSuggestion: 'Letzten Rahmen übernehmen',
+    clear: 'Diesen Rahmen entfernen',
+    save: 'Speichern und lesen',
+    saved: 'Gespeichert. Nomal liest jetzt die Anzeigetafel; der Spielstand folgt.',
+    failed: 'Anzeigetafel konnte nicht gespeichert werden: {{detail}}',
+    remove: 'Keine Anzeigetafel in diesem Video',
+    removed: 'Die Anzeigetafel ist vergessen; der Spielstand kommt wieder aus den Aufschlägen.',
+    reading: 'Anzeigetafel wird gelesen…',
+    readingProgress: 'Anzeigetafel wird gelesen… {{pct}} %',
+    read_one: 'Anzeigetafel gelesen: {{count}} Spielstand',
+    read_other: 'Anzeigetafel gelesen: {{count}} Spielstände',
+    readNothing: 'Auf der Anzeigetafel konnte nichts gelesen werden.',
+    readFailed: 'Anzeigetafel konnte nicht gelesen werden.',
+    readAgain: 'Nochmals lesen',
+  },
+  recap: {
+    create: 'Spielzusammenfassung erstellen',
+    queued: 'Die Spielzusammenfassung wird geschnitten. Du wirst benachrichtigt, sobald sie bereit ist; du findest sie unter Downloads.',
+  },
+}

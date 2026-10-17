@@ -250,6 +250,7 @@ export const libraryEn = {
       clip: 'Clip',
       reel: 'Reel',
       condensed: 'Rallies of a match',
+      recap: 'Game recap',
     },
     status: {
       queued: 'Preparing',

@@ -3,6 +3,7 @@ import { Outlet } from 'react-router'
 import { Header } from '../components/Header'
 import { LoadError } from '../components/Message'
 import { PageSpinner } from '../components/Spinner'
+import { useExportNotifications } from '../lib/exportWatch'
 import { useMe } from '../lib/queries'
 import type { Session } from '../lib/session'
 import { LoggedOutPage } from './LoggedOutPage'
@@ -30,10 +31,17 @@ export function AppLayout() {
         {t('common.skipToContent')}
       </a>
       <Header me={me.data} />
+      <ExportNotifications />
       {/* Every page uses the full window up to 110rem; forms and dialogs set their own widths. */}
       <main id="main" className="mx-auto w-full max-w-[110rem] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <Outlet context={{ me: me.data } satisfies Session} />
       </main>
     </>
   )
+}
+
+/** Toasts when a download asked for in this tab is ready, on any page. */
+function ExportNotifications() {
+  useExportNotifications()
+  return null
 }

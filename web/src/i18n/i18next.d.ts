@@ -4,6 +4,7 @@ import type { courtEn } from './court.en'
 import type { en } from './en'
 import type { libraryEn } from './library.en'
 import type { playersEn } from './players.en'
+import type { scoreboardEn } from './scoreboard.en'
 import type { statsEn } from './stats.en'
 import type { videoEn } from './video.en'
 
@@ -11,6 +12,6 @@ declare module 'i18next' {
   interface CustomTypeOptions {
     defaultNS: 'translation'
     // The video, library and stats strings are registered by src/i18n/pages.ts when their pages load.
-    resources: { translation: typeof en & typeof videoEn & typeof libraryEn & typeof statsEn & typeof courtEn & typeof actionsEn & typeof playersEn }
+    resources: { translation: typeof en & typeof videoEn & typeof libraryEn & typeof statsEn & typeof courtEn & typeof actionsEn & typeof playersEn & typeof scoreboardEn }
   }
 }

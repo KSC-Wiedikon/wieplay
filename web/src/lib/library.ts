@@ -249,11 +249,15 @@ export function useExports() {
   })
 }
 
+/** Fired when an export was queued: the app then watches it and says when it is ready. */
+export const EXPORT_QUEUED = 'nomal:export-queued'
+
 export function useCreateExport() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: (body: ExportIn) => libraryApi.createExport(body),
     onSuccess: async () => {
+      window.dispatchEvent(new Event(EXPORT_QUEUED))
       await client.invalidateQueries({ queryKey: keys.exports })
     },
   })

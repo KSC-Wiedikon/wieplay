@@ -17,6 +17,11 @@ export const de: Messages<typeof en> = {
     draft: 'Entwurf',
     close: 'Schliessen',
   },
+  notify: {
+    exportReady: '«{{title}}» ist unter Downloads bereit.',
+    recapReady: 'Die Spielzusammenfassung «{{title}}» ist unter Downloads bereit.',
+    exportFailed: '«{{title}}» konnte nicht erstellt werden.',
+  },
   sport: {
     volleyball: 'Volleyball',
     basketball: 'Basketball',
