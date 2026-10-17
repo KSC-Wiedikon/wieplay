@@ -13,7 +13,7 @@ import { apiRequest } from './api'
 import { POST_ROLL_MS, PRE_ROLL_MS } from './condensed'
 import { keys } from './queryClient'
 import { periodAt, ralliesOf } from './rallies'
-import type { Period, Segment, Side, Tag, Taxonomy } from './types'
+import type { ActionGate, Period, Segment, Side, Tag, Taxonomy } from './types'
 
 export type StatFormat = 'count' | 'pct' | 'rating'
 export type StatValue = number | null
@@ -101,6 +101,10 @@ export interface VideoStats {
   team_filters: Record<string, RallyFilter>
   match: BoxScore
   sets: SetBox[]
+  /** Suggested actions nobody has answered yet: not counted (absent from older servers). */
+  suggested?: number
+  /** Whether Nomal suggests actions yet. */
+  actions_gate?: ActionGate | null
 }
 
 export interface MatchLine {
@@ -124,6 +128,9 @@ export interface TeamStats {
   columns: StatColumn[]
   season_box: BoxScore
   matches: MatchLine[]
+  /** Suggested actions nobody has answered yet, over the matches: not counted. */
+  suggested?: number
+  actions_gate?: ActionGate | null
 }
 
 export type CsvLanguage = 'en' | 'de'

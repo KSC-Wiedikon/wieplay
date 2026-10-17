@@ -261,6 +261,9 @@ class Video(Base):
     # train the rally finder (PLAN §10.1) and Nomal stops proposing rallies for it.
     rallies_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rallies_reviewed_by: Mapped[int | None] = mapped_column(Integer)
+    # ... and its actions (PLAN §10.4a): from then on its tags train the action proposer.
+    actions_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    actions_reviewed_by: Mapped[int | None] = mapped_column(Integer)
 
     files: Mapped[list[VideoSourceFile]] = relationship(
         back_populates="video", order_by="VideoSourceFile.part_no", cascade="all, delete-orphan"
@@ -576,6 +579,9 @@ class Event(Base):
     attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     court_x: Mapped[float | None] = mapped_column(Float)
     court_y: Mapped[float | None] = mapped_column(Float)
+    # A model's suggested action: the ball at the contact, normalised image coordinates.
+    ball_x: Mapped[float | None] = mapped_column(Float)
+    ball_y: Mapped[float | None] = mapped_column(Float)
     clip_pre_ms: Mapped[int | None] = mapped_column(Integer)
     clip_post_ms: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(Text)

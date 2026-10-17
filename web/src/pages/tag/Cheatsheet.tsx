@@ -2,7 +2,7 @@ import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '../../components/Modal'
 import { gradeLabel, skillLabel } from '../../lib/labels'
-import { useReview, useUi, useWorkspace } from './context'
+import { useActionReview, useReview, useUi, useWorkspace } from './context'
 
 function Keys({ keys }: { keys: string[] }) {
   return (
@@ -45,6 +45,7 @@ export function Cheatsheet() {
   const { controller, taxonomy } = useWorkspace()
   const ui = useUi()
   const reviewing = useReview().active
+  const reviewingActions = useActionReview().active && reviewing
   const basketball = taxonomy.sport === 'basketball'
   const examples = examplesFor(t, basketball)
 
@@ -110,6 +111,23 @@ export function Cheatsheet() {
               [['Esc'], t('tagging.keys.review.leave')],
             ] as [string[], string][],
           },
+          {
+            title: t('actions.keys.group'),
+            rows: [
+              [['Enter'], t('actions.keys.accept')],
+              [['X'], t('actions.keys.reject')],
+              [['S', 'R', 'E', 'A', 'B', 'D', 'F'], t('actions.keys.skill')],
+              [['#', '+', '!', '-', '/', '='], t('actions.keys.grade')],
+              [['0–9', 'Enter'], t('actions.keys.number')],
+              [['Tab'], t('actions.keys.side')],
+              [['←', '→'], t('actions.keys.nudge')],
+              [['Shift + Enter'], t('actions.keys.rally')],
+              [['U'], t('actions.keys.undo')],
+              [['↑', '↓'], t('actions.keys.move')],
+              [['Space'], t('actions.keys.space')],
+              [['Esc'], t('actions.keys.leave')],
+            ] as [string[], string][],
+          },
         ]),
     {
       title: t('tagging.keys.groups.selected'),
@@ -126,8 +144,8 @@ export function Cheatsheet() {
     },
   ]
 
-  // While reviewing, its keys come first.
-  const review = t('tagging.keys.groups.review')
+  // While reviewing, its keys come first (the actions queue's when that is on).
+  const review = reviewingActions ? t('actions.keys.group') : t('tagging.keys.groups.review')
   const groups = reviewing ? [...all.filter((g) => g.title === review), ...all.filter((g) => g.title !== review)] : all
 
   return (

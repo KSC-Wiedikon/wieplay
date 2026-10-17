@@ -33,6 +33,7 @@ import { ApiError, blockersOf } from '../lib/api'
 import { clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
 import { commentMoments } from '../lib/comments'
 import { PRE_ROLL_MS } from '../lib/condensed'
+import { factTags } from '../lib/facts'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
 import { formatClock, segmentKindLabel } from '../lib/labels'
 import { useComments, useVideoClips } from '../lib/library'
@@ -294,10 +295,13 @@ function Ready({ video }: { video: Video }) {
 
   const { resolution, fps } = videoFacts(video)
   const facts = [formatDuration(video.duration_ms), resolution, fps ? t('video.fps', { fps }) : null].filter(Boolean)
-  // Nomal's suggestions are not rallies until a coach reviews them (PLAN §10): the rally list,
-  // skipping dead time and the counts leave them out.
+  // Nomal's suggestions are not rallies or tags until a coach reviews them (PLAN §10, §10.4a):
+  // the rally list, skipping dead time, the counts, the plays and the diagrams leave them out.
   const data = useMemo(
-    () => (tagging.data ? { ...tagging.data, segments: tagging.data.segments.filter((s) => !isSuggestion(s)) } : undefined),
+    () =>
+      tagging.data
+        ? { ...tagging.data, segments: tagging.data.segments.filter((s) => !isSuggestion(s)), events: factTags(tagging.data.events) }
+        : undefined,
     [tagging.data],
   )
   const rallyCount = data?.segments.filter((s) => s.kind === 'rally').length ?? 0
@@ -447,7 +451,7 @@ function Ready({ video }: { video: Video }) {
             </div>
           )}
           {data?.can_tag && video.sport === 'volleyball' && (
-            <AnalysisStatus video={video} rallies={rallyCount} reviewHref={`/videos/${video.id}/tag?mode=review`} />
+            <AnalysisStatus video={video} rallies={rallyCount} actionTags={tagCount} reviewHref={`/videos/${video.id}/tag?mode=review`} />
           )}
           {video.meets_standard === false && (
             <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">

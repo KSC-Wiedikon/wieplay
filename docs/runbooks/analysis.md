@@ -174,6 +174,55 @@ score, the score line's final and where the serve evidence alone ends (`evidence
 accuracy of a run blind to the coach (`vs_coach`). The serve model's held-out scores are in
 the training run's `metrics.serve`; `analyse` jobs use it once it beat the rule.
 
+## Suggested actions (serve, reception, set, attack, block, dig, freeball)
+
+What it is: [PLAN §10.4a](../PLAN.md#104a-suggested-actions-volleyball). Nothing to switch on:
+an `actions` job (seconds, same `analyse` capability and lane) follows every trajectory job
+and, 90 s later, every scoring a coach causes (sets, serve calls, rallies done). It reads the
+video's signals and asks the API for the rest: the rallies with their servers, winners and
+sides, the court (the coach's calibration, or the court finder's when confident), the current
+model. Deploy the API first (migration `0010`), then the worker. Videos analysed before:
+
+```bash
+python -m nomal.cli actions --all-ready --dry-run
+python -m nomal.cli actions --all-ready          # or --video <id>
+```
+
+**The bar.** Suggestions are written only once the action finder's held-out score on games
+whose actions a coach reviewed passes it: two games or more, precision of fully right
+suggestions ≥ 0.70, contact recall ≥ 0.6. Until then the jobs run and measure themselves
+where coaches tagged, and the pages say why there are no suggestions. Settings (API):
+
+```bash
+NOMAL_ACTION_SUGGESTIONS=auto            # auto (the bar) | on (write anyway, testing) | off
+NOMAL_ACTION_SUGGEST_MIN_PRECISION=0.70
+NOMAL_ACTION_SUGGEST_MIN_RECALL=0.6
+```
+
+`GET /api/videos/{id}/analysis` → `actions.gate` says where it stands (reason, games, score).
+After switching to `on`, `python -m nomal.cli actions --all-ready` fills the games in.
+
+Suggestions are tags with source "model" and review "unreviewed": they show dashed on the
+tagging page and are answered in Review → Actions (Enter, X, S R E A B D F, # + ! - / =, a
+number then Enter, Tab, ←/→, Shift+Enter, U). They never count in stats, reels or the score
+until accepted. A run never writes into a rally with a person's tags; it replaces its own
+untouched suggestions elsewhere and leaves rejected ones out.
+
+The learning loop is the rallies': "Actions reviewed" (refused while suggestions are open)
+queues a `train_actions` job ten minutes later; it needs two such games, scores the rules (v0)
+and the learned model (v1) on each game left out and keeps v1 only when its action F1 beats
+v0's (then every game nobody has done gets new suggestions).
+
+```bash
+python -m nomal.cli train-actions                # train now
+python -m nomal.cli action-eval                  # per-game scores of the latest training
+```
+
+Scores per video: `GET /api/videos/{id}/analysis` → `actions` (suggestion counts, the newest
+run's counts per skill, and in rallies a coach tagged `vs_coach`: precision, recall and F1 of
+the contacts at ±0.3 s, skill and side accuracy, action F1). A model that does not load (a
+new scikit-learn) falls back to the rules with a warning; `train-actions` trains a new one.
+
 ## When something goes wrong
 
 - **Analysis failed**: the video still plays; the error is on the job (Admin → Jobs) and,
@@ -197,6 +246,7 @@ analysis[-dev]/
                                                                   is what browsers get)
   models/rallies/rally-v1-<job8>.pkl                              trained finders
   models/rallies/serve-v1-<job8>.pkl                              trained serve models
+  models/actions/actions-v1-<job8>.pkl                            trained action proposers
 ```
 
 Each file has a row in `analysis_artifact` with its SHA-256; the worker refuses a model file

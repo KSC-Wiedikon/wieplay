@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from nomal.core import imports, jobs
+from nomal.core.config import Settings
 from nomal.core.media import (
     CODECS,
     SEGMENT_NAME,
@@ -357,9 +358,15 @@ def finish_if_done(db: Session, video: Video, now: datetime | None = None) -> bo
     return True
 
 
-def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]) -> None:
+def complete(
+    db: Session,
+    video: Video | None,
+    job: Job,
+    payload: dict[str, Any],
+    settings: Settings | None = None,
+) -> None:
     """Validate a worker's result and write it. Raises ValueError on a bad result."""
-    from nomal.core import analysis, calibration
+    from nomal.core import actions, analysis, calibration
 
     if job.kind in analysis.KINDS:
         analysis.complete(db, video, job, payload)
@@ -367,9 +374,14 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
         return
     if job.kind == "court":
         calibration.complete_court(db, video, job, payload)
+        actions.after_trajectory(db, video, job)  # the actions' floor positions follow
         return
     if job.kind in calibration.KINDS:
         calibration.complete(db, video, job, payload)
+        actions.after_trajectory(db, video, job)  # the suggested actions follow
+        return
+    if job.kind in actions.KINDS:
+        actions.complete(db, video, job, payload, settings)
         return
     if job.kind == "purge":
         jobs.succeed(job, payload)
@@ -403,9 +415,9 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
     """A job failed for good: the video failed, its other jobs stop. A failed export only
     fails that export. Failed analysis leaves the video as it is: it plays without it."""
-    from nomal.core import analysis, calibration
+    from nomal.core import actions, analysis, calibration
 
-    if job.kind in analysis.KINDS or job.kind in calibration.KINDS:
+    if job.kind in analysis.KINDS or job.kind in calibration.KINDS or job.kind in actions.KINDS:
         return
     if job.kind == "export":
         export = db.get(VideoExport, uuid.UUID(job.params["export_id"]))

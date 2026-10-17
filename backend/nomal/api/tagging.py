@@ -74,6 +74,12 @@ class EventOut(BaseModel):
     # Model proposals (PLAN §10): how sure the model is, and which run made it.
     confidence: float | None
     model_run_id: uuid.UUID | None
+    # A suggested action (PLAN §10.4a): the ball at the contact (normalised image
+    # coordinates) and the floor below it in metres (with a calibrated court only).
+    ball_x: float | None = None
+    ball_y: float | None = None
+    court_x: float | None = None
+    court_y: float | None = None
     review: str
     version: int
     updated_at: datetime
@@ -160,6 +166,8 @@ class TaggingOut(BaseModel):
     official_final: list[int] | None
     # A coach marked the rally list complete and right (POST .../rallies-reviewed).
     rallies_reviewed_at: datetime | None = None
+    # ... and its actions (POST .../actions-reviewed).
+    actions_reviewed_at: datetime | None = None
     # The match's first serve (start of set 1, else the end of the warm-up): "start at the
     # first serve" on the video page.
     first_serve_ms: int | None = None
@@ -327,6 +335,7 @@ def get_tagging(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> TaggingOut
         official_sets=_official_sets(db, video),
         official_final=_official_final(db, video),
         rallies_reviewed_at=video.rallies_reviewed_at,
+        actions_reviewed_at=video.actions_reviewed_at,
         first_serve_ms=scoring.first_serve_ms(db, video),
     )
 

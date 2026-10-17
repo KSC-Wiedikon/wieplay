@@ -3,6 +3,7 @@ import type { Outbox, OutboxState } from '../../lib/outbox'
 import type { Playhead } from '../../lib/playhead'
 import type { TaggingStore, TaggingView } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
+import type { ActionReviewController, ActionReviewState } from './actionReview'
 import type { TagController, UiState } from './controller'
 import type { ReviewController, ReviewState } from './review'
 
@@ -15,6 +16,8 @@ export interface WorkspaceParts {
   playhead: Playhead
   controller: TagController
   review: ReviewController
+  /** The actions queue of the review (suggested actions, PLAN §10.4a). */
+  actions: ActionReviewController
   /** A narrow screen (tablet, phone): only the review of suggestions, by touch. */
   narrow: boolean
   /** Reloads the server's data under the queued changes (after the server changed rallies itself). */
@@ -48,4 +51,9 @@ export function useSync(): OutboxState {
 export function useReview(): ReviewState {
   const { review } = useWorkspace()
   return useSyncExternalStore(review.subscribe, review.getState)
+}
+
+export function useActionReview(): ActionReviewState {
+  const { actions } = useWorkspace()
+  return useSyncExternalStore(actions.subscribe, actions.getState)
 }

@@ -3,6 +3,7 @@
 // React renders a snapshot of it through subscribe/getState.
 
 import { clipRange } from '../../lib/clips'
+import { factTags } from '../../lib/facts'
 import { formatEntry, isEntryChar, parseEntry, toggleSide, type EntryError } from '../../lib/grammar'
 import type { Playhead } from '../../lib/playhead'
 import { proposeByKey, proposeByTag, rallyStartForServe, ralliesOf, type RallyProposal } from '../../lib/rallies'
@@ -315,7 +316,8 @@ export class TagController {
   rallyKey = (): void => {
     const view = this.store.getView()
     if (view.openRally) {
-      this.set({ proposal: proposeByKey(view.openRally, this.now(), view.events, this.taxonomy) })
+      // A suggested action's grade is no fact: the winner comes from the coach's tags.
+      this.set({ proposal: proposeByKey(view.openRally, this.now(), factTags(view.events), this.taxonomy) })
       return
     }
     const start_ms = this.now()

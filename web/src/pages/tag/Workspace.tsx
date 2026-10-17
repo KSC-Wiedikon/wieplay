@@ -27,12 +27,15 @@ import { Outbox, type OutboxItem } from '../../lib/outbox'
 import { Playhead, usePlayhead } from '../../lib/playhead'
 import { keys } from '../../lib/queryClient'
 import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
+import { actionItems, factTags, suggestedCount } from '../../lib/actions'
 import { allProgress, reviewProgress, suggestionCount } from '../../lib/suggestions'
 import { TaggingStore } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
 import { useLoopPlayback } from '../../lib/useLoopPlayback'
-import { WorkspaceContext, useReview, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
+import { WorkspaceContext, useActionReview, useReview, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
+import { ActionReviewController } from './actionReview'
+import { ActionReviewPanel } from './ActionReviewPanel'
 import { Cheatsheet } from './Cheatsheet'
 import { TagController } from './controller'
 import { EntryPanel } from './EntryPanel'
@@ -56,6 +59,8 @@ interface Session {
   bundle: Tagging
   /** Proposals rejected before this session (no longer in the tagging data), for the review's progress. */
   rejectedBefore: number
+  /** Suggested actions rejected before this session, likewise. */
+  actionsRejectedBefore: number
 }
 
 /**
@@ -96,7 +101,13 @@ export function Workspace({ video, taxonomy, narrow = false }: { video: Video; t
         return
       }
       store.attach(outbox)
-      opened = { store, outbox, bundle, rejectedBefore: analysis?.proposals.rejected ?? 0 }
+      opened = {
+        store,
+        outbox,
+        bundle,
+        rejectedBefore: analysis?.proposals.rejected ?? 0,
+        actionsRejectedBefore: analysis?.actions?.suggestions.rejected ?? 0,
+      }
       setSession(opened)
     }
     start().catch(() => {
@@ -137,6 +148,7 @@ export function Workspace({ video, taxonomy, narrow = false }: { video: Video; t
       store={session.store}
       outbox={session.outbox}
       rejectedBefore={session.rejectedBefore}
+      actionsRejectedBefore={session.actionsRejectedBefore}
       narrow={narrow}
     />
   )
@@ -152,6 +164,7 @@ interface DeskProps extends WorkspaceProps {
   store: TaggingStore
   outbox: Outbox
   rejectedBefore: number
+  actionsRejectedBefore: number
   narrow: boolean
 }
 
@@ -171,13 +184,16 @@ function scoreAgain(client: QueryClient, outbox: Outbox, store: TaggingStore, vi
     .catch(() => {})
 }
 
-function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }: DeskProps) {
+function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsRejectedBefore, narrow }: DeskProps) {
   const client = useQueryClient()
   const [params, setParams] = useSearchParams()
   const [playhead] = useState(() => new Playhead())
   const [controller] = useState(() => new TagController(store, playhead, taxonomy, { duration_ms: video.duration_ms }))
   const [review] = useState(
     () => new ReviewController(store, playhead, controller, { rejectedBefore, onLeave: () => scoreAgain(client, outbox, store, video.id) }),
+  )
+  const [actions] = useState(
+    () => new ActionReviewController(store, playhead, controller, { rejectedBefore: actionsRejectedBefore, onLeave: () => review.stop() }),
   )
   const [element, setElement] = useState<HTMLVideoElement | null>(null)
   const reload = useCallback(() => {
@@ -187,8 +203,8 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }
       .catch(() => {})
   }, [store, video.id])
   const parts = useMemo<WorkspaceParts>(
-    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow, reload }),
-    [video, bundle, taxonomy, store, outbox, playhead, controller, review, narrow, reload],
+    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, narrow, reload }),
+    [video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, narrow, reload],
   )
   const reviewing = useSyncedReview(review)
 
@@ -198,22 +214,52 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }
   }, [playhead, element])
 
   useEffect(() => review.attach(), [review])
+  useEffect(() => actions.attach(), [actions])
+  // Leaving the review leaves its actions queue too.
+  useEffect(
+    () =>
+      review.subscribe(() => {
+        if (!review.getState().active) actions.stop()
+      }),
+    [review, actions],
+  )
 
-  // One keyboard at a time: the review's keys while reviewing, the tagging keys otherwise.
+  // One keyboard at a time: the review's keys while reviewing (its actions queue's when that is
+  // on), the tagging keys otherwise.
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => (review.getState().active ? review.onKeyDown(event) : controller.onKeyDown(event))
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!review.getState().active) controller.onKeyDown(event)
+      else if (actions.getState().active) actions.onKeyDown(event)
+      else review.onKeyDown(event)
+    }
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [controller, review])
+  }, [controller, review, actions])
 
   // ?mode=review (the video page's "Review suggestions") opens the review; a narrow screen has only it.
   const wantsReview = narrow || params.get('mode') === 'review'
+  const wantsActions = params.get('queue') === 'actions'
   const started = useRef(false)
   useEffect(() => {
     if (started.current) return
     started.current = true
     if (wantsReview) review.start()
-  }, [review, wantsReview])
+    if (wantsReview && wantsActions) actions.start()
+  }, [review, actions, wantsReview, wantsActions])
+  const actionQueue = useSyncedActions(actions)
+  // The queue stays in the address too.
+  useEffect(() => {
+    if (actionQueue === (params.get('queue') === 'actions')) return
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (actionQueue) next.set('queue', 'actions')
+        else next.delete('queue')
+        return next
+      },
+      { replace: true },
+    )
+  }, [actionQueue, params, setParams])
   // The mode stays in the address, so a reload comes back to it.
   useEffect(() => {
     if (narrow || reviewing === (params.get('mode') === 'review')) return
@@ -231,6 +277,25 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }
   // An analysis that finishes while the page is open brings its suggestions in.
   const analysis = useAnalysis(video.id, taxonomy.sport !== 'basketball')
   const analysisStatus = analysis.data?.status ?? null
+  // So do new suggested actions.
+  const actionsStatus = analysis.data?.actions?.status ?? null
+  const lastActions = useRef(actionsStatus)
+  useEffect(() => {
+    const before = lastActions.current
+    lastActions.current = actionsStatus
+    if (actionsStatus !== 'done' || before === null || !isBusy({ status: before })) return
+    let cancelled = false
+    void Promise.all([api.tagging(video.id), api.analysis(video.id).catch(() => null)])
+      .then(([fresh, latest]) => {
+        if (cancelled) return
+        store.replaceBase(fresh)
+        actions.reset(latest?.actions?.suggestions.rejected ?? 0)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [actionsStatus, store, actions, video.id])
   const lastStatus = useRef(analysisStatus)
   useEffect(() => {
     const before = lastStatus.current
@@ -254,6 +319,17 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, narrow }
       <DeskLayout element={element} setElement={setElement} />
     </WorkspaceContext>
   )
+}
+
+/** Whether the actions queue of the review is on, as React state. */
+function useSyncedActions(actions: ActionReviewController): boolean {
+  const [active, setActive] = useState(() => actions.getState().active)
+  useEffect(() => {
+    const update = () => setActive(actions.getState().active)
+    update()
+    return actions.subscribe(update)
+  }, [actions])
+  return active
 }
 
 /** Whether the review is on, as React state. */
@@ -280,15 +356,19 @@ function DeskLayout({
   const ui = useUi()
   const sync = useSync()
   const review = useReview()
+  const actionReview = useActionReview()
   const reviewing = review.active
+  const reviewingActions = reviewing && actionReview.active
 
   const rallies = useMemo(() => ralliesOf(view.segments), [view.segments])
   const trajectories = useTrajectories(video.id, controller.playsRallies)
   const windows = useMemo(() => playWindows(rallies, { duration_ms: video.duration_ms }), [rallies, video.duration_ms])
   // While reviewing, the suggestion on screen plays in a loop instead.
   useCondensedPlayback(element, windows, ui.skip && !reviewing)
-  const current = reviewing ? (view.segments.find((s) => s.id === review.currentId) ?? null) : null
-  useLoopPlayback(element, current?.start_ms ?? null, current?.end_ms ?? null)
+  const current = reviewing && !reviewingActions ? (view.segments.find((s) => s.id === review.currentId) ?? null) : null
+  // An action loops around its contact: 1 s before it to 0.5 s after it.
+  const action = reviewingActions ? (view.events.find((e) => e.id === actionReview.currentId) ?? null) : null
+  useLoopPlayback(element, current?.start_ms ?? action?.t_ms ?? null, current?.end_ms ?? action?.t_ms ?? null)
 
   // The analysis card counts rally proposals ("rallies reviewed" waits for those only); the
   // review goes through the breaks Nomal labelled too.
@@ -299,9 +379,17 @@ function DeskLayout({
     [view.segments, review.seen, review.seenGaps, review.rejectedBefore],
   )
   const byHand = rallies.length - suggestionCount(view.segments)
+  const actionCount = useMemo(() => actionItems(view.events).length, [view.events])
+  const openActions = useMemo(() => suggestedCount(view.events), [view.events])
+  const factCount = useMemo(() => factTags(view.events).length, [view.events])
+  // Below the bar (PLAN §10.4a) the Actions queue says why there are no suggestions.
+  const gate = useAnalysis(video.id, controller.playsRallies).data?.actions?.gate
   // The review is offered once Nomal suggested something (volleyball: basketball marks no rallies).
-  const canReview = controller.playsRallies && (progress.total > 0 || reviewing)
-  const status = controller.playsRallies && video.can_tag ? <AnalysisStatus video={video} rallies={byHand} live={live} onReviewed={reload} /> : null
+  const canReview = controller.playsRallies && (progress.total > 0 || actionCount > 0 || reviewing)
+  const status =
+    controller.playsRallies && video.can_tag ? (
+      <AnalysisStatus video={video} rallies={byHand} live={live} actionTags={factCount} onReviewed={reload} />
+    ) : null
 
   // Without IndexedDB, unsent changes are lost with the page: ask before leaving.
   useEffect(() => {
@@ -326,7 +414,7 @@ function DeskLayout({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canReview && !narrow && <ModeSwitch open={progress.total - progress.done} />}
+          {canReview && !narrow && <ModeSwitch open={progress.total - progress.done + openActions} />}
           <SyncStatus />
           <ButtonLink to={`/videos/${video.id}`}>{t('tagging.back')}</ButtonLink>
         </div>
@@ -351,7 +439,8 @@ function DeskLayout({
         {/* About 22rem until the video reaches its height limit; then the panel takes the rest. */}
         {reviewing ? (
           <div className={cx('flex flex-col gap-2', !narrow && 'min-w-80 flex-[1_0_22rem]')}>
-            <ReviewPanel />
+            {(actionCount > 0 || gate) && <QueueSwitch rallies={progress.total - progress.done} actions={openActions} />}
+            {reviewingActions ? <ActionReviewPanel /> : <ReviewPanel />}
           </div>
         ) : (
           <aside className="flex min-w-80 flex-[1_0_22rem] flex-col gap-2" aria-label={t('tagging.panel')}>
@@ -364,7 +453,7 @@ function DeskLayout({
       {!reviewing && <SetsBar />}
       <Timeline />
       {!reviewing && ui.segmentId && <SegmentPanel key={ui.segmentId} id={ui.segmentId} />}
-      {reviewing ? <RallyList mode="review" /> : <Lists rallies={rallies.length} />}
+      {reviewingActions ? <EventTable /> : reviewing ? <RallyList mode="review" /> : <Lists rallies={rallies.length} />}
       {reviewing && status}
       <Cheatsheet />
       <WorkspaceClipDialog />
@@ -388,6 +477,29 @@ function ModeSwitch({ open }: { open: number }) {
       onChange={(value, event) => {
         if (value === 'review') review.start()
         else review.stop()
+        // A pointer click must not leave Enter on this button: Enter answers the review.
+        if (event.detail > 0) event.currentTarget.blur()
+      }}
+    />
+  )
+}
+
+/** In the review: Nomal's rallies (and breaks) or its suggested actions. */
+function QueueSwitch({ rallies, actions: open }: { rallies: number; actions: number }) {
+  const { t } = useTranslation()
+  const { actions } = useWorkspace()
+  const state = useActionReview()
+  return (
+    <Segmented
+      label={t('actions.queue.label')}
+      value={state.active ? 'actions' : 'rallies'}
+      options={[
+        { value: 'rallies', label: t('actions.queue.rallies', { count: rallies }) },
+        { value: 'actions', label: t('actions.queue.actions', { count: open }) },
+      ]}
+      onChange={(value, event) => {
+        if (value === 'actions') actions.start()
+        else actions.stop()
         // A pointer click must not leave Enter on this button: Enter answers the review.
         if (event.detail > 0) event.currentTarget.blur()
       }}
@@ -610,8 +722,9 @@ function SetState() {
   const state = scoreBefore(t_ms, view.periods, view.segments)
   const open = view.openRally
   const serves = serveCodes(taxonomy)
+  // A suggested serve is no fact: only the coach's tags name the server.
   const serveTag = open
-    ? view.events.find((e) => serves.has(e.code) && e.t_ms >= open.start_ms - SERVE_SLACK_MS && e.t_ms <= t_ms)
+    ? factTags(view.events).find((e) => serves.has(e.code) && e.t_ms >= open.start_ms - SERVE_SLACK_MS && e.t_ms <= t_ms)
     : undefined
   const serving = serveTag?.side ?? state.serving
   // The score counts winners Nomal suggested (no coach decided those rallies yet).

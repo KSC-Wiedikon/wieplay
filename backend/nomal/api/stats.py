@@ -21,11 +21,12 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from nomal.api.access import visible_team
-from nomal.api.deps import DbDep, ViewerDep
+from nomal.api.analysis import ActionGateOut, gate_out
+from nomal.api.deps import DbDep, SettingsDep, ViewerDep
 from nomal.api.tagging import _readable
 from nomal.core import stats, tagging
 from nomal.core.models import (
@@ -112,6 +113,10 @@ class VideoStatsOut(BaseModel):
     team_filters: dict[str, dict[str, str]]
     match: BoxOut
     sets: list[SetOut]
+    # Suggested actions nobody has accepted or rejected yet: not counted above.
+    suggested: int = 0
+    # Whether Nomal suggests actions yet (PLAN §10.4a); null for older servers.
+    actions_gate: ActionGateOut | None = None
 
 
 class MatchOut(BaseModel):
@@ -134,6 +139,9 @@ class TeamStatsOut(BaseModel):
     columns: list[ColumnOut]
     season_box: BoxOut
     matches: list[MatchOut]
+    # Suggested actions nobody has accepted or rejected yet, over the matches: not counted.
+    suggested: int = 0
+    actions_gate: ActionGateOut | None = None
 
 
 # --- loading --------------------------------------------------------------------------------
@@ -182,12 +190,35 @@ def _events(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[sta
     out: dict[uuid.UUID, list[stats.TagIn]] = defaultdict(list)
     rows = db.scalars(
         select(Event)
-        .where(Event.video_id.in_(video_ids), Event.deleted_at.is_(None))
+        .where(
+            Event.video_id.in_(video_ids),
+            Event.deleted_at.is_(None),
+            tagging.event_stands(),  # facts only: a suggested action counts once accepted
+        )
         .order_by(Event.t_ms, Event.id)
     )
     for e in rows:
         out[e.video_id].append(_tag(e))
     return out
+
+
+def _suggested(db: Session, video_ids: list[uuid.UUID]) -> int:
+    """Suggested actions nobody has answered yet: not in the numbers (PLAN §10.4a)."""
+    if not video_ids:
+        return 0
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Event)
+            .where(
+                Event.video_id.in_(video_ids),
+                Event.source == "model",
+                Event.review == "unreviewed",
+                Event.deleted_at.is_(None),
+            )
+        )
+        or 0
+    )
 
 
 def _rallies(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[stats.RallyIn]]:
@@ -326,7 +357,9 @@ def _video_stats(
 
 
 @router.get("/videos/{video_id}/stats", response_model=VideoStatsOut)
-def video_stats(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> VideoStatsOut:
+def video_stats(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> VideoStatsOut:
     video, result, cols = _video_stats(db, viewer, video_id)
     return VideoStatsOut(
         video_id=video.id,
@@ -350,6 +383,8 @@ def video_stats(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> VideoStats
             )
             for s in result.sets
         ],
+        suggested=_suggested(db, [video.id]),
+        actions_gate=gate_out(db, settings),
     )
 
 
@@ -370,7 +405,7 @@ def video_stats_csv(
 
 def _season(
     db: Session, viewer: Viewer, team_id: int
-) -> tuple[WdTeam, stats.SeasonStats, list[stats.Column], int]:
+) -> tuple[WdTeam, stats.SeasonStats, list[stats.Column], list[uuid.UUID]]:
     access = visible_team(db, viewer, team_id)
     team = access.team
     _check_sport(team.sport)
@@ -403,18 +438,18 @@ def _season(
     ]
     members = {t.member_id for m in matches for t in m.tags if t.member_id is not None}
     result = stats.season_stats(matches, _names(db, members))
-    return team, result, stats.columns(load("volleyball")), len(videos)
+    return team, result, stats.columns(load("volleyball")), ids
 
 
 @router.get("/teams/{team_id}/stats", response_model=TeamStatsOut)
-def team_stats(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamStatsOut:
-    team, result, cols, count = _season(db, viewer, team_id)
+def team_stats(team_id: int, viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> TeamStatsOut:
+    team, result, cols, ids = _season(db, viewer, team_id)
     return TeamStatsOut(
         team_id=team.id,
         team_name=team.name,
         season=team.season,
         lineage_id=team.lineage_id,
-        videos=count,
+        videos=len(ids),
         tagged=result.tagged,
         columns=_columns(cols),
         season_box=_season_box(result.box, result.team, cols),
@@ -430,6 +465,8 @@ def team_stats(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamStatsOut:
             )
             for m in result.matches
         ],
+        suggested=_suggested(db, ids),
+        actions_gate=gate_out(db, settings),
     )
 
 

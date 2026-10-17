@@ -2,12 +2,14 @@ import '../i18n/pages'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
+import { ActionGateNote } from '../components/ActionGateNote'
 import { buttonClasses } from '../components/buttonStyles'
 import { ChartIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, LoadError } from '../components/Message'
 import { SectionHeader } from '../components/PageHeader'
 import { Spinner } from '../components/Spinner'
 import { StatsLegend, StatsTable, TeamTable, type TeamTableRow } from '../components/StatsTable'
+import { SuggestedHint } from '../components/VideoStats'
 import { formatDate } from '../lib/format'
 import { reelLink, teamCsvUrl, useTeamStats, type MatchLine } from '../lib/stats'
 import type { TeamDetail } from '../lib/types'
@@ -74,6 +76,7 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
           ) : null
         }
       />
+      {(data?.suggested ?? 0) > 0 ? <SuggestedHint count={data?.suggested ?? 0} /> : <ActionGateNote gate={data?.actions_gate} />}
       {stats.isPending ? (
         <Spinner />
       ) : stats.isError || !data ? (

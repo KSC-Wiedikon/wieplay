@@ -2,6 +2,7 @@
 // (docs/PLAN.md §9.6), undo and redo over this page's own changes, and the rally being played
 // (which exists only here until it ends: the API needs an end time; basketball has none).
 
+import { factTags } from './facts'
 import type { Change, ChangeKind, Outbox, OutboxItem } from './outbox'
 import { byStart, rescoreFor, sortedPeriods, type OpenRally } from './rallies'
 import { readStorage, writeStorage } from './storage'
@@ -100,6 +101,13 @@ function eventFromIn(p: EventIn, prev: Tag | undefined, roster: readonly RosterE
     note: p.note ?? null,
     source: prev?.source ?? 'manual',
     review: p.review ?? prev?.review ?? 'unreviewed',
+    // A suggested action keeps what the model said about it until the server answers.
+    confidence: prev?.confidence ?? null,
+    model_run_id: prev?.model_run_id ?? null,
+    ball_x: prev?.ball_x ?? null,
+    ball_y: prev?.ball_y ?? null,
+    court_x: prev?.court_x ?? null,
+    court_y: prev?.court_y ?? null,
     version: prev?.version ?? 0,
     updated_at: prev?.updated_at ?? '',
     deleted_at: null,
@@ -171,6 +179,8 @@ interface Base {
    * them back with their source and confidence, not as a new manual rally.
    */
   goneSegments?: Map<string, Segment>
+  /** Tags the server answered as deleted (a rejected suggestion), for the same reason. */
+  goneEvents?: Map<string, Tag>
 }
 
 export interface MergedData {
@@ -194,7 +204,7 @@ export function mergeView(
   for (const item of items) {
     if (item.kind === 'event') {
       if (item.payload.deleted) events.delete(item.id)
-      else events.set(item.id, eventFromIn(item.payload, base.events.get(item.id), roster))
+      else events.set(item.id, eventFromIn(item.payload, base.events.get(item.id) ?? base.goneEvents?.get(item.id), roster))
     } else if (item.kind === 'segment') {
       if (item.payload.deleted) segments.delete(item.id)
       else segments.set(item.id, segmentFromIn(item.payload, base.segments.get(item.id) ?? base.goneSegments?.get(item.id)))
@@ -209,7 +219,8 @@ export function mergeView(
   if (!provisional) {
     return { events: tags, segments: [...segments.values()].sort(byStart), periods: sortedPeriods([...periods.values()]), provisional }
   }
-  const scored = rescoreFor(taxonomy, [...periods.values()], [...segments.values()], tags)
+  // A suggested serve or grade is no fact: the score counts the coach's tags only.
+  const scored = rescoreFor(taxonomy, [...periods.values()], [...segments.values()], factTags(tags))
   return { events: tags, segments: scored.segments, periods: scored.periods, provisional }
 }
 
@@ -258,6 +269,7 @@ export class TaggingStore {
   private redoStack: Step[] = []
   private stepSeq = 0
   private readonly goneSegments = new Map<string, Segment>()
+  private readonly goneEvents = new Map<string, Tag>()
   private view: TaggingView
   private readonly listeners = new Set<() => void>()
   private outbox: Outbox | null = null
@@ -356,6 +368,7 @@ export class TaggingStore {
       segments: this.live('segment', bundle.segments),
       periods: this.live('period', bundle.periods),
       goneSegments: this.goneSegments,
+      goneEvents: this.goneEvents,
     }
   }
 
@@ -372,10 +385,12 @@ export class TaggingStore {
       map.delete(item.id)
       this.deletedVersions.set(key, item.version)
       if (kind === 'segment') this.goneSegments.set(item.id, item as unknown as Segment)
+      if (kind === 'event') this.goneEvents.set(item.id, item as unknown as Tag)
     } else {
       map.set(item.id, item)
       this.deletedVersions.delete(key)
       if (kind === 'segment') this.goneSegments.delete(item.id)
+      if (kind === 'event') this.goneEvents.delete(item.id)
     }
   }
 

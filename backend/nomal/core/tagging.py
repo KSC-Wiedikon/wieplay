@@ -123,6 +123,13 @@ def stands() -> Any:
     return ~((Segment.source == "model") & Segment.review.in_(("unreviewed", "rejected", "merged")))
 
 
+def event_stands() -> Any:
+    """Tags that count as what happened: everything but a model's suggested action nobody has
+    accepted yet (PLAN §10.4a). Stats, smart reels and the score use only these; the tagging
+    page shows the suggestions too, apart."""
+    return ~((Event.source == "model") & Event.review.in_(("unreviewed", "rejected", "merged")))
+
+
 IN_USE = "this id is already in use"
 
 
@@ -302,6 +309,7 @@ def _apply_event(
     if row is None:
         row = Event(id=item.id, video_id=video.id, version=0, created_by=actor, source="manual")
         db.add(row)
+    review = _model_event_review(row, item, attributes)
     row.sport, row.taxonomy_version = tax.sport, tax.version
     row.code, row.t_ms, row.frame, row.time_precision = (
         item.code,
@@ -313,13 +321,38 @@ def _apply_event(
     row.member_id = member_id
     row.attributes = attributes
     row.clip_pre_ms, row.clip_post_ms, row.note = item.clip_pre_ms, item.clip_post_ms, item.note
-    row.review = item.review
+    row.review = review
     _stamp(row, item.deleted, now)
     after = _snapshot(row, EVENT_FIELDS)
     if before != after:
         row.updated_by = actor
     _bump(row, before, after)
     return row
+
+
+def _model_event_review(row: Event, item: EventIn, attributes: dict[str, Any]) -> str:
+    """Review state of a model's suggested action after a person's change, like a rally
+    proposal's (_model_review; PLAN §11: corrections are data): a delete rejects it (kept as
+    a hard negative), undoing that reopens it; another skill, side, grade, zone or time
+    corrects it, also when the client passes the state through unchanged; an explicit state
+    wins otherwise. Naming the player of an action the model left without one (the coach's
+    `7` in the review) is information it asked for, not a correction. Manual and imported
+    tags keep what the client sends."""
+    if row.source != "model":
+        return item.review
+    if item.deleted:
+        return "rejected"
+    if row.deleted_at is not None:  # undo of a rejection
+        return "unreviewed" if item.review == "rejected" else item.review
+    edited = (row.code, row.side, row.t_ms, row.attributes or {}) != (
+        item.code,
+        item.side,
+        item.t_ms,
+        attributes,
+    ) or (row.number is not None and row.number != item.number)
+    if edited and item.review in ("confirmed", "unreviewed"):
+        return "corrected"
+    return item.review
 
 
 def upsert_segment(
@@ -517,6 +550,7 @@ def rescore(db: Session, video: Video) -> None:
                 Event.video_id == video.id,
                 Event.code == "S",
                 Event.deleted_at.is_(None),
+                event_stands(),  # a suggested serve is no fact
             )
             .order_by(Event.t_ms)
         ).all()

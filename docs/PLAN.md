@@ -511,6 +511,7 @@ video             id, team_id → wd_team, kind 'match'|'training'|'other',
                   meets_standard bool, standard_issues text[]  -- e.g. '25fps', '720p'
                   retention_until, created_by, created_at, deleted_at, deleted_by,
                   rallies_reviewed_at NULL, rallies_reviewed_by NULL  -- §10.1
+                  actions_reviewed_at NULL, actions_reviewed_by NULL  -- §10.4a
 video_source_file video_id, part_no, nas_path, bytes, sha256, duration_ms, offset_ms
 video_rendition   video_id, name '1080p50'|'540p25', codec, bitrate, segment_seconds,
                   segment_count, storage_prefix, bytes, job_id
@@ -592,6 +593,7 @@ event            id (client UUIDv7), video_id, segment_id NULL, sport, taxonomy_
                  side 'us'|'them', number NULL, member_id NULL,
                  attributes jsonb   -- grade, zone_from, zone_to, subtype, made/missed, …
                  court_x NULL, court_y NULL   -- metres, from homography (tier 2)
+                 ball_x NULL, ball_y NULL     -- a suggested action: the ball at contact (§10.4a)
                  clip_pre_ms NULL, clip_post_ms NULL, note NULL,
                  source 'manual'|'model'|'import', model_run_id NULL, confidence NULL,
                  review 'unreviewed'|'confirmed'|'corrected'|'rejected',
@@ -1419,6 +1421,87 @@ proposes the shot type.
 - Runs only on live segments of the analysis copy.
 - **Bar**: precision ≥ 0.9 at recall ≥ 0.8 within 5 px on held-out frames, near and far court
   reported separately.
+
+### 10.4a Suggested actions (volleyball)
+
+**Built 17.10.2026** (`nomal/ml/actions.py`, `nomal/core/actions.py`, the `actions` and
+`train_actions` jobs; migration `0010`). Per rally (a proposal or a coach's), Nomal suggests
+the serve, receptions, sets, attacks, blocks, digs and freeballs at the ball's contacts, as
+tags with `source='model'`, `review='unreviewed'`, a `confidence` and their `model_run_id`.
+Each one carries what the player attribution (§10.5) needs to attach a player later: the
+contact's time (`t_ms`, `frame`; `time_precision` "frame" when the analysis saw every frame of
+the video, else "adjusted"), the side, the ball at the contact (`event.ball_x`, `ball_y`,
+normalised image coordinates) and, with a calibrated court, the floor below it at the skill's
+usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
+
+- **Candidates**: the trajectory's contacts (§10.4) without the tops of flights; tracks that
+  start fast (the ball just hit, often the serve) and changes of direction while the tracker
+  lost the ball; not what no hand can touch: above 3.6 m, a fast rising ball that nearly
+  stops (the top of a steep high ball, the net, a catch), a slow ball low in the picture
+  (rolling, handed to the server).
+- **Side of the net**: the camera stands behind the end line at about net height, so a ball
+  at net height looks the same on either side. Evidence: whether the far half (up to 4 m) can
+  show there at all, the depth that explains the bend of the flights before and after the
+  contact (gravity bends a far flight less in the picture), apparent speed. The camera is the
+  coach's calibration (or the court finder's when confident), else a nominal camera of the
+  filming standard with its horizon at the ball's median height.
+- **v0, the rules**: per rally a small dynamic programme over the candidates, each skipped or
+  given a role (the serve; the 1st, 2nd, 3rd touch of a side; a block at the net right after
+  an attack; the floor): three touches a side, the third goes over, a block does not count,
+  minimum flight times, a serve that was not seen. Skills follow from the roles (first touch
+  after a serve a reception, after an attack a dig, the second a set, the one over an attack
+  unless lobbed, a first touch straight over an overpass `/`). Grade hints only when the
+  scoring is sure who won: ace `#` (with `=` on the reception that touched it last), serve
+  error `=`, kill `#` for the winner's last attack, `/` and `#` for an attack blocked for a
+  point, `=` for the loser's last attack; else no grade.
+- **v1, learned**: two gradient-boosted classifiers over every candidate (position, turn,
+  speeds, the flights' depth, the side evidence, its place in the rally, v0's role): the skill
+  or "no action", and the side. Labels: the tags of games whose actions a coach marked done,
+  matched to candidates within ±0.3 s. `train_actions` (ten minutes after the last "actions
+  done") scores v0 and v1 on each game left out (split by match, §11) and keeps v1 only when
+  its mean action F1 (contact within ±0.3 s with the coach's skill and side) beats v0's; a
+  kept model suggests again for every game nobody has done. Also reported: the contact
+  recall (the coaches' tags with a candidate within ±0.3 s: what the ball's path can find).
+- **The bar** (since 17.10.2026, a coach's review costs more than wrong suggestions save):
+  suggestions are written only once the finder in use passes it on games whose actions a
+  coach reviewed, held out: at least two games, **precision of fully right suggestions**
+  (contact within ±0.3 s with the coach's skill and side) **≥ 0.70** and **contact recall ≥
+  0.6** (`NOMAL_ACTION_SUGGEST_MIN_PRECISION`, `NOMAL_ACTION_SUGGEST_MIN_RECALL`;
+  `NOMAL_ACTION_SUGGESTIONS` = `auto` (default) | `on` (write anyway, for testing) | `off`).
+  Below it every run still measures itself where a coach tagged and writes nothing (its old
+  untouched suggestions go); the training that first passes it brings suggestions to every
+  game nobody has reviewed. The tagging page, the analysis card and the stats say plainly why
+  there are none yet ("… now: 2 games, last score 41 %"); "Actions reviewed" stays available
+  for a game the coach tagged, which is how the loop gets its labels.
+- **Rules for writing**: never into a rally that has a person's tags (made, imported, or a
+  suggestion accepted or corrected): there the run only scores itself against them
+  (precision, recall, F1 of contacts at ±0.3 s, skill and side accuracy, action F1; in
+  `GET /api/videos/{id}/analysis` → `actions.vs_coach`). Untouched suggestions are replaced on
+  every run; none within ±0.3 s of one a coach rejected or of a tag that is there.
+- **When**: after each trajectory job, 90 s after a scoring a coach caused (sets, serve calls,
+  rallies done; debounced), after a rally training, after an accepted action training, on
+  request (`POST /api/videos/{id}/actions`, `python -m nomal.cli actions`). Seconds a match.
+- **Review**: dashed in the tag list (with an inline accept) and on the timeline; the review
+  mode gains an Actions queue next to the rallies: the contact loops (1 s before to 0.5 s
+  after), `Enter` accept, `X` reject, `S R E A B D F` the skill, `# + ! - / =` the grade (again:
+  none), a number then `Enter` the player, `Tab` the side, `←/→` one frame, `Shift+Enter` the
+  rest of the rally, `U` undo; "actions reviewed" (`POST /api/videos/{id}/actions-reviewed`,
+  `video.actions_reviewed_at`, refused while suggestions are open) makes the game training
+  data. A changed skill, side, grade or time is a correction; naming the player is not.
+- **Facts only**: stats, smart reels, the score and the serving team ignore a suggestion until
+  a coach accepts it (`tagging.event_stands`); the stats say how many wait.
+- **First real run, 17.10.2026** (the H3 vs Volero Legends match of §10.1, v0 rallies and the
+  scoring, outside the workers, the court clicked by hand; the nominal camera gives nearly the
+  same): 2.9 k candidates, 7.2 per rally; 587 suggestions, 3.1 per rally: 188 serves (one in
+  188 of 191 rallies), 97 receptions, 120 sets, 71 attacks, 85 digs, 24 freeballs, 2 blocks;
+  grade hints on 72 (28 aces, 14 serve errors, 10 kills). 3 s to read the signals and find the
+  candidates, 0.5 s to label (with the bar off). Eyeballed on the video, 60 random suggestions in three rounds
+  (the rules tuned between them): 30 % right in time, skill and side; 57 % at a real contact,
+  where the side was right in about three of four. Most errors are not contacts at all (the
+  ball in flight, at the ceiling, on the floor after the point), serves put on a later contact
+  of a rally the finder cut, and skills shifted by one where the tracker missed a touch. Far
+  from a bar: the learning loop and the players (§10.5: who is under the ball) are the way
+  up; a first reviewed game gives the first measured F1.
 
 ### 10.5 Player detection and tracking
 

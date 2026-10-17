@@ -520,6 +520,25 @@ describe('VideoPage', () => {
       expect(within(team).queryByRole('button', { name: /Side-outs: rallies we received and won/ })).not.toBeInTheDocument()
     })
 
+    it('counts facts only and says how many suggested actions wait', async () => {
+      // Nomal suggested a third attack of #7; nobody has accepted it: not a number, not a play.
+      const suggested = tag({ t_ms: 40_000, code: 'A', number: 7, source: 'model', review: 'unreviewed', confidence: 0.7 })
+      showStats({ tagging: { ...tagging, events: [kill, suggested, error] }, stats: { ...stats, suggested: 1 } })
+      expect(await screen.findByText('Suggested, not reviewed: 1 action. It counts once a coach accepts it.')).toBeInTheDocument()
+      fireEvent.click(await screen.findByRole('button', { name: 'Play #7 Luca Brunner, Attacks: 2' }))
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+    })
+
+    it('says why there are no suggested actions yet', async () => {
+      const gate = {
+        mode: 'auto' as const, open: false, reason: 'too_few_games', finder: 'v0', games: 1, precision: null,
+        contact_recall: null, min_precision: 0.7, min_recall: 0.6, trained_at: null,
+      }
+      showStats({ stats: { ...stats, suggested: 0, actions_gate: gate } })
+      expect(await screen.findByText(/Action suggestions start once Nomal gets them right often enough/)).toBeInTheDocument()
+      expect(screen.getByText(/\(now: 1 game\)/)).toBeInTheDocument()
+    })
+
     it('says when there is nothing to count yet', async () => {
       showStats({ tagging: bundle({ can_tag: true }), stats: videoStats() })
       expect(await screen.findByText('No stats yet')).toBeInTheDocument()
