@@ -127,6 +127,26 @@ export function newestFirst(videos: readonly Video[]): Video[] {
   )
 }
 
+/** Videos by month of recording, newest month first and newest video first in each. */
+export function byMonth(videos: readonly Video[]): { month: string; videos: Video[] }[] {
+  const groups: { month: string; videos: Video[] }[] = []
+  for (const video of newestFirst(videos)) {
+    const month = video.recorded_on.slice(0, 7)
+    const last = groups.at(-1)
+    if (last?.month === month) last.videos.push(video)
+    else groups.push({ month, videos: [video] })
+  }
+  return groups
+}
+
+/** "Oktober 2026" / "October 2026" for "2026-10". */
+export function monthLabel(month: string, language: string): string {
+  const [year, mm] = month.split('-').map(Number) as [number, number]
+  return new Intl.DateTimeFormat(language === 'de' ? 'de-CH' : 'en-GB', { month: 'long', year: 'numeric' }).format(
+    new Date(Date.UTC(year, mm - 1, 15)),
+  )
+}
+
 /** "Match"; null for a kind Nomal no longer offers (training rows from before 16.10.2026). */
 export function kindLabel(t: TFunction, kind: string): string | null {
   return kind === 'match' ? t('video.kind.match') : null

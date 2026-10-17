@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from nomal.api.access import TeamAccess, team_refs, visible_team, visible_video
@@ -37,7 +37,7 @@ from nomal.core.filming import (
     club_today,
     refresh_rosters,
 )
-from nomal.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTeam
+from nomal.core.models import InboxFile, Job, Segment, Video, VideoSourceFile, WdGame, WdTeam
 from nomal.core.permissions import (
     Viewer,
     can_delete_video,
@@ -118,6 +118,15 @@ class ImportedFromOut(BaseModel):
     title: str | None
 
 
+class AnalysisBriefOut(BaseModel):
+    """Where the automatic analysis of a ready video stands (PLAN §10.1), for lists."""
+
+    # none: never queued; queued | running; done; failed (the latest analyse job)
+    status: Literal["none", "queued", "running", "done", "failed"]
+    # Rally suggestions nobody has answered yet.
+    open: int = 0
+
+
 class VideoOut(BaseModel):
     id: uuid.UUID
     team_id: int
@@ -153,6 +162,8 @@ class VideoOut(BaseModel):
     files: list[FileOut]
     # The rally list is complete and right (a coach said so); PLAN §10.1.
     rallies_reviewed_at: datetime | None = None
+    # The automatic analysis; None while the video is not ready.
+    analysis: AnalysisBriefOut | None = None
 
 
 class FileIn(BaseModel):
@@ -231,6 +242,52 @@ def _progress(db: Session, videos: list[Video]) -> dict[uuid.UUID, float]:
     return {k: round(sum(v) / len(v), 3) for k, v in done.items()}
 
 
+JOB_TO_ANALYSIS: dict[str, Literal["queued", "running", "done", "failed"]] = {
+    "queued": "queued",
+    "running": "running",
+    "succeeded": "done",
+    "failed": "failed",
+}
+
+
+def _analysis(db: Session, videos: list[Video]) -> dict[uuid.UUID, AnalysisBriefOut]:
+    """The latest analyse job and the open rally suggestions of each ready video, in two
+    queries: "Ready" says the video plays, this says whether Nomal has looked at it yet."""
+    ids = [v.id for v in videos if v.status == "ready"]
+    if not ids:
+        return {}
+    latest: dict[uuid.UUID, tuple[datetime, str]] = {}
+    for video_id, status, created in db.execute(
+        select(Job.video_id, Job.status, Job.created_at).where(
+            Job.video_id.in_(ids), Job.kind == "analyse"
+        )
+    ):
+        if video_id is not None and (video_id not in latest or created > latest[video_id][0]):
+            latest[video_id] = (created, status)
+    open_by_video = dict(
+        db.execute(
+            select(Segment.video_id, func.count())
+            .where(
+                Segment.video_id.in_(ids),
+                Segment.source == "model",
+                Segment.kind == "rally",
+                Segment.review == "unreviewed",
+                Segment.deleted_at.is_(None),
+            )
+            .group_by(Segment.video_id)
+        ).all()
+    )
+    return {
+        video_id: AnalysisBriefOut(
+            status=JOB_TO_ANALYSIS.get(latest[video_id][1], "none")
+            if video_id in latest
+            else "none",
+            open=int(open_by_video.get(video_id, 0)),
+        )
+        for video_id in ids
+    }
+
+
 def _imported_from(video: Video) -> ImportedFromOut | None:
     origin = (video.capture or {}).get("import")
     if video.source != "import" or not isinstance(origin, dict):
@@ -250,10 +307,13 @@ def _video_out(
     viewer: Viewer,
     settings: Settings,
     progress_by_video: dict[uuid.UUID, float] | None = None,
+    analysis_by_video: dict[uuid.UUID, AnalysisBriefOut] | None = None,
 ) -> VideoOut:
     manager = _manages(viewer, access)
     if progress_by_video is None:
         progress_by_video = _progress(db, [video])
+    if analysis_by_video is None:
+        analysis_by_video = _analysis(db, [video])
     progress = progress_by_video.get(video.id)
     fps = video.fps_num / video.fps_den if video.fps_num and video.fps_den else None
     return VideoOut(
@@ -293,6 +353,7 @@ def _video_out(
         can_share=can_share_with_team(viewer, access.ref, access.leads),
         can_export=can_export(viewer, access.ref, access.leads),
         rallies_reviewed_at=video.rallies_reviewed_at,
+        analysis=analysis_by_video.get(video.id),
         files=[
             FileOut(
                 id=f.id,
@@ -383,8 +444,8 @@ def team_videos(
     videos = list(
         db.scalars(query.order_by(Video.recorded_on.desc(), Video.created_at.desc())).all()
     )
-    progress = _progress(db, videos)
-    return [_video_out(db, v, access, viewer, settings, progress) for v in videos]
+    progress, analysis = _progress(db, videos), _analysis(db, videos)
+    return [_video_out(db, v, access, viewer, settings, progress, analysis) for v in videos]
 
 
 def _resolve_match(db: Session, team: WdTeam, body: VideoCreateIn) -> tuple[date, str, int | None]:

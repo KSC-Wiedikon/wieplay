@@ -222,6 +222,28 @@ def test_proposals_are_written_with_their_model_run(
         )
 
 
+def test_video_lists_say_where_the_analysis_stands(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    """ "Ready" says the video plays; the analysis brief says whether Nomal looked at it."""
+    coach = club["coach"]
+
+    def brief() -> Any:
+        listed = coach.get(f"/api/teams/{ready['team_id']}/videos").json()
+        one = coach.get(f"/api/videos/{ready['id']}").json()["analysis"]
+        assert next(v for v in listed if v["id"] == ready["id"])["analysis"] == one
+        return one
+
+    assert brief() == {"status": "queued", "open": 0}
+    job = claim_kind(analyser, "analyse")
+    assert brief() == {"status": "running", "open": 0}
+    complete(analyser, job, payload(job, [(10_000, 20_000), (40_000, 52_000)]))
+    assert brief() == {"status": "done", "open": 2}
+    first = segments(coach, ready)[0]
+    change(coach, ready, edit(first, review="confirmed"))
+    assert brief() == {"status": "done", "open": 1}
+
+
 def test_a_bad_result_fails_the_analysis_not_the_video(
     ready: Any, club: dict[str, TestClient], analyser: TestClient
 ) -> None:
