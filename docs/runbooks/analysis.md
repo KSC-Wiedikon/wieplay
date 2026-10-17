@@ -155,7 +155,9 @@ get their player (PLAN §10.5).
 
   A rerun replaces the clusters; a coach's number stays where the same number is read on
   the same team.
-- **Cost**: see PLAN §10.9 (measured on the Legends game).
+- **Cost** (PLAN §10.9): a 2 h 12 min match, 26 k frames of rally windows: 1 h 51 min on
+  the Lenovo with 4 threads beside the prod backfill (~1.9× its analyse job), 5.2 CPU-hours;
+  the API's index ~1.7 MB, 76 contact sheets (~250 kB each).
 
 ## The learning loop
 

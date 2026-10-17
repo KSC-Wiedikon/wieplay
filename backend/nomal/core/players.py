@@ -98,6 +98,11 @@ HIGH_CONTACT_M = 2.3
 LOW_SKILLS = frozenset({"R", "D", "F"})
 # A suggestion is written into a model's action from this confidence on.
 APPLY_CONFIDENCE = 0.35
+# The nearest player in the image (distance to the box in box heights), not on the floor: on
+# the Legends game (17.10.2026, 919 contacts) the floor distance through the recovered camera
+# was 4.7 m at the median (the ball's height is a guess, a wide lens bends the picture), the
+# image distance 0.25 box heights. The floor distance stays for a better camera model.
+COURT_DISTANCE = False
 
 Team = Literal["us", "them"]
 
@@ -985,7 +990,7 @@ def attribute_event(
     if found is None:
         return None, None, None
     t_ms, point, kind = found
-    to_court, camera = geometry(t_ms)
+    to_court, camera = geometry(t_ms) if COURT_DISTANCE else (None, None)
     frame = index.frame_near(t_ms)
     if frame is None:
         return None, None, t_ms

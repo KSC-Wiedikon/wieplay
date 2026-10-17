@@ -1564,10 +1564,11 @@ lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, 
    teams. A rerun keeps a number where the same number is read on the same team.
 6. **Attribution** (API, pure Python): for every action, the ball at the contact (the
    suggestion's own `ball_x/ball_y` when it has them, else the ball track's nearest contact,
-   bounces excluded), the analysed frame nearest it, the boxes of the action's team there;
-   the nearest player on the floor in metres with a calibrated camera (the ball 0.8 m up for
-   receptions, digs and free balls, 2.3 m for the rest; the camera's setup at that time),
-   else in the image (distance to the box in box heights). Confidence from the distance and the margin to the second nearest.
+   bounces excluded), the analysed frame nearest it, the boxes of the action's team there,
+   the nearest player in the image (distance to the box in box heights); confidence from the
+   distance and the margin to the second nearest. A floor distance through the camera (the
+   ball 0.8 m up for receptions, digs and free balls, 2.3 m for the rest, the camera's setup
+   at that time) is built but off: on the Legends game it was 4.7 m off at the median.
    A model's unanswered action gets `number`/`member_id`/`track_ref` written (taken back when
    the gallery no longer supports it); a person's number is never overwritten; the coach's
    tags without a number get a suggestion beside them that "apply" turns into the coach's.
@@ -1675,6 +1676,14 @@ fine-tuning; YOLO11m unbatched does ~40 frames/s on the laptop GPU (players at 2
 live part ≈ 25 min, to bring down with batching in M8). The provider benchmark is still open. With 8 GB of VRAM the
 models run one after another in FP16 with small batches. The L4 figures also matter for the
 later move (§8.6, §16.2).
+
+**Players on the Lenovo's CPU, measured 17.10.2026** (§10.5; the Legends game, 2 h 12 min):
+183 rally windows, 2,647 s, 26,468 frames at 10 fps; YOLO26s at 1280 px with 4 threads:
+**1 h 51 min wall** (detection and tracking 6,629 s, number reading 172 s, clusters 16 s),
+5.2 CPU-hours, on a busy box (load 15–20: the prod worker's backfill ran beside it). The
+analyse job of the same game took 59 min there with 4 threads, so the players are ~1.9× the
+analyse job. On a quiet box the detector alone runs at 87 ms a frame (~40 min a match).
+Detection only around contacts (±1 s) would save little: contacts cover most of a rally.
 
 ---
 
