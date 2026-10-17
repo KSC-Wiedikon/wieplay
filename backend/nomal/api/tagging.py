@@ -136,6 +136,8 @@ class PeriodOut(BaseModel):
     side_switch_at_score: int | None
     # Our setter's zone (1-6) at the set's first serve: rotation stats.
     start_rotation: int | None = None
+    # Our six shirt numbers in zones I-VI at that serve (null in a zone: not entered).
+    start_lineup: list[int | None] | None = None
     final_us: int | None
     final_them: int | None
     # manual | model (a set the scoring proposed, answered like a rally proposal).

@@ -477,6 +477,8 @@ class Period(Base):
     side_switch_at_score: Mapped[int | None] = mapped_column(Integer)
     # Our setter's zone (1-6) at the set's first serve: the rotation stats walk from it.
     start_rotation: Mapped[int | None] = mapped_column(Integer)
+    # Who stood in zones I-VI at that serve: six shirt numbers (null: a zone left empty).
+    start_lineup: Mapped[list[int | None] | None] = mapped_column(JSONB(none_as_null=True))
     # The automatic scoring's guesses (PLAN §10.3), next to the coach's first_serve and
     # our_court_side_at_start: who served first, our side at the start; how sure a set the
     # model proposed is, and the run that proposed or scored it.

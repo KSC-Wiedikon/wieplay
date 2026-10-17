@@ -103,12 +103,23 @@ class PeriodIn(_Change):
     # Left out, these stay as they are: our setter's zone at the first serve, and the answer
     # to a set the model proposed.
     start_rotation: int | None = Field(default=None, ge=1, le=6)
+    # Left out, it stays too: our six shirt numbers in zones I-VI at the first serve (null in
+    # a zone: not entered).
+    start_lineup: list[int | None] | None = Field(default=None, min_length=6, max_length=6)
     review: Review | None = None
 
     @model_validator(mode="after")
     def _order(self) -> PeriodIn:
         if self.end_ms is not None and self.end_ms <= self.start_ms:
             raise ValueError("a set or quarter ends after it starts")
+        if self.start_lineup is not None:
+            numbers = [n for n in self.start_lineup if n is not None]
+            if any(isinstance(n, bool) or not 0 <= n <= 99 for n in numbers):
+                raise ValueError("a lineup holds shirt numbers 0-99")
+            if len(numbers) != len(set(numbers)):
+                raise ValueError("a player stands in one zone of the lineup")
+            if not numbers:
+                self.start_lineup = None  # nothing entered
         return self
 
 
@@ -214,10 +225,11 @@ SEGMENT_FIELDS = ("kind", "start_ms", "end_ms", "won_by", "review", "merged_into
                   "serving_manual")  # fmt: skip
 PERIOD_FIELDS = (
     "no", "start_ms", "end_ms", "start_us", "start_them", "first_serve",
-    "our_court_side_at_start", "side_switch_at_score", "start_rotation", "review",
+    "our_court_side_at_start", "side_switch_at_score", "start_rotation", "start_lineup",
+    "review",
 )  # fmt: skip
 # Fields a client may leave out to keep them as they are.
-KEPT_WHEN_ABSENT = ("serving_manual", "start_rotation", "review")
+KEPT_WHEN_ABSENT = ("serving_manual", "start_rotation", "start_lineup", "review")
 
 
 def _bump(
@@ -455,6 +467,7 @@ def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
     ):
         setattr(row, key, getattr(item, key))
     row.start_rotation = kept.get("start_rotation", item.start_rotation)
+    row.start_lineup = kept.get("start_lineup", item.start_lineup)
     row.review = review
     _stamp(row, item.deleted, now)
     _bump(row, before, _snapshot(row, PERIOD_FIELDS))
@@ -465,6 +478,7 @@ PERIOD_EDIT = ("no", "start_ms", "end_ms", "start_us", "start_them")
 # What a coach fills in on a set (the model never does).
 PERIOD_COACH_FIELDS = (
     "first_serve", "our_court_side_at_start", "side_switch_at_score", "start_rotation",
+    "start_lineup",
 )  # fmt: skip
 
 
