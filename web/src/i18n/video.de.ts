@@ -422,6 +422,7 @@ export const videoDe: Messages<typeof videoEn> = {
         serve: 'Der Aufschlag passt nicht zum Spielstand.',
         coach: 'Passt nicht zu einem Punkt oder Aufschlag, den du gesetzt hast.',
         unsure: 'Nomal ist hier nicht sicher.',
+        board: 'Anzeigetafel und Aufschläge widersprechen sich hier.',
       },
     },
     review: {

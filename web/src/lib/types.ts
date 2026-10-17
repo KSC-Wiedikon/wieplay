@@ -322,7 +322,7 @@ export type CourtSide = 'near' | 'far'
  * for the last rally of a set, after it), it looks like no point at all (a replay), the serve
  * evidence or a coach's fact disagrees with the score, or the model is unsure.
  */
-export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure'
+export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure' | 'board'
 
 export interface TaxonomySkill {
   /** One letter for volleyball (S R E A B D F); one or two characters for basketball (S2 S3 FT RO … F). */
@@ -920,7 +920,7 @@ export interface CommentIn {
   recipient?: number | null
 }
 
-export type ExportKind = 'clip' | 'reel' | 'condensed'
+export type ExportKind = 'clip' | 'reel' | 'condensed' | 'recap'
 export type ExportStatus = 'queued' | 'ready' | 'failed' | 'expired' | 'deleted'
 
 /** A watermarked MP4 rendered by the media worker (coaches only, PLAN §5.2). */
@@ -942,7 +942,9 @@ export interface ExportIn {
   kind: ExportKind
   clip_id?: string
   reel_id?: string
-  /** A condensed match. */
+  /** A condensed match or a game recap. */
   video_id?: string
   title?: string
+  /** A game recap: the language of the words on the picture (the viewer's). */
+  lang?: 'en' | 'de'
 }

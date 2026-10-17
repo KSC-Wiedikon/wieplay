@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, date, datetime
 from typing import Any, Literal
 
@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from nomal.api.access import TeamAccess, team_refs, visible_team, visible_video
 from nomal.api.deps import DbDep, SettingsDep, StoreDep, ViewerDep, audit
-from nomal.core import pipeline, reels, tagging
+from nomal.core import pipeline, recap, reels, tagging
 from nomal.core.models import (
     Clip,
     Comment,
@@ -215,11 +215,13 @@ class CommentOut(BaseModel):
 
 
 class ExportIn(BaseModel):
-    kind: Literal["clip", "reel", "condensed"]
+    kind: Literal["clip", "reel", "condensed", "recap"]
     clip_id: uuid.UUID | None = None
     reel_id: uuid.UUID | None = None
-    video_id: uuid.UUID | None = None  # condensed match
+    video_id: uuid.UUID | None = None  # condensed match, game recap
     title: str | None = Field(default=None, max_length=200)
+    # The language of what a game recap writes on the picture (the viewer's).
+    lang: Literal["de", "en"] = "en"
 
 
 class ExportOut(BaseModel):
@@ -801,6 +803,7 @@ def _filename(export: VideoExport) -> str:
 @router.post("/exports", response_model=ExportOut, status_code=201)
 def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
     """Queue a watermarked MP4 (coaches, team managers, sport admins; PLAN §5.2)."""
+    recap_params: dict[str, Any] | None = None
     if body.kind == "clip":
         clip = db.get(Clip, body.clip_id) if body.clip_id else None
         if clip is None or clip.deleted_at is not None:
@@ -818,6 +821,28 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
         if not pieces:
             raise HTTPException(409, "This video has no rallies marked yet")
         title = body.title or f"{video.title} (condensed)"
+    elif body.kind == "recap":
+        if body.video_id is None:
+            raise HTTPException(422, "A game recap names its video")
+        video, _ = _watchable(db, viewer, body.video_id)
+        if video.sport != "volleyball":
+            raise HTTPException(409, "Game recaps are for volleyball matches")
+        chosen = recap.select_plays(db, video)
+        if not chosen.plays:
+            raise HTTPException(409, "This video has no rallies or plays to choose from yet")
+        pieces = [
+            reels.Piece(video_id=video.id, start_ms=p.start_ms, end_ms=p.end_ms)
+            for p in chosen.plays
+        ]
+        card, sides = recap.card(db, video, body.lang)
+        recap_params = {
+            "card": asdict(card),
+            "card_ms": recap.TITLE_MS,
+            "bugs": [recap.bug(p, sides, body.lang) for p in chosen.plays],
+            "source": chosen.source,
+            "lang": body.lang,
+        }
+        title = body.title or recap.title_of(video, body.lang)
     else:
         reel = _readable_reel(db, viewer, body.reel_id) if body.reel_id else None
         if reel is None:
@@ -843,7 +868,7 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
         id=uuid.uuid4(),
         kind=body.kind,
         title=title.strip()[:200],
-        duration_ms=reels.total_ms(pieces),
+        duration_ms=reels.total_ms(pieces) + (recap.TITLE_MS if recap_params else 0),
         source={
             "clip_id": str(body.clip_id) if body.clip_id else None,
             "reel_id": str(body.reel_id) if body.reel_id else None,
@@ -867,8 +892,12 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
         }
         for p in pieces
     ]
+    if recap_params is not None:
+        # The score bug of each clip goes with it (worker/recap.py draws it).
+        for item, bug in zip(job_pieces, recap_params.pop("bugs"), strict=True):
+            item["bug"] = bug
     watermark = f"KSCW intern · {viewer.name} · {datetime.now(UTC):%d.%m.%Y}"
-    pipeline.enqueue_export(db, export, job_pieces, watermark)
+    pipeline.enqueue_export(db, export, job_pieces, watermark, recap=recap_params)
     audit(db, viewer.member_id, "export_requested", "export", str(export.id), kind=body.kind,
           pieces=len(pieces), duration_ms=export.duration_ms)  # fmt: skip
     db.commit()

@@ -251,6 +251,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
       clip: 'Clip',
       reel: 'Reel',
       condensed: 'Ballwechsel eines Spiels',
+      recap: 'Spielzusammenfassung',
     },
     status: {
       queued: 'In Vorbereitung',

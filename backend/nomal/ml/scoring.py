@@ -17,6 +17,10 @@ follows from who served each rally, plus the rules and the official result:
 5. Max-marginals (the cheapest path with the other answer) give each rally's confidence; a
    rally is flagged ("check") when the path contradicts its evidence or a coach, a point is
    missing next to it, it looks like no point, or the answer is unsure.
+6. **The scoreboard**, when it was read (nomal/ml/board.py): +1 for one team between two
+   rallies names the winner of the first, no change says it was no point. Contradicting it
+   costs more than a misread serve and a missed rally together (the board wins over the serve
+   evidence), less than a coach's fact; a path that still disagrees is flagged ("board").
 
 Sets: a coach's sets when there are any, else proposed from the long breaks and the official
 number of points per set (`propose_sets`).
@@ -31,7 +35,8 @@ from typing import Literal
 
 Side = Literal["us", "them"]
 Court = Literal["near", "far"]
-Note = Literal["coach", "missing_before", "missing_after", "extra", "serve", "unsure"]
+Note = Literal["coach", "board", "missing_before", "missing_after", "extra", "serve", "unsure"]
+BoardSays = Literal["us", "them", "none"]
 
 SIDES: tuple[Side, Side] = ("us", "them")
 COURTS: tuple[Court, Court] = ("near", "far")
@@ -49,6 +54,7 @@ MISS_MIN_GAP_S = 10.0  # a shorter gap holds no missed rally (a rally cut in two
 BEAM = 14.0
 UNSURE = 0.7  # a winner less sure than this is flagged
 SERVE_DISAGREES = 0.25  # the path's server has at most this probability from the evidence
+C_BOARD = 9.0  # contradicting the scoreboard (times how sure its reading is)
 
 
 def other(side: Side) -> Side:
@@ -77,6 +83,9 @@ class RallyObs:
     # (a rally the finder missed shows there).
     gap_ball_s: float = 0.0
     gap_whistles: int = 0
+    # The scoreboard about this rally: who won it, or "none" (no point); how sure (0..1).
+    board: BoardSays | None = None
+    board_p: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -174,6 +183,8 @@ class _Rally:
     point: tuple[tuple[float, float], tuple[float, float]]  # [side near=0/far=1][server]
     serve_fact: int  # -1 none, else the server a coach saw
     won_fact: int
+    # The scoreboard: the cost of a point for us / for them / of no point.
+    board: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 def _prepare(r: RallyObs) -> _Rally:
@@ -188,11 +199,20 @@ def _prepare(r: RallyObs) -> _Rally:
         p_us = p if near_is_us else 1.0 - p
         rows.append((base - math.log(2.0 * p_us), base - math.log(2.0 * (1.0 - p_us))))
     fact = {"us": 0, "them": 1, None: -1}
+    board = (0.0, 0.0, 0.0)
+    if r.board is not None and r.board_p > 0:
+        c = C_BOARD * r.board_p
+        board = (
+            0.0 if r.board == "us" else c,
+            0.0 if r.board == "them" else c,
+            0.0 if r.board == "none" else c,
+        )
     return _Rally(
-        -math.log(p_extra),
+        -math.log(p_extra) + board[2],
         (rows[0], rows[1]),
         fact[r.serve_fact],
         fact[r.won_fact],
+        board,
     )
 
 
@@ -285,9 +305,9 @@ class _Set:
         side = (0 if self.side0 == "near" else 1) ^ switched
         base = r.point[side][s] + (C_FACT if r.serve_fact >= 0 and r.serve_fact != s else 0.0)
         if up >= 0:
-            out.append((up, base + (C_FACT if r.won_fact == 1 else 0.0), s * 2))
+            out.append((up, base + (C_FACT if r.won_fact == 1 else 0.0) + r.board[0], s * 2))
         if tp >= 0:
-            out.append((tp, base + (C_FACT if r.won_fact == 0 else 0.0), s * 2 + 1))
+            out.append((tp, base + (C_FACT if r.won_fact == 0 else 0.0) + r.board[1], s * 2 + 1))
         return out
 
     def miss_edges(self, state: int, i: int) -> list[tuple[int, float, int]]:
@@ -353,12 +373,12 @@ def _forward(s: _Set, backs: list[Back] | None) -> list[Layer]:
             if r.serve_fact >= 0 and r.serve_fact != srv:
                 base += C_FACT
             if up >= 0:
-                total = base + (C_FACT if r.won_fact == 1 else 0.0)
+                total = base + (C_FACT if r.won_fact == 1 else 0.0) + r.board[0]
                 if total < f.get(up, inf):
                     f[up] = total
                     br[up] = (state, srv * 2)
             if tp >= 0:
-                total = base + (C_FACT if r.won_fact == 0 else 0.0)
+                total = base + (C_FACT if r.won_fact == 0 else 0.0) + r.board[1]
                 if total < f.get(tp, inf):
                     f[tp] = total
                     br[tp] = (state, srv * 2 + 1)
@@ -501,6 +521,7 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
             extra_total += 1
             point = min((v for k, v in per_opt.items() if k >= 0), default=math.inf)
             conf = _confidence({-1: per_opt.get(-1, math.inf), 0: point}, -1)
+            board_overruled = r.board in ("us", "them") and r.board_p > 0
             rallies_out.append(
                 RallyOut(
                     r.key,
@@ -512,7 +533,7 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
                     round(conf, 3),
                     None,
                     side_now,
-                    "extra",
+                    "board" if board_overruled else "extra",
                     gap_points,
                 )
             )
@@ -533,13 +554,15 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
             r.won_fact is not None and r.won_fact != won
         ):
             note = "coach"
+        elif r.board is not None and r.board_p > 0 and r.board != won:
+            note = "board"
         elif missed:
             note = "missing_before"
         elif i == n - 1 and choice[-1]:
             note = "missing_after"
         elif serve_p is not None and serve_p < SERVE_DISAGREES and r.serve_fact is None:
             note = "serve"
-        elif conf < UNSURE and r.won_fact is None:
+        elif conf < UNSURE and r.won_fact is None and r.board is None:
             note = "unsure"
         rallies_out.append(
             RallyOut(

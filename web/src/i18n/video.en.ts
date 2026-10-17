@@ -424,6 +424,7 @@ export const videoEn = {
         serve: "The serve doesn't fit the score.",
         coach: "Doesn't fit a winner or serve you set.",
         unsure: 'Nomal is not sure about this one.',
+        board: 'The scoreboard and the serves disagree here.',
       },
     },
     review: {

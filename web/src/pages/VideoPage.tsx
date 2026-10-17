@@ -13,6 +13,7 @@ import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CourtTools } from '../components/CourtTools'
 import { ExportButton } from '../components/ExportButton'
+import { ScoreboardTools } from '../components/ScoreboardDialog'
 import { AnalysisStatus } from '../components/AnalysisStatus'
 import { PlayersStep } from '../components/PlayersStep'
 import { AlertIcon, CheckIcon, ChevronRightIcon, PlayIcon, TrashIcon } from '../components/icons'
@@ -376,6 +377,8 @@ function Ready({ video }: { video: Video }) {
             overlay={trajectories.available && trajectories.on ? <TrajectoryLayer state={trajectories} video={element} /> : undefined}
           />
           {volleyball && <CourtTools video={video} element={element} trajectories={trajectories} />}
+          {volleyball && video.status === 'ready' && <ScoreboardTools video={video} element={element} />}
+          {volleyball && video.can_export && <RecapButton video={video} />}
           {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null) || breaks.length > 0 || starts.length > 0) ? (
             <MomentsStrip
               duration_ms={duration}
@@ -681,6 +684,20 @@ function UploadingPanel({ video, enabled }: { video: Video; enabled: boolean }) 
       >
         {t('video.cancelUploadBody')}
       </ConfirmDialog>
+    </div>
+  )
+}
+
+/** "Create game recap": the best plays in 2-3 minutes with a title card and the score (PLAN §7.7). */
+function RecapButton({ video }: { video: Video }) {
+  const { t, i18n } = useTranslation()
+  return (
+    <div>
+      <ExportButton
+        request={{ kind: 'recap', video_id: video.id, lang: i18n.language === 'de' ? 'de' : 'en' }}
+        text={t('recap.create')}
+        queuedText={t('recap.queued')}
+      />
     </div>
   )
 }

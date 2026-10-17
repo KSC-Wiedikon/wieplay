@@ -364,7 +364,17 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     scored = [p for p in periods if by_period.get(p.id)]
     set_ins = [_set_in(p, [obs[i] for i in by_period[p.id]], official) for p in scored]
+    # The scoreboard, when it was read: it wins over the serve evidence (PLAN §10.3, step 5).
+    from nomal.core import scoreboard as sboard
+
+    board = sboard.board_for(db, video, rallies, scored, by_period) if set_ins else None
+    if board is not None:
+        set_ins = sboard.orient(board, set_ins)
     match = sc.score_match(set_ins) if set_ins else sc.MatchOut([], 1.0)
+    board_metrics = None
+    if board is not None:
+        match, disagreements = sboard.flag_disagreements(set_ins, match)
+        board_metrics = sboard.metrics(board, set_ins, match, disagreements)
 
     # The rallies: clear, then write what the model found.
     by_key = {str(r.id): r for r in rallies}
@@ -440,6 +450,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         "first_serve_ms": first_serve_ms,
         "vs_coach": _vs_coach(set_ins, match),
         "notes": dict(Counter(r.note for so in match.sets for r in so.rallies if r.note)),
+        "board": board_metrics,
     }
     run.timing = {"wall_s": round(time.perf_counter() - started, 3), "rallies": len(rallies)}
     from nomal.core import actions  # the suggested actions follow the new sides (PLAN §10.4a)

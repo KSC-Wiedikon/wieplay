@@ -18,13 +18,17 @@ interface ExportButtonProps {
   label?: string
   iconOnly?: boolean
   className?: string
+  /** The button's text instead of "Download as MP4" (e.g. "Create game recap"). */
+  text?: string
+  /** What the toast says once it is queued. */
+  queuedText?: string
 }
 
 /**
  * "Download as MP4": queues a watermarked export (coaches, team managers, sport admins). The
  * first time, it says what a download is for. The file is listed under Downloads when ready.
  */
-export function ExportButton({ request, label, iconOnly = false, className }: ExportButtonProps) {
+export function ExportButton({ request, label, iconOnly = false, className, text, queuedText }: ExportButtonProps) {
   const { t } = useTranslation()
   const toast = useToast()
   const create = useCreateExport()
@@ -32,7 +36,7 @@ export function ExportButton({ request, label, iconOnly = false, className }: Ex
 
   const queue = () =>
     create.mutate(request, {
-      onSuccess: () => toast.success(t('exports.queued')),
+      onSuccess: () => toast.success(queuedText ?? t('exports.queued')),
       onError: (error) => {
         if (!(error instanceof ApiError)) toast.error(t('exports.failed', { detail: t('common.error') }))
         else if (error.status === 403) toast.error(t('exports.forbidden'))
@@ -59,7 +63,7 @@ export function ExportButton({ request, label, iconOnly = false, className }: Ex
         onClick={onClick}
       >
         {iconOnly ? <DownloadIcon className="size-4" /> : <DownloadIcon />}
-        {!iconOnly && t('exports.download')}
+        {!iconOnly && (text ?? t('exports.download'))}
       </Button>
       <ConfirmDialog
         open={explain}
