@@ -7,11 +7,19 @@ import {
   formatStat,
   rallyWindow,
   reelLink,
+  rotationRallies,
+  rotationTags,
   rowHas,
+  setterPlays,
+  setWindow,
   statRallies,
   statTags,
+  tagRallies,
   tagSets,
   tagWindow,
+  teamCsvUrl,
+  videoCsvUrl,
+  type SetPlay,
   type StatColumn,
 } from './stats'
 
@@ -151,5 +159,83 @@ describe('reelLink', () => {
   it("can't name a shirt number or a missing member", () => {
     expect(reelLink(team, { side: 'us', member_id: null }, column('att_ta'))).toBeNull()
     expect(reelLink(team, { side: 'us', number: 7 }, column('att_ta'))).toBeNull()
+  })
+})
+
+describe('rotations', () => {
+  const r1 = rally({ start_ms: 10_000, end_ms: 20_000, serving: 'them', won_by: 'us' })
+  const r2 = rally({ start_ms: 30_000, end_ms: 40_000, serving: 'us', won_by: null })
+  const r3 = rally({ start_ms: 50_000, end_ms: 60_000, serving: 'us', won_by: 'us' })
+  // The walk put r1 and r2 in this rotation; r2's winner is the next rally's server.
+  const plays = [
+    { id: r1.id, serving: 'them' as const, won_by: 'us' as const },
+    { id: r2.id, serving: 'us' as const, won_by: 'us' as const },
+  ]
+
+  it('plays the rallies of a rotation behind a team number, with the winner the walk used', () => {
+    expect(rotationRallies([r3, r2, r1], plays, { won_by: 'us' }).map((r) => r.id)).toEqual([r1.id, r2.id])
+    expect(rotationRallies([r1, r2, r3], plays, { serving: 'us', won_by: 'any' }).map((r) => r.id)).toEqual([r2.id])
+    expect(rotationRallies([r1, r2, r3], plays, { won_by: 'them' })).toEqual([])
+  })
+
+  it("plays our tags of a column in the rotation's rallies, linked or by time", () => {
+    const linked = tag({ t_ms: 15_000, code: 'A', attributes: { grade: '#' }, segment_id: r1.id })
+    const toss = tag({ t_ms: 28_500, code: 'S', attributes: { grade: '+' } }) // 1.5 s before r2
+    const theirs = tag({ t_ms: 16_000, code: 'A', side: 'them', number: 4, segment_id: r1.id })
+    const later = tag({ t_ms: 55_000, code: 'A', segment_id: r3.id })
+    const source = { events: [later, theirs, toss, linked], segments: [r1, r2, r3] }
+    expect(tagRallies(source.events, source.segments).get(toss.id)).toBe(r2.id)
+    expect(rotationTags(source, plays, column('att_ta')).map((t) => t.id)).toEqual([linked.id])
+    expect(rotationTags(source, plays, column('serve_ta')).map((t) => t.id)).toEqual([toss.id])
+    expect(rotationTags(source, plays, column('att_kill')).map((t) => t.id)).toEqual([linked.id])
+  })
+
+  it('names the CSV part', () => {
+    expect(videoCsvUrl('v1', 'de')).toBe('/api/videos/v1/stats.csv?lang=de')
+    expect(videoCsvUrl('v1', 'en', 'rotations')).toBe('/api/videos/v1/stats.csv?lang=en&part=rotations')
+    expect(teamCsvUrl(92, 'en', 'setter')).toBe('/api/teams/92/stats.csv?lang=en&part=setter')
+  })
+})
+
+describe('setter plays', () => {
+  const play = (patch: Partial<SetPlay>): SetPlay => ({
+    set_id: 's',
+    attack_id: null,
+    rally_id: null,
+    set_no: 1,
+    t_ms: 0,
+    attacker: null,
+    attacker_member: null,
+    setter: 3,
+    setter_member: 103,
+    zone: null,
+    rotation: null,
+    quality: 'unknown',
+    outcome: null,
+    attacked: false,
+    ...patch,
+  })
+  const plays = [
+    play({ set_id: 'a', attacker: 7, zone: 'left', outcome: 'kill', attacked: true, rotation: 1, quality: 'perfect' }),
+    play({ set_id: 'b', attacker: 7, zone: null, outcome: 'play', attacked: true, rotation: 6, set_no: 2 }),
+    play({ set_id: 'c', attacker: 11, zone: 'middle', outcome: 'error', attacked: true, rotation: 1 }),
+    play({ set_id: 'd', rotation: 1 }),
+  ]
+
+  it("matches every key of a line's filter, a null too, and the set", () => {
+    expect(setterPlays(plays, { attacker: 7 }, null).map((p) => p.set_id)).toEqual(['a', 'b'])
+    expect(setterPlays(plays, { attacker: 7 }, 1).map((p) => p.set_id)).toEqual(['a'])
+    expect(setterPlays(plays, { attacked: true, zone: null }, null).map((p) => p.set_id)).toEqual(['b'])
+    expect(setterPlays(plays, { rotation: 1, attacked: true, zone: 'middle' }, null).map((p) => p.set_id)).toEqual(['c'])
+    expect(setterPlays(plays, { rotation: 1 }, null).map((p) => p.set_id)).toEqual(['a', 'c', 'd'])
+    expect(setterPlays(plays, { attacked: false }, null).map((p) => p.set_id)).toEqual(['d'])
+  })
+
+  it("plays from the set to the end of the attack after it", () => {
+    const set = tag({ t_ms: 13_000, code: 'E' })
+    const attack = tag({ t_ms: 14_000, code: 'A' })
+    expect(setWindow(set, attack, volleyball, null)).toEqual({ start_ms: 11_000, end_ms: 16_000 })
+    expect(setWindow(set, null, volleyball, null)).toEqual({ start_ms: 11_000, end_ms: 15_000 })
+    expect(setWindow(set, attack, volleyball, 15_500)).toEqual({ start_ms: 11_000, end_ms: 15_500 })
   })
 })

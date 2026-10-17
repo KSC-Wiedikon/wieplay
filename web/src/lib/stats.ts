@@ -61,9 +61,86 @@ export interface TeamLine {
   break_point_pct: number | null
 }
 
+/** A rally the rotation walk put in a rotation, with the server and winner it used. */
+export interface RotationRally {
+  id: string
+  serving: Side
+  won_by: Side
+}
+
 /** Our points per rotation (our setter's zone, 1..6), walked from each set's starting rotation. */
 export interface RotationLine extends TeamLine {
   rotation: number
+  // Since step 5a; absent from older servers.
+  /** Our tags in its rallies: the numbers of `rotation_columns` (serve, reception, attack). */
+  values?: Record<string, StatValue>
+  /** Its rallies (the season: none, its numbers are not played). */
+  plays?: RotationRally[]
+  /** Our six in zones I..VI in this rotation (the most common when the sets differ). */
+  lineup?: (number | null)[] | null
+  lineup_varies?: boolean
+}
+
+/** Where an attack after one of our sets started: front row 4 3 2, back row (pipe). */
+export const SETTER_ZONES = ['left', 'middle', 'right', 'back'] as const
+export type SetterZone = (typeof SETTER_ZONES)[number]
+/** The first contact before a set: our reception's quality, or transition. */
+export const QUALITIES = ['perfect', 'good', 'poor', 'transition', 'unknown'] as const
+export type Quality = (typeof QUALITIES)[number]
+export type SetOutcome = 'kill' | 'error' | 'blocked' | 'play'
+
+/** One option of the setter's distribution; its plays are the sets matching `filter`. */
+export interface SetterLine {
+  key: string
+  filter: SetFilter
+  number: number | null
+  member_id: number | null
+  name: string | null
+  sets: number
+  attacks: number
+  /** Of the attacks after a set in this scope. */
+  share: number | null
+  /** Attacks per zone (left, middle, right, back, unknown). */
+  zones: Partial<Record<SetterZone | 'unknown', number>>
+  kills: number
+  errors: number
+  blocked: number
+  kill_pct: number | null
+  hit_pct: number | null
+}
+
+/** One of our sets (a match only). */
+export interface SetPlay {
+  set_id: string
+  attack_id: string | null
+  rally_id: string | null
+  set_no: number | null
+  t_ms: number
+  attacker: number | null
+  attacker_member: number | null
+  setter: number | null
+  setter_member: number | null
+  zone: SetterZone | null
+  rotation: number | null
+  quality: Quality
+  outcome: SetOutcome | null
+  /** Followed by our attack. */
+  attacked: boolean
+}
+
+/** Which sets a setter number is made of: every key present must match. */
+export type SetFilter = Partial<Pick<SetPlay, 'attacker' | 'attacker_member' | 'setter' | 'setter_member' | 'zone' | 'rotation' | 'quality' | 'outcome' | 'attacked'>>
+
+export interface SetterStats {
+  sets: number
+  attacks: number
+  by_attacker: SetterLine[]
+  by_zone: SetterLine[]
+  by_rotation: SetterLine[]
+  by_reception: SetterLine[]
+  by_setter: SetterLine[]
+  /** The match only: one per set tag, in time order. */
+  plays: SetPlay[] | null
 }
 
 export interface BoxScore {
@@ -76,12 +153,17 @@ export interface BoxScore {
    * when it has none). Absent from servers before the automatic scoring.
    */
   rotations?: RotationLine[] | null
+  /** Our sets and the attacks after them (absent from older servers). */
+  setter?: SetterStats | null
 }
 
 export interface SetBox extends BoxScore {
   no: number
   score_us: number | null
   score_them: number | null
+  /** Our setter's zone and our six in zones I..VI at the set's first serve. */
+  start_rotation?: number | null
+  start_lineup?: (number | null)[] | null
 }
 
 /** Rallies behind a team number: a present key must match; won_by 'any' means decided. */
@@ -101,6 +183,8 @@ export interface VideoStats {
   team_filters: Record<string, RallyFilter>
   match: BoxScore
   sets: SetBox[]
+  /** The numbers of our tags shown per rotation (absent from older servers). */
+  rotation_columns?: StatColumn[]
   /** Suggested actions nobody has answered yet: not counted (absent from older servers). */
   suggested?: number
   /** Whether Nomal suggests actions yet. */
@@ -128,25 +212,30 @@ export interface TeamStats {
   columns: StatColumn[]
   season_box: BoxScore
   matches: MatchLine[]
+  rotation_columns?: StatColumn[]
   /** Suggested actions nobody has answered yet, over the matches: not counted. */
   suggested?: number
   actions_gate?: ActionGate | null
 }
 
 export type CsvLanguage = 'en' | 'de'
+/** Which table a CSV holds: the box score, the rotations or the setter analysis. */
+export type CsvPart = 'box' | 'rotations' | 'setter'
 
 export const statsApi = {
   video: (id: string, signal?: AbortSignal) => apiRequest<VideoStats>(`/api/videos/${id}/stats`, { signal }),
   team: (id: number, signal?: AbortSignal) => apiRequest<TeamStats>(`/api/teams/${id}/stats`, { signal }),
 }
 
+const partQuery = (part: CsvPart) => (part === 'box' ? '' : `&part=${part}`)
+
 /** The CSV download is a plain link (the session cookie goes along). */
-export function videoCsvUrl(id: string, lang: CsvLanguage): string {
-  return `/api/videos/${id}/stats.csv?lang=${lang}`
+export function videoCsvUrl(id: string, lang: CsvLanguage, part: CsvPart = 'box'): string {
+  return `/api/videos/${id}/stats.csv?lang=${lang}${partQuery(part)}`
 }
 
-export function teamCsvUrl(id: number, lang: CsvLanguage): string {
-  return `/api/teams/${id}/stats.csv?lang=${lang}`
+export function teamCsvUrl(id: number, lang: CsvLanguage, part: CsvPart = 'box'): string {
+  return `/api/teams/${id}/stats.csv?lang=${lang}${partQuery(part)}`
 }
 
 /** Stats follow the tagging: always asked again when the page opens. */
@@ -258,6 +347,55 @@ export function statRallies(segments: readonly Segment[], filter: RallyFilter, p
     if (filter.won_by === 'any') return r.won_by !== null
     return filter.won_by === undefined || r.won_by === filter.won_by
   })
+}
+
+/** Each tag's rally (id), as the server links them: its own, or one starting up to 2 s after it. */
+export function tagRallies(tags: readonly Tag[], segments: readonly Segment[]): Map<string, string | null> {
+  const rallies = ralliesOf(segments)
+  const known = new Set(rallies.map((r) => r.id))
+  const out = new Map<string, string | null>()
+  for (const tag of tags) {
+    const rally =
+      tag.segment_id !== null
+        ? known.has(tag.segment_id)
+          ? tag.segment_id
+          : null
+        : (rallies.find((r) => r.start_ms - RALLY_LEAD_MS <= tag.t_ms && tag.t_ms <= r.end_ms)?.id ?? null)
+    out.set(tag.id, rally)
+  }
+  return out
+}
+
+/** The rallies of a rotation behind a team number, in time order. */
+export function rotationRallies(segments: readonly Segment[], plays: readonly RotationRally[], filter: RallyFilter): Segment[] {
+  const chosen = new Set(
+    plays
+      .filter((p) => (filter.serving === undefined || p.serving === filter.serving) && (filter.won_by === undefined || filter.won_by === 'any' || p.won_by === filter.won_by))
+      .map((p) => p.id),
+  )
+  return ralliesOf(segments).filter((r) => chosen.has(r.id))
+}
+
+/** Our tags of a column in a rotation's rallies, in time order. */
+export function rotationTags(source: Pick<TagSource, 'events' | 'segments'>, plays: readonly RotationRally[], column: Pick<StatColumn, 'codes' | 'grades'>): Tag[] {
+  const ids = new Set(plays.map((p) => p.id))
+  const rallies = tagRallies(source.events, source.segments)
+  return source.events
+    .filter((tag) => tag.side === 'us' && columnHas(tag, column) && ids.has(rallies.get(tag.id) ?? ''))
+    .sort((a, b) => a.t_ms - b.t_ms)
+}
+
+/** The sets behind a setter number: those matching every key of the filter (and the set). */
+export function setterPlays(plays: readonly SetPlay[], filter: SetFilter, setNo: number | null): SetPlay[] {
+  const keys = Object.keys(filter) as (keyof SetFilter)[]
+  return plays.filter((play) => (setNo === null || play.set_no === setNo) && keys.every((key) => play[key] === filter[key]))
+}
+
+/** A set's window: from the set (its skill's pre-roll) to the end of the attack after it. */
+export function setWindow(set: Tag, attack: Tag | null, taxonomy: Taxonomy | null, duration_ms: number | null): { start_ms: number; end_ms: number } {
+  const first = tagWindow(set, taxonomy, duration_ms)
+  if (!attack) return first
+  return { start_ms: first.start_ms, end_ms: Math.max(first.end_ms, tagWindow(attack, taxonomy, duration_ms).end_ms) }
 }
 
 /** What one play shows: its window in the video and a label. */

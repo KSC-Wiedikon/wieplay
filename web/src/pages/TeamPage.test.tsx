@@ -1,8 +1,8 @@
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { TeamDetail, Video } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
-import { boxScore, statRow, teamLine, teamStats } from '../test/stats'
+import { boxScore, rotationColumns, rotationLine, setterLine, setterStats, statRow, teamLine, teamStats } from '../test/stats'
 import { TeamPage } from './TeamPage'
 
 const team = (patch: Partial<TeamDetail> = {}): TeamDetail => ({
@@ -247,6 +247,36 @@ describe('TeamPage season stats', () => {
     expect(within(rows[1] as HTMLElement).getByRole('link', { name: 'KSCW – Volley Näfels' })).toHaveAttribute('href', `/videos/${MATCH}`)
     expect(rows[2]).toHaveTextContent('Total1:02515')
     expect(within(section).getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', '/api/teams/92/stats.csv?lang=en')
+  })
+
+  it('adds up the rotations and the setter over the season, as plain numbers', async () => {
+    const rotations = [1, 2, 3, 4, 5, 6].map((r) =>
+      rotationLine(r, r === 4 ? { rallies: 30, won: 18, lost: 12, side_out_won: 9, side_out_of: 14, side_out_pct: 9 / 14, values: { att_ta: 12, att_kill: 5, att_hit: 0.25 }, lineup: [11, 9, 7, 3, 1, 14] } : {}),
+    )
+    const setter = setterStats({
+      sets: 40,
+      attacks: 36,
+      by_attacker: [setterLine('m107', { filter: { attacker_member: 107 }, number: 7, member_id: 107, name: 'Luca Brunner', sets: 20, attacks: 20, share: 20 / 36, zones: { left: 14, back: 6 }, kills: 9, kill_pct: 0.45, hit_pct: 0.3 })],
+      by_zone: [setterLine('left', { filter: { attacked: true, zone: 'left' }, sets: 14, attacks: 14, share: 14 / 36, kills: 6, kill_pct: 6 / 14 })],
+      by_reception: [setterLine('good', { filter: { quality: 'good' }, sets: 40, attacks: 36, zones: { left: 14, back: 6, unknown: 16 } })],
+    })
+    stub(team(), [], { '/api/teams/92/stats': { body: { ...season, rotation_columns: rotationColumns, season_box: { ...season.season_box, rotations, setter } } } })
+    const section = await screen.findByRole('region', { name: 'Season stats' })
+    fireEvent.click(await within(section).findByRole('tab', { name: 'Rotations' }))
+    expect(within(section).getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', '/api/teams/92/stats.csv?lang=en&part=rotations')
+    const table = within(section).getByRole('table', { name: 'Points per rotation' })
+    const four = within(table).getByRole('rowheader', { name: 'Rotation 4' }).closest('tr') as HTMLTableRowElement
+    expect(within(four).getAllByRole('cell').slice(0, 6).map((c) => c.textContent)).toEqual(['30', '18', '12', '14', '9', '64.3%'])
+    // Rotations of several matches are not played: no buttons.
+    expect(within(section).queryByRole('button', { name: /^Play/ })).not.toBeInTheDocument()
+    expect(within(section).getByText('Setter #3')).toBeInTheDocument()
+
+    fireEvent.click(within(section).getByRole('tab', { name: 'Setter' }))
+    expect(within(section).getByRole('status')).toHaveTextContent('40 sets tagged · 36 followed by our attack')
+    const attackers = within(section).getByRole('table', { name: 'By attacker' })
+    expect(within(attackers).getByRole('rowheader', { name: /#7/ }).closest('tr')).toHaveTextContent('202055.6%')
+    expect(within(section).getByRole('img', { name: /^Left: 38.9% of the attacks \(14\)/ })).toBeInTheDocument()
+    expect(within(section).getByText('Zone not tagged', { exact: false })).toBeInTheDocument()
   })
 
   it('says when nothing of the season is tagged yet', async () => {

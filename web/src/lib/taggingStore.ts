@@ -74,6 +74,7 @@ export function periodToIn(period: Period): PeriodIn {
     side_switch_at_score: period.side_switch_at_score,
     review: period.review,
     start_rotation: period.start_rotation,
+    start_lineup: period.start_lineup,
   }
 }
 
@@ -163,6 +164,7 @@ function periodFromIn(p: PeriodIn, prev: Period | undefined): Period {
     confidence: prev?.confidence ?? null,
     // Without the key the server keeps the starting rotation.
     start_rotation: 'start_rotation' in p ? (p.start_rotation ?? null) : (prev?.start_rotation ?? null),
+    start_lineup: 'start_lineup' in p ? (p.start_lineup ?? null) : (prev?.start_lineup ?? null),
     model_first_serve: prev?.model_first_serve ?? null,
     model_court_side: prev?.model_court_side ?? null,
     version: prev?.version ?? 0,

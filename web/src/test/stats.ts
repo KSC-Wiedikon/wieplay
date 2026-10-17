@@ -1,7 +1,7 @@
 // Stats fixtures shaped like GET /api/videos/{id}/stats and /api/teams/{id}/stats
 // (backend/nomal/api/stats.py). The columns are the server's for the volleyball taxonomy.
 
-import type { BoxScore, StatColumn, StatRow, StatValue, TeamLine, TeamStats, VideoStats } from '../lib/stats'
+import type { BoxScore, RotationLine, SetterLine, SetterStats, StatColumn, StatRow, StatValue, TeamLine, TeamStats, VideoStats } from '../lib/stats'
 
 const IN_PLAY = ['+', '!', '-', '/', null]
 
@@ -117,4 +117,59 @@ export function teamStats(patch: Partial<TeamStats> = {}): TeamStats {
     matches: [],
     ...patch,
   }
+}
+
+/** The rotation table's columns, as the server sends them (`rotation_columns`). */
+export const rotationColumns: StatColumn[] = [
+  'serve_ta',
+  'serve_ace',
+  'serve_err',
+  'serve_eff',
+  'rec_ta',
+  'rec_positive',
+  'rec_eff',
+  'att_ta',
+  'att_kill',
+  'att_hit',
+].map((key) =>
+  key === 'rec_eff'
+    ? { key, group: 'reception', format: 'pct', codes: ['R'], grades: null }
+    : (statColumns.find((c) => c.key === key) as StatColumn),
+)
+
+/** One rotation's line; empty unless patched. */
+export function rotationLine(rotation: number, patch: Partial<RotationLine> = {}): RotationLine {
+  return {
+    rotation,
+    ...teamLine(),
+    values: Object.fromEntries(rotationColumns.map((c) => [c.key, null])),
+    plays: [],
+    lineup: null,
+    lineup_varies: false,
+    ...patch,
+  }
+}
+
+export function setterLine(key: string, patch: Partial<SetterLine> = {}): SetterLine {
+  return {
+    key,
+    filter: {},
+    number: null,
+    member_id: null,
+    name: null,
+    sets: 0,
+    attacks: 0,
+    share: null,
+    zones: {},
+    kills: 0,
+    errors: 0,
+    blocked: 0,
+    kill_pct: null,
+    hit_pct: null,
+    ...patch,
+  }
+}
+
+export function setterStats(patch: Partial<SetterStats> = {}): SetterStats {
+  return { sets: 0, attacks: 0, by_attacker: [], by_zone: [], by_rotation: [], by_reception: [], by_setter: [], plays: null, ...patch }
 }

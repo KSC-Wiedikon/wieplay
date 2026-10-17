@@ -368,6 +368,30 @@ describe('TagPage, sets bar and the automatic score', () => {
     expect(sent.get(two.id)).toMatchObject({ start_rotation: 4, first_serve: null })
   })
 
+  it('takes a starting lineup per set: six shirt numbers on a court, the setter marks the rotation', async () => {
+    const { server } = show(sets())
+    await screen.findByRole('region', { name: 'Tag entry' })
+    fireEvent.click(screen.getByRole('button', { name: 'Lineup of set 2' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Lineup of set 2' })
+    // Laid out like the court from behind our end line: front row IV III II, back row V VI I.
+    expect([...dialog.querySelectorAll('[data-zone]')].map((z) => z.getAttribute('data-zone'))).toEqual(['4', '3', '2', '5', '6', '1'])
+    const numbers = { I: '3', II: '7', III: '11', IV: '9', V: '1', VI: '7' }
+    for (const [zone, number] of Object.entries(numbers)) {
+      fireEvent.change(within(dialog).getByRole('combobox', { name: `Shirt number in zone ${zone}` }), { target: { value: number } })
+    }
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Setter in zone I' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save lineup' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('#7 stands in two zones.')
+    fireEvent.change(within(dialog).getByRole('combobox', { name: 'Shirt number in zone VI' }), { target: { value: '' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save lineup' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Lineup of set 2' })).toHaveTextContent('3 · 7 · 11 · 9 · 1 · –')
+
+    await waitFor(() => expect(server.sentPeriods().some((p) => p.start_lineup)).toBe(true), { timeout: 3000 })
+    const sent = server.sentPeriods().find((p) => p.id === two.id)
+    expect(sent).toMatchObject({ start_lineup: [3, 7, 11, 9, 1, null], start_rotation: 1 })
+  })
+
   it("asks for set 1's first serve and side when Nomal is unsure about them", async () => {
     show(sets(), { state: { analysis: analysis({ scoring: scoring({ sides_confidence: 0.72 }) }) } })
     await screen.findByRole('region', { name: 'Tag entry' })

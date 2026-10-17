@@ -6,6 +6,7 @@ import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Select, TextInput } from '../../components/Field'
 import { AlertIcon, CheckIcon, CloseIcon, SparkleIcon } from '../../components/icons'
+import { Modal } from '../../components/Modal'
 import { SuggestedValue } from '../../components/ScoringMarks'
 import { Table, TBody, Td, Th, THead } from '../../components/Table'
 import { useAnalysis } from '../../lib/analysis'
@@ -13,6 +14,7 @@ import { cx } from '../../lib/cx'
 import { formatClock, periodLabel, sideLabel } from '../../lib/labels'
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
+import { ROMAN } from '../../lib/rotations'
 import { formatPercent, isSetSuggestion } from '../../lib/suggestions'
 import { newId, periodToIn } from '../../lib/taggingStore'
 import type { CourtSide, Period, PeriodIn, Segment, Side } from '../../lib/types'
@@ -223,8 +225,20 @@ function SetDetails({ official }: { official: (p: Period) => [number, number] | 
   const sides = scoring?.sides_confidence ?? null
   const unsure = scoring !== null && (sides === null || sides < SIDES_SURE)
   const invite = unsure && first !== null && (first.first_serve === null || first.our_court_side_at_start === null) ? first : null
+  const [lineup, setLineup] = useState<Period | null>(null)
   return (
     <div className="flex flex-col gap-1">
+      {lineup && (
+        <LineupDialog
+          key={lineup.id}
+          period={lineup}
+          onClose={() => setLineup(null)}
+          onSave={(patch) => {
+            controller.updatePeriod(lineup.id, patch)
+            setLineup(null)
+          }}
+        />
+      )}
       {invite && (
         <div role="note" aria-label={t('tagging.sets.sidesTitle')} className="flex items-start gap-2 rounded-xl border border-accent bg-accent-soft p-3 text-sm text-on-accent-soft">
           <SparkleIcon className="mt-0.5 size-4 shrink-0" />
@@ -245,6 +259,11 @@ function SetDetails({ official }: { official: (p: Period) => [number, number] | 
               <Th>
                 <abbr title={t('tagging.sets.rotationHint')} className="no-underline">
                   {t('tagging.sets.rotation')}
+                </abbr>
+              </Th>
+              <Th>
+                <abbr title={t('tagging.sets.lineupHint')} className="no-underline">
+                  {t('tagging.sets.lineup')}
                 </abbr>
               </Th>
             </tr>
@@ -295,6 +314,11 @@ function SetDetails({ official }: { official: (p: Period) => [number, number] | 
                     ))}
                   </Select>
                 </Td>
+                <Td tight>
+                  <Button aria-label={t('tagging.sets.lineupOf', { no: p.no })} onClick={() => setLineup(p)} className="tabular-nums">
+                    {p.start_lineup?.some((n) => n !== null) ? p.start_lineup.map((n) => n ?? '–').join(' · ') : t('tagging.sets.lineupAdd')}
+                  </Button>
+                </Td>
               </tr>
             ))}
           </TBody>
@@ -302,6 +326,133 @@ function SetDetails({ official }: { official: (p: Period) => [number, number] | 
       </Card>
       <p className="text-xs text-muted">{t('tagging.sets.detailsHint')}</p>
     </div>
+  )
+}
+
+/** Where each zone's field sits on the dialog's court: front row IV III II, back row V VI I. */
+const LINEUP_ORDER = [3, 2, 1, 4, 5, 0] as const
+
+/**
+ * A set's starting lineup: our six shirt numbers in zones I-VI at the first serve, laid out
+ * like the court seen from behind our end line, and the setter, whose zone is the starting
+ * rotation. Optional; the rotation charts on the video page show who stands where.
+ */
+function LineupDialog({ period, onClose, onSave }: { period: Period; onClose: () => void; onSave: (patch: Partial<PeriodIn>) => void }) {
+  const { t } = useTranslation()
+  const id = useId()
+  const { bundle } = useWorkspace()
+  const [numbers, setNumbers] = useState<string[]>(() => Array.from({ length: 6 }, (_, i) => (period.start_lineup?.[i] ?? '').toString()))
+  const [setter, setSetter] = useState<number | null>(period.start_rotation ?? null)
+  const [error, setError] = useState<string | null>(null)
+  const roster = bundle.roster.filter((r) => r.side === 'us').sort((a, b) => a.number - b.number)
+
+  const save = () => {
+    const lineup: (number | null)[] = []
+    for (const text of numbers) {
+      const trimmed = text.trim()
+      if (trimmed === '') {
+        lineup.push(null)
+        continue
+      }
+      const n = Number(trimmed)
+      if (!/^\d{1,2}$/.test(trimmed) || !Number.isInteger(n)) {
+        setError(t('tagging.sets.lineupErrors.number'))
+        return
+      }
+      if (lineup.includes(n)) {
+        setError(t('tagging.sets.lineupErrors.duplicate', { number: n }))
+        return
+      }
+      lineup.push(n)
+    }
+    onSave({ start_lineup: lineup.some((n) => n !== null) ? lineup : null, start_rotation: setter })
+  }
+
+  return (
+    <Modal
+      open
+      title={t('tagging.sets.lineupOf', { no: period.no })}
+      onClose={onClose}
+      footer={
+        <>
+          {period.start_lineup && (
+            <Button variant="ghostDanger" className="mr-auto" onClick={() => onSave({ start_lineup: null })}>
+              {t('tagging.sets.lineupClear')}
+            </Button>
+          )}
+          <Button onClick={onClose}>{t('common.cancel')}</Button>
+          <Button variant="primary" type="submit" form={`${id}-form`}>
+            {t('tagging.sets.lineupSave')}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={`${id}-form`}
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          save()
+        }}
+      >
+        <p className="text-sm text-muted">{t('tagging.sets.lineupBody')}</p>
+        <div className="rounded-card bg-sunken p-3">
+          <p className="mb-1 text-center text-xs font-semibold text-muted">{t('tagging.sets.net')}</p>
+          <div aria-hidden="true" className="mb-2 h-1.5 rounded-full bg-fg" />
+          <div className="grid grid-cols-3 gap-2">
+            {LINEUP_ORDER.map((zone) => {
+              const roman = ROMAN[zone]
+              return (
+                <div key={zone} data-zone={zone + 1} className={cx('flex flex-col items-center gap-1.5 rounded-control border border-hairline bg-court-floor p-2', zone === 3 || zone === 2 || zone === 1 ? 'mb-2' : '')}>
+                  <label htmlFor={`${id}-z${zone}`} className="text-xs font-semibold text-muted">
+                    {t('tagging.sets.zone', { zone: roman })}
+                  </label>
+                  <TextInput
+                    id={`${id}-z${zone}`}
+                    inline
+                    list={`${id}-roster`}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    aria-label={t('tagging.sets.numberIn', { zone: roman })}
+                    className="w-16 text-center text-base font-semibold tabular-nums"
+                    value={numbers[zone] ?? ''}
+                    onChange={(e) => {
+                      const next = [...numbers]
+                      next[zone] = e.target.value
+                      setNumbers(next)
+                      setError(null)
+                    }}
+                  />
+                  <label className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 text-xs font-semibold sm:min-h-8">
+                    <input
+                      type="radio"
+                      name={`${id}-setter`}
+                      className="size-4 accent-[var(--color-accent)]"
+                      checked={setter === zone + 1}
+                      aria-label={t('tagging.sets.setterIn', { zone: roman })}
+                      onChange={() => setSetter(zone + 1)}
+                    />
+                    {t('tagging.sets.setter')}
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+        <datalist id={`${id}-roster`}>
+          {roster.map((r) => (
+            <option key={r.number} value={r.number}>
+              {r.name ?? ''}
+            </option>
+          ))}
+        </datalist>
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
+      </form>
+    </Modal>
   )
 }
 
