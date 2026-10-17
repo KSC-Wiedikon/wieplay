@@ -21,6 +21,7 @@ import httpx
 from nomal.core import imports
 from nomal.core.storage import content_type_for, safe_file_name
 from nomal.worker import ffmpeg, importer
+from nomal.worker import recap as recap_pictures
 from nomal.worker.client import ApiClient, ClaimedJob
 from nomal.worker.config import WorkerSettings
 
@@ -397,7 +398,8 @@ def import_video(ctx: Context) -> dict[str, Any]:
 
 
 def export(ctx: Context) -> dict[str, Any]:
-    """A watermarked MP4 of a clip, reel or condensed match (PLAN §7.7)."""
+    """A watermarked MP4 of a clip, reel or condensed match (PLAN §7.7); a game recap adds a
+    title card and a score bug on every clip (worker/recap.py)."""
     params = ctx.job.params
     out = ctx.scratch / "export"
     if out.exists():
@@ -406,18 +408,44 @@ def export(ctx: Context) -> dict[str, Any]:
     watermark = out / "watermark.txt"
     watermark.write_text(str(params["watermark"])[:200])
     pieces = params["pieces"]
-    total_ms = sum(int(p["end_ms"]) - int(p["start_ms"]) for p in pieces)
+    recap = params.get("recap")
+    fonts = recap_pictures.Fonts(
+        ctx.settings.font_file, recap_pictures.bold_of(ctx.settings.font_file)
+    )
+    texts = recap_pictures.Texts(out)
+    card_ms = int(recap["card_ms"]) if recap and recap.get("card") else 0
+    total_ms = sum(int(p["end_ms"]) - int(p["start_ms"]) for p in pieces) + card_ms
     done_ms = 0
     parts: list[str] = []
+    if card_ms:
+        assert recap is not None
+        ffmpeg.run(
+            ffmpeg.card_args(
+                duration_s=card_ms / 1000,
+                background=recap_pictures.NAVY,
+                overlays=recap_pictures.card_filters(recap["card"], card_ms / 1000, texts, fonts),
+                watermark_file=watermark,
+                font_file=ctx.settings.font_file,
+                output="card.mp4",
+            ),
+            duration_ms=card_ms,
+            on_progress=lambda p: ctx.report(0.9 * p * card_ms / max(total_ms, 1), "title card"),
+            cancel=ctx.cancel,
+            cwd=out,
+        )
+        parts.append("card.mp4")
+        done_ms += card_ms
     root = ctx.settings.raw_root
     for piece in pieces:
         # A piece in the video's timeline may span two camera files: cut per file.
+        cuts = []
         for part in piece["parts"]:
             offset, length = int(part["offset_ms"]), int(part["duration_ms"])
             start = max(int(piece["start_ms"]), offset)
             end = min(int(piece["end_ms"]), offset + length)
-            if end - start < 40:  # less than two frames of this file
-                continue
+            if end - start >= 40:  # at least two frames of this file
+                cuts.append((part, offset, start, end))
+        for n, (part, offset, start, end) in enumerate(cuts):
             source = inside(root, Path(part["path"]))
             name = f"piece_{len(parts):03d}.mp4"
             base, cut_ms = done_ms, end - start
@@ -425,6 +453,12 @@ def export(ctx: Context) -> dict[str, Any]:
             def report(p: float, base: int = base, cut_ms: int = cut_ms) -> None:
                 ctx.report(0.9 * (base + p * cut_ms) / max(total_ms, 1), "rendering")
 
+            overlays: list[str] = []
+            audio_filter = None
+            if recap:
+                overlays, audio_filter = recap_pictures.piece_overlays(
+                    piece, start, cut_ms / 1000, n == 0, n == len(cuts) - 1, texts, fonts
+                )
             ffmpeg.run(
                 ffmpeg.export_piece_args(
                     source=source,
@@ -434,6 +468,8 @@ def export(ctx: Context) -> dict[str, Any]:
                     watermark_file=watermark,
                     font_file=ctx.settings.font_file,
                     output=name,
+                    overlays=overlays,
+                    audio_filter=audio_filter,
                 ),
                 duration_ms=cut_ms,
                 on_progress=report,
@@ -442,7 +478,7 @@ def export(ctx: Context) -> dict[str, Any]:
             )
             parts.append(name)
             done_ms += cut_ms
-    if not parts:
+    if not parts or parts == ["card.mp4"]:
         raise PermanentError("nothing to render")
     parts_list = out / "parts.ffconcat"
     parts_list.write_text("ffconcat version 1.0\n" + "".join(f"file '{name}'\n" for name in parts))
@@ -511,6 +547,12 @@ def train_actions(ctx: Context) -> dict[str, Any]:
     return job.train(ctx)
 
 
+def scoreboard(ctx: Context) -> dict[str, Any]:
+    from nomal.worker import scoreboard as job  # numpy, OpenCV: the worker image only
+
+    return job.run(ctx)
+
+
 HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "import": import_video,
     "ingest": ingest,
@@ -525,6 +567,7 @@ HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "actions": actions,
     "train_actions": train_actions,
     "players": players,
+    "scoreboard": scoreboard,
 }
 # Long CPU jobs that run on a worker's background lane (runner.py), next to the media jobs.
 BACKGROUND_KINDS = (
@@ -535,4 +578,5 @@ BACKGROUND_KINDS = (
     "actions",
     "train_actions",
     "players",
+    "scoreboard",
 )

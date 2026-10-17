@@ -128,6 +128,10 @@ class ScoringOut(BaseModel):
     gaps: dict[str, int]
     first_serve_ms: int | None
     vs_coach: ScoringVsCoachOut | None
+    # The scoreboard's part (PLAN §10.3, step 5), when it was read: which side of it is ours,
+    # how many rallies it named, how often the score line follows it, its winners against the
+    # coach's, its disagreements with the serves.
+    board: dict[str, Any] | None = None
 
 
 class ActionsVsCoachOut(BaseModel):
@@ -329,6 +333,7 @@ def _scoring(db: DbDep, video: Video) -> ScoringOut | None:
         gaps=m.get("gaps", {}),
         first_serve_ms=m.get("first_serve_ms"),
         vs_coach=ScoringVsCoachOut.model_validate(m["vs_coach"]) if m.get("vs_coach") else None,
+        board=m.get("board"),
     )
 
 

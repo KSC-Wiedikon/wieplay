@@ -49,6 +49,8 @@ ignore = ["S101"]  # assert is fine in tests
 "nomal/worker/ffmpeg.py" = ["S603", "S607"]
 "tests/test_worker_ffmpeg.py" = ["S603", "S607"]
 "tests/test_worker_analyse.py" = ["S603", "S607"]
+"tests/test_worker_recap.py" = ["S603", "S607"]
+"tests/test_scoreboard_ml.py" = ["S603", "S607"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -366,6 +366,28 @@ def poster_args(*, source: Path, at_s: float) -> list[str]:
 EXPORT_WIDTH, EXPORT_HEIGHT, EXPORT_FPS = 1920, 1080, 50
 
 
+def filter_path(path: Path | str) -> str:
+    """A file name inside a filter argument (ffmpeg's option escaping)."""
+    return str(path).replace("\\", "/").replace(":", "\\:")
+
+
+def watermark_filter(watermark_file: Path, font_file: str) -> str:
+    return (
+        f"drawtext=fontfile={filter_path(font_file)}:textfile={filter_path(watermark_file)}:"
+        "fontsize=30:fontcolor=white@0.85:box=1:boxcolor=black@0.45:boxborderw=8:"
+        "x=w-tw-28:y=h-th-28"
+    )
+
+
+# Every export piece and the recap's title card are encoded alike, so they join without
+# re-encoding.
+EXPORT_ENCODE = [
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "8M",
+    "-bufsize", "16M", "-g", str(2 * EXPORT_FPS), "-profile:v", "high",
+    "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+]  # fmt: skip
+
+
 def export_piece_args(
     *,
     source: Path,
@@ -375,20 +397,24 @@ def export_piece_args(
     watermark_file: Path,
     font_file: str,
     output: str,
+    overlays: Sequence[str] = (),
+    audio_filter: str | None = None,
 ) -> list[str]:
     """One piece of an export: cut frame-accurately from the originals, 1080p50, the
     watermark burned in (PLAN §5.2). Pieces share every parameter, so they join without
     re-encoding. Silent audio when the source has none, so every piece has a track.
     `source` is one camera file: seeking inside the concat demuxer is unreliable, so a
-    piece that spans two files is cut as two pieces."""
-    text = str(watermark_file).replace("\\", "/").replace(":", "\\:")
-    font = font_file.replace(":", "\\:")
-    video_filter = (
-        f"scale={EXPORT_WIDTH}:{EXPORT_HEIGHT}:force_original_aspect_ratio=decrease,"
-        f"pad={EXPORT_WIDTH}:{EXPORT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps={EXPORT_FPS},"
-        "format=yuv420p,"
-        f"drawtext=fontfile={font}:textfile={text}:fontsize=30:fontcolor=white@0.85:"
-        "box=1:boxcolor=black@0.45:boxborderw=8:x=w-tw-28:y=h-th-28"
+    piece that spans two files is cut as two pieces. `overlays`: more filters on the 1080p
+    picture before the watermark (the recap's score bug, fades)."""
+    video_filter = ",".join(
+        [
+            f"scale={EXPORT_WIDTH}:{EXPORT_HEIGHT}:force_original_aspect_ratio=decrease",
+            f"pad={EXPORT_WIDTH}:{EXPORT_HEIGHT}:(ow-iw)/2:(oh-ih)/2",
+            f"fps={EXPORT_FPS}",
+            "format=yuv420p",
+            *overlays,
+            watermark_filter(watermark_file, font_file),
+        ]
     )
     args = [
         "-ss", f"{start_s:.3f}", *input_guard(), "-i", str(source),
@@ -399,12 +425,37 @@ def export_piece_args(
         "-t", f"{duration_s:.3f}",
         "-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
         "-vf", video_filter,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-maxrate", "8M",
-        "-bufsize", "16M", "-g", str(2 * EXPORT_FPS), "-profile:v", "high",
-        "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+    ]  # fmt: skip
+    if audio_filter:
+        args += ["-af", audio_filter]
+    args += [*EXPORT_ENCODE, output]
+    return args
+
+
+def card_args(
+    *,
+    duration_s: float,
+    background: str,
+    overlays: Sequence[str],
+    watermark_file: Path,
+    font_file: str,
+    output: str,
+) -> list[str]:
+    """A still card (the recap's title): a plain colour with text drawn on it, silent audio,
+    encoded like the export pieces."""
+    video_filter = ",".join(
+        ["format=yuv420p", *overlays, watermark_filter(watermark_file, font_file)]
+    )
+    return [
+        "-f", "lavfi", "-i",
+        f"color=c={background}:s={EXPORT_WIDTH}x{EXPORT_HEIGHT}:r={EXPORT_FPS}:d={duration_s:.3f}",
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-t", f"{duration_s:.3f}",
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-vf", video_filter,
+        *EXPORT_ENCODE,
         output,
     ]  # fmt: skip
-    return args
 
 
 def join_args(*, parts_list: Path, output: str) -> list[str]:

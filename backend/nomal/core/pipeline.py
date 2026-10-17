@@ -366,7 +366,7 @@ def complete(
     settings: Settings | None = None,
 ) -> None:
     """Validate a worker's result and write it. Raises ValueError on a bad result."""
-    from nomal.core import actions, analysis, calibration, players
+    from nomal.core import actions, analysis, calibration, players, scoreboard
 
     if job.kind in analysis.KINDS:
         analysis.complete(db, video, job, payload)
@@ -387,6 +387,9 @@ def complete(
         return
     if job.kind in players.KINDS:
         players.complete(db, video, job, payload)
+        return
+    if job.kind in scoreboard.KINDS:
+        scoreboard.complete(db, video, job, payload)
         return
     if job.kind == "purge":
         jobs.succeed(job, payload)
@@ -420,7 +423,7 @@ def complete(
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
     """A job failed for good: the video failed, its other jobs stop. A failed export only
     fails that export. Failed analysis leaves the video as it is: it plays without it."""
-    from nomal.core import actions, analysis, calibration, players
+    from nomal.core import actions, analysis, calibration, players, scoreboard
 
     if (
         job.kind in analysis.KINDS
@@ -429,6 +432,8 @@ def on_failed(db: Session, video: Video | None, job: Job) -> None:
         or job.kind in players.KINDS
     ):
         return
+    if job.kind in scoreboard.KINDS:
+        return  # the scoring goes on without the board
     if job.kind == "export":
         export = db.get(VideoExport, uuid.UUID(job.params["export_id"]))
         if export is not None:
@@ -528,10 +533,15 @@ def refuse_after_ingest(db: Session, video: Video, reason: str) -> None:
 
 
 def enqueue_export(
-    db: Session, export: VideoExport, pieces: list[dict[str, Any]], watermark: str
+    db: Session,
+    export: VideoExport,
+    pieces: list[dict[str, Any]],
+    watermark: str,
+    recap: dict[str, Any] | None = None,
 ) -> Job:
     """Queue the rendering of an export (PLAN §7.7). Each piece names its video's NAS
-    originals; the worker cuts frame-accurately, burns in the watermark and joins."""
+    originals; the worker cuts frame-accurately, burns in the watermark and joins. A game
+    recap brings its title card (`recap`) and a score bug per piece."""
     key = f"exports/{export.id}.mp4"
     job = jobs.enqueue(
         db,
@@ -544,6 +554,7 @@ def enqueue_export(
             "pieces": pieces,
             "watermark": watermark,
             "duration_ms": export.duration_ms,
+            **({"recap": recap} if recap is not None else {}),
         },
     )
     export.job_id = job.id
