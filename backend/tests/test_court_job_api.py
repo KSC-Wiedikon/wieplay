@@ -203,7 +203,6 @@ def _db() -> str:
     return TEST_DB
 
 
-
 def test_a_camera_carried_to_another_spot_is_a_setup_too(
     ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
 ) -> None:
@@ -213,6 +212,7 @@ def test_a_camera_carried_to_another_spot_is_a_setup_too(
     state = court_of(club, ready)
     assert state["court_job"] == "done"
     assert [s["start"] for s in state["setups"]] == ["start", "moved"]
+
 
 def test_an_unsure_court_is_a_guess_and_a_weak_one_nothing(
     app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
