@@ -379,7 +379,11 @@ def _video_out(
         # is ready: saying so earlier shows broken images (PLAN §7.6).
         has_thumbs=bool(video.thumbs) and video.status == "ready",
         progress=progress,
-        error=video.error if manager else None,
+        error=(
+            (video.error if video.status == "refused" else guests.error_for(viewer, video.error))
+            if manager
+            else None
+        ),
         created_at=video.created_at,
         created_by=video.created_by,
         can_delete=can_delete_video(viewer, access.ref, access.leads),

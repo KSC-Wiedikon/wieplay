@@ -35,7 +35,7 @@ from nomal.api.access import TeamAccess
 from nomal.api.analysis import JobStateOut, _manages
 from nomal.api.deps import DbDep, StoreDep, ViewerDep, audit
 from nomal.api.tagging import RosterOut, _readable, _roster_out
-from nomal.core import players, tagging
+from nomal.core import guests, players, tagging
 from nomal.core.models import Event, Video
 from nomal.core.permissions import Viewer, can_run_analysis, can_tag
 from nomal.core.players import EventPlayer, PlayerCluster
@@ -248,7 +248,7 @@ def players_out(
             status=job.status,
             progress=job.progress,
             message=job.message,
-            error=job.error if manager else None,
+            error=guests.error_for(viewer, job.error) if manager else None,
             created_at=job.created_at,
             started_at=job.started_at,
             finished_at=job.finished_at,

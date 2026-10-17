@@ -14,6 +14,7 @@ The rules (who sees and does what) are in core/permissions.py, the logic in core
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 import uuid
@@ -21,7 +22,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, Field, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
@@ -50,6 +51,7 @@ from nomal.core.models import (
 from nomal.core.permissions import Viewer, can_manage_people
 from nomal.core.pipeline import season_of
 
+log = logging.getLogger(__name__)
 auth_router = APIRouter(prefix="/api/auth/guest", tags=["guests"])
 router = APIRouter(prefix="/api", tags=["guests"])
 
@@ -57,7 +59,20 @@ NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 WRONG_LOGIN = "Wrong email or password"
 SEASON = re.compile(r"^\d{4}/\d{2}$")
 
-Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+
+def _plain_name(value: str) -> str:
+    """Names go into the stats CSV and the export's watermark: none starts like a spreadsheet
+    formula."""
+    if value[:1] in ("=", "+", "-", "@"):
+        raise ValueError("A name starts with a letter or a digit")
+    return value
+
+
+Name = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=120),
+    AfterValidator(_plain_name),
+]
 Number = Annotated[int, Field(ge=0, le=99)]
 
 
@@ -100,15 +115,22 @@ class LoginIn(BaseModel):
 @auth_router.post("/login", status_code=204)
 def guest_login(body: LoginIn, request: Request, db: DbDep, settings: SettingsDep) -> Response:
     """One answer for every failure (wrong password, unknown email, locked, disabled), so the
-    form tells nobody which emails have an account."""
-    account = guests.authenticate(db, body.email, body.password)
+    form tells nobody which emails have an account. A burst of logins gets 429."""
+    try:
+        account = guests.authenticate(db, body.email, body.password)
+    except guests.Busy as exc:
+        db.rollback()
+        raise HTTPException(429, str(exc), headers={**NO_STORE, "Retry-After": "60"}) from None
     if account is None:
         known = db.scalar(
             select(GuestAccount.member_id).where(
                 GuestAccount.email == guests.normalise_email(body.email)
             )
         )
-        audit(db, None, "guest_login_failed", "guest_account", str(known) if known else None)
+        if known is not None:  # unknown emails are not logged: a flood would fill the log
+            audit(db, None, "guest_login_failed", "guest_account", str(known))
+        else:
+            log.info("guest login with an unknown email")
         db.commit()
         raise HTTPException(401, WRONG_LOGIN, headers=NO_STORE)
     member = db.get(WdMember, account.member_id)
@@ -187,6 +209,9 @@ def accept_invite(
     """Set up the account (or a new password) from the link, and log in."""
     try:
         found = guests.accept_invite(db, token, email=body.email, password=body.password)
+    except guests.Busy as exc:
+        db.rollback()
+        raise HTTPException(429, str(exc), headers={**NO_STORE, "Retry-After": "60"}) from None
     except guests.GuestError as exc:
         db.rollback()
         raise _invite_error(exc) from None

@@ -62,6 +62,7 @@ _SCRYPT_MAXMEM = 64 * 1024 * 1024
 # A burst of logins (or someone trying passwords) hashes at most this many at once: the
 # VPS's memory and CPU stay bounded.
 _HASHING = threading.BoundedSemaphore(4)
+HASH_WAIT_SECONDS = 5.0
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -85,6 +86,10 @@ class NotOnTeam(GuestError):
     """No such person on this team."""
 
 
+class Busy(GuestError):
+    """Every hashing slot is taken (a burst of logins): try again in a moment."""
+
+
 def is_guest_id(value: int) -> bool:
     """A guest team or person (ids from guest_id_seq), not one from Wiedisync."""
     return value >= GUEST_ID_BASE
@@ -104,10 +109,15 @@ def _b64(raw: bytes) -> str:
 
 
 def _scrypt(password: str, salt: bytes, n: int, r: int, p: int, dklen: int) -> bytes:
-    with _HASHING:
+    # A flood of logins waits a little, then gets "busy" instead of taking every thread.
+    if not _HASHING.acquire(timeout=HASH_WAIT_SECONDS):
+        raise Busy("Too many logins at this moment. Try again in a minute.")
+    try:
         return hashlib.scrypt(
             password.encode(), salt=salt, n=n, r=r, p=p, maxmem=_SCRYPT_MAXMEM, dklen=dklen
         )
+    finally:
+        _HASHING.release()
 
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
@@ -499,6 +509,9 @@ def accept_invite(
     account.locked_until = None
     account.disabled_at = None  # a coach sent a link to someone on the roster
     account.last_login_at = now  # the link logs them in
+    if not created:
+        # A new password: whoever is logged in with the old one is logged out.
+        db.execute(delete(UserSession).where(UserSession.member_id == found.member.id))
     found.invite.used_at = now
     db.execute(
         update(GuestInvite)
@@ -525,8 +538,9 @@ def authenticate(
     caller says the same for all). Counts failures; 10 in a row lock it for 15 minutes.
     Flushes; the caller commits either way."""
     now = now or datetime.now(UTC)
+    # No row lock while hashing: a flood on one email must not hold up its owner's login.
     account = db.scalars(
-        select(GuestAccount).where(GuestAccount.email == normalise_email(email)).with_for_update()
+        select(GuestAccount).where(GuestAccount.email == normalise_email(email))
     ).first()
     if account is None or len(password) > MAX_PASSWORD:
         verify_password(password[:MAX_PASSWORD], _dummy_hash())
@@ -535,17 +549,25 @@ def authenticate(
         verify_password(password, _dummy_hash())
         return None
     if not verify_password(password, account.password_hash):
-        account.failed_logins += 1
-        if account.failed_logins >= LOCK_AFTER:
-            account.failed_logins = 0
-            account.locked_until = now + LOCK_FOR
-        db.flush()
+        # Counted in the database itself, so attempts at the same moment all count.
+        failed = db.scalar(
+            update(GuestAccount)
+            .where(GuestAccount.member_id == account.member_id)
+            .values(failed_logins=GuestAccount.failed_logins + 1)
+            .returning(GuestAccount.failed_logins)
+        )
+        if failed is not None and failed >= LOCK_AFTER:
+            db.execute(
+                update(GuestAccount)
+                .where(GuestAccount.member_id == account.member_id)
+                .values(failed_logins=0, locked_until=now + LOCK_FOR)
+            )
+        db.expire(account)
+        return None
+    if account.disabled_at is not None:
         return None
     account.failed_logins = 0
     account.locked_until = None
-    if account.disabled_at is not None:
-        db.flush()
-        return None
     account.last_login_at = now
     db.flush()
     return account
@@ -624,6 +646,17 @@ def guest_viewer(db: Session, member_id: int) -> Viewer | None:
         guest=True,
         club=club_for_member(db, member_id),
     )
+
+
+PROCESSING_FAILED = "Processing failed. A KSCW admin can see why."
+
+
+def error_for(viewer: Viewer, error: str | None) -> str | None:
+    """What a job's error says to this viewer: a guest club's people get a plain sentence,
+    not the worker's own text (file paths, tool output)."""
+    if error is None or not viewer.guest:
+        return error
+    return PROCESSING_FAILED
 
 
 # --- filming, quota, training -----------------------------------------------------------------

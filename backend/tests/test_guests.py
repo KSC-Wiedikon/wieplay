@@ -266,9 +266,12 @@ def test_a_new_link_resets_the_password_and_old_links_expire(
     assert new_client().get(f"/api/auth/guest/invite/{token_of(older)}").status_code == 410
     info = new_client().get(f"/api/auth/guest/invite/{token_of(newer)}").json()
     assert info["has_account"] is True and info["role"] == "coach"
-    # No email asked: the account keeps its own.
+    # No email asked: the account keeps its own. A new password logs out the old sessions.
     browser = new_client()
     assert accept(browser, newer, None, password="a brand new password").status_code == 200
+    assert coach.get("/api/me").status_code == 401
+    assert browser.get("/api/me").json()["member"]["name"] == "Gina Gast"
+    coach = browser
     login = new_client()
     old = {"email": "gina@example.org", "password": PASSWORD}
     assert login.post("/api/auth/guest/login", json=old).status_code == 401
@@ -306,7 +309,8 @@ def test_guest_login_wrong_unknown_locked_disabled(
     wrong, unknown = login("gina@example.org", "not the password"), login("x@y.org", PASSWORD)
     assert (wrong.status_code, unknown.status_code) == (401, 401)
     assert wrong.json() == unknown.json() == {"detail": WRONG}
-    assert len(audit_rows(db_engine, "guest_login_failed")) == 2
+    # Logged for a known account only: a flood of made-up emails does not fill the log.
+    assert [r[1] for r in audit_rows(db_engine, "guest_login_failed")] == [str(gast["coach_id"])]
     assert [r[0] for r in audit_rows(db_engine, "guest_login")].count(gast["coach_id"]) == 2
 
     # Ten wrong in a row lock the account for 15 minutes, the right password included.
@@ -366,6 +370,8 @@ def test_coaches_keep_the_roster_and_players_read_it(
     pia = coach.post(url, json={"name": " Pia Gast ", "number": 9}).json()
     assert (pia["name"], pia["number"], pia["role"]) == ("Pia Gast", 9, "player")
     assert coach.post(url, json={"name": "", "number": 1}).status_code == 422
+    formula = {"name": '=HYPERLINK("http://x")'}  # names go into CSVs and watermarks
+    assert coach.post(url, json=formula).status_code == 422
     assert coach.post(url, json={"name": "X", "role": "captain"}).status_code == 422
 
     edited = coach.patch(f"{url}/{pia['member_id']}", json={"number": None, "name": "Pia G."})
@@ -725,3 +731,34 @@ def test_guest_games_train_the_models_only_with_the_clubs_ok(
         train, skipped = rallies()
         assert train == {str(ours.id), str(theirs.id)} and skipped == {}
         assert actions_skipped()[str(theirs.id)] == "no tags"
+
+
+# --- hardening ---------------------------------------------------------------------------------
+
+
+def test_a_burst_of_logins_gets_busy_not_every_thread(
+    gast: dict[str, Any], new_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(guests, "HASH_WAIT_SECONDS", 0.05)
+    held = [guests._HASHING.acquire(timeout=1) for _ in range(4)]  # every slot hashing
+    try:
+        login = {"email": "gina@example.org", "password": PASSWORD}
+        busy = new_client().post("/api/auth/guest/login", json=login)
+        assert busy.status_code == 429 and busy.headers["retry-after"] == "60"
+    finally:
+        for taken in held:
+            if taken:
+                guests._HASHING.release()
+    login = {"email": "gina@example.org", "password": PASSWORD}
+    assert new_client().post("/api/auth/guest/login", json=login).status_code == 204
+
+
+def test_guests_see_no_worker_error_text() -> None:
+    from nomal.core.permissions import Viewer
+
+    kscw = Viewer(1, "u", "Jo", frozenset(), frozenset(), {})
+    gast = Viewer(guests.GUEST_ID_BASE + 1, "g", "Gina", frozenset(), frozenset(), {}, guest=True)
+    raw = "OSError: /mnt/nas/nomal/raw/2026-27/vb-H3/x.mp4: No such file"
+    assert guests.error_for(kscw, raw) == raw
+    assert guests.error_for(gast, raw) == guests.PROCESSING_FAILED
+    assert guests.error_for(gast, None) is None

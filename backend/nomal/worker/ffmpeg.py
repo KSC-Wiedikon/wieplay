@@ -418,7 +418,7 @@ def filter_path(path: Path | str) -> str:
 def watermark_filter(watermark_file: Path, font_file: str) -> str:
     return (
         f"drawtext=fontfile={filter_path(font_file)}:textfile={filter_path(watermark_file)}:"
-        "fontsize=30:fontcolor=white@0.85:box=1:boxcolor=black@0.45:boxborderw=8:"
+        "expansion=none:fontsize=30:fontcolor=white@0.85:box=1:boxcolor=black@0.45:boxborderw=8:"
         "x=w-tw-28:y=h-th-28"
     )
 

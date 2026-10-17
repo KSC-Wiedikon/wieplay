@@ -208,7 +208,7 @@ def save(video_id: uuid.UUID, body: SaveIn, viewer: ViewerDep, db: DbDep) -> Sco
     video = _editable(db, viewer, video_id)
     if body.copied_from is not None:
         source = db.get(sb.ScoreboardRegion, body.copied_from)
-        if source is None:
+        if source is None or source.lineage_id != video.lineage_id:
             raise HTTPException(422, "Copied from an unknown scoreboard")
     row = sb.save(
         db,

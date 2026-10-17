@@ -773,7 +773,7 @@ def delete_comment(comment_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> None:
 # --- exports -------------------------------------------------------------------------------
 
 
-def _export_out(export: VideoExport, db: Session) -> ExportOut:
+def _export_out(export: VideoExport, db: Session, viewer: Viewer) -> ExportOut:
     progress = None
     if export.status == "queued" and export.job_id:
         job = db.get(Job, export.job_id)
@@ -786,7 +786,7 @@ def _export_out(export: VideoExport, db: Session) -> ExportOut:
         status=export.status,
         bytes=export.bytes,
         progress=progress,
-        error=export.error,
+        error=guests.error_for(viewer, export.error),
         created_at=export.created_at,
         expires_at=export.expires_at,
     )
@@ -905,7 +905,7 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
     audit(db, viewer.member_id, "export_requested", "export", str(export.id), kind=body.kind,
           pieces=len(pieces), duration_ms=export.duration_ms)  # fmt: skip
     db.commit()
-    return _export_out(export, db)
+    return _export_out(export, db, viewer)
 
 
 @router.get("/exports", response_model=list[ExportOut])
@@ -916,7 +916,7 @@ def my_exports(viewer: ViewerDep, db: DbDep) -> list[ExportOut]:
         .order_by(VideoExport.created_at.desc())
         .limit(100)
     )
-    return [_export_out(e, db) for e in rows]
+    return [_export_out(e, db, viewer) for e in rows]
 
 
 @router.get("/exports/{export_id}/download")
