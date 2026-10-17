@@ -1,7 +1,9 @@
 # WiePlay
 
 *WiePlay*: **Wie**dikon + re**play**. Called *Nomal* (Swiss German for "again") until
-17.10.2026; the code, packages, settings, containers, hosts and the repo keep the name `nomal`.
+17.10.2026. Since then the repo is `KSC-Wiedikon/wieplay` and the hosts are `wieplay.kscw.ch` and
+`wieplay-dev.kscw.ch`; the code, packages, settings (`NOMAL_*`), containers, database and
+buckets keep the name `nomal`.
 
 In-house video analysis for KSC Wiedikon: coaches and players upload match and practice
 footage, tag what happens, and watch clips and highlight reels, behind their Wiedisync

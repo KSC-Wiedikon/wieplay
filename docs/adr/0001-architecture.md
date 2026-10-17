@@ -5,7 +5,7 @@
 
 ## Decision
 
-1. **Separate service and repo.** WiePlay is its own FastAPI + React app at `nomal.kscw.ch`, not
+1. **Separate service and repo.** WiePlay is its own FastAPI + React app at `wieplay.kscw.ch`, not
    another build of Wiedisync. It keeps Directus permissions out of WiePlay's hot path and lets the
    ML side be Python.
 2. **Same origin for web and API.** The API serves the built SPA, so WiePlay's session cookie is

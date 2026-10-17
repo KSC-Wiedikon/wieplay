@@ -25,7 +25,7 @@ full admin (Admin → Teams → Guest clubs); nothing touches the database by ha
    called ("VBC Zürich"), team ("Herren 2"), league (optional), season (the current one by
    default), video limit, and the training box only if the club said yes. It is switched on.
 3. **Invite the coach**: right after creating it (or *Invite a coach* in its row), give the
-   coach's name. WiePlay shows a link `https://nomal.kscw.ch/join/…` **once**: copy it and send it
+   coach's name. WiePlay shows a link `https://wieplay.kscw.ch/join/…` **once**: copy it and send it
    to the coach only (a direct message, not a group chat). It works once, for 14 days.
 4. **The coach** opens the link, sets an email and a password and lands on the team page,
    where they:

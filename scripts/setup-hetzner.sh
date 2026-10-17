@@ -17,8 +17,8 @@ set -euo pipefail
 
 env="${1:-}"
 case "$env" in
-  dev) directus_url=https://directus-dev.kscw.ch public=https://nomal-dev.kscw.ch ;;
-  prod) directus_url=https://directus.kscw.ch public=https://nomal.kscw.ch ;;
+  dev) directus_url=https://directus-dev.kscw.ch public=https://wieplay-dev.kscw.ch ;;
+  prod) directus_url=https://directus.kscw.ch public=https://wieplay.kscw.ch ;;
   *) echo "usage: scripts/setup-hetzner.sh dev|prod" >&2; exit 2 ;;
 esac
 host="${NOMAL_DEPLOY_HOST:-hetzner}"

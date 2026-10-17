@@ -1,16 +1,17 @@
 # WiePlay: plan
 
 > *WiePlay*: **Wie**dikon + re**play**, watch it again and learn from it. Called *Nomal*
-> (Swiss German for "again") until 17.10.2026; the code, packages, settings, containers,
-> hosts and the repo keep the name `nomal` (renaming them buys nothing a user sees).
+> (Swiss German for "again") until 17.10.2026, when the repo became `KSC-Wiedikon/wieplay`
+> and the hosts `wieplay(-dev).kscw.ch`. The code, packages, settings (`NOMAL_*`), containers,
+> database and buckets keep the name `nomal` (renaming them buys nothing a user sees).
 > In-house video analysis for KSC Wiedikon, replacing what clubs pay Hudl or Balltime for.
 
 | | |
 |---|---|
 | Status | **Plan, revision 4** (15.10.2026). Nothing built yet; brand icons generated. |
 | Owner | Luca Canepa (sole developer) |
-| Repo | `KSC-Wiedikon/nomal` (AGPL-3.0, like Wiedisync; private for now) |
-| Live host (planned) | `nomal.kscw.ch` (prod), `nomal-dev.kscw.ch` (dev) |
+| Repo | `KSC-Wiedikon/wieplay` (AGPL-3.0, like Wiedisync; private for now) |
+| Live hosts | `wieplay.kscw.ch` (prod), `wieplay-dev.kscw.ch` (dev); `nomal(-dev).kscw.ch` until 17.10.2026 |
 | Depends on | Wiedisync (accounts, teams, rosters, games): `KSC-Wiedikon/wiedisync` |
 
 This is the plan of record. Decisions that change it get a short ADR in `docs/adr/` and an
@@ -96,7 +97,7 @@ From the Q&A on 15.10.2026 (second round supersedes the first):
 | D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference starts internal** (decided 15.10.2026): on the **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; always on), with a researched plan to move to an **EU or Swiss provider** later (§8.6). US providers are out. The Framework 16 is also the development and training machine; the RTX 4090 PC is not part of the plan. The worker interface is backend-agnostic (queue → worker), so internal, provider and a future GPU box are interchangeable (§8). |
 | D5 | Permissions | Team-scoped defaults accepted (§5.1). **Adults only**: a hard check against member birthdates; nothing under 18 is filmed or stored. |
 | D6 | OpenVolley | Not now. The data model stays open for importing points later (§6.6, §10.8). |
-| D7 | Repo | `KSC-Wiedikon/nomal`, AGPL-3.0 (created, private). |
+| D7 | Repo | `KSC-Wiedikon/wieplay` (`nomal` until 17.10.2026), AGPL-3.0 (private). |
 | D8 | Docs | This plan lives in the repo and is committed (secret-free by rule). |
 | D9 | Brand | Own WiePlay brand (§13): assets in `docs/brand/`, `-vb` / `-bb` variants (default `vb`), wordmark "WiePlay" in Bricolage Grotesque ExtraBold (lowercase "nomal" until 17.10.2026). |
 | D10 | Budget | **~CHF 210 per season** running cost in total (cloud GPU ~80, backup storage ~50, test GPU ~35, reserve). Lines that would exceed it are flagged (§16). |
@@ -118,7 +119,7 @@ flowchart LR
   end
 
   subgraph CF[Cloudflare]
-    T[Tunnel: nomal.kscw.ch<br/>HTML, JSON, 302s only]
+    T[Tunnel: wieplay.kscw.ch<br/>HTML, JSON, 302s only]
   end
 
   subgraph H[Hetzner VPS]
@@ -164,7 +165,7 @@ the Lenovo server and the GPU.
 
 | Component | Runs on | Does | Tech |
 |---|---|---|---|
-| **nomal-web** | Built into the `nomal-api` image, served at `nomal.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
+| **nomal-web** | Built into the `nomal-api` image, served at `wieplay.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
 | **nomal-api** | Hetzner VPS (the club's account), Docker, bound to `127.0.0.1`, reached via the existing Cloudflare Tunnel; worker routes only through an SSH tunnel from the worker host (§8.1) | Auth, permissions, metadata, upload orchestration, media redirects, job queue, audit log, budget ledger | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
 | **Postgres `nomal`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All WiePlay state incl. the job queue | Postgres 16 |
 | **Object storage** | Hetzner Object Storage, same region as the VPS, private bucket | HLS renditions, thumbnails, upload staging, exports, temporary analysis copies | S3 API |
@@ -177,7 +178,7 @@ the Lenovo server and the GPU.
 
 ### 3.3 Why this shape
 
-- **Same origin for app and API** (`nomal.kscw.ch` serves both): WiePlay's own session cookie
+- **Same origin for app and API** (`wieplay.kscw.ch` serves both): WiePlay's own session cookie
   is host-only, WiePlay's API needs no CORS, and the Android WebView just works.
 - **Separate service, shared Postgres server**: keeps Wiedisync's Directus permissions out of
   the hot path and reuses the existing backup pipeline. No cross-database foreign keys:
@@ -195,7 +196,7 @@ the Lenovo server and the GPU.
 ### 4.1 Constraint found in Wiedisync
 
 The Wiedisync login cookie (`kscw_session`) has been **httpOnly and host-only on
-`directus.kscw.ch`** since 28.09.2026. No other host, including `nomal.kscw.ch`, can read it.
+`directus.kscw.ch`** since 28.09.2026. No other host, including `wieplay.kscw.ch`, can read it.
 Wiedisync's other apps call Directus with credentialed CORS, which needs entries in the
 Directus `CORS_ORIGIN` env and in `cors-credentials.js`.
 
@@ -208,7 +209,7 @@ OIDC-shaped authorization flow).
 sequenceDiagram
   autonumber
   participant B as Browser
-  participant N as nomal-api (nomal.kscw.ch)
+  participant N as nomal-api (wieplay.kscw.ch)
   participant D as Directus bridge (directus.kscw.ch)
   participant W as Wiedisync login (wiedisync.kscw.ch)
 
@@ -272,11 +273,11 @@ sequenceDiagram
 | Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
 | ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in WiePlay**, per lineage. The bridge returns personal data only for the team ids WiePlay asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
 | Env | Directus `.env` (prod + dev) | `NOMAL_JWT_PRIVATE_KEY`, `NOMAL_JWT_KID`, `NOMAL_RETURN_URLS`, `NOMAL_SYNC_TOKEN_HASH`, and on dev `NOMAL_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
-| Later: "Video" link on game cards | `GameCard` | Plain link to `nomal.kscw.ch/games/<id>`. |
+| Later: "Video" link on game cards | `GameCard` | Plain link to `wieplay.kscw.ch/games/<id>`. |
 | Docs | `INFRA.md`, `SECURITY.md`, `PERMISSIONS.md` | Same commit, per Wiedisync rules. |
 
-No `CORS_ORIGIN` change is needed. A Cloudflare Tunnel public hostname `nomal.kscw.ch`
-(and `nomal-dev.kscw.ch`) pointing at the API's local port is.
+No `CORS_ORIGIN` change is needed. A Cloudflare Tunnel public hostname `wieplay.kscw.ch`
+(and `wieplay-dev.kscw.ch`) pointing at the API's local port is.
 
 ### 4.5 Guest clubs
 
@@ -989,14 +990,14 @@ database is backed up with Wiedisync's existing pipeline (§15.2).
 As decided: the authenticated API serves the playlist, segment URLs are signed with a TTL of
 minutes, and the player keeps going for the full match.
 
-1. hls.js loads `GET /api/media/{video}/{rendition}/index.m3u8` from `nomal.kscw.ch` with the
+1. hls.js loads `GET /api/media/{video}/{rendition}/index.m3u8` from `wieplay.kscw.ch` with the
    session cookie. The API checks permission and returns a VOD playlist whose segment URIs
    point back at the API: `/api/media/{video}/{rendition}/seg/{n}.m4s`.
 2. As the player needs each 4-second segment, it requests that URI; the API checks the
    session (cached per session + video for 60 s) and answers **302** to an object-storage URL
    **signed for 5 minutes, for that one segment**. Signing is a local HMAC, no network call.
 3. The browser fetches the bytes directly from object storage (bucket CORS allows
-   `nomal.kscw.ch`).
+   `wieplay.kscw.ch`).
 
 So signing happens continuously as playback advances: a 2 h match (~1 800 segments per
 rendition) plays without interruption, while any copied URL is either useless without the
@@ -2159,7 +2160,7 @@ nomal/
 
 | | Dev | Prod |
 |---|---|---|
-| Web + API | `nomal-dev.kscw.ch` | `nomal.kscw.ch` |
+| Web + API | `wieplay-dev.kscw.ch` | `wieplay.kscw.ch` |
 | Wiedisync | `directus-dev.kscw.ch` (nightly scrubbed prod clone, IDs match) | `directus.kscw.ch` |
 | Database | `nomal_dev` | `nomal` |
 | Bucket | `…-nomal-dev` (lifecycle: 30 days) | `…-nomal` |
@@ -2226,7 +2227,7 @@ Everything goes to dev first, as in Wiedisync.
 
 ### 15.3 Monitoring
 
-Uptime Kuma: `nomal.kscw.ch/api/health`, worker heartbeat, oldest-queued-job age, GPU spend vs.
+Uptime Kuma: `wieplay.kscw.ch/api/health`, worker heartbeat, oldest-queued-job age, GPU spend vs.
 cap. Errors: structured JSON logs; frontend errors to the club's Sentry (new project).
 
 ---
@@ -2293,7 +2294,7 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 - An end-to-end run through the production image passed.
 - Wiedisync bridge: KSC-Wiedikon/wiedisync#8, merged and deployed to dev.
 
-**Live on dev since 15.10.2026**: https://nomal-dev.kscw.ch.
+**Live on dev since 15.10.2026**: https://wieplay-dev.kscw.ch.
 - `nomal_dev` database, Directus dev env and the `kscw-club` tunnel route are in place.
 - The first sync covered H3, D1, DU23-1 and Herren 1.
 
@@ -2329,7 +2330,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | # | Milestone | Contents | Done when |
 |---|---|---|---|
 | **S0** | Spike (before M1); **run 16.10.2026 on H3's YouTube games** ([report](research/spike-s0-2026-10.md)) | Film one match to the standard. On the Framework 16: off-the-shelf TrackNet + YOLO, look at the far court, run a draft `ml_analyse` and **measure GPU-hours per video**; one benchmark run on Infomaniak or OVHcloud (test-GPU line). Whistle detection on its audio. Done: ball trackers, YOLO, whistles; open: provider run, 4K originals, a whole match. | Capture standard confirmed or changed (4K, mount height); GPU-h/video measured on the Framework 16 and one provider |
-| **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the WiePlay brand (icons already in `docs/brand/icons/`); Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `nomal-dev.kscw.ch` with a Wiedisync dev account and see your WiePlay-enabled teams and games |
+| **M0** | Foundations | Repo, CI, local compose; FastAPI + React skeleton with the WiePlay brand (icons already in `docs/brand/icons/`); Alembic; Wiedisync bridge on **dev** + Wiedisync PR; tunnel hostname, DB, bucket; ADR-001 | Log in on `wieplay-dev.kscw.ch` with a Wiedisync dev account and see your WiePlay-enabled teams and games |
 | **M1** | Video in, video out | Job queue + Lenovo media worker; NAS inbox + browser multipart upload (split files); ingest + transcode + thumbnails; HLS with per-segment signing; adult hard gate + *filming allowed/blocked*; consent (dropped 16.10.2026, §5.4); audit log; DU23 decision applied | A real 2 h match plays on desktop, Android and an iPhone; a segment URL dies after 5 min; a non-member gets 403; a blocked team cannot upload |
 | **M2** | Tagging + condensed playback | Volleyball taxonomy; roster snapshot; grammar + hotkeys; timeline + event table; rally key + rally/score from tags; **skip dead time (manual)** with timeout/set-break keys; set boundaries + starting score; rally list filters (player, action, outcome, set); outbox; revision triggers | A full match tagged in ≤ 1.5× its length; condensed playback works; pulling the network cable loses nothing |
 | **M3** | Clips, reels, export, comments | Virtual clips; smart per-player reels; highlight builder across matches; comments pinned to a moment with @mentions and audience; drill segments for trainings; ffmpeg export with watermark (incl. condensed match) | A player opens "my attacks this season" on a phone; a coach downloads a watermarked condensed match |
