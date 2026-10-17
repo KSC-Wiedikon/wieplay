@@ -71,6 +71,7 @@ def court_result(
     method: str = "auto-hall",
     confidence: float = 0.82,
     bump: bool = True,
+    second: str = "bump",
     reference: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     setups: list[dict[str, Any]] = [
@@ -90,11 +91,11 @@ def court_result(
             {
                 "from_ms": BUMP_AT,
                 "to_ms": END,
-                "start": "bump",
+                "start": second,
                 "shift_px": 38.4,
                 "samples": 98,
-                "view": 0,
-                "to_main": SHIFT,
+                "view": 1 if second == "moved" else 0,
+                "to_main": EYE if second == "moved" else SHIFT,
             }
         )
         found.append({"points": corners(0.03)})
@@ -201,6 +202,17 @@ def _db() -> str:
 
     return TEST_DB
 
+
+
+def test_a_camera_carried_to_another_spot_is_a_setup_too(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
+) -> None:
+    # The worker calls a setup on another view "moved"; prod jobs failed on it (17.10.2026).
+    job = court_job(analyser, store)
+    complete(analyser, job, court_result(job, second="moved"))
+    state = court_of(club, ready)
+    assert state["court_job"] == "done"
+    assert [s["start"] for s in state["setups"]] == ["start", "moved"]
 
 def test_an_unsure_court_is_a_guess_and_a_weak_one_nothing(
     app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
