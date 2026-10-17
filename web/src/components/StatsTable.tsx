@@ -20,13 +20,13 @@ import { Table, TBody, THead } from './Table'
 /** What a number does when clicked: play its moments here, or open a page (a reel). */
 export type CellTarget = { kind: 'play'; onPlay: () => void } | { kind: 'link'; to: string }
 
-const STICKY = 'sticky left-0 z-[1]'
+export const STICKY = 'sticky left-0 z-[1]'
 
 /** A header cell; unlike Th it brings no padding of its own, so the numbers can sit tight. */
-function H({ className, scope = 'col', ...props }: ComponentProps<'th'>) {
+export function H({ className, scope = 'col', ...props }: ComponentProps<'th'>) {
   return <th scope={scope} className={cx('border-b border-hairline py-2.5 text-xs font-semibold whitespace-nowrap text-muted last:pr-4', className)} {...props} />
 }
-const GROUP_START = 'border-l border-hairline'
+export const GROUP_START = 'border-l border-hairline'
 
 /** Counts sit close together; percentages and ratings get a little more air. */
 function pad(column: Pick<StatColumn, 'format'>): string {
@@ -82,7 +82,6 @@ export function NumberCell({ value, text, label, target, selected, className, on
   )
 }
 
-/** "#7 Alex Muster", "#11", "Team", "Opponent". */
 /** "Jonas Keller" → "J. Keller"; a single name stays as it is. */
 function shortName(name: string): string {
   const parts = name.trim().split(/\s+/)

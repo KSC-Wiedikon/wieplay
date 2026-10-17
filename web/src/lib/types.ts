@@ -385,6 +385,8 @@ export interface Period {
   confidence?: number | null
   /** Our setter's zone (1..6) at the set's first serve (DataVolley P1..P6). Coach input. */
   start_rotation?: number | null
+  /** Our six shirt numbers in zones I..VI at that serve (null in a zone: not entered). Coach input. */
+  start_lineup?: (number | null)[] | null
   /** The model's guess of who served first in this set. */
   model_first_serve?: Side | null
   /** The model's guess of our side at the set's start. */
@@ -556,6 +558,8 @@ export interface PeriodIn extends ChangeBase {
   review?: Review
   /** Absent: the server keeps the current one. */
   start_rotation?: number | null
+  /** Absent: the server keeps the current one. */
+  start_lineup?: (number | null)[] | null
 }
 
 export interface ChangesIn {

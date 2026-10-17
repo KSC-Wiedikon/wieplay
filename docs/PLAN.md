@@ -1222,7 +1222,30 @@ the skill, an ungraded tag counts as an attempt that is neither a point nor an e
   Points, side-out % and break-point % per rotation, per set and for the match, from the
   coach's facts only (a winner is the coach's or the next rally's known server; where neither
   is known the walk stops for that set).
-- Not yet: zone heatmaps, the search bar, saved filters and the regrade queue.
+- Rotations and the setter (step 5a/5b, 17.10.2026), on tabs next to the box score ("Players",
+  "Rotations", "Setter"), per match, set and season:
+  - A set may carry its starting lineup (`period.start_lineup`: our six shirt numbers in zones
+    I-VI at the first serve), entered in the Sets bar next to the starting rotation (a court-
+    shaped dialog; marking the setter sets the starting rotation). After k side-outs zone I
+    holds who started in zone I + k.
+  - Per rotation: the team numbers above plus our serve (TA, aces, errors, efficiency),
+    reception (TA, positive %, efficiency = (# and + − = and /) ÷ TA) and attack (TA, kills,
+    hitting %) in its rallies; a rotation chart per rotation (our six at the serve, the setter
+    marked; with the setter's zone only, the setter and P1-P6). Every number plays its rallies
+    (the server sends each rotation's rallies with the winner the walk used). The opponent's
+    rotation is not tagged and not counted.
+  - Setter analysis, from the tags alone: each of our set tags (`E`) with the next tag of its
+    rally if that is our attack (attacker, zone from its `zone_from`, else the set's `zone_to`:
+    4 left, 3 middle, 2 right, 1 5-9 back row/pipe; kill, error, blocked, in play) and the tag
+    before it (our reception's grade: perfect #, good + !, poor - / =; anything else in the
+    rally: transition; nothing, an ungraded pass or their serve: unknown). Distribution per
+    attacker, zone, rotation, first contact and setter with kill % and hitting %, a court
+    heat map of the zones; every number plays its sets up to the attack. No tempo: the
+    taxonomy has none.
+  - API: `rotations` (richer) and `setter` on the match, each set and the season box,
+    `rotation_columns`; CSV `?part=rotations` and `?part=setter`. Season numbers of these two
+    tabs are not played (a smart reel can't name a rotation yet).
+- Not yet: zone heatmaps for serves, the search bar, saved filters and the regrade queue.
 
 ---
 

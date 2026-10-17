@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Analysis, Tagging, TeamDetail, Video } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
-import { boxScore, statRow, teamLine, videoStats } from '../test/stats'
+import { boxScore, rotationColumns, rotationLine, setterLine, setterStats, statRow, teamLine, videoStats } from '../test/stats'
 import { bundle, period, rally, tag } from '../test/tagging'
 import { VideoPage } from './VideoPage'
 
@@ -506,7 +506,7 @@ describe('VideoPage', () => {
 
     it('narrows the box score to a set; team numbers play their rallies', async () => {
       showStats()
-      const sets = await screen.findByRole('group', { name: 'Box score of' })
+      const sets = await screen.findByRole('group', { name: 'Stats for' })
       fireEvent.click(within(sets).getByRole('button', { name: 'Set 1' }))
       expect(within(sets).getByRole('button', { name: 'Set 1' })).toHaveAttribute('aria-pressed', 'true')
       expect(screen.getByRole('table', { name: 'Box score · Set 1' })).toBeInTheDocument()
@@ -659,41 +659,210 @@ describe('VideoPage', () => {
   })
 
   describe('stats per rotation', () => {
-    const set1 = period({ no: 1, start_ms: 0, first_serve: 'us', final_us: 1, final_them: 1, start_rotation: 1 })
-    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, serving: 'us', won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })
+    const LINEUP = [3, 7, 11, 9, 1, 14]
+    /** Who stands in zones I..VI in a rotation, the set starting in rotation 1. */
+    const turned = (r: number) => LINEUP.map((_, i) => LINEUP[(i + ((1 - r + 6) % 6)) % 6] ?? null)
+    const set1 = period({ no: 1, start_ms: 0, first_serve: 'them', final_us: 2, final_them: 1, start_rotation: 1, start_lineup: LINEUP })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, serving: 'them', won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })
+    const r2 = rally({ start_ms: 40_000, end_ms: 50_000, serving: 'us', won_by: 'them', period_id: set1.id, score_us_after: 1, score_them_after: 1 })
+    const r3 = rally({ start_ms: 70_000, end_ms: 80_000, serving: 'them', won_by: 'us', period_id: set1.id, score_us_after: 2, score_them_after: 1 })
     const kill = tag({ t_ms: 15_000, code: 'A', number: 7, attributes: { grade: '#' }, segment_id: r1.id })
-    const tagging = bundle({ can_tag: false, periods: [set1], segments: [r1], events: [kill] })
-    const rotations = [1, 2, 3, 4, 5, 6].map((rotation) => ({
-      rotation,
-      ...teamLine(rotation === 1 ? { rallies: 3, won: 2, lost: 1, side_out_won: 1, side_out_of: 1, side_out_pct: 1, break_point_won: 1, break_point_of: 2, break_point_pct: 0.5 } : {}),
-    }))
+    const serve = tag({ t_ms: 40_500, code: 'S', number: 7, attributes: { grade: '-' }, segment_id: r2.id })
+    const attack = tag({ t_ms: 74_000, code: 'A', number: 7, attributes: { grade: '+' }, segment_id: r3.id })
+    const tagging = bundle({ can_tag: true, periods: [set1], segments: [r1, r2, r3], events: [kill, serve, attack] })
+    const rotations = [1, 2, 3, 4, 5, 6].map((r) =>
+      rotationLine(r, {
+        lineup: turned(r),
+        ...(r === 1
+          ? { rallies: 1, won: 1, side_out_won: 1, side_out_of: 1, side_out_pct: 1, values: { att_ta: 1, att_kill: 1, att_hit: 1 }, plays: [{ id: r1.id, serving: 'them', won_by: 'us' }] }
+          : r === 6
+            ? {
+                rallies: 2,
+                won: 1,
+                lost: 1,
+                side_out_won: 1,
+                side_out_of: 1,
+                side_out_pct: 1,
+                break_point_of: 1,
+                break_point_pct: 0,
+                values: { serve_ta: 1, serve_ace: 0, serve_err: 0, serve_eff: 0, att_ta: 1, att_kill: 0, att_hit: 0 },
+                plays: [
+                  { id: r2.id, serving: 'us', won_by: 'them' },
+                  { id: r3.id, serving: 'them', won_by: 'us' },
+                ],
+              }
+            : {}),
+      }),
+    )
     const box = boxScore({ summary: teamLine({ rallies: 3, won: 2, lost: 1 }), rotations })
+    const stats = videoStats({ tags: 3, rallies: 3, match: box, rotation_columns: rotationColumns, sets: [{ ...box, no: 1, score_us: 2, score_them: 1, start_rotation: 1, start_lineup: LINEUP }] })
 
-    function showStats(stats: unknown) {
-      return show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagging }, [`/api/videos/${ID}/stats`]: { body: stats } })
+    function showStats(body: unknown = stats, bundleBody: Tagging = tagging) {
+      return show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: bundleBody }, [`/api/videos/${ID}/stats`]: { body } })
     }
 
-    beforeEach(() => window.localStorage.clear())
+    async function openTab(name: string) {
+      fireEvent.click(await screen.findByRole('tab', { name }))
+      expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true')
+    }
 
-    it('shows points per rotation for the match and the chosen set', async () => {
-      showStats(videoStats({ tags: 1, rallies: 3, match: box, sets: [{ ...box, no: 1, score_us: 1, score_them: 1, rotations: rotations.slice(0, 6).map((r) => (r.rotation === 1 ? { ...r, rallies: 2 } : r)) }] }))
-      const table = await screen.findByRole('table', { name: 'Points per rotation' })
-      const rows = within(table).getAllByRole('row')
-      expect(rows.map((r) => r.firstElementChild?.textContent)).toEqual(['Rotation', ...[1, 2, 3, 4, 5, 6].map((n) => `Rotation ${n}`)])
-      const first = within(rows[1] as HTMLElement).getAllByRole('cell').map((c) => c.textContent)
-      expect(first).toEqual(['3', '2', '1', '1', '1', '100.0%', '2', '1', '50.0%'])
-      // Plain numbers: no moments behind them to play.
-      expect(within(table).queryByRole('button')).not.toBeInTheDocument()
+    beforeEach(() => {
+      window.localStorage.clear()
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+    })
 
-      fireEvent.click(within(screen.getByRole('group', { name: 'Box score of' })).getByRole('button', { name: 'Set 1' }))
-      const set = screen.getByRole('table', { name: 'Points per rotation · Set 1' })
-      expect(within(within(set).getAllByRole('row')[1] as HTMLElement).getAllByRole('cell')[0]).toHaveTextContent('2')
+    it('shows points, side-out, break-point and our skills per rotation; the numbers play their rallies', async () => {
+      showStats()
+      await openTab('Rotations')
+      expect(screen.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/videos/${ID}/stats.csv?lang=en&part=rotations`)
+      const table = screen.getByRole('table', { name: 'Points per rotation' })
+      const rows = within(table).getAllByRole('row').slice(2) // two header rows
+      expect(rows.map((r) => r.firstElementChild?.textContent)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `Rotation ${n}`))
+      const first = within(rows[0] as HTMLElement).getAllByRole('cell').map((c) => c.textContent)
+      // Rallies; won, lost; received, side-outs, %; served, break points, %; serve (4), reception (3), attack (3).
+      expect(first).toEqual(['1', '1', '0', '1', '1', '100.0%', '0', '0', '–', '–', '–', '–', '–', '–', '–', '–', '1', '1', '100.0%'])
+
+      fireEvent.click(within(table).getByRole('button', { name: 'Play Rotation 6, Rallies lost: 1' }))
+      const player = document.querySelector('video') as HTMLVideoElement
+      expect(player.currentTime).toBe(38) // rally 2, 2 s before
+      expect(screen.getByText('Playing Rally 2 · 1:1')).toBeInTheDocument()
+      // Our tags of the column in the rotation's rallies: the attack in rally 3.
+      fireEvent.click(within(table).getByRole('button', { name: /^Play Rotation 6, Hitting/ }))
+      expect(player.currentTime).toBe(71)
+      expect(screen.getByText('Playing #7 Luca Brunner · Attack · + Good · 1:14')).toBeInTheDocument()
+    })
+
+    it('draws a court per rotation with our six and the setter', async () => {
+      showStats()
+      await openTab('Rotations')
+      const charts = screen.getByRole('list', { name: 'Rotation charts' })
+      const cards = within(charts).getAllByRole('listitem')
+      expect(cards).toHaveLength(6)
+      const six = cards[5] as HTMLElement
+      expect(within(six).getByText('P6')).toBeInTheDocument()
+      expect(within(six).getByText('Setter #3')).toBeInTheDocument()
+      const court = within(six).getByRole('img', { name: /Rotation 6: where we stand at the serve/ })
+      expect(court.getAttribute('aria-label')).toContain('Zone I: #7 L. Brunner')
+      expect(court.getAttribute('aria-label')).toContain('Zone VI: #3 M. Keller (Setter)')
+      expect(court.querySelector('[data-setter]')?.getAttribute('data-zone')).toBe('6')
+      expect(within(six).getByText('±0')).toBeInTheDocument()
+      fireEvent.click(within(six).getByRole('button', { name: 'Play Rotation 6, Side-outs: rallies we received and won: 1' }))
+      expect((document.querySelector('video') as HTMLVideoElement).currentTime).toBe(68)
+      // A rotation without rallies: its numbers are plain.
+      expect(within(cards[2] as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+    })
+
+    it('shows the setter only where no lineup was entered', async () => {
+      const bare = rotations.map((r) => ({ ...r, lineup: null }))
+      showStats({ ...stats, match: { ...box, rotations: bare } })
+      await openTab('Rotations')
+      expect(screen.getByText(/With the lineup per set/)).toBeInTheDocument()
+      const court = screen.getAllByTestId('rotation-court')[2] as unknown as SVGElement
+      expect(court.querySelector('[data-setter] [data-label]')?.textContent).toBe('S')
+      expect(screen.getByText('Setter in zone III')).toBeInTheDocument()
+    })
+
+    it('narrows the rotations to a set', async () => {
+      showStats()
+      await openTab('Rotations')
+      fireEvent.click(within(screen.getByRole('group', { name: 'Stats for' })).getByRole('button', { name: 'Set 1' }))
+      expect(screen.getByRole('table', { name: 'Points per rotation · Set 1' })).toBeInTheDocument()
+      // The tabs keep their place.
+      expect(screen.getByRole('tab', { name: 'Rotations' })).toHaveAttribute('aria-selected', 'true')
     })
 
     it('says the starting rotation per set is needed when there is none', async () => {
       showStats(videoStats({ tags: 1, rallies: 3, match: { ...box, rotations: null } }))
-      expect(await screen.findByText(/need the starting rotation of each set: set it in the sets bar on the tagging page/)).toBeInTheDocument()
+      await openTab('Rotations')
+      expect(screen.getByText('No rotations yet')).toBeInTheDocument()
+      expect(screen.getByText(/Rotations need each set's starting rotation/)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Open the tagging page' })).toHaveAttribute('href', `/videos/${ID}/tag`)
       expect(screen.queryByRole('table', { name: 'Points per rotation' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('setter analysis', () => {
+    const set1 = period({ no: 1, start_ms: 0, first_serve: 'them', start_rotation: 1 })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, serving: 'them', won_by: 'us', period_id: set1.id })
+    const r2 = rally({ start_ms: 40_000, end_ms: 50_000, serving: 'them', won_by: 'them', period_id: set1.id })
+    const pass = tag({ t_ms: 12_000, code: 'R', number: 11, member_id: 111, attributes: { grade: '#' }, segment_id: r1.id })
+    const set = tag({ t_ms: 13_000, code: 'E', number: 3, member_id: 103, segment_id: r1.id })
+    const kill = tag({ t_ms: 14_000, code: 'A', number: 7, attributes: { grade: '#', zone_from: 4 }, segment_id: r1.id })
+    const set2 = tag({ t_ms: 43_000, code: 'E', number: 3, member_id: 103, segment_id: r2.id })
+    const tagging = bundle({ can_tag: false, periods: [set1], segments: [r1, r2], events: [pass, set, kill, set2] })
+    const base = { attacker: null, attacker_member: null, setter: 3, setter_member: 103, rally_id: null, set_no: 1 }
+    const plays = [
+      { ...base, set_id: set.id, attack_id: kill.id, t_ms: 13_000, attacker: 7, attacker_member: 107, zone: 'left', rotation: 1, quality: 'perfect', outcome: 'kill', attacked: true },
+      { ...base, set_id: set2.id, attack_id: null, t_ms: 43_000, zone: null, rotation: 6, quality: 'transition', outcome: null, attacked: false },
+    ] as const
+    const line = { sets: 1, attacks: 1, share: 1, zones: { left: 1 }, kills: 1, kill_pct: 1, hit_pct: 1 }
+    const setter = setterStats({
+      sets: 2,
+      attacks: 1,
+      by_attacker: [setterLine('7', { ...line, filter: { attacker: 7 }, number: 7, member_id: 107, name: 'Luca Brunner' })],
+      by_zone: [setterLine('left', { ...line, filter: { attacked: true, zone: 'left' } })],
+      by_rotation: [1, 2, 3, 4, 5, 6].map((r) =>
+        r === 1 ? setterLine('1', { ...line, filter: { rotation: 1 } }) : setterLine(String(r), { filter: { rotation: r }, sets: r === 6 ? 1 : 0 }),
+      ),
+      by_reception: [setterLine('perfect', { ...line, filter: { quality: 'perfect' } }), setterLine('transition', { filter: { quality: 'transition' }, sets: 1 })],
+      by_setter: [setterLine('3', { ...line, sets: 2, share: 1, filter: { setter: 3 }, number: 3, name: 'Mia Keller' })],
+      plays: [...plays],
+    })
+    const stats = videoStats({ tags: 4, rallies: 2, match: boxScore({ setter }), sets: [{ ...boxScore({ setter: { ...setter, plays: null } }), no: 1, score_us: 1, score_them: 1 }] })
+
+    function showStats(body: unknown = stats) {
+      return show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagging }, [`/api/videos/${ID}/stats`]: { body } })
+    }
+
+    beforeEach(() => {
+      window.localStorage.clear()
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+    })
+
+    it('shows where the sets went; a number plays its sets up to the attack', async () => {
+      showStats()
+      fireEvent.click(await screen.findByRole('tab', { name: 'Setter' }))
+      expect(screen.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/videos/${ID}/stats.csv?lang=en&part=setter`)
+      expect(screen.getByRole('status')).toHaveTextContent('2 sets tagged · 1 followed by our attack')
+      const left = screen.getByRole('button', { name: /^Play Left: 100.0% of the attacks \(1\)/ })
+      fireEvent.click(left)
+      const player = document.querySelector('video') as HTMLVideoElement
+      expect(player.currentTime).toBe(11) // the set, 2 s before
+      expect(screen.getByText('Playing #3 Mia Keller sets #7 Luca Brunner · Kill · 0:13')).toBeInTheDocument()
+
+      const attackers = screen.getByRole('table', { name: 'By attacker' })
+      const row = within(attackers).getByRole('rowheader', { name: /#7/ }).closest('tr') as HTMLTableRowElement
+      expect(within(row).getAllByRole('cell').map((c) => c.textContent)).toEqual(['1', '1', '100.0%', '1', '0', '0', '100.0%', '100.0%'])
+      const rotations = screen.getByRole('table', { name: 'By rotation' })
+      const one = within(rotations).getByRole('rowheader', { name: 'Rotation 1' }).closest('tr') as HTMLTableRowElement
+      expect(within(one).getAllByRole('cell')[3]).toHaveTextContent('100.0% (1)') // left
+      expect(screen.getByRole('table', { name: 'By first contact' })).toHaveTextContent('Perfect pass')
+      // One setter: no table of setters.
+      expect(screen.queryByRole('table', { name: 'By setter' })).not.toBeInTheDocument()
+
+      // The sets without an attack after them.
+      fireEvent.click(screen.getByRole('button', { name: 'Play No attack after the set: 1' }))
+      expect(player.currentTime).toBe(41)
+      expect(screen.getByText('Playing #3 Mia Keller sets · No attack · 0:43')).toBeInTheDocument()
+    })
+
+    it('says what to tag when there are no sets', async () => {
+      showStats(videoStats({ tags: 2, rallies: 2, match: boxScore({ setter: setterStats() }) }))
+      fireEvent.click(await screen.findByRole('tab', { name: 'Setter' }))
+      expect(screen.getByText('No sets tagged yet')).toBeInTheDocument()
+      expect(screen.getByText(/reads our set tags \(E, e.g. 3E\)/)).toBeInTheDocument()
+    })
+
+    it('moves between the tabs with the arrow keys', async () => {
+      showStats()
+      const players = await screen.findByRole('tab', { name: 'Players' })
+      expect(players).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', players.id)
+      fireEvent.keyDown(players, { key: 'ArrowLeft' })
+      expect(screen.getByRole('tab', { name: 'Setter' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tab', { name: 'Setter' })).toHaveFocus()
+      fireEvent.keyDown(screen.getByRole('tab', { name: 'Setter' }), { key: 'Home' })
+      expect(players).toHaveAttribute('aria-selected', 'true')
     })
   })
 })

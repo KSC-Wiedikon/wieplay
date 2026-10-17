@@ -1,5 +1,5 @@
 import '../i18n/pages'
-import { useId } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { ActionGateNote } from '../components/ActionGateNote'
@@ -7,9 +7,12 @@ import { buttonClasses } from '../components/buttonStyles'
 import { ChartIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, LoadError } from '../components/Message'
 import { SectionHeader } from '../components/PageHeader'
+import { RotationStats } from '../components/RotationStats'
+import { SetterStats } from '../components/SetterStats'
 import { Spinner } from '../components/Spinner'
 import { StatsLegend, StatsTable, TeamTable, type TeamTableRow } from '../components/StatsTable'
-import { SuggestedHint } from '../components/VideoStats'
+import { TabPanel, Tabs } from '../components/Tabs'
+import { SuggestedHint, type StatsTab } from '../components/VideoStats'
 import { formatDate } from '../lib/format'
 import { reelLink, teamCsvUrl, useTeamStats, type MatchLine } from '../lib/stats'
 import type { TeamDetail } from '../lib/types'
@@ -34,6 +37,8 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
   const data = stats.data
   const tagged = (data?.tagged ?? 0) > 0
   const lang = i18n.language === 'de' ? 'de' : 'en'
+  const [tab, setTab] = useState<StatsTab>('players')
+  const names = useMemo(() => new Map((data?.season_box.players ?? []).flatMap((p) => (p.number !== null && p.name ? [[p.number, p.name] as const] : []))), [data])
 
   const rows: TeamTableRow[] = data
     ? [
@@ -64,12 +69,12 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
         title={t('stats.seasonTitle')}
         hint={
           data && data.videos > 0
-            ? [t('stats.tagged', { tagged: data.tagged, count: data.videos }), tagged ? t('stats.hintSeason') : null].filter(Boolean).join(' · ')
+            ? [t('stats.tagged', { tagged: data.tagged, count: data.videos }), tagged && tab === 'players' ? t('stats.hintSeason') : null].filter(Boolean).join(' · ')
             : undefined
         }
         action={
           tagged ? (
-            <a href={teamCsvUrl(team.id, lang)} download className={buttonClasses({ variant: 'secondary' })}>
+            <a href={teamCsvUrl(team.id, lang, tab === 'players' ? 'box' : tab)} download className={buttonClasses({ variant: 'secondary' })}>
               <DownloadIcon className="size-4" />
               {t('stats.csv')}
             </a>
@@ -86,30 +91,60 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
           {t('stats.seasonEmpty.body')}
         </EmptyState>
       ) : (
-        <div className="flex flex-col gap-6">
-          <StatsTable
-            caption={`${t('stats.seasonTitle')} · ${team.name} ${team.season}`}
-            columns={data.columns}
-            players={data.season_box.players}
-            team={data.season_box.team}
-            opponent={data.season_box.opponent}
-            showMatches
-            target={(row, column) => {
-              const to = reelLink(team, row.filter, column)
-              return to ? { kind: 'link', to } : null
-            }}
+        <div className="flex flex-col gap-4">
+          <Tabs
+            id={id}
+            label={t('stats.tabs.label')}
+            value={tab}
+            options={[
+              { value: 'players', label: t('stats.tabs.players') },
+              { value: 'rotations', label: t('stats.tabs.rotations') },
+              { value: 'setter', label: t('stats.tabs.setter') },
+            ]}
+            onChange={setTab}
           />
-          <div className="flex flex-col gap-2">
-            <h3 className="font-semibold">{t('stats.team.seasonTitle')}</h3>
-            <TeamTable
-              caption={t('stats.team.seasonTitle')}
-              first={t('stats.team.match')}
-              scoreLabel={t('stats.team.result')}
-              rows={rows}
-              target={() => null}
-            />
-          </div>
-          <StatsLegend columns={data.columns} matches />
+          <TabPanel id={id} value={tab} className="flex flex-col gap-6">
+            {tab === 'players' && (
+              <>
+                <StatsTable
+                  caption={`${t('stats.seasonTitle')} · ${team.name} ${team.season}`}
+                  columns={data.columns}
+                  players={data.season_box.players}
+                  team={data.season_box.team}
+                  opponent={data.season_box.opponent}
+                  showMatches
+                  target={(row, column) => {
+                    const to = reelLink(team, row.filter, column)
+                    return to ? { kind: 'link', to } : null
+                  }}
+                />
+                <div className="flex flex-col gap-2">
+                  <h3 className="font-semibold">{t('stats.team.seasonTitle')}</h3>
+                  <TeamTable
+                    caption={t('stats.team.seasonTitle')}
+                    first={t('stats.team.match')}
+                    scoreLabel={t('stats.team.result')}
+                    rows={rows}
+                    target={() => null}
+                  />
+                </div>
+                <StatsLegend columns={data.columns} matches />
+              </>
+            )}
+            {tab === 'rotations' && (
+              <RotationStats
+                rotations={data.season_box.rotations}
+                columns={data.rotation_columns ?? []}
+                scope={null}
+                names={names}
+                hint={`${t('stats.rotations.hint')} ${t('stats.rotations.seasonHint')}`}
+                team={() => null}
+                skill={() => null}
+                playable={false}
+              />
+            )}
+            {tab === 'setter' && <SetterStats setter={data.season_box.setter} target={() => null} hint={t('stats.setter.seasonHint')} scope={null} />}
+          </TabPanel>
         </div>
       )}
     </section>
