@@ -26,7 +26,7 @@ from sqlalchemy import select
 
 from nomal.api.access import TeamAccess, visible_video
 from nomal.api.deps import DbDep, SettingsDep, ViewerDep, audit
-from nomal.core import actions, analysis, scoring, tagging
+from nomal.core import actions, analysis, players, scoring, tagging
 from nomal.core.config import Settings
 from nomal.core.models import Job, ModelRun, Segment, Video
 from nomal.core.permissions import Viewer, can_delete_video, can_tag, can_upload
@@ -173,6 +173,26 @@ class ActionGateOut(BaseModel):
     trained_at: datetime | None
 
 
+class PlayersSummaryOut(BaseModel):
+    """The players of the video (PLAN §10.5; the gallery: GET /api/videos/{id}/players)."""
+
+    status: str  # none | queued | running | done | failed (the newest players job)
+    run_id: uuid.UUID | None
+    clusters: int  # people found (merged ones folded, "not a player" excluded)
+    named: int  # of them, with a number from the coach
+    clusters_us: int
+    clusters_them: int
+    numbers_read: int  # clusters with a number the reader suggests
+    # Hudl's "% identified": actions with a player (the coach's or Nomal's)
+    actions: int
+    identified: int
+    identified_share: float | None
+    suggested: int
+    # Nomal's players against the coach's numbers where both exist
+    compared: int
+    accuracy: float | None
+
+
 class ActionsOut(BaseModel):
     """The suggested actions of the video (PLAN §10.4a)."""
 
@@ -211,6 +231,7 @@ class AnalysisOut(BaseModel):
     rally_model: RallyModelOut
     scoring: ScoringOut | None = None
     actions: ActionsOut | None = None
+    players: PlayersSummaryOut | None = None
 
 
 class ReviewedIn(BaseModel):
@@ -361,6 +382,37 @@ def _actions(db: DbDep, video: Video, settings: Settings) -> ActionsOut | None:
     )
 
 
+def _players(db: DbDep, video: Video) -> PlayersSummaryOut | None:
+    if video.sport not in players.SPORTS:
+        return None
+    run = players.latest_run(db, video.id)
+    job = players.latest_job(db, video.id)
+    if run is None and job is None:
+        return None
+    rows = players.clusters(db, video.id) if run is not None else []
+    people = [c for c in rows if not c.not_player]
+    found = ((run.metrics or {}).get("attribution") if run is not None else None) or {}
+    vs = found.get("vs_coach") or {}
+    status = STATUS.get(job.status, job.status) if job is not None else "done"
+    if job is not None and job.status == "leased":
+        status = "running"
+    return PlayersSummaryOut(
+        status=status,
+        run_id=run.id if run is not None else None,
+        clusters=len(people),
+        named=sum(1 for c in people if c.number is not None),
+        clusters_us=sum(1 for c in people if c.team == "us"),
+        clusters_them=sum(1 for c in people if c.team == "them"),
+        numbers_read=sum(1 for c in people if c.ocr_number is not None),
+        actions=int(found.get("actions", 0)),
+        identified=int(found.get("identified", 0)),
+        identified_share=found.get("identified_share"),
+        suggested=int(found.get("suggested", 0)),
+        compared=int(vs.get("compared", 0)),
+        accuracy=vs.get("accuracy"),
+    )
+
+
 def analysis_out(
     db: DbDep, video: Video, viewer: Viewer, access: TeamAccess, settings: Settings
 ) -> AnalysisOut:
@@ -423,6 +475,7 @@ def analysis_out(
         rally_model=_rally_model(db),
         scoring=_scoring(db, video),
         actions=_actions(db, video, settings),
+        players=_players(db, video),
     )
 
 

@@ -3,8 +3,28 @@
 # Deno >= 2.3 (or Node >= 22); Debian's Node 20 is too old and YouTube then answers 403.
 # The `analysis` extra (numpy, ONNX Runtime CPU, scikit-learn, OpenCV headless for the
 # court: PLAN §10.6) runs the automatic analysis (PLAN §10.1); the API image does without it.
+# The players job (PLAN §10.5) needs a person detector and a shirt-number reader as ONNX:
+# a first, throw-away stage installs PyTorch (CPU) and Ultralytics only to export YOLO26s and
+# fetch the OCR models (scripts/ml/player_weights.py, every download SHA-256 checked); the
+# worker image gets the ONNX files in /opt/nomal-weights and no PyTorch.
 #   docker build -f Dockerfile.worker -t nomal-worker:<tag> .
 # Runs `python -m nomal.worker`; settings come from NOMAL_WORKER_* (deploy/lenovo/).
+
+FROM python:3.12-slim-trixie AS player-weights
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    YOLO_OFFLINE=1
+# OpenCV (an Ultralytics dependency) needs these to import.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip install --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.14.1+cpu torchvision==0.29.1+cpu \
+ && pip install ultralytics==8.4.178 onnx==1.23.2 onnxslim==0.1.98 onnxruntime==1.31.0
+COPY scripts/ml/player_weights.py /tmp/player_weights.py
+WORKDIR /tmp
+RUN python /tmp/player_weights.py /weights
 
 FROM python:3.12-slim-trixie
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -27,6 +47,7 @@ RUN uv sync --frozen --no-dev --extra analysis && useradd --system --uid 10001 -
 # host user that owns the NAS share (any uid), so the folder is world-writable and sticky;
 # a new named volume copies this mode, an existing one needs `chmod 1777` once.
 RUN mkdir -p /work && chmod 1777 /work
+COPY --from=player-weights /weights /opt/nomal-weights
 ENV PATH="/app/.venv/bin:$PATH"
 USER nomal
 CMD ["python", "-m", "nomal.worker"]

@@ -23,6 +23,7 @@ analysis = [
     "numpy>=2.3",
     "opencv-python-headless==4.14.0.94",
     "onnxruntime>=1.22",
+    "pillow>=11.3",
     "scikit-learn>=1.7",
 ]
 
