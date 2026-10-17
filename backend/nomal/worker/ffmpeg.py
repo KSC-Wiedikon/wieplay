@@ -133,6 +133,50 @@ def concat_list(inputs: Sequence[str], target: Path) -> Path:
     return target
 
 
+class Parts:
+    """A video's camera files in order: a moment of the video → (file, offset in it).
+
+    Seeking with `-ss` before `-i` on one MP4 jumps to the nearest key frame; through the
+    concat demuxer it decodes from the start of the file, minutes per seek on a 2 h match
+    (seen on prod, 17.10.2026: the court job took 55 min for ~300 frames). File lengths come
+    from ffprobe, once, and only when there is more than one file."""
+
+    def __init__(self, inputs: Sequence[str]) -> None:
+        self.files = [Path(item) for item in inputs]
+        if not self.files:
+            raise FfmpegError("no input files")
+        self._starts: list[float] | None = [0.0] if len(self.files) == 1 else None
+
+    def _ensure_starts(self) -> list[float]:
+        if self._starts is None:
+            starts, at = [], 0.0
+            for path in self.files:
+                starts.append(at)
+                at += probe_duration_s(path)
+            self._starts = starts
+        return self._starts
+
+    def locate(self, at_s: float) -> tuple[Path, float]:
+        starts = self._ensure_starts()
+        index = max(i for i, start in enumerate(starts) if start <= max(at_s, 0.0))
+        return self.files[index], max(at_s - starts[index], 0.0)
+
+
+def probe_duration_s(path: Path) -> float:
+    """A file's length in seconds (ffprobe, container duration)."""
+    out = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ],
+        capture_output=True, text=True, timeout=60, check=False,
+    )  # fmt: skip
+    try:
+        return float(out.stdout.strip())
+    except ValueError as exc:
+        raise FfmpegError(f"could not read the length of {path.name}") from exc
+
+
 def even(value: float) -> int:
     return max(2, round(value / 2) * 2)
 

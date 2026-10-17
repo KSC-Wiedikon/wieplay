@@ -14,7 +14,6 @@ import logging
 import os
 import subprocess
 import time
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -36,12 +35,12 @@ def _nice() -> None:
     os.nice(NICE)
 
 
-def _grab(concat: Path, at_s: float, size: tuple[int, int]) -> np.ndarray | None:
+def _grab(parts: ffmpeg.Parts, at_s: float, size: tuple[int, int]) -> np.ndarray | None:
     w, h = size
+    source, offset = parts.locate(at_s)  # seek in the camera file, not the concat demuxer
     args = [
         "ffmpeg", "-hide_banner", "-nostdin", "-v", "error",
-        "-ss", f"{at_s:.2f}", *ffmpeg.input_guard(concat=True),
-        "-f", "concat", "-safe", "0", "-i", str(concat),
+        "-ss", f"{offset:.2f}", *ffmpeg.input_guard(), "-i", str(source),
         "-frames:v", "1", "-an", "-vf", f"scale={w}:{h}:flags=area",
         "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
     ]  # fmt: skip
@@ -55,14 +54,14 @@ def _grab(concat: Path, at_s: float, size: tuple[int, int]) -> np.ndarray | None
 
 def median_frame(ctx: Context, duration_ms: int, frames: int = COURT_FRAMES) -> np.ndarray | None:
     """The hall without its players: the median of frames spread over the video."""
-    concat = ffmpeg.concat_list(raw_inputs(ctx), ctx.scratch / "court.ffconcat")
+    parts = ffmpeg.Parts(raw_inputs(ctx))
     duration_s = max(duration_ms / 1000, 1.0)
     grabbed = []
     for i in range(frames):
         if ctx.cancel.is_set():
             raise ffmpeg.Cancelled()
         at = duration_s * (0.08 + 0.84 * i / max(frames - 1, 1))
-        frame = _grab(concat, at, COURT_SIZE)
+        frame = _grab(parts, at, COURT_SIZE)
         if frame is not None:
             grabbed.append(frame)
         ctx.report(0.4 + 0.4 * (i + 1) / frames, "finding the court")
