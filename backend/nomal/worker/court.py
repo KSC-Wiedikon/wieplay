@@ -53,14 +53,15 @@ def _nice() -> None:
     os.nice(NICE)
 
 
-def grab(concat: Path, at_s: float, *, key: bool) -> np.ndarray | None:
-    """An RGB frame at SIZE: the key frame at or after `at_s` (fast), or the exact one."""
+def grab(parts: ffmpeg.Parts, at_s: float, *, key: bool) -> np.ndarray | None:
+    """An RGB frame at SIZE: the key frame at or after `at_s` (fast), or the exact one. Seeks
+    in the camera file itself (ffmpeg.Parts), never through the concat demuxer."""
     w, h = SIZE
+    source, offset = parts.locate(at_s)
     args = [
         "ffmpeg", "-hide_banner", "-nostdin", "-v", "error",
-        *(["-skip_frame", "nokey"] if key else []),
-        "-ss", f"{max(at_s, 0.0):.3f}", *ffmpeg.input_guard(concat=True),
-        "-f", "concat", "-safe", "0", "-i", str(concat),
+        *(["-skip_frame", "nokey", "-noaccurate_seek"] if key else []),
+        "-ss", f"{offset:.3f}", *ffmpeg.input_guard(), "-i", str(source),
         "-frames:v", "1", "-an", "-vf", f"scale={w}:{h}:flags=area",
         "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
     ]  # fmt: skip
@@ -243,7 +244,11 @@ def points_of(h_px: np.ndarray, size: tuple[int, int]) -> dict[str, list[float]]
 
 
 def _median(
-    ctx: Context, concat: Path, times: list[int], members: list[int], progress: tuple[float, float]
+    ctx: Context,
+    parts: ffmpeg.Parts,
+    times: list[int],
+    members: list[int],
+    progress: tuple[float, float],
 ) -> np.ndarray | None:
     """The empty hall: the median of up to MEDIAN_FRAMES frames of a setup."""
     pick = [
@@ -255,7 +260,7 @@ def _median(
     for k, i in enumerate(pick):
         if ctx.cancel.is_set():
             raise ffmpeg.Cancelled()
-        frame = grab(concat, times[i] / 1000, key=True)
+        frame = grab(parts, times[i] / 1000, key=True)
         if frame is not None:
             frames.append(frame)
         ctx.report(
@@ -297,7 +302,7 @@ def run(ctx: Context) -> dict[str, Any]:
     started = time.perf_counter()
     params = ctx.job.params
     root, out = _out_dir(ctx)
-    concat = ffmpeg.concat_list(raw_inputs(ctx), ctx.scratch / "court.ffconcat")
+    parts = ffmpeg.Parts(raw_inputs(ctx))
     duration_ms = int(params.get("duration_ms") or 0)
     if duration_ms <= 0:
         raise PermanentError("the video has no duration")
@@ -309,7 +314,7 @@ def run(ctx: Context) -> dict[str, Any]:
     for i, t in enumerate(times):
         if ctx.cancel.is_set():
             raise ffmpeg.Cancelled()
-        frame = grab(concat, t / 1000, key=True)
+        frame = grab(parts, t / 1000, key=True)
         feats.append(reg.features(frame, "orb") if frame is not None else None)
         ctx.report(0.5 * (i + 1) / len(times), "following the camera")
     if sum(f is not None for f in feats) < 3:
@@ -318,7 +323,7 @@ def run(ctx: Context) -> dict[str, Any]:
     def at(t_ms: int) -> reg.Features | None:
         # Key frames again: a second or a few apart, as close as a bump needs to be placed,
         # and fast (an exact frame decodes everything since the last key frame).
-        frame = grab(concat, t_ms / 1000, key=True)
+        frame = grab(parts, t_ms / 1000, key=True)
         return reg.features(frame, "orb") if frame is not None else None
 
     setups = court_segments.find(times, feats, duration_ms, grab=at)
@@ -344,7 +349,7 @@ def run(ctx: Context) -> dict[str, Any]:
         vm = court_segments.main_setup(setups, view)
         view_main[view] = vm
         span = (0.5 + 0.3 * n / len(views), 0.5 + 0.3 * (n + 1) / len(views))
-        hall = _median(ctx, concat, times, setups[vm].samples, (span[0], (span[0] + span[1]) / 2))
+        hall = _median(ctx, parts, times, setups[vm].samples, (span[0], (span[0] + span[1]) / 2))
         if hall is None:
             if view == setups[main].view:
                 raise PermanentError("could not read frames of the video")

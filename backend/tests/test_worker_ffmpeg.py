@@ -197,3 +197,18 @@ def test_export_pieces_with_watermark_join_into_one_mp4(parts: list[Path], tmp_p
         capture_output=True, text=True, check=True,
     ).stdout.strip()  # fmt: skip
     assert 172 <= int(joined) <= 175  # 3.5 s at 50 fps; at most a frame lost per cut
+
+
+def test_parts_map_a_moment_to_its_camera_file(parts: list[Path]) -> None:
+    """Seeks go into the camera file itself (the concat demuxer decodes from the start)."""
+    lengths = [ffmpeg.probe_duration_s(p) for p in parts]
+    assert all(length > 0 for length in lengths)
+    split = ffmpeg.Parts([str(p) for p in parts])
+    assert split.locate(0.0) == (parts[0], 0.0)
+    source, offset = split.locate(lengths[0] + 0.5)
+    assert source == parts[1] and offset == pytest.approx(0.5, abs=0.01)
+    assert split.locate(-3.0) == (parts[0], 0.0)
+    single = ffmpeg.Parts([str(parts[0])])
+    assert single.locate(1.25) == (parts[0], 1.25)  # one file: no ffprobe needed
+    with pytest.raises(ffmpeg.FfmpegError):
+        ffmpeg.Parts([])
