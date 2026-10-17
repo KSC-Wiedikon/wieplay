@@ -12,19 +12,26 @@ import {
 } from '../lib/condensed'
 import { cx } from '../lib/cx'
 import { formatDuration } from '../lib/format'
+import { ApiError } from '../lib/api'
 import { formatClock, sideLabel } from '../lib/labels'
 import { usePlayhead, type Playhead } from '../lib/playhead'
 import { ralliesOf } from '../lib/rallies'
+import { fullNameOf, useSideNames } from '../lib/sides'
 import { readStorage, writeStorage } from '../lib/storage'
 import { effectiveWinner, scoreAfter } from '../lib/suggestions'
-import type { Segment, Tagging } from '../lib/types'
+import { useToast } from '../lib/toast'
+import type { Segment, Side, Tagging } from '../lib/types'
 import { useCondensedPlayback } from '../lib/useCondensedPlayback'
+import { useSetWinner } from '../lib/winner'
 import { Badge } from './Badge'
+import { Button } from './Button'
 import { Card } from './Card'
-import { SuggestedValue } from './ScoringMarks'
+import { UndoIcon } from './icons'
+import { ScoreHead, SuggestedValue } from './ScoringMarks'
 import { Switch } from './Switch'
 import { Table, TBody, Td, Th, THead, Tr } from './Table'
 import { TagFilters } from './TagFilters'
+import { WinnerPicker } from './WinnerPicker'
 
 const SKIP_KEY = 'nomal-skip-dead-time'
 
@@ -35,14 +42,28 @@ interface RallyPanelProps {
   playhead: Playhead
   /** While a clip plays, skipping dead time waits. */
   suspended?: boolean
-  /** Next to the switch, e.g. "Download as MP4" for coaches. */
+  /** Next to the switch. */
   action?: ReactNode
+  /** Coaches set who won a rally here (the video's id): a fact the score line follows. */
+  editVideoId?: string | null
+}
+
+/** The last winner set here, to take back. */
+interface LastCall {
+  rally: Segment
+  n: number
+  before: Side | null
+  after: Side | null
 }
 
 /** Condensed playback (PLAN §9.5) for everyone who can watch: rallies only, a rally list, filters. */
-export function RallyPanel({ tagging, duration_ms, element, playhead, suspended = false, action }: RallyPanelProps) {
+export function RallyPanel({ tagging, duration_ms, element, playhead, suspended = false, action, editVideoId = null }: RallyPanelProps) {
   const { t } = useTranslation()
   const id = useId()
+  const names = useSideNames()
+  const toast = useToast()
+  const setWinner = useSetWinner(editVideoId ?? '')
+  const [last, setLast] = useState<LastCall | null>(null)
   const [skip, setSkip] = useState(() => readStorage(SKIP_KEY) !== 'off')
   const [filter, setFilter] = useState<TagFilter>(NO_FILTER)
 
@@ -67,6 +88,25 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
   const play = (rally: Segment) => {
     playhead.seek(rally.start_ms - PRE_ROLL_MS)
     playhead.play()
+  }
+
+  // Shown at once (the score line too), with a way back.
+  const pick = (rally: Segment, n: number, won_by: Side | null, undo = false) => {
+    setLast(undo ? null : { rally, n, before: rally.won_by ?? null, after: won_by })
+    setWinner.mutate(
+      { rally, won_by },
+      {
+        onError: (error) => {
+          setLast(null)
+          toast.error(t('winner.failed', { detail: error instanceof ApiError ? error.detail : t('common.error') }))
+        },
+      },
+    )
+  }
+  const undo = () => {
+    if (!last) return
+    const now = tagging.segments.find((s) => s.id === last.rally.id)
+    if (now) pick(now, last.n, last.before, true)
   }
 
   return (
@@ -118,7 +158,7 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
                   <Th>{t('tagging.condensed.rally')}</Th>
                   <Th>{t('tagging.filters.set')}</Th>
                   <Th className="hidden sm:table-cell">{t('tagging.condensed.time')}</Th>
-                  <Th>{t('tagging.condensed.score')}</Th>
+                  <ScoreHead />
                   <Th>{t('tagging.condensed.point')}</Th>
                 </tr>
               </THead>
@@ -155,15 +195,23 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
                       <Td className="font-semibold tabular-nums">
                         {score ? <SuggestedValue suggested={score.suggested}>{score.text}</SuggestedValue> : '–'}
                       </Td>
-                      <Td>
-                        {winner.value === null ? (
-                          '–'
-                        ) : winner.suggested ? (
-                          <SuggestedValue suggested>{sideLabel(t, winner.value)}</SuggestedValue>
-                        ) : (
-                          <Badge tone={winner.value === 'us' ? 'accent' : 'neutral'}>{sideLabel(t, winner.value)}</Badge>
-                        )}
-                      </Td>
+                      {editVideoId ? (
+                        <Td tight>
+                          <WinnerPicker rally={rally} n={n} names={names} disabled={setWinner.isPending} onPick={(won_by) => pick(rally, n, won_by)} />
+                        </Td>
+                      ) : (
+                        <Td>
+                          {winner.value === null ? (
+                            '–'
+                          ) : winner.suggested ? (
+                            <SuggestedValue suggested>{sideLabel(t, winner.value, names)}</SuggestedValue>
+                          ) : (
+                            <Badge tone={winner.value === 'us' ? 'accent' : 'neutral'} title={names ? fullNameOf(names, winner.value) : undefined}>
+                              {sideLabel(t, winner.value, names)}
+                            </Badge>
+                          )}
+                        </Td>
+                      )}
                     </Tr>
                   )
                 })}
@@ -172,9 +220,23 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
           </div>
         </Card>
       )}
+      {last && (
+        <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm">
+          <span>
+            {last.after
+              ? t('winner.changed', { n: last.n, team: sideLabel(t, last.after, names) })
+              : t('winner.cleared', { n: last.n })}
+          </span>
+          <Button variant="ghost" onClick={undo} disabled={setWinner.isPending}>
+            <UndoIcon className="size-4" />
+            {t('winner.undo')}
+          </Button>
+        </p>
+      )}
     </section>
   )
 }
+
 
 interface RallyStripProps {
   rallies: readonly Segment[]

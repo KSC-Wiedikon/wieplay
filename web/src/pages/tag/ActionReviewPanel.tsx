@@ -10,6 +10,7 @@ import { useAnalysis, useSetActionsReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
 import { skillByCode } from '../../lib/grammar'
 import { formatClock, gradeLabel, sideLabel, skillLabel } from '../../lib/labels'
+import { useSideNames, type SideNames } from '../../lib/sides'
 import { periodAt, ralliesOf } from '../../lib/rallies'
 import { formatPercent } from '../../lib/suggestions'
 import type { Side, Tag, Taxonomy } from '../../lib/types'
@@ -40,7 +41,7 @@ function skillName(t: TFunction, taxonomy: Taxonomy, code: string | number | und
   return skillLabel(t, skillByCode(taxonomy, value), value)
 }
 
-function noticeText(t: TFunction, notice: ActionNotice, taxonomy: Taxonomy): string {
+function noticeText(t: TFunction, notice: ActionNotice, taxonomy: Taxonomy, names: SideNames | null): string {
   const p = notice.params ?? {}
   const time = p.time === undefined ? '' : formatClock(Number(p.time))
   const skill = skillName(t, taxonomy, p.code)
@@ -57,7 +58,7 @@ function noticeText(t: TFunction, notice: ActionNotice, taxonomy: Taxonomy): str
     case 'grade':
       return t('actions.notice.grade', { grade: String(p.grade ?? '') })
     case 'side':
-      return t('actions.notice.side', { side: sideLabel(t, p.side as Side) })
+      return t('actions.notice.side', { side: sideLabel(t, p.side as Side, names) })
     case 'moved':
       return t('actions.notice.moved', { time })
     case 'acceptedRally':
@@ -104,6 +105,7 @@ export function ActionChip({ tag, className }: { tag: Tag; className?: string })
  */
 export function ActionReviewPanel() {
   const { t } = useTranslation()
+  const names = useSideNames()
   const { actions, video, narrow, taxonomy } = useWorkspace()
   const view = useView()
   const state = useActionReview()
@@ -196,7 +198,7 @@ export function ActionReviewPanel() {
       )}
 
       <p role="status" className={cx('min-h-5 text-sm', state.notice?.tone === 'error' ? 'text-danger' : 'text-muted')}>
-        {state.notice ? noticeText(t, state.notice, taxonomy) : t('actions.hint')}
+        {state.notice ? noticeText(t, state.notice, taxonomy, names) : t('actions.hint')}
       </p>
 
       {!narrow && (
@@ -217,6 +219,7 @@ function useActionsReviewedAt(): string | null {
 /** Skill, grade, side, player and contact time of the action on screen, each with its keys. */
 function Facts({ tag, number }: { tag: Tag; number: string }) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const { actions, narrow, taxonomy } = useWorkspace()
   const skill = skillByCode(taxonomy, tag.code)
   const grade = tag.attributes.grade ?? null
@@ -272,7 +275,7 @@ function Facts({ tag, number }: { tag: Tag; number: string }) {
       </div>
       <dl className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1 text-sm">
         <dt className="font-semibold text-muted">{t('actions.side')}</dt>
-        <dd className="font-semibold">{sideLabel(t, tag.side)}</dd>
+        <dd className="font-semibold">{sideLabel(t, tag.side, names)}</dd>
         <dd>
           <Button size="touch" onClick={press(actions.toggleSide)}>
             {t('actions.otherSide')}

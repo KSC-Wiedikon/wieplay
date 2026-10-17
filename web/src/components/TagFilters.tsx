@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { isFiltered, playerKey, type TagFilter } from '../lib/condensed'
 import { skillByCode } from '../lib/grammar'
 import { gradeLabel, periodLabel, playerLabel, skillLabel } from '../lib/labels'
+import { useSideNames } from '../lib/sides'
 import type { Period, RosterEntry, Tag, Taxonomy } from '../lib/types'
 import { Button } from './Button'
 import { Select } from './Field'
@@ -20,6 +21,7 @@ interface TagFiltersProps {
 /** Player, skill, grade and set (basketball: quarter); each "All" by default. Players are those with tags. */
 export function TagFilters({ filter, onChange, taxonomy, tags, periods, roster }: TagFiltersProps) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const id = useId()
   const sport = taxonomy?.sport ?? 'volleyball'
 
@@ -43,7 +45,7 @@ export function TagFilters({ filter, onChange, taxonomy, tags, periods, roster }
           <option value="">{t('tagging.filters.all')}</option>
           {players.map(([key, p]) => (
             <option key={key} value={key}>
-              {playerLabel(t, p.side, p.number, roster)}
+              {playerLabel(t, p.side, p.number, roster, undefined, names)}
             </option>
           ))}
         </Select>

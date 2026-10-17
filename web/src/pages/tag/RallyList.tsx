@@ -1,19 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CheckIcon, CloseIcon } from '../../components/icons'
-import { CheckMark, SuggestedValue } from '../../components/ScoringMarks'
+import { CheckMark, ScoreHead, SuggestedValue } from '../../components/ScoringMarks'
 import { Segmented } from '../../components/Segmented'
 import { SuggestionChip } from '../../components/SuggestionChip'
 import { Table, TBody, Td, Th, THead, Tr } from '../../components/Table'
+import { WinnerPicker } from '../../components/WinnerPicker'
 import { cx } from '../../lib/cx'
 import { formatClock, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { periodAt, ralliesOf } from '../../lib/rallies'
+import { useSideNames } from '../../lib/sides'
 import {
   effectiveServer,
-  effectiveWinner,
   formatPercent,
   formatSeconds,
   isGap,
@@ -50,6 +50,7 @@ function reveal(container: HTMLElement | null, id: string | null): void {
 export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?: ReactNode }) {
   const { t } = useTranslation()
   const { controller, review, taxonomy } = useWorkspace()
+  const names = useSideNames()
   const view = useView()
   const ui = useUi()
   const state = useReview()
@@ -113,7 +114,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                   <Th className="hidden sm:table-cell">{t('tagging.suggestions.length')}</Th>
                   {reviewing && <Th>{t('tagging.suggestions.what')}</Th>}
                   {!reviewing && <Th className="hidden md:table-cell">{t('tagging.suggestions.serve')}</Th>}
-                  <Th>{t('tagging.condensed.score')}</Th>
+                  <ScoreHead />
                   {!reviewing && <Th className="hidden md:table-cell">{t('tagging.condensed.point')}</Th>}
                   <Th>{reviewing ? t('tagging.suggestions.state') : t('tagging.suggestions.source')}</Th>
                   {!reviewing && (
@@ -132,7 +133,6 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                   const splitOff = state.pending.has(rally.id)
                   const gap = isGap(rally.kind)
                   const server = effectiveServer(rally)
-                  const winner = effectiveWinner(rally)
                   const score = gap ? null : scoreAfter(rally)
                   return (
                     <Tr
@@ -161,7 +161,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                       )}
                       {!reviewing && (
                         <Td className="hidden md:table-cell">
-                          {server.value ? <SuggestedValue suggested={server.suggested}>{sideLabel(t, server.value)}</SuggestedValue> : '–'}
+                          {server.value ? <SuggestedValue suggested={server.suggested}>{sideLabel(t, server.value, names)}</SuggestedValue> : '–'}
                         </Td>
                       )}
                       <Td className="font-semibold tabular-nums">
@@ -171,14 +171,9 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                         </span>
                       </Td>
                       {!reviewing && (
-                        <Td className="hidden md:table-cell">
-                          {winner.value === null ? (
-                            '–'
-                          ) : winner.suggested ? (
-                            <SuggestedValue suggested>{sideLabel(t, winner.value)}</SuggestedValue>
-                          ) : (
-                            <Badge tone={winner.value === 'us' ? 'accent' : 'neutral'}>{sideLabel(t, winner.value)}</Badge>
-                          )}
+                        // Who won: the coach's call (a fact the score line follows), else Nomal's, muted.
+                        <Td tight className="hidden md:table-cell">
+                          <WinnerPicker rally={rally} n={n} names={names} onPick={(won_by) => controller.updateSegment(rally.id, { won_by })} />
                         </Td>
                       )}
                       <Td>

@@ -11,11 +11,7 @@ import { ClipDialog } from '../components/ClipDialog'
 import { ClipBar, ClipsSection } from '../components/ClipsSection'
 import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { CourtTools } from '../components/CourtTools'
-import { ExportButton } from '../components/ExportButton'
-import { ScoreboardTools } from '../components/ScoreboardDialog'
-import { AnalysisStatus } from '../components/AnalysisStatus'
-import { PlayersStep } from '../components/PlayersStep'
+import { ExportMenu } from '../components/ExportMenu'
 import { AlertIcon, CheckIcon, ChevronRightIcon, PlayIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
 import { MomentsStrip, type BreakMark, type StartMark } from '../components/MomentsStrip'
@@ -24,7 +20,8 @@ import { ProgressBar } from '../components/ProgressBar'
 import { RallyPanel } from '../components/RallyPanel'
 import { PageSpinner } from '../components/Spinner'
 import { Tendencies } from '../components/Tendencies'
-import { TrajectoryLayer } from '../components/Trajectories'
+import { TrajectoryLayer, TrajectoryToggle } from '../components/Trajectories'
+import { VideoSetup } from '../components/VideoSetup'
 import { useTrajectories } from '../lib/trajectories'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { UploadProgress } from '../components/UploadProgress'
@@ -42,6 +39,7 @@ import { useComments, useVideoClips } from '../lib/library'
 import { Playhead } from '../lib/playhead'
 import { useDeleteVideo, useMe, useTagging, useVideo, useVideoConfig } from '../lib/queries'
 import { keys } from '../lib/queryClient'
+import { SideNamesContext, sideNamesOf } from '../lib/sides'
 import { sportOf, useSportAccent } from '../lib/sport'
 import { isGap, isGapSuggestion, isSetSuggestion, isSuggestion } from '../lib/suggestions'
 import type { StatPlay } from '../lib/stats'
@@ -87,6 +85,11 @@ function VideoView({ videoId }: { videoId: string }) {
   const v = video.data
   const enabled = config.data?.enabled !== false
   const kind = kindLabel(t, v.kind)
+  const canExport = v.can_export && v.status === 'ready' && enabled
+  const canDelete = v.can_delete && v.status !== 'uploading'
+  const { resolution, fps } = videoFacts(v)
+  // Length, picture and frame rate, next to the date (only once there is a picture).
+  const facts = v.status === 'ready' ? [formatDuration(v.duration_ms), resolution, fps ? t('video.fps', { fps }) : null].filter(Boolean) : []
 
   const onDelete = () =>
     remove.mutate(v, {
@@ -114,16 +117,29 @@ function VideoView({ videoId }: { videoId: string }) {
         }
         title={v.title}
         actions={
-          v.can_delete && v.status !== 'uploading' ? (
-            <Button variant="ghostDanger" onClick={() => setConfirmDelete(true)}>
-              <TrashIcon className="size-4" />
-              {t('video.delete')}
-            </Button>
+          canExport || canDelete ? (
+            <>
+              {canExport && <VideoExport video={v} />}
+              {canDelete && (
+                <Button variant="ghostDanger" onClick={() => setConfirmDelete(true)}>
+                  <TrashIcon className="size-4" />
+                  {t('video.delete')}
+                </Button>
+              )}
+            </>
           ) : null
         }
         subtitle={
           <div className="flex flex-col gap-1">
-            <span className="tabular-nums">{formatDate(v.recorded_on)}</span>
+            <p className="flex flex-wrap gap-x-2 tabular-nums">
+              <span>{formatDate(v.recorded_on)}</span>
+              {facts.length > 0 && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{facts.join(' · ')}</span>
+                </>
+              )}
+            </p>
             {v.imported_from && <ImportOrigin origin={v.imported_from} />}
           </div>
         }
@@ -295,8 +311,8 @@ function Ready({ video }: { video: Video }) {
     else element.addEventListener('loadedmetadata', go, { once: true })
   }, [wanted, element, clips.data, play])
 
-  const { resolution, fps } = videoFacts(video)
-  const facts = [formatDuration(video.duration_ms), resolution, fps ? t('video.fps', { fps }) : null].filter(Boolean)
+  // "KSCW H3", "Volero" wherever the page would say us and them.
+  const names = useMemo(() => sideNamesOf(video, t), [video, t])
   // Nomal's suggestions are not rallies or tags until a coach reviews them (PLAN §10, §10.4a):
   // the rally list, skipping dead time, the counts, the plays and the diagrams leave them out.
   const data = useMemo(
@@ -367,18 +383,29 @@ function Ready({ video }: { video: Video }) {
   }
 
   return (
-    <>
+    <SideNamesContext value={names}>
       {/* Wide screens: the player and its tools on the left, rallies, clips and comments beside it. */}
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_34rem] xl:items-start 2xl:grid-cols-[minmax(0,1fr)_38rem]">
         <div className="flex min-w-0 flex-col gap-3">
+          {/* Under the picture: playback only (the setup has its own card below). */}
           <VideoPlayer
             video={video}
             videoRef={setElement}
             overlay={trajectories.available && trajectories.on ? <TrajectoryLayer state={trajectories} video={element} /> : undefined}
+            toolbar={
+              trajectories.available || firstServe !== null ? (
+                <>
+                  {volleyball && <TrajectoryToggle state={trajectories} />}
+                  {firstServe !== null && (
+                    <Button variant="ghost" onClick={startAtFirstServe}>
+                      <PlayIcon className="size-4" />
+                      {t('tagging.markers.startAtFirstServe')}
+                    </Button>
+                  )}
+                </>
+              ) : undefined
+            }
           />
-          {volleyball && <CourtTools video={video} element={element} trajectories={trajectories} />}
-          {volleyball && video.status === 'ready' && <ScoreboardTools video={video} element={element} />}
-          {volleyball && video.can_export && <RecapButton video={video} />}
           {duration && ((clips.data?.length ?? 0) > 0 || comments.data?.some((c) => c.t_ms !== null) || breaks.length > 0 || starts.length > 0) ? (
             <MomentsStrip
               duration_ms={duration}
@@ -412,17 +439,6 @@ function Ready({ video }: { video: Video }) {
               )}
             </p>
           )}
-          {(facts.length > 0 || firstServe !== null) && (
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              {facts.length > 0 && <p className="text-sm text-muted tabular-nums">{facts.join(' · ')}</p>}
-              {firstServe !== null && (
-                <Button variant="ghost" onClick={startAtFirstServe} className="ml-auto">
-                  <PlayIcon className="size-4" />
-                  {t('tagging.markers.startAtFirstServe')}
-                </Button>
-              )}
-            </div>
-          )}
           <ClipBar
             playhead={playhead}
             clipIn={marks.in}
@@ -454,10 +470,6 @@ function Ready({ video }: { video: Video }) {
               )}
             </div>
           )}
-          {data?.can_tag && video.sport === 'volleyball' && (
-            <AnalysisStatus video={video} rallies={rallyCount} actionTags={tagCount} reviewHref={`/videos/${video.id}/tag?mode=review`} />
-          )}
-          {data?.can_tag && video.sport === 'volleyball' && <PlayersStep video={video} canEdit />}
           {video.meets_standard === false && (
             <div className="flex flex-col gap-1 rounded-xl border border-hairline bg-surface p-3 text-sm">
               <p className="flex flex-wrap items-center gap-2 font-semibold">
@@ -470,6 +482,7 @@ function Ready({ video }: { video: Video }) {
               <p className="text-muted">{t('video.belowStandardNote')}</p>
             </div>
           )}
+          {data?.can_tag && volleyball && <VideoSetup video={video} element={element} rallies={rallyCount} actionTags={tagCount} />}
         </div>
         <div className="flex min-w-0 flex-col gap-6 xl:gap-8">
           {data && rallyCount > 0 && (
@@ -480,7 +493,7 @@ function Ready({ video }: { video: Video }) {
                 element={element}
                 playhead={playhead}
                 suspended={current !== null}
-                action={video.can_export ? <ExportButton request={{ kind: 'condensed', video_id: video.id }} /> : null}
+                editVideoId={data.can_tag && volleyball ? video.id : null}
               />
             </div>
           )}
@@ -515,7 +528,7 @@ function Ready({ video }: { video: Video }) {
       </div>
       {video.sport === 'volleyball' && <VideoStats video={video} tagging={data} onPlay={playStats} />}
       {volleyball && <Tendencies video={video} tagging={data} onPlay={playStats} />}
-    </>
+    </SideNamesContext>
   )
 }
 
@@ -688,16 +701,10 @@ function UploadingPanel({ video, enabled }: { video: Video; enabled: boolean }) 
   )
 }
 
-/** "Create game recap": the best plays in 2-3 minutes with a title card and the score (PLAN §7.7). */
-function RecapButton({ video }: { video: Video }) {
-  const { t, i18n } = useTranslation()
-  return (
-    <div>
-      <ExportButton
-        request={{ kind: 'recap', video_id: video.id, lang: i18n.language === 'de' ? 'de' : 'en' }}
-        text={t('recap.create')}
-        queuedText={t('recap.queued')}
-      />
-    </div>
-  )
+/** "Export" in the page's header: the rallies only and the game recap (coaches; PLAN §7.7). */
+function VideoExport({ video }: { video: Video }) {
+  // The rallies as the page shows them: suggestions nobody answered are no rallies yet.
+  const tagging = useTagging(video.id, true)
+  const rallies = tagging.data ? tagging.data.segments.filter((s) => s.kind === 'rally' && !isSuggestion(s)).length : 0
+  return <ExportMenu video={video} rallies={rallies} />
 }

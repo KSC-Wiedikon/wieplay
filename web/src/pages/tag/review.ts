@@ -4,7 +4,8 @@
 //
 //   Enter accept · X reject · ←/→ move the start · Shift+←/→ move the end (0.25 s; with Alt
 //   one frame) · M merge with the next suggestion · S split at the playhead · U undo
-//   1 we serve · 2 they serve (again: no call) · W B T D O label a break (§10.3)
+//   1 we serve · 2 they serve (again: no call) · 3 we won · 4 they won (again: no call;
+//   the winner is a fact the scoring keeps to) · W B T D O label a break (§10.3)
 //
 // The gap labels of the automatic scoring (warm-up, set break, timeout, stoppage, after the
 // match) are in the list too, in time order with the rallies; they are accepted, rejected,
@@ -13,7 +14,8 @@
 // Answers are ordinary segment changes through the tagging store and its outbox (offline
 // queue, base versions, undo): accept sets review "confirmed", a moved boundary or another
 // label "corrected", reject deletes the segment with review "rejected" (the server keeps it as
-// a negative). A serve call sets `serving_manual`. Plain TypeScript like the tagging
+// a negative). A serve call sets `serving_manual`, a winner `won_by` (a model's proposal with
+// another winner is corrected, as the server has it). Plain TypeScript like the tagging
 // controller, so a burst of keys always sees the last state.
 
 import type { Playhead } from '../../lib/playhead'
@@ -51,6 +53,8 @@ export type ReviewNoticeKey =
   | 'relabelled'
   | 'serve'
   | 'serveCleared'
+  | 'won'
+  | 'wonCleared'
   | 'ralliesOnly'
   | 'gapsOnly'
   | 'moved'
@@ -333,6 +337,25 @@ export class ReviewController {
     this.set({ notice: call === null ? this.notify('serveCleared') : this.notify('serve', { side: call }) })
   }
 
+  /**
+   * 3 / 4: we or they won this rally (the coach's call, a fact the scoring keeps to; the score
+   * line follows at once); the same key again takes the call back.
+   */
+  won = (side: Side): void => {
+    const segment = this.current()
+    if (!segment) {
+      this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
+      return
+    }
+    if (segment.kind !== 'rally') {
+      this.set({ notice: this.notify('ralliesOnly', undefined, 'error') })
+      return
+    }
+    const call = segment.won_by === side ? null : side
+    this.commit([segmentChange(segment, { won_by: call })])
+    this.set({ notice: call === null ? this.notify('wonCleared') : this.notify('won', { side: call }) })
+  }
+
   /** ←/→ (start) and Shift+←/→ (end): 0.25 s, or one frame with Alt. */
   nudge = (field: 'start_ms' | 'end_ms', direction: -1 | 1, { frame = false } = {}): void => {
     const segment = this.current()
@@ -516,6 +539,10 @@ export class ReviewController {
       case '2':
         this.serve(key === '1' ? 'us' : 'them')
         return true
+      case '3':
+      case '4':
+        this.won(key === '3' ? 'us' : 'them')
+        return true
     }
     const label = GAP_KEYS[key.toLowerCase()]
     if (label) {
@@ -564,12 +591,16 @@ function without(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
   return out
 }
 
-/** A change to a segment; a model's proposal with new boundaries or another label is corrected (PLAN §11). */
+/**
+ * A change to a segment; a model's proposal with new boundaries, another label or another
+ * winner is corrected (PLAN §11; the server does the same).
+ */
 function segmentChange(segment: Segment, patch: Partial<SegmentIn>): Change {
   const moved =
     (patch.start_ms !== undefined && patch.start_ms !== segment.start_ms) ||
     (patch.end_ms !== undefined && patch.end_ms !== segment.end_ms) ||
-    (patch.kind !== undefined && patch.kind !== segment.kind)
+    (patch.kind !== undefined && patch.kind !== segment.kind) ||
+    (patch.won_by !== undefined && (patch.won_by ?? null) !== (segment.won_by ?? null))
   let review: Review = patch.review ?? segment.review
   if (isModel(segment) && moved) review = 'corrected'
   return { kind: 'segment', payload: { ...segmentToIn(segment), ...patch, review } }

@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { useBallTrack } from '../lib/ballTrack'
 import { playerKey } from '../lib/condensed'
 import { countOutcomes, diagramArrows, skillCategory, useCourt, type Arrow, type Outcome } from '../lib/court'
-import { formatClock, gradeLabel, periodLabel, playerLabel, skillLabel } from '../lib/labels'
+import { formatClock, gradeLabel, periodLabel, playerLabel, sideLabel, skillLabel } from '../lib/labels'
+import { useSideNames } from '../lib/sides'
 import { tagWindow, type StatPlay } from '../lib/stats'
 import type { Tag, Tagging, Video } from '../lib/types'
 import { CourtDiagram } from './CourtDiagram'
@@ -32,6 +33,7 @@ interface TendenciesProps {
  */
 export function Tendencies({ video, tagging, onPlay }: TendenciesProps) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const id = useId()
   const court = useCourt(video.id)
   const calibration = court.data?.calibration ?? null
@@ -79,7 +81,7 @@ export function Tendencies({ video, tagging, onPlay }: TendenciesProps) {
     const tag = arrow.tag
     const spec = taxonomy?.skills.find((s) => s.code === tag.code) ?? null
     return t('court.tendencies.arrow', {
-      player: playerLabel(t, tag.side, tag.number, tagging.roster, tag.member_id),
+      player: playerLabel(t, tag.side, tag.number, tagging.roster, tag.member_id, names),
       skill: skillLabel(t, spec, tag.code),
       grade: tag.attributes.grade ? gradeLabel(t, spec, tag.attributes.grade) : '',
       outcome: outcomeName(arrow.outcome),
@@ -111,11 +113,11 @@ export function Tendencies({ video, tagging, onPlay }: TendenciesProps) {
         <label className="flex flex-col gap-1 text-xs font-semibold" htmlFor={`${id}-player`}>
           {t('court.tendencies.player')}
           <Select id={`${id}-player`} inline value={player} onChange={(e) => setPlayer(e.target.value)}>
-            <option value="us">{t('court.tendencies.allUs')}</option>
-            <option value="them">{t('court.tendencies.allThem')}</option>
+            <option value="us">{t('court.tendencies.allUs', { team: sideLabel(t, 'us', names) })}</option>
+            <option value="them">{t('court.tendencies.allThem', { team: sideLabel(t, 'them', names) })}</option>
             {players.map(([key, tag]) => (
               <option key={key} value={key}>
-                {playerLabel(t, tag.side, tag.number, tagging.roster, tag.member_id)}
+                {playerLabel(t, tag.side, tag.number, tagging.roster, tag.member_id, names)}
               </option>
             ))}
           </Select>
@@ -138,7 +140,7 @@ export function Tendencies({ video, tagging, onPlay }: TendenciesProps) {
         <div className="w-full rounded-card border border-hairline bg-surface p-3 shadow-card sm:max-w-sm">
           <CourtDiagram
             arrows={arrows}
-            label={t('court.tendencies.diagram', { skill: skillName })}
+            label={t('court.tendencies.diagram', { skill: skillName, team: sideLabel(t, 'us', names) })}
             netLabel={t('court.tendencies.net')}
             describe={describe}
             onSelect={select}

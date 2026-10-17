@@ -346,3 +346,22 @@ export function SplitIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** An empty step (a setup step still to do). */
+export function CircleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+    </Icon>
+  )
+}
+
+/** A done step. */
+export function CircleCheckIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8 12.5 2.7 2.7L16.5 9.5" />
+    </Icon>
+  )
+}

@@ -71,17 +71,21 @@ def text_width(text: str, size: int, bold: bool) -> int:
 def bug_filters(
     bug: dict[str, Any], switch_s: float | None, texts: Texts, fonts: Fonts
 ) -> list[str]:
-    """The score bug, top left, with what the API sent (facts only): the set, the score (the
-    score before the point until `switch_s`, the moment of the point in the piece's own
-    time, the new one from there; either alone when only it is known), what the play was.
-    Rows that are empty are left out; nothing at all, no bug."""
+    """The score bug, top left, with what the API sent (facts only): the set, the teams in
+    the score's order ("KSCW H3 - Volero"), the score (the score before the point until
+    `switch_s`, the moment of the point in the piece's own time, the new one from there;
+    either alone when only it is known), what the play was. Rows that are empty are left
+    out; nothing at all, no bug."""
     head, before, after = (str(bug.get(k) or "") for k in ("set", "before", "after"))
     note = str(bug.get("label") or "")
+    teams = str(bug.get("teams") or "") if before or after else ""
     if not (head or before or after or note):
         return []
     rows: list[tuple[str, int]] = []  # (row, height)
     if head:
         rows.append(("head", 38))
+    if teams:
+        rows.append(("teams", 36))
     if before or after:
         rows.append(("score", 74))
     if note:
@@ -92,6 +96,7 @@ def bug_filters(
             text_width(before, 56, True),
             text_width(after, 56, True),
             text_width(note, 28, False),
+            text_width(teams, 24, False),
             160,
         )
         + 64
@@ -106,6 +111,8 @@ def bug_filters(
             out.append(drawtext(texts(head), fonts.bold, 28, YELLOW, x + 32, top))
         elif row == "note":
             out.append(drawtext(texts(note), fonts.regular, 28, f"{LIGHT}@0.9", x + 32, top))
+        elif row == "teams":
+            out.append(drawtext(texts(teams), fonts.regular, 24, f"{LIGHT}@0.85", x + 32, top))
         elif before == after or at is None:
             out.append(drawtext(texts(after or before), fonts.bold, 56, LIGHT, x + 32, top))
         else:

@@ -302,6 +302,11 @@ class Video(Base):
     # ... and its actions (PLAN §10.4a): from then on its tags train the action proposer.
     actions_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actions_reviewed_by: Mapped[int | None] = mapped_column(Integer)
+    # The setup (the video page's "Setup"): the names a coach set instead of the derived ones
+    # (nomal/core/names.py), and "no scoreboard in this video".
+    name_us: Mapped[str | None] = mapped_column(String(40))
+    name_them: Mapped[str | None] = mapped_column(String(40))
+    no_scoreboard: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     files: Mapped[list[VideoSourceFile]] = relationship(
         back_populates="video", order_by="VideoSourceFile.part_no", cascade="all, delete-orphan"

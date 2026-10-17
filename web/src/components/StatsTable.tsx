@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { cx } from '../lib/cx'
+import { useSideNames } from '../lib/sides'
 import {
   columnGroups,
   EMPTY,
@@ -91,7 +92,15 @@ function shortName(name: string): string {
 
 export function RowName({ row }: { row: Pick<StatRow, 'kind' | 'number' | 'name'> }) {
   const { t } = useTranslation()
-  if (row.kind !== 'player') return <span className="font-semibold">{t(`stats.rows.${row.kind}`)}</span>
+  const names = useSideNames()
+  if (row.kind !== 'player') {
+    const full = names ? (row.kind === 'team' ? names.usFull : row.kind === 'opponent' ? names.themFull : undefined) : undefined
+    return (
+      <span className="min-w-0 truncate font-semibold" title={full}>
+        {rowLabel(t, row, names)}
+      </span>
+    )
+  }
   const short = row.name ? shortName(row.name) : null
   return (
     <span className="inline-flex min-w-0 items-baseline gap-1.5" title={row.name ?? undefined}>
@@ -129,6 +138,7 @@ interface StatsTableProps {
  */
 export function StatsTable({ caption, columns, players, team, opponent, showMatches = false, target, selected = null, onSelect }: StatsTableProps) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const groups = columnGroups(columns)
   const head = (column: { key: string }) => (
     <abbr title={t(`stats.long.${column.key}` as 'stats.long.points')} className="no-underline">
@@ -138,7 +148,7 @@ export function StatsTable({ caption, columns, players, team, opponent, showMatc
 
   const line = (row: StatRow, tone: 'player' | 'team' | 'opponent') => {
     const key = rowKey(row)
-    const name = rowLabel(t, row)
+    const name = rowLabel(t, row, names)
     return (
       <tr key={key} className={cx(tone === 'team' && 'bg-sunken', tone === 'opponent' && 'text-muted')}>
         <th

@@ -78,7 +78,7 @@ import csv
 import io
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Literal
@@ -1077,10 +1077,12 @@ def to_csv(
     scopes: Sequence[tuple[str, BoxScore, TeamLine]],
     lang: str = "en",
     with_matches: bool = False,
+    labels: Mapping[str, str] | None = None,
 ) -> str:
     """One line per row and scope (the match and each set, or the season). The team line's
-    side-out and break-point numbers fill the last columns of the team's row."""
-    words = HEADERS.get(lang, HEADERS["en"])
+    side-out and break-point numbers fill the last columns of the team's row. `labels`: the
+    names of rows without one by kind (a match: "team" and "opponent" by the teams' names)."""
+    words = {**HEADERS.get(lang, HEADERS["en"]), **(labels or {})}
     head = [words["set"], words["number"], words["player"]]
     if with_matches:
         head.append(words["matches"])

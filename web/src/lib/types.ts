@@ -194,6 +194,33 @@ export interface Video {
   rallies_reviewed_at?: string | null
   /** Where the automatic analysis stands; null while the video is not ready (older servers: absent). */
   analysis?: AnalysisBrief | null
+  /** The two teams' names, for where the app would say us and them (older servers: absent). */
+  names?: TeamNames | null
+  /** A coach said there is no scoreboard in the picture (the setup's scoreboard step). */
+  no_scoreboard?: boolean
+}
+
+/** The teams' names of a video (backend nomal/core/names.py). */
+export interface TeamNames {
+  /** Short: "KSCW H3". */
+  us: string
+  /** Short: "Volero"; null when nobody knows (the app says "Opponent"). */
+  them: string | null
+  /** The official names, for tooltips. */
+  us_full: string
+  them_full: string | null
+  /** Where the opponent's name came from: set by a coach, the Wiedisync game, the video's title. */
+  them_from: 'set' | 'game' | 'title' | null
+  /** What a coach set for this video (the setup's fields); null: derived. */
+  us_set: string | null
+  them_set: string | null
+}
+
+/** PATCH /api/videos/{id}/setup: fields left out stay; a name set to null goes back to the derived one. */
+export interface VideoSetupIn {
+  name_us?: string | null
+  name_them?: string | null
+  no_scoreboard?: boolean
 }
 
 /** "Ready" says a video plays; this says whether Nomal has analysed it (PLAN §10.1). */

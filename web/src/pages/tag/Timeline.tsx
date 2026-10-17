@@ -8,9 +8,10 @@ import { isSuggestedTag } from '../../lib/actions'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
-import { formatClock, periodLabel, scoreNoteText, segmentKindLabel } from '../../lib/labels'
+import { formatClock, periodLabel, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
+import { useSideNames } from '../../lib/sides'
 import {
   formatPercent,
   GAP_KINDS,
@@ -374,6 +375,7 @@ function TagMarker({ tag, left, selected, onClick }: { tag: Tag; left: string; s
 function Legend() {
   const { t } = useTranslation()
   const { controller, taxonomy } = useWorkspace()
+  const names = useSideNames()
   const view = useView()
   const suggested = view.segments.some((s) => s.source === 'model' && s.kind === 'rally')
   const gapSuggested = view.segments.some(isGapSuggestion)
@@ -394,8 +396,8 @@ function Legend() {
     ...more.map((k): [string, string] => [kindClass(k), segmentKindLabel(t, k, taxonomy.sport)]),
     ...(gapSuggested ? [['border border-dashed border-muted bg-muted/10', t('tagging.timeline.legend.gapSuggested')] as [string, string]] : []),
     ...(view.periods.length > 0 ? [['rounded-none border-l-2 border-fg', t('tagging.timeline.legend.setStart')] as [string, string]] : []),
-    ['bg-fg', t('tagging.timeline.legend.tagUs')],
-    ['bg-muted', t('tagging.timeline.legend.tagThem')],
+    ['bg-fg', t('tagging.timeline.legend.tagUs', { team: sideLabel(t, 'us', names) })],
+    ['bg-muted', t('tagging.timeline.legend.tagThem', { team: sideLabel(t, 'them', names) })],
     ...(actionSuggested ? [['border border-dashed border-accent bg-accent-soft', t('actions.legend')] as [string, string]] : []),
     ['bg-link rotate-45 scale-75', t('tagging.timeline.legend.comment')],
   ]
@@ -417,6 +419,7 @@ const KINDS: SegmentKind[] = ['rally', 'timeout', 'set_break', 'warmup', 'stoppa
 export function SegmentPanel({ id }: { id: string }) {
   const { t } = useTranslation()
   const htmlId = useId()
+  const names = useSideNames()
   const { controller, playhead, taxonomy } = useWorkspace()
   const view = useView()
   const [error, setError] = useState(false)
@@ -486,8 +489,8 @@ export function SegmentPanel({ id }: { id: string }) {
               onChange={(e) => update({ won_by: e.target.value === '' ? null : (e.target.value as Side) })}
             >
               <option value="">{t('tagging.segment.none')}</option>
-              <option value="us">{t('tagging.us')}</option>
-              <option value="them">{t('tagging.them')}</option>
+              <option value="us">{sideLabel(t, 'us', names)}</option>
+              <option value="them">{sideLabel(t, 'them', names)}</option>
             </Select>
           </label>
         )}

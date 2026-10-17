@@ -6,14 +6,15 @@ import { Button } from '../../components/Button'
 import { cx } from '../../lib/cx'
 import { parseEntry, type EntryError, type ParsedEntry } from '../../lib/grammar'
 import { formatClock, gradeLabel, playerLabel, segmentKindLabel, sideLabel, skillLabel } from '../../lib/labels'
+import { useSideNames, type SideNames } from '../../lib/sides'
 import { addPoint, scoreBefore } from '../../lib/rallies'
 import type { RosterEntry, Taxonomy } from '../../lib/types'
 import { useUi, useView, useWorkspace } from './context'
 import type { Notice } from './controller'
 
-function previewParts(t: TFunction, parsed: ParsedEntry, roster: readonly RosterEntry[]): string[] {
+function previewParts(t: TFunction, parsed: ParsedEntry, roster: readonly RosterEntry[], names: SideNames | null): string[] {
   const parts: string[] = []
-  if (parsed.number !== null || parsed.side === 'them') parts.push(playerLabel(t, parsed.side, parsed.number, roster))
+  if (parsed.number !== null || parsed.side === 'them') parts.push(playerLabel(t, parsed.side, parsed.number, roster, undefined, names))
   else parts.push(t('tagging.entry.noNumber'))
   if (parsed.skill) parts.push(skillLabel(t, parsed.skill))
   if (parsed.grade) parts.push(`${parsed.grade} ${gradeLabel(t, parsed.skill, parsed.grade)}`)
@@ -81,6 +82,7 @@ function noticeText(t: TFunction, notice: Notice, taxonomy: Taxonomy): string {
 
 export function EntryPanel() {
   const { t } = useTranslation()
+  const names = useSideNames()
   const { taxonomy, controller, store } = useWorkspace()
   const view = useView()
   const ui = useUi()
@@ -121,7 +123,7 @@ export function EntryPanel() {
           <>
             <p className="font-semibold">
               <span className="sr-only">{`${entry.text}: `}</span>
-              {previewParts(t, parsed, view.roster).join(' · ')}
+              {previewParts(t, parsed, view.roster, names).join(' · ')}
               {at !== null && <span className="font-normal text-muted tabular-nums">{` · ${formatClock(at)}`}</span>}
             </p>
             <p className="flex flex-wrap items-center gap-2">
@@ -180,10 +182,13 @@ function Proposal() {
   const { controller } = useWorkspace()
   const view = useView()
   const ui = useUi()
+  const names = useSideNames()
   const proposal = ui.proposal
   if (!proposal) return null
   const before = scoreBefore(proposal.rally.start_ms, view.periods, view.segments)
   const after = addPoint(before, proposal.winner)
+  const teams = { us: sideLabel(t, 'us', names), them: sideLabel(t, 'them', names) }
+  const score = names ? `${names.us} ${after.us}:${after.them} ${names.them}` : `${after.us}:${after.them}`
 
   return (
     <div role="group" aria-labelledby="proposal-title" className="flex flex-col gap-2 rounded-xl border-2 border-accent bg-sunken p-3">
@@ -191,16 +196,16 @@ function Proposal() {
         {t('tagging.proposal.title')}
       </h3>
       <p className="text-sm tabular-nums">
-        {proposal.winner ? t('tagging.proposal.point', { side: sideLabel(t, proposal.winner) }) : t('tagging.proposal.noPoint')}
-        {before.period && ` · ${t('tagging.proposal.score', { us: after.us, them: after.them })}`}
+        {proposal.winner ? t('tagging.proposal.point', { side: sideLabel(t, proposal.winner, names) }) : t('tagging.proposal.noPoint')}
+        {before.period && ` · ${t('tagging.proposal.score', { score })}`}
         {` · ${t('tagging.proposal.at', { time: formatClock(proposal.end_ms) })}`}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button aria-pressed={proposal.winner === 'us'} variant={proposal.winner === 'us' ? 'primary' : 'secondary'} onClick={() => controller.setWinner('us')}>
-          {t('tagging.proposal.us')}
+          {t('tagging.proposal.pointTo', { team: teams.us })}
         </Button>
         <Button aria-pressed={proposal.winner === 'them'} variant={proposal.winner === 'them' ? 'primary' : 'secondary'} onClick={() => controller.setWinner('them')}>
-          {t('tagging.proposal.them')}
+          {t('tagging.proposal.pointTo', { team: teams.them })}
         </Button>
         <Button variant="primary" onClick={controller.confirmProposal}>
           {t('tagging.proposal.confirm')}
@@ -209,7 +214,7 @@ function Proposal() {
           {t('tagging.proposal.keep')}
         </Button>
       </div>
-      <p className="text-xs text-muted">{t('tagging.proposal.keys')}</p>
+      <p className="text-xs text-muted">{t('tagging.proposal.keys', teams)}</p>
     </div>
   )
 }

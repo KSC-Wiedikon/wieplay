@@ -32,6 +32,8 @@ interface AnalysisStatusProps {
   onReviewed?: () => void
   /** The coach's own action tags (suggestions not counted): "actions reviewed" needs some. */
   actionTags?: number
+  /** Without a card of its own (the video page's setup frames it). */
+  plain?: boolean
   className?: string
 }
 
@@ -50,7 +52,7 @@ function Spinning() {
  * failed, how well the suggestions matched the coach's own rallies, the automatic score
  * (§10.3), and "Rallies reviewed", which tells Nomal to learn from the game.
  */
-export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, actionTags = 0, className }: AnalysisStatusProps) {
+export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, actionTags = 0, plain = false, className }: AnalysisStatusProps) {
   const { t } = useTranslation()
   const analysis = useAnalysis(video.id, true)
   const analyse = useAnalyse(video.id)
@@ -95,8 +97,9 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
       body = t('tagging.analysis.noneBody')
   }
 
+  const Frame = plain ? 'div' : Card
   return (
-    <Card role="region" aria-label={t('tagging.analysis.title')} className={cx('flex flex-wrap items-start gap-x-6 gap-y-3 p-4', className)}>
+    <Frame role="region" aria-label={t('tagging.analysis.title')} className={cx('flex flex-wrap items-start gap-x-6 gap-y-3', !plain && 'p-4', className)}>
       <div className="flex min-w-0 flex-[2_1_20rem] flex-col gap-1">
         <p role="status" className={cx('flex items-center gap-2 font-semibold', data.status === 'failed' && 'text-danger')}>
           {icon}
@@ -132,7 +135,7 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
       {!isBusy(data) && (total > 0 || rallies > 0 || video.rallies_reviewed_at) ? (
         <Reviewed video={video} open={open} total={total} onReviewed={onReviewed} />
       ) : null}
-    </Card>
+    </Frame>
   )
 }
 

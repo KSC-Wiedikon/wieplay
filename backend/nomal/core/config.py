@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # kid -> Ed25519 public key (PEM). JSON object in the environment.
     bridge_public_keys: dict[str, str] = Field(default_factory=dict)
 
+    # The club's short name, before a team's name where the app names our side ("KSCW H3"),
+    # and its name as it appears in the federation's game names ("KSC Wiedikon H3").
+    club_short_name: str = "KSCW"
+    club_name: str = "KSC Wiedikon"
+
     session_hours: int = 8
     cookie_secure: bool = True
 

@@ -437,6 +437,129 @@ describe('VideoPage', () => {
     })
   })
 
+  describe('the teams’ names, who won, the setup and the export', () => {
+    const names = { us: 'KSCW H3', them: 'Volley Näfels', us_full: 'KSC Wiedikon H3', them_full: 'Volley Näfels', them_from: 'game' as const, us_set: null, them_set: null }
+    const set1 = period({ no: 1, start_ms: 0, first_serve: 'us' })
+    const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0, score_source: 'tags', version: 2 })
+    const r2 = rally({ start_ms: 60_000, end_ms: 70_000, period_id: set1.id, model_won_by: 'them', score_us_after: 1, score_them_after: 1, score_source: 'model', version: 3 })
+    const tagged = (patch: Partial<Tagging> = {}): Tagging => bundle({ can_tag: false, periods: [set1], segments: [r1, r2], events: [], ...patch })
+
+    beforeEach(() => {
+      window.localStorage.clear()
+      vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => Promise.resolve())
+    })
+
+    it('names the teams instead of us and them: the rally list, its score and the stats', async () => {
+      show(video({ names }), 200, {
+        [`/api/videos/${ID}/tagging`]: { body: tagged() },
+        [`/api/videos/${ID}/stats`]: { body: videoStats({ tags: 2, rallies: 2 }) },
+      })
+      const list = await screen.findByRole('table', { name: 'Rallies' })
+      expect(within(list).getByRole('columnheader', { name: 'Score: KSCW H3 – Volley Näfels' })).toBeInTheDocument()
+      const rows = within(list).getAllByRole('row').slice(1)
+      expect(rows.map((r) => r.textContent)).toEqual(['110:101:0KSCW H3', '211:001:1 (suggested)Volley Näfels (suggested)'])
+      // Players see who won; they don't set it.
+      expect(within(list).queryByRole('combobox')).not.toBeInTheDocument()
+      const box = await screen.findByRole('table', { name: 'Box score' })
+      expect(within(box).getByRole('rowheader', { name: 'KSCW H3' })).toBeInTheDocument()
+      expect(within(box).getByRole('rowheader', { name: 'Volley Näfels' })).toBeInTheDocument()
+      // The setup is for those who tag; the downloads for coaches.
+      expect(screen.queryByRole('button', { name: /^Setup/ })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
+    })
+
+    it('lets a coach set who won a rally: shown at once, sent as a fact, with undo', async () => {
+      const posts: unknown[] = []
+      // The server: the winner kept as a fact, the score line from it (Nomal's winner without one).
+      let second = r2
+      show(video({ names, can_tag: true }), 200, {
+        [`/api/videos/${ID}/tagging`]: { body: () => tagged({ can_tag: true, segments: [r1, second] }) },
+        [`/api/videos/${ID}/analysis`]: { body: { status: 'done', model_run: null, proposals: { unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0 }, metrics_vs_human: null } },
+        [`POST /api/videos/${ID}/changes`]: {
+          body: ({ body }: { body: unknown }) => {
+            posts.push(body)
+            const won = (body as { segments: { won_by: 'us' | 'them' | null }[] }).segments[0]?.won_by ?? null
+            const [us, them] = won === 'us' ? [2, 0] : [1, 1]
+            second = { ...second, won_by: won, version: second.version + 1, score_us_after: us, score_them_after: them, score_source: won ? 'tags' : 'model' }
+            return { events: [], segments: [r1, second], periods: [set1], stale: [] }
+          },
+        },
+      })
+      const list = await screen.findByRole('table', { name: 'Rallies' })
+      const point = within(list).getByRole('combobox', { name: 'Point of rally 2' })
+      expect(within(point).getAllByRole('option').map((o) => o.textContent)).toEqual(['Volley Näfels (Nomal)', 'KSCW H3', 'Volley Näfels'])
+      expect(point).toHaveValue('')
+
+      // Nomal had Volley Näfels; KSCW H3 won it. The score follows at once, the server gets the fact.
+      fireEvent.change(point, { target: { value: 'us' } })
+      expect(screen.getByText('Point of rally 2: KSCW H3.')).toBeInTheDocument()
+      await waitFor(() => expect(within(list).getAllByRole('row')[2]).toHaveTextContent('2:0'))
+      await waitFor(() => expect(posts).toHaveLength(1))
+      expect(posts[0]).toEqual({ events: [], periods: [], segments: [expect.objectContaining({ id: r2.id, won_by: 'us', base_version: 3, kind: 'rally', start_ms: 60_000, end_ms: 70_000 })] })
+
+      // Undo: back to Nomal's suggestion.
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+      await waitFor(() => expect(posts).toHaveLength(2))
+      expect(posts[1]).toEqual({ events: [], periods: [], segments: [expect.objectContaining({ id: r2.id, won_by: null, base_version: 4 })] })
+      await waitFor(() => expect(within(list).getByRole('combobox', { name: 'Point of rally 2' })).toHaveValue(''))
+      expect(screen.queryByText('Point of rally 2: KSCW H3.')).not.toBeInTheDocument()
+    })
+
+    it('keeps only playback under the player and puts the setup in its own card', async () => {
+      show(video({ names, can_tag: true }), 200, {
+        [`/api/videos/${ID}/tagging`]: { body: tagged({ can_tag: true }) },
+        [`/api/videos/${ID}/analysis`]: { body: { status: 'none', model_run: null, proposals: { unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0 }, metrics_vs_human: null } },
+      })
+      const setup = await screen.findByRole('button', { name: /^Setup/ })
+      await waitFor(() => expect(setup).toHaveAttribute('aria-expanded', 'true')) // the analysis waits for the coach
+      expect(await screen.findByText('Nomal has not analysed this video yet.')).toBeInTheDocument()
+      // The length, picture and frame rate sit next to the date; the keys behind a button.
+      expect(screen.getByText('1:32:10 · 1920×1080 · 50 fps')).toBeInTheDocument()
+      expect(screen.queryByText(/Keys: space to play/)).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Keys' }))
+      expect(screen.getByRole('region', { name: 'Keys of the player' })).toHaveTextContent('5 seconds back or forward')
+      fireEvent.keyDown(document, { key: 'Escape' })
+      expect(screen.queryByRole('region', { name: 'Keys of the player' })).not.toBeInTheDocument()
+    })
+
+    it('offers the downloads in one Export menu', async () => {
+      const posts: unknown[] = []
+      show(video({ names, can_export: true }), 200, {
+        [`/api/videos/${ID}/tagging`]: { body: tagged() },
+        'POST /api/exports': {
+          status: 201,
+          body: ({ body }: { body: unknown }) => {
+            posts.push(body)
+            return { id: 'x', kind: 'recap', title: 'Recap', duration_ms: 1000, status: 'queued', bytes: null, progress: null, error: null, created_at: '', expires_at: null }
+          },
+        },
+      })
+      await screen.findByRole('table', { name: 'Rallies' })
+      expect(screen.queryByRole('button', { name: 'Download as MP4' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Create game recap' })).not.toBeInTheDocument()
+      const menu = screen.getByRole('button', { name: 'Export' })
+      expect(menu).toHaveAttribute('aria-expanded', 'false')
+      fireEvent.click(menu)
+      expect(menu).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByRole('button', { name: /^Rallies only \(MP4\)/ })).toBeEnabled()
+      expect(screen.getByRole('link', { name: 'Your downloads' })).toHaveAttribute('href', '/downloads')
+      fireEvent.click(screen.getByRole('button', { name: /^Game recap \(MP4\)/ }))
+      expect(menu).toHaveAttribute('aria-expanded', 'false')
+      // The rules once per device, then the recap is queued.
+      fireEvent.click(within(screen.getByRole('alertdialog', { name: 'Download as MP4' })).getByRole('button', { name: 'Prepare the MP4' }))
+      await waitFor(() => expect(posts).toEqual([{ kind: 'recap', video_id: ID, lang: 'en' }]))
+      expect(await screen.findByText(/Cutting the game recap/)).toBeInTheDocument()
+    })
+
+    it('has nothing to cut without rallies', async () => {
+      show(video({ names, can_export: true }), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged({ segments: [] }) } })
+      fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+      const condensed = screen.getByRole('button', { name: /^Rallies only \(MP4\)/ })
+      await waitFor(() => expect(condensed).toBeDisabled())
+      expect(condensed).toHaveTextContent('Mark or review the rallies first.')
+    })
+  })
+
   describe('stats', () => {
     const set1 = period({ no: 1, start_ms: 0, first_serve: 'us', final_us: 1, final_them: 1 })
     const r1 = rally({ start_ms: 10_000, end_ms: 20_000, serving: 'us', won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })

@@ -8,7 +8,9 @@ import { Modal } from '../../components/Modal'
 import { Table, TBody, Td, Th, THead } from '../../components/Table'
 import { api, ApiError } from '../../lib/api'
 import { cx } from '../../lib/cx'
+import { sideLabel } from '../../lib/labels'
 import { useRosterCandidates } from '../../lib/queries'
+import { useSideNames } from '../../lib/sides'
 import { keys } from '../../lib/queryClient'
 import { newId } from '../../lib/taggingStore'
 import { useToast } from '../../lib/toast'
@@ -18,6 +20,7 @@ import { useUi, useView, useWorkspace } from './context'
 /** Roster chips (PLAN §9.1). A click starts a tag for that number. */
 export function RosterPanel() {
   const { t } = useTranslation()
+  const names = useSideNames()
   const { controller } = useWorkspace()
   const view = useView()
   const ui = useUi()
@@ -56,9 +59,9 @@ export function RosterPanel() {
         </Button>
       </div>
       <div className="grid grid-cols-[3.5rem_1fr] items-start gap-2 text-sm">
-        <span className="pt-2 font-semibold text-muted">{t('tagging.us')}</span>
+        <span className="pt-2 font-semibold text-muted">{sideLabel(t, 'us', names)}</span>
         {us.length > 0 ? <ul className="flex flex-wrap gap-1">{us.map(chip)}</ul> : <p className="pt-2 text-muted">{t('tagging.roster.none')}</p>}
-        <span className="pt-2 font-semibold text-muted">{t('tagging.them')}</span>
+        <span className="pt-2 font-semibold text-muted">{sideLabel(t, 'them', names)}</span>
         {them.length > 0 ? <ul className="flex flex-wrap gap-1">{them.map(chip)}</ul> : <p className="pt-2 text-muted">{t('tagging.roster.none')}</p>}
       </div>
       {editing && <RosterEditor onClose={() => setEditing(false)} />}

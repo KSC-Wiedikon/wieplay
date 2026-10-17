@@ -4,7 +4,9 @@ GET    /api/videos/{id}/scoreboard        the box (if any), what the hall's memo
                                           reading job's state and what it found
 PUT    /api/videos/{id}/scoreboard        save the box (whoever may tag) and read the board
 DELETE /api/videos/{id}/scoreboard        no board in this video: the box and its readings go,
-                                          the scoring goes back to the serves
+                                          the scoring goes back to the serves (the video
+                                          remembers it: `no_scoreboard`, also set with
+                                          PATCH /api/videos/{id}/setup)
 POST   /api/videos/{id}/scoreboard/read   read it again
 
 Whoever may watch the video may look; its taggers draw the box.
@@ -218,6 +220,7 @@ def save(video_id: uuid.UUID, body: SaveIn, viewer: ViewerDep, db: DbDep) -> Sco
         at_ms=body.at_ms,
         copied_from=body.copied_from,
     )
+    video.no_scoreboard = False
     job = sb.queue_reading(db, video, row, analysis.analysis_subdir(db, video))
     audit(db, viewer.member_id, "scoreboard_marked", "video", str(video.id), kind=body.kind,
           sets=body.sets is not None, copied=body.copied_from is not None,
@@ -244,6 +247,7 @@ def remove(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> Response:
     video = _editable(db, viewer, video_id)
     if not sb.remove(db, video):
         raise HTTPException(404, "The video has no scoreboard marked")
+    video.no_scoreboard = True  # the setup's scoreboard step is done
     scoring.score_video(db, video, reason="scoreboard")
     audit(db, viewer.member_id, "scoreboard_removed", "video", str(video.id))
     db.commit()

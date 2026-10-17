@@ -1,0 +1,101 @@
+import type { Messages } from './de'
+import type { setupEn } from './setup.en'
+
+// Swiss German spelling (ss, never ß), informal "du" as in Wiedisync.
+export const setupDe: Messages<typeof setupEn> = {
+  sides: {
+    opponent: 'Gegner',
+  },
+  winner: {
+    label: 'Punkt von Ballwechsel {{n}}',
+    nomal: '{{team}} (Nomal)',
+    none: '–',
+    changed: 'Punkt von Ballwechsel {{n}}: {{team}}.',
+    cleared: 'Punkt von Ballwechsel {{n}}: wieder Nomals Vorschlag.',
+    undo: 'Rückgängig',
+    failed: 'Der Punkt konnte nicht gespeichert werden: {{detail}}',
+  },
+  setup: {
+    title: 'Einrichtung',
+    progress: '{{done}} von {{total}} erledigt',
+    running_one: '{{count}} läuft',
+    running_other: '{{count}} laufen',
+    needsYou_one: '{{count}} braucht dich',
+    needsYou_other: '{{count}} brauchen dich',
+    completed: 'Erledigt',
+    state: {
+      done: 'Erledigt',
+      busy: 'Läuft',
+      todo: 'Offen',
+      attention: 'Braucht dich',
+      waiting: 'Wartet',
+      optional: 'Optional',
+    },
+    analysis: {
+      title: 'Ballwechsel und Spielstand',
+    },
+    ball: {
+      title: 'Ballflug',
+      done: 'Gefunden. «Flugbahnen» unter dem Video zeichnet ihn.',
+      busy: 'Nomal verfolgt den Ball…',
+      failed: 'Der Ballflug konnte nicht gefunden werden.',
+      none: 'Kommt nach der Analyse: Nomal verfolgt den Ball, sobald es die Ballwechsel gefunden hat.',
+    },
+    court: {
+      title: 'Spielfeld',
+      none: 'Nicht eingerichtet. Mit dem Spielfeld zählen die Aufpralle des Balls in den Tendenzen.',
+      busy: 'Nomal sucht das Spielfeld…',
+      auto: 'Automatisch gesetzt: prüf, ob die Linien auf dem Feld liegen.',
+      done: 'Eingerichtet.',
+      open: 'Spielfeld einrichten',
+      check: 'Spielfeld prüfen',
+      edit: 'Spielfeld bearbeiten',
+    },
+    scoreboard: {
+      title: 'Anzeigetafel',
+      none: 'Nicht markiert. Ist die Anzeigetafel im Bild, liest Nomal sie für den Spielstand.',
+      absent: 'Keine Anzeigetafel in diesem Video.',
+      waiting: 'Markiert: wartet aufs Lesen.',
+      open: 'Anzeigetafel markieren',
+      edit: 'Rahmen bearbeiten',
+      noBoard: 'Keine Anzeigetafel in diesem Video',
+    },
+    players: {
+      title: 'Spieler:innen',
+    },
+    names: {
+      title: 'Teamnamen',
+      fromGame: 'Aus dem Spiel in Wiedisync.',
+      fromTitle: 'Der Gegner aus dem Videotitel.',
+      fromYou: 'Von einem Coach gesetzt.',
+      unknown: 'Der Gegner ist nicht bekannt, darum steht «Gegner». Gib ihm hier einen Namen.',
+      edit: 'Namen bearbeiten',
+      dialogTitle: 'Teamnamen',
+      intro:
+        'Stehen überall, wo sonst wir und Gegner stünde: wer aufschlug und gewann, der Spielstand, die Statistik, das CSV und die Spielzusammenfassung. Lass ein Feld leer für den Namen, den Nomal herausfindet.',
+      us: 'Unser Team',
+      them: 'Gegner',
+      derived: 'Leer: {{name}}',
+      official: 'Offizieller Name: {{name}}',
+      save: 'Namen speichern',
+      saved: 'Namen gespeichert.',
+      failed: 'Die Namen konnten nicht gespeichert werden: {{detail}}',
+    },
+  },
+  exportMenu: {
+    button: 'Exportieren',
+    condensed: 'Nur Ballwechsel (MP4)',
+    condensedHint: 'Das Spiel ohne Pausen.',
+    noRallies: 'Markier oder prüf zuerst die Ballwechsel.',
+    recap: 'Spielzusammenfassung (MP4)',
+    recapHint: 'Die besten Szenen in 2–3 Minuten, mit Titelbild und Spielstand.',
+    downloads: 'Deine Downloads',
+  },
+  playerKeys: {
+    button: 'Tasten',
+    title: 'Tasten des Players',
+    space: 'Abspielen oder pausieren',
+    arrows: '5 Sekunden zurück oder vor',
+    frames: 'Ein Bild zurück oder vor (pausiert)',
+  },
+}

@@ -13,6 +13,7 @@ import { filterTags, isFiltered, lastAtOrBefore, NO_FILTER, type TagFilter } fro
 import { cx } from '../../lib/cx'
 import { formatEntry, skillByCode } from '../../lib/grammar'
 import { formatClock, gradeLabel, periodLabel, playerLabel, sideLabel, skillLabel } from '../../lib/labels'
+import { useSideNames } from '../../lib/sides'
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import type { ReelItemIn, RosterEntry, Side, Tag, TagAttributes, Taxonomy } from '../../lib/types'
@@ -130,6 +131,7 @@ export function EventTable() {
 
 function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boolean; selected: boolean; onAddToReel: (tag: Tag) => void }) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const { controller, taxonomy, actions } = useWorkspace()
   const actionReview = useActionReview()
   const view = useView()
@@ -171,7 +173,7 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
         )}
         <ActionChip tag={tag} className="ml-2 not-italic" />
       </Td>
-      <Td>{playerLabel(t, tag.side, tag.number, view.roster, tag.member_id)}</Td>
+      <Td>{playerLabel(t, tag.side, tag.number, view.roster, tag.member_id, names)}</Td>
       <Td>{skillLabel(t, skill, tag.code)}</Td>
       <Td>{tag.attributes.grade ? `${tag.attributes.grade} ${gradeLabel(t, skill, tag.attributes.grade)}` : '–'}</Td>
       {taxonomy.zones.length > 0 && (
@@ -199,6 +201,7 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
 
 function EditRow({ tag }: { tag: Tag }) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const { controller, taxonomy } = useWorkspace()
   const [side, setSide] = useState<Side>(tag.side)
   const [number, setNumber] = useState(tag.number === null ? '' : String(tag.number))
@@ -244,8 +247,8 @@ function EditRow({ tag }: { tag: Tag }) {
       <Td className="font-mono text-sm tabular-nums">{formatClock(tag.t_ms)}</Td>
       <Td colSpan={2} tight>
         <Select ref={first} inline value={side} onChange={(e) => setSide(e.target.value as Side)} aria-label={t('tagging.table.side')}>
-          <option value="us">{sideLabel(t, 'us')}</option>
-          <option value="them">{sideLabel(t, 'them')}</option>
+          <option value="us">{sideLabel(t, 'us', names)}</option>
+          <option value="them">{sideLabel(t, 'them', names)}</option>
         </Select>
       </Td>
       <Td tight>

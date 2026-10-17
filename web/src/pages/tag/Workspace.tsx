@@ -30,6 +30,7 @@ import { keys } from '../../lib/queryClient'
 import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
 import { actionItems, factTags, suggestedCount } from '../../lib/actions'
 import { allProgress, reviewProgress, suggestionCount } from '../../lib/suggestions'
+import { SideNamesContext, sideNamesOf, useSideNames } from '../../lib/sides'
 import { TaggingStore } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
@@ -207,6 +208,9 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
     () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, narrow, reload }),
     [video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, narrow, reload],
   )
+  const { t } = useTranslation()
+  // "KSCW H3", "Volero" wherever the workspace would say us and them.
+  const names = useMemo(() => sideNamesOf(video, t), [video, t])
   const reviewing = useSyncedReview(review)
 
   useEffect(() => {
@@ -317,7 +321,9 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
 
   return (
     <WorkspaceContext value={parts}>
-      <DeskLayout element={element} setElement={setElement} />
+      <SideNamesContext value={names}>
+        <DeskLayout element={element} setElement={setElement} />
+      </SideNamesContext>
     </WorkspaceContext>
   )
 }
@@ -541,6 +547,7 @@ function Lists({ rallies }: { rallies: number }) {
 function WorkspaceClipDialog() {
   const { t } = useTranslation()
   const { controller, video } = useWorkspace()
+  const names = useSideNames()
   const ui = useUi()
   const view = useView()
   const request = ui.clipRequest
@@ -548,11 +555,11 @@ function WorkspaceClipDialog() {
     if (!request) return null
     const tag = request.event_id ? view.events.find((e) => e.id === request.event_id) : undefined
     const title = tag
-      ? `${formatEntry(tag)} · ${playerLabel(t, tag.side, tag.number, view.roster, tag.member_id)}`
+      ? `${formatEntry(tag)} · ${playerLabel(t, tag.side, tag.number, view.roster, tag.member_id, names)}`
       : t('clips.dialog.defaultTitle', { time: formatClock(request.start_ms, { tenths: false }) })
     return { id: null, video_id: video.id, start_ms: request.start_ms, end_ms: request.end_ms, title, note: null, event_id: request.event_id, visibility: 'private' }
     // The form keeps what was typed: it reads the draft once per clip range.
-  }, [request, view.events, view.roster, video.id, t])
+  }, [request, view.events, view.roster, video.id, t, names])
   return (
     <ClipDialog
       draft={draft}
@@ -719,6 +726,7 @@ function StatePanel() {
 function SetState() {
   const { t } = useTranslation()
   const { playhead, taxonomy } = useWorkspace()
+  const names = useSideNames()
   const view = useView()
   const tenths = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 100))
   const t_ms = tenths * 100
@@ -738,12 +746,16 @@ function SetState() {
       <p className="flex flex-wrap items-baseline gap-x-3 text-lg font-bold tabular-nums">
         <span>{state.period ? t('tagging.setNo', { no: state.period.no }) : t('tagging.state.noSet')}</span>
         {state.period && (
-          <SuggestedValue suggested={state.suggested === true} className="text-2xl">
-            {`${state.us}:${state.them}`}
-          </SuggestedValue>
+          <span className="inline-flex items-baseline gap-x-1.5">
+            {names && <span className="text-sm font-semibold text-muted">{names.us}</span>}
+            <SuggestedValue suggested={state.suggested === true} className="text-2xl">
+              {`${state.us}:${state.them}`}
+            </SuggestedValue>
+            {names && <span className="text-sm font-semibold text-muted">{names.them}</span>}
+          </span>
         )}
         <SuggestedValue suggested={suggested && serving !== null} className="text-base font-semibold">
-          {serving ? t('tagging.state.serve', { side: sideLabel(t, serving) }) : t('tagging.state.serveUnknown')}
+          {serving ? t('tagging.state.serve', { side: sideLabel(t, serving, names) }) : t('tagging.state.serveUnknown')}
         </SuggestedValue>
       </p>
       <p className="text-sm text-muted tabular-nums">

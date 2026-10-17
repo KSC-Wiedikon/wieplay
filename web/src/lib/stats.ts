@@ -13,6 +13,7 @@ import { apiRequest } from './api'
 import { POST_ROLL_MS, PRE_ROLL_MS } from './condensed'
 import { keys } from './queryClient'
 import { periodAt, ralliesOf } from './rallies'
+import type { SideNames } from './sides'
 import type { ActionGate, Period, Segment, Side, Tag, Taxonomy } from './types'
 
 export type StatFormat = 'count' | 'pct' | 'rating'
@@ -273,7 +274,10 @@ export function columnGroups(columns: readonly StatColumn[]): { group: string | 
 }
 
 /** "#7 Alex Muster", "#11", "Team", "Opponent" (needs the stats strings, src/i18n/pages.ts). */
-export function rowLabel(t: TFunction, row: Pick<StatRow, 'kind' | 'number' | 'name'>): string {
+/** "#7 Alex Muster"; the team's and the opponent's rows by the teams' names on a match ("KSCW H3", "Volero"). */
+export function rowLabel(t: TFunction, row: Pick<StatRow, 'kind' | 'number' | 'name'>, names?: SideNames | null): string {
+  if (names && row.kind === 'team') return names.us
+  if (names && row.kind === 'opponent') return names.them
   if (row.kind !== 'player') return t(`stats.rows.${row.kind}`)
   return [row.number !== null ? `#${row.number}` : null, row.name].filter(Boolean).join(' ')
 }
