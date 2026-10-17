@@ -1,3 +1,5 @@
+import { guestsEn } from './guests.en'
+
 export const en = {
   common: {
     loading: 'Loading…',
@@ -34,8 +36,8 @@ export const en = {
     otherLanguageLabel: 'Auf Deutsch wechseln',
   },
   loggedOut: {
-    tagline: 'Video analysis for KSC Wiedikon teams.',
-    login: 'Log in with Wiedisync',
+    tagline: 'Video analysis for KSC Wiedikon teams and their guest clubs.',
+    login: 'KSCW members: log in with Wiedisync',
   },
   home: {
     title: 'Your teams',
@@ -260,6 +262,7 @@ export const en = {
     no_roster: 'The team has no roster in Wiedisync.',
     adult_check_unavailable: "Wiedisync couldn't be asked whether everyone is 18 or older. Try again later.",
     roster_unavailable: "The rosters couldn't be refreshed from Wiedisync. Try again later.",
+    adults_not_declared: "A coach of the team hasn't confirmed yet that everyone filmed is 18 or older (on the team page).",
     unknown: 'Filming is not allowed for another reason ({{code}}).',
   },
   upload: {
@@ -464,4 +467,5 @@ export const en = {
     body: "This page doesn't exist.",
     back: 'Back to your teams',
   },
+  ...guestsEn,
 }

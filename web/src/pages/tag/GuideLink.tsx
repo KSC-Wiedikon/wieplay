@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { cx } from '../../lib/cx'
+import { useIsGuest } from '../../lib/guests'
 
 /**
  * "How to help": the guide for helpers (reviewing, keys, tagging basics). Opens in a new tab,
@@ -8,6 +9,8 @@ import { cx } from '../../lib/cx'
  */
 export function GuideLink({ className }: { className?: string }) {
   const { t } = useTranslation()
+  // The guide is written for KSCW's helpers: not shown to guest clubs.
+  if (useIsGuest()) return null
   return (
     <Link
       to="/how-to-help"

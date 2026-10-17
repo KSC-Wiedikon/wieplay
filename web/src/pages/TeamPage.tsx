@@ -15,8 +15,9 @@ import { opponentOf, scoreOf, setsOf, splitGames } from '../lib/games'
 import { useTeam, useTeamGames } from '../lib/queries'
 import { sportOf, useSportAccent } from '../lib/sport'
 import type { Game } from '../lib/types'
-import { NotFoundPage } from './NotFoundPage'
+import { AdultsBanner, PeopleSection } from './GuestSections'
 import { HelpersSection, HelpingSection } from './HelpersSection'
+import { NotFoundPage } from './NotFoundPage'
 import { FilmingSection, VideosSection } from './TeamSections'
 
 // The season's numbers are a wide table with strings of their own: loaded when shown.
@@ -43,6 +44,8 @@ function TeamView({ teamId }: { teamId: number }) {
 
   const today = todayIso()
   const { name, league, season, sport } = team.data
+  // A guest club's team (PLAN §4.5) has no Wiedisync games: nothing to plan filming for.
+  const guest = team.data.guest === true
 
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
@@ -59,11 +62,12 @@ function TeamView({ teamId }: { teamId: number }) {
           </>
         }
         title={name}
-        subtitle={[league, season].filter(Boolean).join(' · ')}
+        subtitle={[team.data.club, league, season].filter(Boolean).join(' · ')}
       />
 
       {/* A helper is here to review and tag: the guide comes first. */}
       {team.data.helper && <HelpingSection />}
+      <AdultsBanner team={team.data} />
       <VideosSection team={team.data} />
       {team.data.rel.includes('player') && <HighlightsSection teamId={teamId} />}
       {sport === 'volleyball' && (
@@ -73,18 +77,21 @@ function TeamView({ teamId }: { teamId: number }) {
       )}
 
       {/* Wide screens: what's coming on the left, what was played on the right. */}
-      <div className="grid gap-8 sm:gap-10 xl:grid-cols-2 xl:items-start">
-        <div className="flex min-w-0 flex-col gap-8 sm:gap-10">
-          <FilmingSection teamId={teamId} />
-          <Section title={t('team.upcomingGames')} query={games}>
-            {(data) => <UpcomingGames games={splitGames(data, today).upcoming} />}
+      {!guest && (
+        <div className="grid gap-8 sm:gap-10 xl:grid-cols-2 xl:items-start">
+          <div className="flex min-w-0 flex-col gap-8 sm:gap-10">
+            <FilmingSection teamId={teamId} />
+            <Section title={t('team.upcomingGames')} query={games}>
+              {(data) => <UpcomingGames games={splitGames(data, today).upcoming} />}
+            </Section>
+          </div>
+          <Section title={t('team.playedGames')} query={games}>
+            {(data) => <PlayedGames games={splitGames(data, today).played} />}
           </Section>
         </div>
-        <Section title={t('team.playedGames')} query={games}>
-          {(data) => <PlayedGames games={splitGames(data, today).played} />}
-        </Section>
-      </div>
+      )}
 
+      {guest && <PeopleSection team={team.data} />}
       {team.data.can_grant && <HelpersSection team={team.data} />}
     </div>
   )

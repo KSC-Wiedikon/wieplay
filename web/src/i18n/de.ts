@@ -1,4 +1,5 @@
 import type { en } from './en'
+import { guestsDe } from './guests.de'
 
 export type Messages<T> = { [K in keyof T]: T[K] extends string ? string : Messages<T[K]> }
 
@@ -38,8 +39,8 @@ export const de: Messages<typeof en> = {
     otherLanguageLabel: 'Switch to English',
   },
   loggedOut: {
-    tagline: 'Videoanalyse für die Teams des KSC Wiedikon.',
-    login: 'Mit Wiedisync anmelden',
+    tagline: 'Videoanalyse für die Teams des KSC Wiedikon und ihre Gastvereine.',
+    login: 'KSCW-Mitglieder: mit Wiedisync anmelden',
   },
   home: {
     title: 'Deine Teams',
@@ -266,6 +267,8 @@ export const de: Messages<typeof en> = {
     adult_check_unavailable:
       'Wiedisync konnte nicht prüfen, ob alle 18 oder älter sind. Versuch es später nochmals.',
     roster_unavailable: 'Die Kader konnten nicht aus Wiedisync aktualisiert werden. Versuch es später nochmals.',
+    adults_not_declared:
+      'Ein Coach des Teams hat noch nicht bestätigt, dass alle Gefilmten 18 oder älter sind (auf der Teamseite).',
     unknown: 'Filmen ist aus einem anderen Grund nicht erlaubt ({{code}}).',
   },
   upload: {
@@ -475,4 +478,5 @@ export const de: Messages<typeof en> = {
     body: 'Diese Seite gibt es nicht.',
     back: 'Zurück zu deinen Teams',
   },
+  ...guestsDe,
 }

@@ -6,7 +6,7 @@ import { PageSpinner } from '../components/Spinner'
 import { useExportNotifications } from '../lib/exportWatch'
 import { useMe } from '../lib/queries'
 import type { Session } from '../lib/session'
-import { LoggedOutPage } from './LoggedOutPage'
+import { LoginPage } from './LoginPage'
 
 export function AppLayout() {
   const { t } = useTranslation()
@@ -20,7 +20,7 @@ export function AppLayout() {
       </main>
     )
   }
-  if (!me.data) return <LoggedOutPage />
+  if (!me.data) return <LoginPage />
 
   return (
     <>

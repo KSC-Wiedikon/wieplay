@@ -9,6 +9,19 @@ import { TeamPage } from './pages/TeamPage'
 
 // Pages most visits never open are loaded on demand (the player pulls in hls.js on its own).
 const routes: RouteObject[] = [
+  // Without a login: a guest club's invite link (PLAN §4.5) and the privacy notice it links to.
+  {
+    path: 'join/:token',
+    errorElement: <RouteError />,
+    hydrateFallbackElement: <PageSpinner />,
+    lazy: () => import('./pages/JoinPage').then((m) => ({ Component: m.JoinPage })),
+  },
+  {
+    path: 'privacy',
+    errorElement: <RouteError />,
+    hydrateFallbackElement: <PageSpinner />,
+    lazy: () => import('./pages/PrivacyPage').then((m) => ({ Component: m.PrivacyPage })),
+  },
   {
     element: <AppLayout />,
     errorElement: <RouteError />,

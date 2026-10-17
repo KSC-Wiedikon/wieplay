@@ -17,6 +17,7 @@ import { formatDateTime } from '../lib/format'
 import { useAdminTeams, useRunSync, useSetTeamEnabled, useSyncStatus } from '../lib/queries'
 import { groupBySport } from '../lib/teams'
 import type { AdminTeam, SyncStatus } from '../lib/types'
+import { GuestClubsSection } from './AdminGuestClubs'
 
 export function AdminTeamsPage() {
   const { t } = useTranslation()
@@ -31,6 +32,7 @@ export function AdminTeamsPage() {
           <SyncPanel />
           <TeamsPanel season={season} />
         </div>
+        <GuestClubsSection />
       </div>
     </AdminShell>
   )
