@@ -38,7 +38,7 @@ from nomal.ml import scoring as sc
 
 KINDS = frozenset({"scoreboard"})
 CAPS = ("analyse", "nas")
-PRIORITY = -10  # with the analyses: below everything that leads to playback
+PRIORITY = jobs.FOLLOW_UP_PRIORITY  # quick: before the next analysis
 TRACK_KIND = "scoreboard"
 FPS = 2.0
 NAS_PATH = re.compile(r"[A-Za-z0-9._/-]+")
