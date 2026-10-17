@@ -16,6 +16,7 @@ import { useTeam, useTeamGames } from '../lib/queries'
 import { sportOf, useSportAccent } from '../lib/sport'
 import type { Game } from '../lib/types'
 import { NotFoundPage } from './NotFoundPage'
+import { HelpersSection, HelpingSection } from './HelpersSection'
 import { FilmingSection, VideosSection } from './TeamSections'
 
 // The season's numbers are a wide table with strings of their own: loaded when shown.
@@ -61,6 +62,8 @@ function TeamView({ teamId }: { teamId: number }) {
         subtitle={[league, season].filter(Boolean).join(' · ')}
       />
 
+      {/* A helper is here to review and tag: the guide comes first. */}
+      {team.data.helper && <HelpingSection />}
       <VideosSection team={team.data} />
       {team.data.rel.includes('player') && <HighlightsSection teamId={teamId} />}
       {sport === 'volleyball' && (
@@ -81,6 +84,8 @@ function TeamView({ teamId }: { teamId: number }) {
           {(data) => <PlayedGames games={splitGames(data, today).played} />}
         </Section>
       </div>
+
+      {team.data.can_grant && <HelpersSection team={team.data} />}
     </div>
   )
 }

@@ -161,6 +161,19 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     watermarked export; the rules are shown once per device. `/downloads` lists them; the
     download is a plain link to `/api/exports/{id}/download`, which redirects to a 5-minute
     signed URL.
+- **Team helpers** (PLAN §5.1 "analyst"; `src/pages/HelpersSection.tsx`, `src/lib/helpers.ts`):
+  coaches, team managers, sport admins and admins (`can_grant` on `GET /api/teams/{id}`) get a
+  "Helpers" section at the bottom of the team page: what helpers can and can't do, the list
+  (name, teams, added by and when, note), "Add a helper" with a type-ahead search of club
+  members (`…/helpers/candidates?q=`, 250 ms after the last key; name and teams only) and an
+  optional note, and "Remove" after asking. A helper's team carries `helper: true`: a "Helper"
+  chip on the start page, upload offered (`mayUpload`), and a band at the top of the team page
+  pointing to the guide. Tagging and review buttons follow the API's `can_tag` as for coaches.
+- **The guide for helpers** (`/how-to-help`, `src/pages/GuidePage.tsx`, loaded on demand): why
+  reviewing matters, the review keys (including 3/4 for who won), marking rallies reviewed, the
+  tagging basics, suggested actions, what helpers can and can't do. Its text is a typed object
+  per language (`src/i18n/guide.en.ts`, `guide.de.ts`) picked by the reader's language, so the
+  main bundle doesn't carry it. The review panel and the `?` overlay link it (new tab).
 - **Stats** (M3b, volleyball; `src/lib/stats.ts`, `src/components/StatsTable.tsx`): the server
   computes the box score (`GET /api/videos/{id}/stats`, `/api/teams/{id}/stats`). Each number's
   moments are the tags matching its row's `filter`, its column's `codes` and `grades` and the

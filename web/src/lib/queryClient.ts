@@ -10,6 +10,8 @@ export const keys = {
   teamVideos: (id: number) => ['teams', id, 'videos'] as const,
   teamFilming: (id: number, on: string) => ['teams', id, 'filming', on] as const,
   upcomingFilming: (id: number) => ['teams', id, 'upcoming-filming'] as const,
+  teamHelpers: (id: number) => ['teams', id, 'helpers'] as const,
+  helperCandidates: (id: number, q: string) => ['teams', id, 'helpers', 'candidates', q] as const,
   videoConfig: ['video-config'] as const,
   video: (id: string) => ['videos', id] as const,
   tagging: (id: string) => ['videos', id, 'tagging'] as const,

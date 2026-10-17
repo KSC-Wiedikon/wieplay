@@ -41,6 +41,10 @@ const routes: RouteObject[] = [
         lazy: () => import('./pages/ClipsPage').then((m) => ({ Component: m.ClipsPage })),
       },
       {
+        path: 'how-to-help',
+        lazy: () => import('./pages/GuidePage').then((m) => ({ Component: m.GuidePage })),
+      },
+      {
         path: 'reels',
         lazy: () => import('./pages/ReelsPage').then((m) => ({ Component: m.ReelsPage })),
       },

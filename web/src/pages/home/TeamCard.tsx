@@ -9,20 +9,21 @@ import { CalendarIcon, ChevronDownIcon, FilmIcon, HistoryIcon } from '../../comp
 import { VideoPoster } from '../../components/VideoPoster'
 import { cx } from '../../lib/cx'
 import { formatDate } from '../../lib/format'
-import { roleLabel } from '../../lib/roles'
+import { teamRoleLabels } from '../../lib/roles'
 import { sportOf } from '../../lib/sport'
 import type { Team, Video } from '../../lib/types'
 import { newestFirst } from '../../lib/video'
 
-/** The viewer's roles in the team; admins without one see "Admin access". */
+/** The viewer's roles in the team; a helper's grant shows as "Helper"; admins without one see "Admin access". */
 function Roles({ team }: { team: Team }) {
   const { t } = useTranslation()
-  const labels = team.rel.length > 0 ? team.rel.map((rel) => roleLabel(t, rel)) : [t('roles.none')]
+  const labels = teamRoleLabels(t, team)
+  const helper = t('roles.helper')
   return (
     <ul aria-label={t('columns.roles')} className="flex flex-wrap gap-1.5">
-      {labels.map((label) => (
+      {(labels.length > 0 ? labels : [t('roles.none')]).map((label) => (
         <li key={label}>
-          <Chip>{label}</Chip>
+          <Chip accent={team.helper === true && label === helper}>{label}</Chip>
         </li>
       ))}
     </ul>
@@ -145,7 +146,7 @@ function EarlierSeasons({ team, earlier }: { team: Team; earlier: Team[] }) {
               >
                 <span className="link font-semibold">{`${season.name} ${season.season}`}</span>
                 <span className="truncate text-xs text-muted">
-                  {season.rel.length > 0 ? season.rel.map((rel) => roleLabel(t, rel)).join(', ') : t('roles.none')}
+                  {teamRoleLabels(t, season).join(', ') || t('roles.none')}
                 </span>
               </Link>
             </li>

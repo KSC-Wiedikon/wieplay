@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Modal } from '../../components/Modal'
 import { gradeLabel, skillLabel } from '../../lib/labels'
 import { useActionReview, useReview, useUi, useWorkspace } from './context'
+import { GuideLink } from './GuideLink'
 
 function Keys({ keys }: { keys: string[] }) {
   return (
@@ -168,6 +169,7 @@ export function Cheatsheet() {
             </section>
           ))}
           <p className="text-xs text-muted">{t('tagging.keys.note')}</p>
+          <GuideLink />
         </div>
         <div className="flex flex-col gap-5">
           <section className="flex flex-col gap-2">
