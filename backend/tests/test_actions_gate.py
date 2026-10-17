@@ -12,9 +12,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.core import actions
-from nomal.core.config import Settings
-from nomal.core.models import ModelRun
 from tests.fakes import FakeStore
 from tests.media_helpers import worker_client
 from tests.test_actions_api import (
@@ -27,6 +24,9 @@ from tests.test_actions_api import (
     through_trajectory,
 )
 from tests.test_analysis_api import ANALYSE_CAPS, complete, make_ready
+from wieplay.core import actions
+from wieplay.core.config import Settings
+from wieplay.core.models import ModelRun
 
 
 @pytest.fixture

@@ -1,5 +1,5 @@
 // The teams' names where the app would say us and them: who served and who won a rally, the
-// score line, the sets, the stats. The server works them out (backend nomal/core/names.py:
+// score line, the sets, the stats. The server works them out (backend wieplay/core/names.py:
 // "KSCW H3" from the club and the team, the opponent from the Wiedisync game or the video's
 // title, or what a coach set in the video's setup). The keyboard and the data stay us/them
 // (`a` starts an opponent's tag); only the words change.

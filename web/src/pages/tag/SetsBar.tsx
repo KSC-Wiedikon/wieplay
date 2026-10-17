@@ -467,8 +467,8 @@ function SetScore({ period, official, segments }: { period: Period; official: [n
   const suggested = segments.some((s) => s.kind === 'rally' && s.period_id === period.id && s.score_source === 'model')
   const same = official !== null && official[0] === period.final_us && official[1] === period.final_them
   const text = official
-    ? t('tagging.sets.officialVsNomal', { official: `${official[0]}:${official[1]}`, model })
-    : t('tagging.sets.nomalOnly', { model })
+    ? t('tagging.sets.officialVsWiePlay', { official: `${official[0]}:${official[1]}`, model })
+    : t('tagging.sets.wieplayOnly', { model })
   return (
     <span className={cx('inline-flex items-center gap-1', official && !same && 'font-semibold text-danger')}>
       <SuggestedValue suggested={suggested}>{text}</SuggestedValue>

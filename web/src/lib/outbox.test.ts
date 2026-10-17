@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto'
 import { openDB } from 'idb'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, ForbiddenError } from './api'
-import { chunk, Outbox, type Change, type OutboxItem, type OutboxOptions } from './outbox'
+import { chunk, LEGACY_DB, Outbox, type Change, type OutboxItem, type OutboxOptions } from './outbox'
 import type { ChangesIn, ChangesOut, EventIn } from './types'
 
 const VIDEO = '00000000-0000-4000-8000-0000000000aa'
@@ -117,6 +117,26 @@ describe('Outbox', () => {
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     await vi.waitFor(() => expect(second.getState().phase).toBe('idle'))
     expect(await stored(dbName)).toEqual([])
+  })
+
+  it('takes over what the old app (Nomal) left queued, every video, and removes its database', async () => {
+    const legacy = await openDB(LEGACY_DB, 1, {
+      upgrade(db) {
+        db.createObjectStore('changes', { keyPath: 'key' }).createIndex('videoId', 'videoId')
+      },
+    })
+    const queued = (video: string, id: string, seq: number) =>
+      ({ ...event(id), key: `${video}:event:${id}`, videoId: video, id, seq, queuedAt: 1 }) as OutboxItem
+    await legacy.put('changes', queued(VIDEO, 'e1', 1))
+    await legacy.put('changes', queued('other', 'e2', 2))
+    legacy.close()
+
+    // A send that never answers: the taken-over change stays queued for the checks below.
+    const outbox = await Outbox.open({ videoId: VIDEO, send: vi.fn(() => new Promise<ChangesOut>(() => {})), debounceMs: 60_000 })
+    opened.push(outbox)
+    expect(outbox.items().map((i) => i.id)).toEqual(['e1'])
+    expect((await indexedDB.databases()).some((d) => d.name === LEGACY_DB)).toBe(false)
+    expect((await stored('wieplay-outbox')).map((i) => i.id).sort()).toEqual(['e1', 'e2'])
   })
 
   it('keeps other videos out', async () => {

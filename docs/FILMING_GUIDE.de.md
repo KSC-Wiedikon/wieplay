@@ -78,7 +78,7 @@ Auf der Teamseite: *Video hochladen* → das Spiel wählen, oder *Anderes Spiel
   lassen, bis es fertig ist. Ein unterbrochener Upload geht weiter, wenn du auf der
   Videoseite dieselben Dateien nochmals wählst.
 - **Aus der NAS-Inbox** (für alle mit Zugang zum NAS des Clubs). Die Kameradateien in den
-  Ordner deines Teams in der Freigabe `nomal-inbox` kopieren (zum Beispiel `vb-H3`). Nach ein
+  Ordner deines Teams im Ordner `inbox` der Freigabe `wieplay` kopieren (zum Beispiel `inbox/vb-H3`). Nach ein
   paar Minuten erscheinen sie unter *Aus der NAS-Inbox*. Auswählen → *Video hinzufügen*. Sie
   werden nicht nochmals hochgeladen.
 - **Über einen Link.** Ist das Spiel schon auf YouTube oder Twitch, auf dem Kanal des Clubs

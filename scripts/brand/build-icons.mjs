@@ -1,10 +1,10 @@
 // Renders favicons and app icons from the brand SVGs in docs/brand/.
 //
-//   docs/brand/nomal-icon-{vb,bb}.svg  →  docs/brand/icons/{vb,bb}/
+//   docs/brand/wieplay-icon-{vb,bb}.svg  →  docs/brand/icons/{vb,bb}/
 //     favicon.svg, favicon.ico (16/32/48): the ball alone, which stays readable in a tab
 //     icon-192.png, icon-512.png, icon-maskable-192.png, icon-maskable-512.png,
 //     apple-touch-icon.png (180): the full icon
-//   docs/brand/nomal-mark-{vb,bb}.svg  →  docs/brand/icons/{vb,bb}/mark-on-dark.svg
+//   docs/brand/wieplay-mark-{vb,bb}.svg  →  docs/brand/icons/{vb,bb}/mark-on-dark.svg
 //   docs/brand/icons/site.webmanifest  (default variant: vb)
 //
 // Rasterises with Playwright's headless Chromium. See scripts/brand/README.md.
@@ -35,10 +35,10 @@ function ballOnly(iconSvg, sport) {
   // The ball is the group whose first child is the radius-10 circle (the outer group also
   // has a translate/scale transform, so match on the circle, not on the transform alone).
   const ball = iconSvg.match(/<g transform="translate\([^)]*\) scale\([^)]*\)">\s*(<circle r="10"[\s\S]*?)<\/g>/);
-  if (!ball) throw new Error(`ball group not found in nomal-icon-${sport}.svg`);
+  if (!ball) throw new Error(`ball group not found in wieplay-icon-${sport}.svg`);
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-11 -11 22 22" width="512" height="512">\n` +
-    `  <title>Nomal – ${sport === 'bb' ? 'basketball' : 'volleyball'} favicon</title>\n` +
+    `  <title>WiePlay – ${sport === 'bb' ? 'basketball' : 'volleyball'} favicon</title>\n` +
     `  ${ball[1].trimEnd()}\n</svg>\n`
   );
 }
@@ -78,8 +78,8 @@ const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ deviceScaleFactor: 1 });
   for (const sport of SPORTS) {
-    const icon = await readFile(path.join(brand, `nomal-icon-${sport}.svg`), 'utf8');
-    const mark = await readFile(path.join(brand, `nomal-mark-${sport}.svg`), 'utf8');
+    const icon = await readFile(path.join(brand, `wieplay-icon-${sport}.svg`), 'utf8');
+    const mark = await readFile(path.join(brand, `wieplay-mark-${sport}.svg`), 'utf8');
     const out = path.join(brand, 'icons', sport);
     await mkdir(out, { recursive: true });
 

@@ -1,0 +1,68 @@
+"""Worker settings, from WIEPLAY_WORKER_* environment variables."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class WorkerSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="WIEPLAY_WORKER_", extra="ignore")
+
+    # The API through the SSH tunnel on the worker host, e.g. http://172.17.0.1:18090
+    # (deploy/lenovo/wieplay-api-tunnel.service; worker routes refuse requests that come
+    # through Cloudflare).
+    api_url: str
+    token: str = ""
+    token_file: Path | None = None
+    caps: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["ingest", "transcode", "thumbs", "nas"]
+    )
+
+    work_dir: Path = Path("/var/lib/wieplay-worker")
+    # NAS: originals live under raw_root; the inbox share is scanned when "inbox" is a cap.
+    raw_root: Path = Path("/nas/wieplay/raw")
+    inbox_root: Path | None = None
+    # Automatic analysis (cap "analyse"): signals and rally models are written here, on the
+    # NAS next to raw/ (analysis/, analysis-dev/).
+    analysis_root: Path | None = None
+    # Decoding for the analysis. The CPU by default: in the worker image VAAPI was not
+    # faster (the model is the bottleneck) and its scaler found ~1 % fewer balls than the
+    # CPU's area filter (16.10.2026); "vaapi" falls back to the CPU by itself.
+    analysis_hwaccel: Literal["vaapi", "none"] = "none"
+    analysis_threads: int = 6
+    # The players job (PLAN §10.5): its weights' folder (the image has them in
+    # /opt/wieplay-weights) and ONNX Runtime providers (empty: the CPU; a GPU worker sets
+    # e.g. CUDAExecutionProvider,CPUExecutionProvider).
+    players_weights: Path | None = None
+    players_providers: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    inbox_scan_seconds: int = 60
+    inbox_stable_seconds: int = 120
+
+    encoder: Literal["x264", "vaapi"] = "x264"
+    vaapi_device: str = "/dev/dri/renderD128"
+    threads: int = 6  # x264 threads; keeps the box responsive for its other services
+    x264_preset: str = "veryfast"
+
+    # The watermark's font (Debian package fonts-dejavu-core in the worker image).
+    font_file: str = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+    heartbeat_seconds: int = 30
+    upload_concurrency: int = 6
+
+    @field_validator("caps", "players_providers", mode="before")
+    @classmethod
+    def _split(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [c.strip() for c in value.split(",") if c.strip()]
+        return value
+
+    def resolved_token(self) -> str:
+        if self.token:
+            return self.token
+        if self.token_file is not None:
+            return self.token_file.read_text().strip()
+        raise ValueError("set WIEPLAY_WORKER_TOKEN or WIEPLAY_WORKER_TOKEN_FILE")

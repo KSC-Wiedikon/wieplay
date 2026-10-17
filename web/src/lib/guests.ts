@@ -9,8 +9,8 @@ import type { GuestPersonIn, GuestTeam, GuestTeamCreate, GuestTeamUpdate, Me, Te
 
 export type LoginChoice = 'wiedisync' | 'guest'
 
-const CHOICE_KEY = 'nomal-login'
-const LOGGED_OUT_KEY = 'nomal-logged-out'
+const CHOICE_KEY = 'wieplay-login'
+const LOGGED_OUT_KEY = 'wieplay-logged-out'
 
 /** How this browser logged in last time; null when never (or storage is blocked). */
 export function rememberedLogin(): LoginChoice | null {

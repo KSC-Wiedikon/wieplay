@@ -125,7 +125,7 @@ def test_writes_are_idempotent_and_revisioned(
         (3, "delete"),
     ]
     assert revisions[0]["after"]["attributes"] == {"grade": "+"}
-    assert {r["changed_by"] for r in revisions} == {106}  # the coach, via nomal.actor
+    assert {r["changed_by"] for r in revisions} == {106}  # the coach, via wieplay.actor
     with db_engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM event")).scalar() == 1  # soft delete
 

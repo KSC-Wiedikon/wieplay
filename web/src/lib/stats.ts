@@ -1,5 +1,5 @@
 // Statistics (docs/PLAN.md §9.7): the box score of a match or a season, computed by the server
-// (backend/nomal/core/stats.py), and which plays each number is made of.
+// (backend/wieplay/core/stats.py), and which plays each number is made of.
 //
 // A box-score number's plays are the tags matching its row's `filter`, its column's `codes`
 // and `grades`, and (per set) the set. On the video page they are played right there, from

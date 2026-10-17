@@ -15,13 +15,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from nomal.core.config import Settings
-from nomal.core.models import Event
-from nomal.core.players import Ball, box_distance, nearest
-from nomal.ml import players as pl
 from tests.fakes import FakeStore
 from tests.test_analysis_api import claim_kind, complete, make_ready, payload
 from tests.test_court_job_api import BUMP_AT, court_result
+from wieplay.core.config import Settings
+from wieplay.core.models import Event
+from wieplay.core.players import Ball, box_distance, nearest
+from wieplay.ml import players as pl
 
 CAPS = ["analyse", "nas"]
 KINDS = ["analyse", "train_rallies", "trajectory", "court", "players"]
@@ -81,7 +81,7 @@ def trajectory(analyser: TestClient, store: FakeStore, **court: Any) -> None:
         analyser,
         traj,
         {
-            "model": {"name": "nomal-trajectory", "version": "abc123", "params": {}},
+            "model": {"name": "wieplay-trajectory", "version": "abc123", "params": {}},
             "track": {
                 "nas_path": f"{traj['params']['out_dir']}/ball-track-x.json.gz",
                 "key": traj["params"]["track_key"],
@@ -128,7 +128,7 @@ def players_result(job: dict[str, Any], store: FakeStore) -> dict[str, Any]:
 
     return {
         "model": {
-            "name": "nomal-players",
+            "name": "wieplay-players",
             "version": "abc123",
             "weights_sha256": "e" * 64,
             "params": {"detect_fps": 10.0},
@@ -295,13 +295,13 @@ def test_the_cli_finds_players_on_demand(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from nomal import cli
-    from nomal.core.config import get_settings
     from tests.conftest import TEST_DB
+    from wieplay import cli
+    from wieplay.core.config import get_settings
 
     app.state.settings = app.state.settings.model_copy(update={"players_auto": False})
     trajectory(analyser, store)
-    monkeypatch.setenv("NOMAL_DATABASE_URL", TEST_DB)
+    monkeypatch.setenv("WIEPLAY_DATABASE_URL", TEST_DB)
     get_settings.cache_clear()
     try:
         with pytest.raises(SystemExit):
@@ -463,7 +463,7 @@ def test_actions_get_the_player_nearest_the_ball_and_coach_numbers_stay(
     state = gallery(coach, ready)
     att = state["attribution"]
     assert att["actions"] == 5 and att["identified"] == 5 and att["suggested"] == 3
-    # The coach's #3 at 12.1 s is where Nomal sees #7: one compared, wrong.
+    # The coach's #3 at 12.1 s is where WiePlay sees #7: one compared, wrong.
     assert att["vs_coach"] == {"compared": 2, "correct": 0, "accuracy": 0.0}
     assert state["open_suggestions"] == 1
 
@@ -474,7 +474,7 @@ def test_actions_get_the_player_nearest_the_ball_and_coach_numbers_stay(
     assert tags[loose["id"]]["number"] == 7 and tags[loose["id"]]["member_id"] == 101
     assert r.json()["players"]["open_suggestions"] == 0
 
-    # Taking the number away takes back only what Nomal wrote.
+    # Taking the number away takes back only what WiePlay wrote.
     coach.patch(f"{url}/players/clusters/{ids[1]}", json={"number": None})
     assert event(app, hit).number is None
     assert event(app, kept).number == 1
@@ -531,7 +531,7 @@ def test_box_distance_is_in_box_heights() -> None:
 
 
 def test_nearest_picks_the_closer_player_and_its_confidence_reflects_the_margin() -> None:
-    from nomal.core.players import Candidate
+    from wieplay.core.players import Candidate
 
     a, b = Candidate(1, (0.40, 0.2, 0.45, 0.6)), Candidate(2, (0.60, 0.2, 0.65, 0.6))
     pick = nearest((0.44, 0.3), [a, b])
@@ -542,9 +542,9 @@ def test_nearest_picks_the_closer_player_and_its_confidence_reflects_the_margin(
 
 
 def test_nearest_on_the_court_with_a_camera() -> None:
-    from nomal.core import court
-    from nomal.core.players import Candidate
     from tests.test_court import camera_points
+    from wieplay.core import court
+    from wieplay.core.players import Candidate
 
     sol = court.solve(camera_points((4.5, -6.0, 5.0), 1.1, list(court.LANDMARKS)), 16 / 9)
     cam = sol.camera

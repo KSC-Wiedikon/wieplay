@@ -27,11 +27,11 @@ describe('LoginPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'KSCW members: log in with Wiedisync' }))
     expect(go).toHaveBeenCalledWith('/api/auth/login?next=%2Fteams%2F92%3Ftab%3Dstats')
-    expect(localStorage.getItem('nomal-login')).toBe('wiedisync')
+    expect(localStorage.getItem('wieplay-login')).toBe('wiedisync')
   })
 
   it('takes KSCW members straight to Wiedisync when that was their choice', () => {
-    localStorage.setItem('nomal-login', 'wiedisync')
+    localStorage.setItem('wieplay-login', 'wiedisync')
     const go = goSpy()
     renderRoute(<LoginPage />, { path: '/', url: '/' })
     expect(go).toHaveBeenCalledWith('/api/auth/login?next=%2F')
@@ -40,7 +40,7 @@ describe('LoginPage', () => {
   })
 
   it('stays on the page after logging out, and for guests', () => {
-    localStorage.setItem('nomal-login', 'wiedisync')
+    localStorage.setItem('wieplay-login', 'wiedisync')
     markLoggedOut()
     const go = goSpy()
     const first = renderRoute(<LoginPage />, { path: '/', url: '/' })
@@ -48,7 +48,7 @@ describe('LoginPage', () => {
     first.unmount()
 
     sessionStorage.clear()
-    localStorage.setItem('nomal-login', 'guest')
+    localStorage.setItem('wieplay-login', 'guest')
     renderRoute(<LoginPage />, { path: '/', url: '/' })
     expect(screen.getByLabelText('Email')).toBeInTheDocument()
     expect(go).not.toHaveBeenCalled()
@@ -63,7 +63,7 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: ' gina@example.org ' } })
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse battery' } })
     fireEvent.click(submit)
-    await waitFor(() => expect(localStorage.getItem('nomal-login')).toBe('guest'))
+    await waitFor(() => expect(localStorage.getItem('wieplay-login')).toBe('guest'))
     expect(bodyOf(fetch, '/api/auth/guest/login')).toEqual({
       email: 'gina@example.org',
       password: 'correct horse battery',
@@ -80,6 +80,6 @@ describe('LoginPage', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'not the password' } })
     fireEvent.click(screen.getByRole('button', { name: 'Log in' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Wrong email or password.')
-    expect(localStorage.getItem('nomal-login')).toBeNull()
+    expect(localStorage.getItem('wieplay-login')).toBeNull()
   })
 })

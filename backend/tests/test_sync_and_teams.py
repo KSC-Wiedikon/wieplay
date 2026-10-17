@@ -6,9 +6,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from nomal.api.dev_fixtures import personas
-from nomal.core.sync import BridgeError
 from tests.conftest import login
+from wieplay.api.dev_fixtures import personas
+from wieplay.core.sync import BridgeError
 
 P = personas(datetime.now(UTC).date())
 H3, H3_PREV, D1, HERREN1, HERREN1_PREV = 9101, 9001, 9102, 9104, 9004

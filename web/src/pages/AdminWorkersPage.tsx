@@ -16,7 +16,7 @@ import { useCreateWorker, useRevokeWorker, useSetWorkerPaused, useWorkers } from
 import { useToast } from '../lib/toast'
 import type { Worker, WorkerCreated } from '../lib/types'
 
-/** What a worker can be given (backend/nomal/worker). */
+/** What a worker can be given (backend/wieplay/worker). */
 const KNOWN_CAPS = [
   'ingest',
   'import',

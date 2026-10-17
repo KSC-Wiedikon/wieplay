@@ -8,8 +8,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from nomal.ml import metrics, rallies
-from nomal.ml.features import (
+from tests.analysis_helpers import league_rallies, synthetic_signals, to_ms
+from wieplay.ml import metrics, rallies
+from wieplay.ml.features import (
     AUDIO_HOP_S,
     SR,
     AudioFrames,
@@ -18,7 +19,6 @@ from nomal.ml.features import (
     detect_whistles,
     step_features,
 )
-from tests.analysis_helpers import league_rallies, synthetic_signals, to_ms
 
 # --- metrics -------------------------------------------------------------------------------
 

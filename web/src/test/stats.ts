@@ -1,5 +1,5 @@
 // Stats fixtures shaped like GET /api/videos/{id}/stats and /api/teams/{id}/stats
-// (backend/nomal/api/stats.py). The columns are the server's for the volleyball taxonomy.
+// (backend/wieplay/api/stats.py). The columns are the server's for the volleyball taxonomy.
 
 import type { BoxScore, RotationLine, SetterLine, SetterStats, StatColumn, StatRow, StatValue, TeamLine, TeamStats, VideoStats } from '../lib/stats'
 

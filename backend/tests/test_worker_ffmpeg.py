@@ -11,9 +11,9 @@ from typing import Any, cast
 
 import pytest
 
-from nomal.worker import ffmpeg, handlers
-from nomal.worker.client import ClaimedJob
-from nomal.worker.config import WorkerSettings
+from wieplay.worker import ffmpeg, handlers
+from wieplay.worker.client import ClaimedJob
+from wieplay.worker.config import WorkerSettings
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 

@@ -19,7 +19,7 @@
 //
 // Without IndexedDB (blocked site data, some private windows) the outbox works in memory.
 
-import { openDB, type IDBPDatabase } from 'idb'
+import { deleteDB, openDB, type IDBPDatabase } from 'idb'
 import { ApiError } from './api'
 import type { ChangesIn, ChangesOut, EventIn, PeriodIn, SegmentIn } from './types'
 
@@ -88,6 +88,28 @@ const KIND_ORDER: Record<ChangeKind, number> = { period: 0, segment: 1, event: 2
 const LIMITS: Record<ChangeKind, number> = { period: 20, segment: 500, event: 500 }
 
 type Db = IDBPDatabase
+
+// Until 17.10.2026 the app was called Nomal and queued changes in this database. The first
+// outbox opened after the rename takes over everything still queued there (every video's).
+export const LEGACY_DB = 'nomal-outbox'
+
+async function takeOverLegacy(db: Db): Promise<void> {
+  if (typeof indexedDB === 'undefined' || typeof indexedDB.databases !== 'function') return
+  try {
+    if (!(await indexedDB.databases()).some((d) => d.name === LEGACY_DB)) return
+    const old = await openStore(LEGACY_DB)
+    if (!old) return
+    const items = (await old.getAll(STORE)) as OutboxItem[]
+    old.close()
+    if (items.length > 0) {
+      const tx = db.transaction(STORE, 'readwrite')
+      await Promise.all([...items.map((item) => tx.store.put(item)), tx.done])
+    }
+    await deleteDB(LEGACY_DB)
+  } catch {
+    // Left in place: the next page load tries again.
+  }
+}
 
 async function openStore(name: string): Promise<Db | null> {
   if (typeof indexedDB === 'undefined') return null
@@ -170,7 +192,8 @@ export class Outbox {
 
   /** Opens the outbox of a video and picks up what an earlier page left queued. */
   static async open(options: OutboxOptions): Promise<Outbox> {
-    const db = await openStore(options.dbName ?? 'nomal-outbox')
+    const db = await openStore(options.dbName ?? 'wieplay-outbox')
+    if (db && options.dbName === undefined) await takeOverLegacy(db)
     let items: OutboxItem[] = []
     if (db) {
       try {

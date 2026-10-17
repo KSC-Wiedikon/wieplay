@@ -1,4 +1,4 @@
-"""M3b: the box score, side-out and break-point from tags (nomal/core/stats.py, PLAN §9.7).
+"""M3b: the box score, side-out and break-point from tags (wieplay/core/stats.py, PLAN §9.7).
 
 Every expected number is worked out by hand in the comments.
 """
@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from nomal.core import stats
-from nomal.core.stats import RallyIn, SetIn, TagIn
-from nomal.core.taxonomy import Taxonomy, load
+from wieplay.core import stats
+from wieplay.core.stats import RallyIn, SetIn, TagIn
+from wieplay.core.taxonomy import Taxonomy, load
 
 TAX = load("volleyball")
 COLS = stats.columns(TAX)

@@ -14,43 +14,43 @@ Dev first, then prod. Nothing here touches the database by hand.
 1. **NAS folder** for signals and models, owned like `raw/`:
 
    ```bash
-   mkdir -p /mnt/nas/nomal/analysis-dev      # prod: /mnt/nas/nomal/analysis
+   mkdir -p /mnt/nas/wieplay/analysis-dev      # prod: /mnt/nas/wieplay/analysis
    ```
 
-2. **Worker settings**, in `~/stacks/nomal-worker-<env>/.env` (template:
+2. **Worker settings**, in `~/stacks/wieplay-worker-<env>/.env` (template:
    `deploy/lenovo/env.example`):
 
    ```bash
-   NOMAL_NAS_ANALYSIS=/mnt/nas/nomal/analysis-dev
-   NOMAL_WORKER_CAPS=ingest,transcode,thumbs,nas,inbox,analyse   # keep ",import" where set
+   WIEPLAY_NAS_ANALYSIS=/mnt/nas/wieplay/analysis-dev
+   WIEPLAY_WORKER_CAPS=ingest,transcode,thumbs,nas,inbox,analyse   # keep ",import" where set
    ```
 
-   `deploy/lenovo/compose.yaml` refuses to start without `NOMAL_NAS_ANALYSIS`, so set it
+   `deploy/lenovo/compose.yaml` refuses to start without `WIEPLAY_NAS_ANALYSIS`, so set it
    before the next `scripts/deploy-worker.sh <env>`.
 
 3. **Capability in the API** (on the VPS, in that environment's API container):
 
    ```bash
-   python -m nomal.cli add-worker-cap <worker name> analyse
+   python -m wieplay.cli add-worker-cap <worker name> analyse
    ```
 
    Or Admin → Workers. A worker without the capability never gets analysis jobs; one with
-   it but without `NOMAL_NAS_ANALYSIS` logs an error and leaves them queued.
+   it but without `WIEPLAY_NAS_ANALYSIS` logs an error and leaves them queued.
 
 4. **Deploy** the API first (migration `0006`, the new claim filter), then the worker
    (`scripts/deploy-worker.sh <env>`). The worker log says `background lane nas,analyse`.
 
 New volleyball videos that meet the capture standard are analysed once they are ready
-(`NOMAL_ANALYSIS_AUTO=false` on the API turns that off; coaches can still start it from the
+(`WIEPLAY_ANALYSIS_AUTO=false` on the API turns that off; coaches can still start it from the
 video). Analysis runs on its own lane next to the media jobs and below them in CPU priority,
 so uploads never wait for it.
 
 ## Backfill: the imported H3 games
 
 ```bash
-python -m nomal.cli analyse --team <H3 team row id> --dry-run   # what would be queued
-python -m nomal.cli analyse --team <H3 team row id>
-python -m nomal.cli analyse --all-ready                         # every ready volleyball video
+python -m wieplay.cli analyse --team <H3 team row id> --dry-run   # what would be queued
+python -m wieplay.cli analyse --team <H3 team row id>
+python -m wieplay.cli analyse --all-ready                         # every ready volleyball video
 ```
 
 Videos analysed before are skipped (`--force` runs them again: their untouched proposals
@@ -69,8 +69,8 @@ the coach's "Set up the court" dialog; otherwise the dialog starts from the team
 calibration (or empty). Videos analysed before this job existed get it with:
 
 ```bash
-python -m nomal.cli trajectories --dry-run
-python -m nomal.cli trajectories            # --force: also videos that have a track
+python -m wieplay.cli trajectories --dry-run
+python -m wieplay.cli trajectories            # --force: also videos that have a track
 ```
 
 A 2 h 12 min match: 98 kB of track (gzip; 268 kB as JSON), 1.4 s to smooth, ~10 s for the
@@ -108,11 +108,11 @@ makes the video part of the hall's memory (a video without an empty-hall picture
 court job for it).
 
 ```bash
-python -m nomal.cli court --all-ready --dry-run   # what would be queued
-python -m nomal.cli court --all-ready             # videos without a court job result
-python -m nomal.cli court --video <id> --force    # again, e.g. after a coach calibrated a
+python -m wieplay.cli court --all-ready --dry-run   # what would be queued
+python -m wieplay.cli court --all-ready             # videos without a court job result
+python -m wieplay.cli court --video <id> --force    # again, e.g. after a coach calibrated a
                                                   # first video in that hall
-python -m nomal.cli court-eval                    # per video: method, confidence, setups,
+python -m wieplay.cli court-eval                    # per video: method, confidence, setups,
                                                   # and against the coach's calibration
 ```
 
@@ -131,29 +131,29 @@ video's calibration.
 
 ## Players (players job)
 
-**Beta, off by default** (`NOMAL_PLAYERS_AUTO=false` on the API): nothing queues the job by
+**Beta, off by default** (`WIEPLAY_PLAYERS_AUTO=false` on the API): nothing queues the job by
 itself. A coach clicks "Find players (beta, takes ~2 h)" on the video page (`POST
-/api/videos/{id}/players/find`), or an admin runs the CLI below. With `NOMAL_PLAYERS_AUTO=true`
+/api/videos/{id}/players/find`), or an admin runs the CLI below. With `WIEPLAY_PLAYERS_AUTO=true`
 it follows each court job. The `players` job (same `analyse` capability and background lane,
 priority −12 so a backlog's analyses go first) finds the people on the court in the rally
 windows, tracks them, groups them into clusters and reads shirt numbers (a suggestion). The
 coach names the clusters once on the video's "Players in this video" page; the actions then
 get their player (PLAN §10.5).
 
-- **Weights**: in the worker image at `/opt/nomal-weights` (YOLO26s ONNX, PaddleOCR detector
+- **Weights**: in the worker image at `/opt/wieplay-weights` (YOLO26s ONNX, PaddleOCR detector
   and recogniser), built by `Dockerfile.worker`'s first stage from SHA-256-pinned downloads
   (`scripts/ml/player_weights.py`; `MANIFEST.json` lists sources, licences, hashes). Local
-  runs: `NOMAL_WORKER_PLAYERS_WEIGHTS=/path`. Without the OCR files the job still runs (no
+  runs: `WIEPLAY_WORKER_PLAYERS_WEIGHTS=/path`. Without the OCR files the job still runs (no
   number suggestions).
-- **A GPU worker later**: start it with caps `gpu,nas`, `NOMAL_WORKER_PLAYERS_PROVIDERS=
+- **A GPU worker later**: start it with caps `gpu,nas`, `WIEPLAY_WORKER_PLAYERS_PROVIDERS=
   CUDAExecutionProvider,CPUExecutionProvider` and an onnxruntime-gpu image; set
-  `NOMAL_PLAYERS_CAPS=gpu,nas` on the API so new jobs ask for it.
+  `WIEPLAY_PLAYERS_CAPS=gpu,nas` on the API so new jobs ask for it.
 - **On demand** for videos with a ball track:
 
   ```bash
-  python -m nomal.cli players --all-ready --dry-run
-  python -m nomal.cli players --video <id>    # one video
-  python -m nomal.cli players --all-ready     # --force: also videos that have players
+  python -m wieplay.cli players --all-ready --dry-run
+  python -m wieplay.cli players --video <id>    # one video
+  python -m wieplay.cli players --all-ready     # --force: also videos that have players
   ```
 
   A rerun replaces the clusters; a coach's number stays where the same number is read on
@@ -168,16 +168,16 @@ get their player (PLAN §10.5).
    rejected), then marks them done (`POST /api/videos/{id}/rallies-reviewed`; refused with
    the count while proposals are open). A game reopened later trains again once it is
    marked done again.
-2. Ten minutes after the last such mark (`NOMAL_ANALYSIS_TRAIN_DELAY_SECONDS`), one
+2. Ten minutes after the last such mark (`WIEPLAY_ANALYSIS_TRAIN_DELAY_SECONDS`), one
    `train_rallies` job runs. It needs the signals of the reviewed games (their `analyse` job
    must have run) and at least **two** reviewed games to learn v1.
 3. It scores v0 and v1 on every reviewed game while that game is held out of the training.
    v1 is used only when its mean boundary F1 (±1 s) beats v0's; then it proposes new rallies
    for every game nobody has done yet.
-4. Train by hand: `python -m nomal.cli train-rallies`. Scores per game:
+4. Train by hand: `python -m wieplay.cli train-rallies`. Scores per game:
 
    ```bash
-   python -m nomal.cli rally-eval            # the latest training; --json for everything
+   python -m wieplay.cli rally-eval            # the latest training; --json for everything
    ```
 
 ## Scoring (servers, winners, sets, gaps)
@@ -190,9 +190,9 @@ missing series of every game), and are scored from the rally times only meanwhil
 gap lengths, no serve sides).
 
 ```bash
-python -m nomal.cli score --video <id>       # score again now and print the sets
-python -m nomal.cli score --all-ready        # every ready volleyball video (after a deploy)
-python -m nomal.cli train-rallies            # also brings the missing series of old games
+python -m wieplay.cli score --video <id>       # score again now and print the sets
+python -m wieplay.cli score --all-ready        # every ready volleyball video (after a deploy)
+python -m wieplay.cli train-rallies            # also brings the missing series of old games
 ```
 
 What a coach does: in the Sets bar, "First serve" and "We start" for set 1 when WiePlay is not
@@ -216,8 +216,8 @@ video in the same hall is offered that box (else the team's last one); the coach
 still sits on the score, since the camera rarely stands exactly where it stood.
 
 - **What it needs**: the NAS originals, ffmpeg, and for the second reader PaddleOCR's
-  recogniser from the players' weights (`/opt/nomal-weights/en_PP-OCRv5_rec_mobile.onnx` in the
-  worker image; local runs `NOMAL_WORKER_PLAYERS_WEIGHTS=/path`). Without it the light reader
+  recogniser from the players' weights (`/opt/wieplay-weights/en_PP-OCRv5_rec_mobile.onnx` in the
+  worker image; local runs `WIEPLAY_WORKER_PLAYERS_WEIGHTS=/path`). Without it the light reader
   alone runs (fine for lit digits and clean flip cards, weaker on a board seen from the side).
 - **Result**: `GET /api/videos/{id}/scoreboard` (the box, the job, what the board showed and
   when), the scoring's `board` metrics in `GET /api/videos/{id}/analysis`, rallies flagged
@@ -227,8 +227,8 @@ still sits on the score, since the camera rarely stands exactly where it stood.
 
   ```bash
   cd backend
-  uv run python -m nomal.worker.scoreboard VIDEO.mp4 X Y W H --kind flip \
-      --from 1440 --to 2040 --weights /path/to/nomal-weights --readings /tmp/readings.jsonl
+  uv run python -m wieplay.worker.scoreboard VIDEO.mp4 X Y W H --kind flip \
+      --from 1440 --to 2040 --weights /path/to/wieplay-weights --readings /tmp/readings.jsonl
   # X Y W H: the score's box, 0..1 of the picture; prints what the board showed and when
   ```
 
@@ -236,7 +236,7 @@ still sits on the score, since the camera rarely stands exactly where it stood.
   half second): ~12 min for a 2 h match.
 - **Wrong scores**: "No scoreboard in this video" removes the box and its readings and scores
   the video again from the serves; a new box reads it again.
-- **The weights**: `nomal/ml/weights/scoreboard-digits-v1.npz` (numpy arrays, no pickle; its
+- **The weights**: `wieplay/ml/weights/scoreboard-digits-v1.npz` (numpy arrays, no pickle; its
   SHA-256 is checked on load), made by `scripts/ml/scoreboard_digits.py` (synthetic boards,
   deterministic for a seed and a set of fonts; `uv run --with pillow`).
 
@@ -250,7 +250,7 @@ and gets a toast when it is ready. No commentary and no generated text: nothing 
 club's machines.
 
 - **Worker image**: DejaVu Sans and DejaVu Sans Bold (`fonts-dejavu-core`); the bold face is
-  found next to `NOMAL_WORKER_FONT_FILE`.
+  found next to `WIEPLAY_WORKER_FONT_FILE`.
 - **Language**: the requester's (the web app sends it); German and English.
 - **First real render, 17.10.2026**: the H3 home game vs Uster (06.02.2026, 105 min, no tags,
   v0 rallies and scoring from its stored signals), rendered on the Lenovo from the NAS original:
@@ -272,8 +272,8 @@ sides, the court (the coach's calibration, or the court finder's when confident)
 model. Deploy the API first (migration `0010`), then the worker. Videos analysed before:
 
 ```bash
-python -m nomal.cli actions --all-ready --dry-run
-python -m nomal.cli actions --all-ready          # or --video <id>
+python -m wieplay.cli actions --all-ready --dry-run
+python -m wieplay.cli actions --all-ready          # or --video <id>
 ```
 
 **The bar.** Suggestions are written only once the action finder's held-out score on games
@@ -282,13 +282,13 @@ suggestions ≥ 0.70, contact recall ≥ 0.6. Until then the jobs run and measur
 where coaches tagged, and the pages say why there are no suggestions. Settings (API):
 
 ```bash
-NOMAL_ACTION_SUGGESTIONS=auto            # auto (the bar) | on (write anyway, testing) | off
-NOMAL_ACTION_SUGGEST_MIN_PRECISION=0.70
-NOMAL_ACTION_SUGGEST_MIN_RECALL=0.6
+WIEPLAY_ACTION_SUGGESTIONS=auto            # auto (the bar) | on (write anyway, testing) | off
+WIEPLAY_ACTION_SUGGEST_MIN_PRECISION=0.70
+WIEPLAY_ACTION_SUGGEST_MIN_RECALL=0.6
 ```
 
 `GET /api/videos/{id}/analysis` → `actions.gate` says where it stands (reason, games, score).
-After switching to `on`, `python -m nomal.cli actions --all-ready` fills the games in.
+After switching to `on`, `python -m wieplay.cli actions --all-ready` fills the games in.
 
 Suggestions are tags with source "model" and review "unreviewed": they show dashed on the
 tagging page and are answered in Review → Actions (Enter, X, S R E A B D F, # + ! - / =, a
@@ -302,8 +302,8 @@ and the learned model (v1) on each game left out and keeps v1 only when its acti
 v0's (then every game nobody has done gets new suggestions).
 
 ```bash
-python -m nomal.cli train-actions                # train now
-python -m nomal.cli action-eval                  # per-game scores of the latest training
+python -m wieplay.cli train-actions                # train now
+python -m wieplay.cli action-eval                  # per-game scores of the latest training
 ```
 
 Scores per video: `GET /api/videos/{id}/analysis` → `actions` (suggestion counts, the newest
@@ -315,9 +315,9 @@ new scikit-learn) falls back to the rules with a warning; `train-actions` trains
 
 - **Analysis failed**: the video still plays; the error is on the job (Admin → Jobs) and,
   for coaches, in `GET /api/videos/{id}/analysis`. Rerun from the video or with
-  `python -m nomal.cli analyse --video <id>`.
+  `python -m wieplay.cli analyse --video <id>`.
 - **"this worker has no analysis root"**: step 2 is missing on that worker.
-- **Decoding**: the CPU decodes by default (`NOMAL_WORKER_ANALYSIS_HWACCEL=none`); with
+- **Decoding**: the CPU decodes by default (`WIEPLAY_WORKER_ANALYSIS_HWACCEL=none`); with
   `vaapi` a failing iGPU falls back to the CPU by itself. The run's timing says which one
   ran (`hwaccel`).
 - **A rally model does not load** (e.g. a new image with another scikit-learn): analysis

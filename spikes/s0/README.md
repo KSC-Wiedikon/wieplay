@@ -15,7 +15,7 @@ of the app; kept so the numbers can be reproduced.
 | `s0_people.py` | Framework 16 | YOLO person detection, one frame per second |
 | `s0_whistle.py` | Lenovo (CPU) | whistle events of a clip or a whole match, optional spectrogram |
 
-Weights (into `~/projects/nomal-s0/weights/` next to the scripts):
+Weights (into `~/projects/wieplay-s0/weights/` next to the scripts):
 
 - VballNet: the `vb-models` archive linked in its README (Google Drive), unpacked to
   `weights/vballnet/vb-models/`.

@@ -1,10 +1,10 @@
-"""A token signed by the real Wiedisync bridge (kscw-endpoints nomal-bridge.js, signNomalToken)
+"""A token signed by the real Wiedisync bridge (kscw-endpoints wieplay-bridge.js, signWiePlayToken)
 must verify here. The fixture was produced by that code; it is long expired, hence the leeway."""
 
 import json
 from pathlib import Path
 
-from nomal.core.tokens import verify_bridge_token
+from wieplay.core.tokens import verify_bridge_token
 
 FIXTURE = Path(__file__).parent / "fixtures" / "bridge_token_js.json"
 

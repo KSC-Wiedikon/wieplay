@@ -1,5 +1,5 @@
 // The ball's path over the video (docs/PLAN.md §10.4): GET /api/videos/{id}/ball-track, a
-// compact track the server stores per analysis (backend/nomal/ml/trajectory.py), decoded
+// compact track the server stores per analysis (backend/wieplay/ml/trajectory.py), decoded
 // here, and the maths of the "Trajectories" overlay: which part of the path to draw at a
 // moment, and where the picture sits inside the <video> box (letterboxing).
 
@@ -183,7 +183,7 @@ export function useBallTrack(videoId: string, enabled: boolean) {
   return useQuery({ ...ballTrackQuery(videoId), enabled })
 }
 
-const PREFERENCE = 'nomal-trajectories'
+const PREFERENCE = 'wieplay-trajectories'
 
 /** On by default on wider screens, off on phones; the last choice is remembered. */
 export function trajectoriesDefault(): boolean {

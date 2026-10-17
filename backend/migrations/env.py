@@ -1,18 +1,18 @@
-"""Alembic environment: the database URL comes from the app settings (NOMAL_DATABASE_URL)."""
+"""Alembic environment: the database URL comes from the app settings (WIEPLAY_DATABASE_URL)."""
 
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import create_engine
 
-from nomal.core import (  # noqa: F401 - registers the tables
+from wieplay.core import (  # noqa: F401 - registers the tables
     calibration,
     models,
     players,
     scoreboard,
 )
-from nomal.core.config import Settings
-from nomal.core.db import Base
+from wieplay.core.config import Settings
+from wieplay.core.db import Base
 
 config = context.config
 if config.config_file_name is not None:

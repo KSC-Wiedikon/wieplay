@@ -17,10 +17,10 @@ PLAYWRIGHT_CORE=../wiedisync/node_modules/playwright-core/index.mjs node scripts
 
 | Source | Output in `docs/brand/icons/<vb|bb>/` |
 |---|---|
-| the ball from `nomal-icon-<sport>.svg`, alone on a transparent square | `favicon.svg`, `favicon.ico` (16/32/48): the dot trail is unreadable at tab size |
-| `nomal-icon-<sport>.svg` | `icon-192.png`, `icon-512.png` |
+| the ball from `wieplay-icon-<sport>.svg`, alone on a transparent square | `favicon.svg`, `favicon.ico` (16/32/48): the dot trail is unreadable at tab size |
+| `wieplay-icon-<sport>.svg` | `icon-192.png`, `icon-512.png` |
 | same, corners removed (full bleed) | `icon-maskable-192.png`, `icon-maskable-512.png`, `apple-touch-icon.png` (180) |
-| `nomal-mark-<sport>.svg`, trail dots recoloured to `#EEF1F5` | `mark-on-dark.svg` (for navy / dark-mode backgrounds) |
+| `wieplay-mark-<sport>.svg`, trail dots recoloured to `#EEF1F5` | `mark-on-dark.svg` (for navy / dark-mode backgrounds) |
 
 `site.webmanifest` uses the `vb` icons (the default variant); basketball pages swap only the
 favicon link.

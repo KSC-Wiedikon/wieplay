@@ -1,6 +1,6 @@
-"""The action jobs on the worker (nomal/worker/actions.py): the actions of one video from its
+"""The action jobs on the worker (wieplay/worker/actions.py): the actions of one video from its
 signals on the NAS, and the training on reviewed games; their results pass the API's
-validation (nomal/core/actions.py)."""
+validation (wieplay/core/actions.py)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,6 @@ from typing import Any
 
 import numpy as np
 
-from nomal.core.actions import ActionsResult, TrainResult
-from nomal.ml import actions as ac
-from nomal.ml.features import Signals
-from nomal.worker.config import WorkerSettings
-from nomal.worker.handlers import BACKGROUND_KINDS, HANDLERS
 from tests.test_actions import path
 from tests.test_trajectory import signals
 from tests.test_worker_analyse import (
@@ -22,6 +17,11 @@ from tests.test_worker_analyse import (
     context,
     worker_settings,  # noqa: F401 - a fixture
 )
+from wieplay.core.actions import ActionsResult, TrainResult
+from wieplay.ml import actions as ac
+from wieplay.ml.features import Signals
+from wieplay.worker.config import WorkerSettings
+from wieplay.worker.handlers import BACKGROUND_KINDS, HANDLERS
 
 
 def store_signals(root: Path, name: str, sig: Signals) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-"""The ball's path (nomal/ml/trajectory.py): outliers out, short gaps filled, contacts and
+"""The ball's path (wieplay/ml/trajectory.py): outliers out, short gaps filled, contacts and
 bounces found, the compact track round-trips."""
 
 from __future__ import annotations
@@ -9,8 +9,8 @@ import json
 import numpy as np
 import pytest
 
-from nomal.ml import trajectory as tr
-from nomal.ml.features import HEIGHT, WIDTH, Signals
+from wieplay.ml import trajectory as tr
+from wieplay.ml.features import HEIGHT, WIDTH, Signals
 
 FPS = 30.0
 

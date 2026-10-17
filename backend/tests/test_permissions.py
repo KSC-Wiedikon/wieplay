@@ -1,7 +1,7 @@
 import dataclasses
 import uuid
 
-from nomal.core.permissions import TeamRef, Viewer, can_manage_nomal, visible_team_ids
+from wieplay.core.permissions import TeamRef, Viewer, can_manage_wieplay, visible_team_ids
 
 H3 = uuid.uuid4()
 D1 = uuid.uuid4()
@@ -12,7 +12,7 @@ TEAMS = [
     TeamRef(12, "volleyball", H3, True),  # H3, previous season
     TeamRef(80, "volleyball", D1, True),  # D1
     TeamRef(86, "basketball", HERREN1, True),
-    TeamRef(99, "volleyball", OFF, False),  # not enabled for Nomal
+    TeamRef(99, "volleyball", OFF, False),  # not enabled for WiePlay
 ]
 
 
@@ -29,16 +29,16 @@ def viewer(roles=("user",), sport_admin=(), teams=None) -> Viewer:
     )
 
 
-def test_admin_sees_every_enabled_team_and_manages_nomal() -> None:
+def test_admin_sees_every_enabled_team_and_manages_wieplay() -> None:
     admin = viewer(roles=("admin",))
     assert visible_team_ids(admin, TEAMS) == {92, 12, 80, 86}
-    assert can_manage_nomal(admin)
-    assert can_manage_nomal(viewer(roles=("superuser",)))
+    assert can_manage_wieplay(admin)
+    assert can_manage_wieplay(viewer(roles=("superuser",)))
 
 
 def test_sport_admin_sees_their_sport_only() -> None:
     assert visible_team_ids(viewer(sport_admin=("basketball",)), TEAMS) == {86}
-    assert not can_manage_nomal(viewer(roles=("vb_admin",), sport_admin=("volleyball",)))
+    assert not can_manage_wieplay(viewer(roles=("vb_admin",), sport_admin=("volleyball",)))
 
 
 def test_player_sees_only_their_rostered_seasons() -> None:
@@ -63,7 +63,7 @@ def test_board_member_without_admin_role_sees_nothing() -> None:
 
 
 # M1: videos (PLAN §5.1) — who may upload and delete.
-from nomal.core.permissions import (  # noqa: E402
+from wieplay.core.permissions import (  # noqa: E402
     can_delete_video,
     can_upload,
     can_use_inbox,
@@ -101,7 +101,7 @@ def test_inbox_is_for_people_who_upload_somewhere() -> None:
 
 
 # Tagging (M2), sharing and export (M3): admins too since 16.10.2026.
-from nomal.core.permissions import can_export, can_share_with_team, can_tag  # noqa: E402
+from wieplay.core.permissions import can_export, can_share_with_team, can_tag  # noqa: E402
 
 TAG_MATRIX = [
     # (who, team, may tag, may share with the team and export)
@@ -127,8 +127,8 @@ def test_tag_permission_matrix() -> None:
         assert can_export(who, team, leads) is share_export, (who, team)
 
 
-# Team helpers (PLAN §5.1 "analyst"): a Nomal grant per lineage, loaded per request.
-from nomal.core.permissions import (  # noqa: E402
+# Team helpers (PLAN §5.1 "analyst"): a WiePlay grant per lineage, loaded per request.
+from wieplay.core.permissions import (  # noqa: E402
     can_grant_analyst,
     is_analyst,
     is_team_manager,
@@ -165,7 +165,7 @@ HELPER_MATRIX = [
     (H3_HELPER, D1_NOW, {"see", "tag"}),  # their own team: a player there
     (H3_HELPER, HERREN1_NOW, set()),  # another team
     (D1_PLAYER, H3_NOW, set()),  # the grant revoked: nothing loaded for the request
-    (D1_PLAYER.with_grants({OFF}), OFF_TEAM, set()),  # a team that does not use Nomal
+    (D1_PLAYER.with_grants({OFF}), OFF_TEAM, set()),  # a team that does not use WiePlay
     (H3_PLAYER_HELPER, H3_PREV, HELPS),  # a player picked to help sees earlier seasons too
     (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, {"see", "tag"}),
     (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, LEADS),
@@ -194,7 +194,7 @@ def test_helpers_see_their_teams_every_season_and_upload_there() -> None:
 
 
 # Guest clubs (PLAN §4.5): walled off both ways; only full admins see both sides.
-from nomal.core.permissions import (  # noqa: E402
+from wieplay.core.permissions import (  # noqa: E402
     can_import_link,
     can_manage_people,
     can_run_analysis,
@@ -258,7 +258,7 @@ GUEST_MATRIX = [
     # Full admins see both sides; they manage a guest team's people but pick no helpers.
     (viewer(roles=("admin",)), GAST_NOW, ADMIN_ON_GUESTS),
     (viewer(roles=("admin",)), GAST_OFF, set()),
-    # KSCW coaches keep their teams; their rosters are Wiedisync's, never edited in Nomal.
+    # KSCW coaches keep their teams; their rosters are Wiedisync's, never edited in WiePlay.
     (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, LEADS | {"run"}),
     (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, {"see", "tag"}),
 ]
@@ -277,7 +277,7 @@ def test_guests_see_only_their_own_teams() -> None:
     assert visible_team_ids(admin, ALL_TEAMS) == {92, 12, 80, 86, GAST_NOW.id, GAST_PREV.id,
                                                   OTHER_GAST.id}  # fmt: skip
     assert not GUEST_COACH.is_admin and not guest([], roles=("superuser",)).is_admin
-    assert not can_manage_nomal(guest([], roles=("admin",)))
+    assert not can_manage_wieplay(guest([], roles=("admin",)))
 
 
 def test_guests_neither_use_the_inbox_nor_import_links() -> None:

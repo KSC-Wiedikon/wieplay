@@ -538,7 +538,7 @@ describe('downloads', () => {
   })
 
   it('says why a download is refused', async () => {
-    window.localStorage.setItem('nomal-export-rules', '1')
+    window.localStorage.setItem('wieplay-export-rules', '1')
     show({ video: coach(), tagging: tagged(), routes: { 'POST /api/exports': { status: 409, body: { detail: 'The originals of KSCW H3 are not available' } } } })
     await screen.findByRole('table', { name: 'Rallies' })
     fireEvent.click(await screen.findByRole('button', { name: 'Export' }))

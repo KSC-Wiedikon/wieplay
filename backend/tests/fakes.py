@@ -6,7 +6,7 @@ import itertools
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
-from nomal.core.storage import UploadedPart
+from wieplay.core.storage import UploadedPart
 
 
 class NoSuchUpload(Exception):

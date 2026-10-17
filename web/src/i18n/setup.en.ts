@@ -8,7 +8,7 @@ export const setupEn = {
   },
   winner: {
     label: 'Point of rally {{n}}',
-    nomal: '{{team}} (WiePlay)',
+    wieplay: '{{team}} (WiePlay)',
     none: '–',
     changed: 'Point of rally {{n}}: {{team}}.',
     cleared: 'Point of rally {{n}}: back to WiePlay’s suggestion.',

@@ -9,7 +9,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('ExportButton for a game recap', () => {
   it('asks for a recap in the viewer’s language and says it is being cut', async () => {
-    writeStorage('nomal-export-rules', '1')
+    writeStorage('wieplay-export-rules', '1')
     const posted: unknown[] = []
     const queued = vi.fn()
     window.addEventListener(EXPORT_QUEUED, queued)

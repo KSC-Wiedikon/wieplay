@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from nomal.api.worker import reap
 from tests.fakes import FakeStore
 from tests.media_helpers import (
     D1,
@@ -30,6 +29,7 @@ from tests.media_helpers import (
     upload_all,
     worker_client,
 )
+from wieplay.api.worker import reap
 
 
 def test_an_adult_team_films_without_asking_each_player(as_: Any, store: FakeStore) -> None:
@@ -556,9 +556,9 @@ def test_an_unset_camera_clock_is_only_noted(
 @pytest.mark.parametrize(
     "bad",
     [
-        {"nas_path": "/nas/nomal/raw/elsewhere/01.mp4"},
-        {"nas_path": "/nas/nomal/raw/{subdir}/../../other/01.mp4"},
-        {"nas_path": "/nas/nomal/raw/{subdir}/sub/01.mp4"},
+        {"nas_path": "/nas/wieplay/raw/elsewhere/01.mp4"},
+        {"nas_path": "/nas/wieplay/raw/{subdir}/../../other/01.mp4"},
+        {"nas_path": "/nas/wieplay/raw/{subdir}/sub/01.mp4"},
     ],
 )
 def test_ingest_results_with_foreign_paths_are_rejected(
@@ -649,7 +649,7 @@ def test_admin_retries_a_failed_job_with_the_ones_it_cancelled(
 def test_deleted_videos_are_swept_again_after_the_lease_window(
     app: FastAPI, club: dict[str, TestClient], store: FakeStore, db_engine: Engine
 ) -> None:
-    from nomal.api.videos import sweep_deleted
+    from wieplay.api.videos import sweep_deleted
 
     video = upload_all(club["coach"], store, create_match(club["coach"]).json())
     club["coach"].delete(f"/api/videos/{video['id']}")
@@ -666,7 +666,7 @@ def test_deleted_videos_are_swept_again_after_the_lease_window(
 def test_housekeeping_applies_the_retention_rules(
     app: FastAPI, club: dict[str, TestClient], store: FakeStore, db_engine: Engine
 ) -> None:
-    from nomal.core.retention import run_housekeeping
+    from wieplay.core.retention import run_housekeeping
 
     video = upload_all(club["coach"], store, create_match(club["coach"]).json())
     w = worker_client(app, club["admin"], MEDIA_CAPS)

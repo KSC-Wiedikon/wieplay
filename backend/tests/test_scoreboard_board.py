@@ -1,5 +1,5 @@
-"""The scoreboard over a match (nomal/ml/board.py) and in the scoring (nomal/ml/scoring.py,
-nomal/core/scoreboard.py): readings smoothed into what the board showed, a score counting only
+"""The scoreboard over a match (wieplay/ml/board.py) and in the scoring (wieplay/ml/scoring.py,
+wieplay/core/scoreboard.py): readings smoothed into what the board showed, a score counting only
 after 2 s and in +1 steps, the board winning over the serve evidence and losing to a coach,
 disagreements flagged. Plain Python, no database."""
 
@@ -10,9 +10,9 @@ from dataclasses import replace
 
 import pytest
 
-from nomal.core import scoreboard as sboard
-from nomal.ml import board as bd
-from nomal.ml import scoring as sc
+from wieplay.core import scoreboard as sboard
+from wieplay.ml import board as bd
+from wieplay.ml import scoring as sc
 
 
 def readings(

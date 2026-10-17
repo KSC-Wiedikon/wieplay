@@ -8,7 +8,7 @@ export const setupDe: Messages<typeof setupEn> = {
   },
   winner: {
     label: 'Punkt von Ballwechsel {{n}}',
-    nomal: '{{team}} (WiePlay)',
+    wieplay: '{{team}} (WiePlay)',
     none: '–',
     changed: 'Punkt von Ballwechsel {{n}}: {{team}}.',
     cleared: 'Punkt von Ballwechsel {{n}}: wieder der Vorschlag von WiePlay.',

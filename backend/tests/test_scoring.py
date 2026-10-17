@@ -10,10 +10,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from nomal.core import stats
-from nomal.ml import gaps, serve, tracks
-from nomal.ml import scoring as sc
-from nomal.ml.features import HEIGHT, Signals
+from wieplay.core import stats
+from wieplay.ml import gaps, serve, tracks
+from wieplay.ml import scoring as sc
+from wieplay.ml.features import HEIGHT, Signals
 
 # --- a match to score ----------------------------------------------------------------------------
 

@@ -11,10 +11,10 @@ const pub = join(webRoot, 'public')
 /** [source relative to docs/brand, target relative to public] */
 const files = [
   ['icons/site.webmanifest', 'icons/site.webmanifest'],
-  ['nomal-mark-vb.svg', 'brand/nomal-mark-vb.svg'],
-  ['nomal-mark-bb.svg', 'brand/nomal-mark-bb.svg'],
-  ['icons/vb/mark-on-dark.svg', 'brand/nomal-mark-vb-dark.svg'],
-  ['icons/bb/mark-on-dark.svg', 'brand/nomal-mark-bb-dark.svg'],
+  ['wieplay-mark-vb.svg', 'brand/wieplay-mark-vb.svg'],
+  ['wieplay-mark-bb.svg', 'brand/wieplay-mark-bb.svg'],
+  ['icons/vb/mark-on-dark.svg', 'brand/wieplay-mark-vb-dark.svg'],
+  ['icons/bb/mark-on-dark.svg', 'brand/wieplay-mark-bb-dark.svg'],
 ]
 for (const sport of ['vb', 'bb']) {
   for (const name of await readdir(join(brand, 'icons', sport))) {

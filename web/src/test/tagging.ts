@@ -1,5 +1,5 @@
 // Tagging fixtures: the volleyball and basketball taxonomies as the API serves them
-// (backend/nomal/taxonomies/volleyball.yaml, basketball.yaml).
+// (backend/wieplay/taxonomies/volleyball.yaml, basketball.yaml).
 
 import type { Period, RosterEntry, Segment, Tag, Tagging, Taxonomy } from '../lib/types'
 

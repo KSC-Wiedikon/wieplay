@@ -16,13 +16,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.core.analysis import TrainResult
-from nomal.ml import rallies
-from nomal.ml.features import Signals
-from nomal.worker import ffmpeg
-from nomal.worker.client import ClaimedJob
-from nomal.worker.config import WorkerSettings
-from nomal.worker.handlers import HANDLERS, Context
 from tests.analysis_helpers import league_rallies, synthetic_signals, to_ms
 from tests.fakes import FakeStore
 from tests.media_helpers import (
@@ -35,6 +28,13 @@ from tests.media_helpers import (
     upload_all,
     worker_client,
 )
+from wieplay.core.analysis import TrainResult
+from wieplay.ml import rallies
+from wieplay.ml.features import Signals
+from wieplay.worker import ffmpeg
+from wieplay.worker.client import ClaimedJob
+from wieplay.worker.config import WorkerSettings
+from wieplay.worker.handlers import HANDLERS, Context
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 ANALYSE_CAPS = ["analyse", "nas"]
@@ -244,7 +244,7 @@ def test_train_rallies_handler(worker_settings: WorkerSettings) -> None:
 
 
 def test_the_analysis_runs_on_a_background_lane(tmp_path: Path) -> None:
-    from nomal.worker.runner import Worker
+    from wieplay.worker.runner import Worker
 
     settings = WorkerSettings(
         api_url="http://unused", token="x", caps=["ingest", "transcode", "nas", "analyse"],

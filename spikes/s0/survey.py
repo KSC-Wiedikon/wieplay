@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-D = Path("/mnt/nas/nomal/datasets/youtube-h3/videos")
+D = Path("/mnt/nas/wieplay/datasets/youtube-h3/videos")
 OUT = Path(sys.argv[1])
 
 

@@ -15,18 +15,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
-from nomal.api.dev_bridge import FixtureBridgeClient
-from nomal.core import actions, analysis, guests, recap
-from nomal.core.models import (
-    AnalysisArtifact,
-    Job,
-    ModelRun,
-    Segment,
-    TeamLineage,
-    Video,
-    WdTeam,
-)
-from nomal.core.sync import _lineage_for
 from tests.fakes import FakeStore
 from tests.media_helpers import (
     H3,
@@ -37,6 +25,18 @@ from tests.media_helpers import (
     upload_all,
     worker_client,
 )
+from wieplay.api.dev_bridge import FixtureBridgeClient
+from wieplay.core import actions, analysis, guests, recap
+from wieplay.core.models import (
+    AnalysisArtifact,
+    Job,
+    ModelRun,
+    Segment,
+    TeamLineage,
+    Video,
+    WdTeam,
+)
+from wieplay.core.sync import _lineage_for
 
 PASSWORD = "correct horse battery"
 WRONG = "Wrong email or password"
@@ -303,7 +303,7 @@ def test_guest_login_wrong_unknown_locked_disabled(
     ok = good.post(
         "/api/auth/guest/login", json={"email": " GINA@example.org", "password": PASSWORD}
     )
-    assert ok.status_code == 204 and "nomal_session" in ok.cookies
+    assert ok.status_code == 204 and "wieplay_session" in ok.cookies
     assert good.get("/api/me").json()["club"] == "VBC Gast"
 
     wrong, unknown = login("gina@example.org", "not the password"), login("x@y.org", PASSWORD)
@@ -422,7 +422,7 @@ def test_a_removed_person_loses_the_team_at_once(
     assert new_client().post("/api/auth/guest/login", json=login).status_code == 401
     [(_, _, details)] = audit_rows(db_engine, "guest_person_removed")
     assert details == {"member_id": gast["player_id"], "account_disabled": True}
-    # Their name leaves Nomal too, as for a KSCW member who leaves.
+    # Their name leaves WiePlay too, as for a KSCW member who leaves.
     assert sql(db_engine, "SELECT id FROM wd_member WHERE id = :m", m=gast["player_id"]) == []
 
 
@@ -759,11 +759,11 @@ def test_a_burst_of_logins_gets_busy_not_every_thread(
 
 
 def test_guests_see_no_worker_error_text() -> None:
-    from nomal.core.permissions import Viewer
+    from wieplay.core.permissions import Viewer
 
     kscw = Viewer(1, "u", "Jo", frozenset(), frozenset(), {})
     gast = Viewer(guests.GUEST_ID_BASE + 1, "g", "Gina", frozenset(), frozenset(), {}, guest=True)
-    raw = "OSError: /mnt/nas/nomal/raw/2026-27/vb-H3/x.mp4: No such file"
+    raw = "OSError: /mnt/nas/wieplay/raw/2026-27/vb-H3/x.mp4: No such file"
     assert guests.error_for(kscw, raw) == raw
     assert guests.error_for(gast, raw) == guests.PROCESSING_FAILED
     assert guests.error_for(gast, None) is None
