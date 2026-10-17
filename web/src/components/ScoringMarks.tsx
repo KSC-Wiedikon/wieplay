@@ -43,7 +43,8 @@ export function ScoreHead({ className }: { className?: string }) {
   const names = useSideNames()
   if (!names) return <Th className={className}>{t('tagging.condensed.score')}</Th>
   return (
-    <Th className={className} title={`${names.usFull} – ${names.themFull}`}>
+    // Two short lines rather than one wide column: the scores below are short.
+    <Th className={cx('min-w-24 leading-4 whitespace-normal!', className)} title={`${names.usFull} – ${names.themFull}`}>
       <span className="sr-only">{`${t('tagging.condensed.score')}:`}</span> {`${names.us} – ${names.them}`}
     </Th>
   )

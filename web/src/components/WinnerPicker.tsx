@@ -32,9 +32,11 @@ export function WinnerPicker({ rally, n, names, onPick, disabled = false, classN
       value={rally.won_by ?? ''}
       disabled={disabled}
       onChange={(event) => onPick(event.target.value === '' ? null : (event.target.value as Side))}
+      // Quiet like the text around it until pointed at or focused: one in every row.
       className={cx(
-        'min-h-11 w-full max-w-40 min-w-24 cursor-pointer truncate rounded-control border border-hairline-strong bg-surface px-2 text-xs sm:min-h-8',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-60',
+        'min-h-11 w-full max-w-44 min-w-28 cursor-pointer truncate rounded-control border border-transparent bg-transparent px-1.5 text-sm sm:min-h-8',
+        'hover:border-hairline-strong hover:bg-surface focus-visible:border-hairline-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+        'disabled:cursor-not-allowed disabled:opacity-60 *:bg-surface *:text-fg *:not-italic',
         rally.won_by ? 'font-semibold text-fg' : 'text-muted italic',
         className,
       )}

@@ -4,6 +4,9 @@ import { Button } from './Button'
 import type { ButtonSize, ButtonVariant } from './buttonStyles'
 import { ChevronDownIcon } from './icons'
 
+/** The panel's width (w-72, or panelClassName's w-80 at most). */
+const PANEL_PX = 320
+
 interface PopoverProps {
   /** The button's content (icon and text). */
   label: ReactNode
@@ -12,7 +15,7 @@ interface PopoverProps {
   title?: string
   variant?: ButtonVariant
   size?: ButtonSize
-  /** Where the panel opens: under the button's left or right edge. */
+  /** Where the panel opens by preference: under the button's left or right edge (the other one when it would not fit). */
   align?: 'start' | 'end'
   /** A chevron after the label (a menu). */
   chevron?: boolean
@@ -29,6 +32,7 @@ interface PopoverProps {
 export function Popover({ label, ariaLabel, title, variant = 'secondary', size = 'md', align = 'start', chevron = false, className, panelClassName, children }: PopoverProps) {
   const id = useId()
   const [open, setOpen] = useState(false)
+  const [side, setSide] = useState(align)
   const root = useRef<HTMLDivElement>(null)
   // State, not a ref: `close` hands the focus back and may be passed on during render.
   const [button, setButton] = useState<HTMLButtonElement | null>(null)
@@ -67,7 +71,15 @@ export function Popover({ label, ariaLabel, title, variant = 'secondary', size =
         aria-controls={id}
         aria-label={ariaLabel}
         title={title}
-        onClick={() => setOpen((v) => !v)}
+        onClick={(event) => {
+          // The preferred edge, unless the panel would leave the window there.
+          const box = event.currentTarget.getBoundingClientRect()
+          const width = Math.min(PANEL_PX, window.innerWidth - 32)
+          const fitsStart = box.left + width <= window.innerWidth - 8
+          const fitsEnd = box.right - width >= 8
+          setSide(align === 'end' ? (fitsEnd || !fitsStart ? 'end' : 'start') : fitsStart || !fitsEnd ? 'start' : 'end')
+          setOpen((v) => !v)
+        }}
       >
         {label}
         {chevron && <ChevronDownIcon className={cx('size-4 transition-transform motion-reduce:transition-none', open && 'rotate-180')} />}
@@ -77,7 +89,7 @@ export function Popover({ label, ariaLabel, title, variant = 'secondary', size =
           id={id}
           className={cx(
             'absolute top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-hairline bg-surface p-1.5 shadow-raised',
-            align === 'end' ? 'right-0' : 'left-0',
+            side === 'end' ? 'right-0' : 'left-0',
             panelClassName,
           )}
         >

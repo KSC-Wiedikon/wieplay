@@ -40,7 +40,7 @@ function StateIcon({ state }: { state: StepState }) {
     case 'done':
       return <CircleCheckIcon className="size-5 shrink-0 text-on-accent-soft" />
     case 'attention':
-      return <AlertIcon className="size-5 shrink-0 text-danger" />
+      return <AlertIcon className="size-5 shrink-0 text-link" />
     case 'busy':
       return (
         <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 shrink-0 text-muted motion-safe:animate-spin">
@@ -74,7 +74,7 @@ function Step({ title, state, status, badge, actions, children, wide = false }: 
       className={cx(
         'flex min-w-0 flex-col gap-2 rounded-xl border p-3',
         wide && 'md:col-span-2',
-        state === 'attention' ? 'border-danger/40 bg-surface' : 'border-hairline bg-surface',
+        state === 'attention' ? 'border-accent bg-surface' : 'border-hairline bg-surface',
       )}
     >
       <div className="flex items-start gap-2.5">
@@ -83,7 +83,7 @@ function Step({ title, state, status, badge, actions, children, wide = false }: 
           <h3 className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold">
             {title}
             {badge}
-            <span className={cx('text-xs font-semibold', state === 'attention' ? 'text-danger' : 'text-muted')}>{t(`setup.state.${state}`)}</span>
+            <span className={cx('text-xs font-semibold', state === 'attention' ? 'text-link' : 'text-muted')}>{t(`setup.state.${state}`)}</span>
           </h3>
           {status && <div className="text-sm text-muted">{status}</div>}
         </div>
@@ -170,8 +170,10 @@ export function VideoSetup({ video, element, rallies, actionTags }: VideoSetupPr
           className="flex min-h-12 w-full cursor-pointer items-center gap-3 rounded-card px-4 py-2.5 text-left hover:bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
         >
           <SlidersIcon className="size-5 shrink-0 text-muted" />
-          <span className="font-semibold">{t('setup.title')}</span>
-          <span className="min-w-0 flex-1 truncate text-sm font-normal text-muted tabular-nums">{summary}</span>
+          <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-baseline sm:gap-3">
+            <span className="font-semibold">{t('setup.title')}</span>
+            <span className="min-w-0 text-sm font-normal text-muted tabular-nums sm:truncate">{summary}</span>
+          </span>
           <ChevronDownIcon className={cx('size-5 shrink-0 text-muted transition-transform motion-reduce:transition-none', expanded && 'rotate-180')} />
         </button>
       </h2>

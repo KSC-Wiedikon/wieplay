@@ -127,7 +127,9 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
   - Review mode (`/videos/:id/tag?mode=review`, the only mode on tablets and phones) goes through
     the open ones in time order and loops each from 1 s before it (`src/lib/useLoopPlayback.ts`):
     `Enter` accept, `X` reject, `←/→` start and `Shift+←/→` end by 0.25 s (`Alt`: one frame), `M`
-    merge with the next, `S` split at the playhead, `U` undo, `↑/↓` move, `Esc` back to tagging.
+    merge with the next, `S` split at the playhead, `1`/`2` who served, `3`/`4` who won (the
+    rally's `won_by`, a fact the server scores again around), `U` undo, `↑/↓` move, `Esc` back
+    to tagging.
     Every answer is an ordinary segment change through the outbox: accept sets `review:
     "confirmed"`, a moved boundary `"corrected"`, reject deletes with `review: "rejected"` (kept by
     the server as a negative); merge corrects the first and rejects the second; a split adds a
@@ -138,7 +140,25 @@ The wordmark is the text "nomal" in Bricolage Grotesque ExtraBold, self-hosted t
     "Analyse" (`POST …/analyse`) when there is none or it failed, the F1 against the coach's own
     rallies, and "Rallies reviewed" (`POST …/rallies-reviewed`), which makes Nomal learn from the
     game; with suggestions still open it asks first (the server accepts them as they are), and it
-    is offered prominently once every suggestion is answered.
+    is offered prominently once every suggestion is answered. On the video page it is the first
+    step of the setup (below).
+- **The video page's setup** (`src/components/VideoSetup.tsx`, the states in `src/lib/setup.ts`):
+  for those who may tag (volleyball), one card per step with its state (done, running, to do,
+  needs you, waiting, optional) and its action: rallies and score (`AnalysisStatus`), ball
+  path, court (the court dialog), scoreboard (its dialog, read again, "No scoreboard in this
+  video" through `PATCH /api/videos/{id}/setup`), players (beta, on demand), team names (a
+  dialog for the video's own names). Open steps first, completed ones grouped; folded until
+  something needs the coach. Under the player only playback (trajectories, start at the first
+  serve, quality, the "Keys" popover, clips); the downloads are one "Export" menu
+  (`ExportMenu`, `src/lib/useExport.tsx`) in the header.
+- **The teams' names** (`src/lib/sides.ts`): the server sends them with the video
+  (`names`: "KSCW H3", "Volero", the official names for tooltips). The video page, the
+  tagging workspace and the players gallery provide them (`SideNamesContext`); `sideLabel`,
+  `playerLabel` and the stats' `rowLabel` take them, so serving, winners, scores, sets, stats
+  rows, tendencies and keys say the names instead of us and them. Without names (an older
+  server) they say "Us" and "Them" as before. Who won a rally can be set in the rally lists
+  (`WinnerPicker`; on the video page through `src/lib/winner.ts`: one change, the score line
+  computed at once, an undo).
 - **Clips, reels, comments, downloads** (M3; API calls and hooks in `src/lib/library.ts`):
   - A clip is a time range. On the video page "Clip in" / "Clip out" mark it at the playhead
     (`[`, `]`, then `C` in the tagging workspace; `Shift+C` still sets the selected tag's clip

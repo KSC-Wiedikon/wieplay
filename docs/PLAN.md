@@ -1456,15 +1456,29 @@ rallies ≤ 5 %.
   rallies before the first set (warm-up) and after the last are left out. A coach's own set
   replaces the open proposals; a rejected one is not proposed again.
 - **When**: after every analysis and training, when a coach marks the rallies done, changes
-  a set (bounds, number, first serve, sides) or calls a serve in review, and on request
+  a set (bounds, number, first serve, sides), calls a serve in review or changes who won a
+  rally (a fact it keeps to), and on request
   (`POST /api/videos/{id}/scoring`, `python -m nomal.cli score`). Each run is a `model_run`
   (kind "score") with the metrics in `GET /api/videos/{id}/analysis` (`scoring`): per set
   the official score, the score line's final and where the evidence alone ends; flagged
   rallies; gaps; on games with a coach's serves and winners, the serve-side and winner
   accuracy of a run blind to them.
 - **Review**: the suggested server and winner on each rally, the score line with "check"
-  marks, `1`/`2` call the serving team, gap labels in the same list, "First serve" / "We
-  start" and the starting rotation per set in the Sets bar.
+  marks, `1`/`2` call the serving team, `3`/`4` who won (17.10.2026; buttons too, `U` undoes;
+  `won_by` as a fact, a proposal with another winner is corrected), gap labels in the same
+  list, "First serve" / "We start" and the starting rotation per set in the Sets bar. Who
+  won is also a choice per rally in the tagging page's rally list and, for those who tag,
+  in the video page's (with an undo).
+- **The teams' names** (17.10.2026, owner's feedback): wherever the app would say us and
+  them (who served and won, the score line and the rally lists' score head, the sets bar,
+  the stats' team and opponent rows and the match CSV, the tendencies, the recap's bug and
+  title card) it writes the teams' names: ours from `NOMAL_CLUB_SHORT_NAME` (default
+  "KSCW") and the team ("KSCW H3"), the opponent from the video's Wiedisync game (the side
+  that is not ours), else from the title of a friendly ("Friendly vs Volero" → "Volero"),
+  else "Opponent". Long names lose a "VBC" / "VC" / "Volley" in front only when they do not
+  fit 16 characters; the official name stays in tooltips. A coach can set both per video
+  (`video.name_us`, `video.name_them`; `PATCH /api/videos/{id}/setup`). The data and the
+  keyboard stay us/them (`a` starts an opponent's tag). `nomal/core/names.py`.
 - **First real run, 16.10.2026** (the H3 vs Volero Legends match of §10.1, its stored signals,
   v0 rallies, outside the workers): serve track 1.7 s and activity 0.7 s to compute, 9.5 KB
   and 22 KB stored; 191 of 193 rallies in four sets cut at the three set breaks (331, 258,
@@ -1486,7 +1500,8 @@ rallies ≤ 5 %.
   board (flip cards, lit digits, not sure). Stored per video (`scoreboard_region`); a video
   without one is offered the last box drawn in the same hall (the board's place is the
   hall's), else the team's last one. "No scoreboard in this video" forgets it (most of our
-  halls have none in the picture).
+  halls have none in the picture) and is remembered (`video.no_scoreboard`: the setup's
+  scoreboard step is done).
 - **Reading** (`scoreboard` job, the worker's background lane, CPU; `nomal/ml/scoreboard.py`,
   `nomal/worker/scoreboard.py`): ffmpeg crops the box from the NAS originals at 2 fps. Two
   readers, both free and local: a **light one** (local threshold, glyph-shaped components, a
@@ -1993,6 +2008,14 @@ Borrowed from Wiedisync's kscw-ui rules: the `Button` height scale (44 px touch 
 tables for lists of records, Swiss formats (`dd.mm.yyyy`, 24 h, locale `de-CH`), sentence-case
 labels, no native browser dialogs, dark mode from tokens, English first with German at minimum.
 The colours are Nomal's own.
+
+**The video page** (17.10.2026, owner's feedback "a loose pile under the player"): under the
+player only playback (trajectories, start at the first serve, quality, a "Keys" popover, clip
+in/out/save); length, picture and frame rate next to the date; the downloads (rallies only,
+game recap) in one "Export" menu in the header. What Nomal needs to know about the video is
+a "Setup" card (those who tag, volleyball), like Balltime's setup: one card per step with its
+state and action (rallies and score, ball path, court, scoreboard, players, team names), the
+open ones first, the completed ones grouped; folded until something needs the coach.
 
 ---
 

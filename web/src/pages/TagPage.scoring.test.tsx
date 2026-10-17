@@ -311,7 +311,9 @@ describe('TagPage, automatic scoring', () => {
     keys('Enter') // the timeout first
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
     const won = within(panel()).getByRole('group', { name: 'Who won the rally' })
-    expect(within(won).getAllByRole('button').map((b) => b.textContent)).toEqual(['Point KSCW H3' + '3', 'Point Smash 05' + '4'])
+    // The teams' names on the buttons; their accessible names say what for.
+    expect(within(won).getAllByRole('button').map((b) => b.textContent)).toEqual(['KSCW H3' + '3', 'Smash 05' + '4'])
+    expect(within(won).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Point KSCW H3', 'Point Smash 05'])
 
     // Nomal says Smash 05 won it (1:2); the coach saw KSCW H3 win: 3.
     keys('3')
@@ -340,7 +342,7 @@ describe('TagPage, automatic scoring', () => {
     keys('4', '4')
     expect(within(panel()).getByText('Point call taken back.')).toBeInTheDocument()
     expect(within(won).getByRole('button', { name: /Point Smash 05/ })).toHaveAttribute('aria-pressed', 'false')
-  })
+  }, 20_000) // four syncs of the outbox, a second apart
 
   it("doesn't score again when the review is left without a change", async () => {
     const { scored } = show(data(), { url: `/videos/${ID}/tag?mode=review` })

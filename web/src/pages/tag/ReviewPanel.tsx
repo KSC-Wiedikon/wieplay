@@ -313,7 +313,8 @@ function RallyFacts({ rally }: { rally: Segment }) {
         label={t('tagging.review.whoServed')}
         value={call}
         keys={['1', '2']}
-        text={(side) => t('tagging.review.serves', { team: label(side) })}
+        name={(side) => t('tagging.review.serves', { team: label(side) })}
+        text={label}
         title={(side) => (names ? fullNameOf(names, side) : undefined)}
         onPick={review.serve}
         narrow={narrow}
@@ -322,7 +323,8 @@ function RallyFacts({ rally }: { rally: Segment }) {
         label={t('tagging.review.whoWon')}
         value={won}
         keys={['3', '4']}
-        text={(side) => t('tagging.review.pointTo', { team: label(side) })}
+        name={(side) => t('tagging.review.pointTo', { team: label(side) })}
+        text={label}
         title={(side) => (names ? fullNameOf(names, side) : undefined)}
         onPick={review.won}
         narrow={narrow}
@@ -331,11 +333,15 @@ function RallyFacts({ rally }: { rally: Segment }) {
   )
 }
 
-/** Two buttons, ours and theirs, the coach's call pressed: who served (1 2), who won (3 4). */
+/**
+ * Two buttons, ours and theirs, the coach's call pressed: who served (1 2), who won (3 4). They
+ * show the teams' names (the group says what for); their names say it all ("KSCW H3 serves").
+ */
 function CallButtons({
   label,
   value,
   keys,
+  name,
   text,
   title,
   onPick,
@@ -344,6 +350,7 @@ function CallButtons({
   label: string
   value: Side | null
   keys: [string, string]
+  name: (side: Side) => string
   text: (side: Side) => string
   title: (side: Side) => string | undefined
   onPick: (side: Side) => void
@@ -358,11 +365,12 @@ function CallButtons({
             key={side}
             size="touch"
             aria-pressed={value === side}
-            title={title(side)}
-            className={cx('min-w-0 px-3', value === side && 'ring-2 ring-accent')}
+            aria-label={name(side)}
+            title={title(side) ?? name(side)}
+            className={cx('min-w-0 px-3 leading-tight whitespace-normal', value === side && 'bg-accent-soft! text-on-accent-soft ring-2 ring-accent')}
             onClick={press(() => onPick(side))}
           >
-            <span className="min-w-0 truncate">{text(side)}</span>
+            <span className="min-w-0 text-center wrap-break-word">{text(side)}</span>
             <Kbd hidden={narrow}>{keys[i]}</Kbd>
           </Button>
         ))}
