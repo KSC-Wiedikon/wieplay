@@ -617,7 +617,7 @@ comment          id, target_type 'clip'|'event'|'segment'|'video', target_id, t_
 reel             id, owner, lineage_id NULL, title, kind 'smart'|'manual',
                  query jsonb NULL, visibility 'private'|'team', created_at
 reel_item        reel_id, position, video_id, start_ms, end_ms, event_id NULL, clip_id NULL, caption
-export           id, kind 'clip'|'reel'|'condensed', source jsonb, params_hash,
+export           id, kind 'clip'|'reel'|'condensed'|'recap', source jsonb, params_hash,
                  status, object_key, bytes, requested_by, job_id, expires_at
 ```
 
@@ -659,6 +659,9 @@ calibration      id, video_id, hall_name, image_points, court_points, homography
                  -- court job), at_ms; method also 'auto-hall' (the hall's memory)
 scoreboard_region id, video_id, hall_name, rect, layout jsonb (digit boxes: home, away, sets,
                  clock), created_by, copied_from NULL
+                 -- built in 0013 (17.10.2026): one per video, rect {x, y, w, h} (0..1, the
+                 -- score), layout {kind: flip|led|auto, sets: a second box or null},
+                 -- lineage_id, at_ms; what was read is a track (analysis_track "scoreboard")
 compute_usage    id, job_id, backend, gpu_type, gpu_seconds, cpu_core_seconds, gib_seconds,
                  est_cost_chf, at
 budget           period ('2026/27'), line ('cloud_gpu'|'test_gpu'), cap_chf
@@ -925,6 +928,30 @@ follows redirects. **Test on an iPhone in M1.**
   frame-accurate in/out points, concatenate, burn in the watermark and optional captions
   (player, opponent, date, score), upload to `exports/`, notify. A 2-minute reel takes seconds;
   a condensed match a few minutes.
+- **Game recap** (built 17.10.2026; Balltime's "Game Recap" without the paid parts: no
+  commentary, no generated text, everything runs on the club's machines). "Create game recap"
+  on the video page (whoever may export) queues an export of kind `recap`
+  (`nomal/core/recap.py` picks, the worker draws: `nomal/worker/recap.py`):
+  - **Plays from facts**: tags that stand and rallies that stand. Kills, aces and block
+    points (`A#`, `S#`, `B#`; ours count more than theirs), long rallies (≥ 15 s), the rallies
+    that ended a set and the match. **Without tags** (and rallies not marked done): the rally
+    finder's rallies, the longest (an unchecked proposal over 30 s is likely two rallies and
+    left out) and the set and match points of the score line.
+  - Best first until ~2.5 min (3 min at most, the match point always), then in the order
+    played; each clip from 1.5 s before the serve to 2 s after the point, no footage twice.
+  - **Title card** (4 s, navy and yellow, DejaVu Sans from the worker image): "Game recap" /
+    "Spielzusammenfassung", the teams (home first, as in Wiedisync; two lines when long),
+    the sets won and the set scores (Wiedisync's, else the sets a coach stands behind; never
+    sets only the scoring proposed), the date and the hall. In the requester's language.
+  - **Score bug** on every clip, top left: "Satz 2" / "Set 2", the score before the rally,
+    switching to the new score at the moment of the point, and what the play was ("Kill #7",
+    "Set point", "Long rally"). Short fades between clips; the watermark as on every export.
+  - Same pipeline as the other exports: H.264/AAC 1080p50 pieces joined without re-encoding,
+    30 days under Downloads; the app says when it is ready (a toast on any page, while the tab
+    that asked is open).
+  - **First real render, 17.10.2026**: the H3 home game vs Uster (06.02.2026, 105 min,
+    YouTube 1080p60, v0 rallies and scoring from its stored signals, no tags): see the
+    runbook (analysis, "Game recap").
 
 ---
 
@@ -1378,7 +1405,7 @@ the score line in the UI; scores in exports and reels ("set 3, 22:20"). **Bar**:
 rallies with the right winner on held-out matches with the set-score constraint; flagged
 rallies ≤ 5 %.
 
-**Built 16.10.2026** (steps 1–4; OCR, step 5, later):
+**Built 16.10.2026** (steps 1–4; the scoreboard, step 5, on 17.10.2026: below):
 
 - **Serve side** (`nomal/ml/serve.py`, worker): the camera stands behind one end line, so the
   far court is a narrow band around the net where the ball spends most of its time (the
@@ -1438,6 +1465,53 @@ rallies ≤ 5 %.
   rallies): far from the bar, as expected without a coach's labels; a visual check of 48
   serves of set 3 found 45 read right and 3 unclear frames. Next: coaches review this game,
   the serve v1 learns from it, the rally finder's recall.
+
+**Scoreboard, built 17.10.2026** (step 5):
+
+- **The box**: "Mark the scoreboard" on the video page (whoever may tag): a box dragged around
+  the score on the paused frame, optionally a second one around the sets won, and the kind of
+  board (flip cards, lit digits, not sure). Stored per video (`scoreboard_region`); a video
+  without one is offered the last box drawn in the same hall (the board's place is the
+  hall's), else the team's last one. "No scoreboard in this video" forgets it (most of our
+  halls have none in the picture).
+- **Reading** (`scoreboard` job, the worker's background lane, CPU; `nomal/ml/scoreboard.py`,
+  `nomal/worker/scoreboard.py`): ffmpeg crops the box from the NAS originals at 2 fps. Two
+  readers, both free and local: a **light one** (local threshold, glyph-shaped components, a
+  one-hidden-layer network, 270 KB of numpy weights trained on synthetic flip cards and seven
+  segments with 10 TrueType faces, degraded like a hall camera: `scripts/ml/scoreboard_digits.py`;
+  a thin upright stroke of the digits' height counts as a "1"), and **PaddleOCR's PP-OCRv5
+  recogniser**, the ONNX file the players job already brings into the worker image, reading
+  each number on its own (cut at the widest gap between the glyphs). Agreeing, they are surer;
+  one reading a tens digit the other lost wins; otherwise the surer one, doubted.
+- **Smoothing** (`nomal/ml/board.py`, plain Python): a score counts only when read for ≥ 2 s
+  (a head in front of the board does not break it, a stray misreading inside is ignored); of
+  those, the path with the most support where the score only rises by +1 (a jump of a few
+  points while it was hidden, at a cost) and falls back to ~0:0 at a new set; everything off
+  that path is a misreading. The readings stay on the NAS (`analysis_artifact` "scoreboard",
+  npz); what the board showed and when (a few KB) is `analysis_track` "scoreboard".
+- **In the scoring**: the board during each rally is the score before it, so +1 between two
+  rallies names the first one's winner and no change says "no point". That is evidence in the
+  alignment (step 4): contradicting it costs 9 × its confidence, more than a misread serve
+  and a missed rally together (the board wins over the serve evidence) and less than a coach's
+  winner (12) or the official score (a hard constraint). Which side of the board is ours: the
+  official set scores when the board's set finals say it, else the side that fits the rest of
+  the evidence better. Flagged "board": rallies where the path still disagrees with the board
+  and rallies where the scoring blind to the board was sure of another answer (≥ 70 %).
+  Metrics (`GET /api/videos/{id}/analysis` → `scoring.board`): orientation, rallies named,
+  how often the score line follows the board, disagreements with the serves, and on reviewed
+  games the board's winners against the coach's.
+- **First real check, 17.10.2026** (the Volero friendly of 17.09.2026, a flip board on the
+  scorer's table at the bottom left, seen from the side, its left edge cut by the picture,
+  the scorer in front of it most of the time; 10 minutes of set 1 checked by eye): 14 scores
+  came out of the smoothing, all right; 17 scores were shown in that time, 3 missed (14:8,
+  whose "1" the picture's edge cuts off, and two hidden almost all the time). Before
+  smoothing, 44 % of the half-second samples were read; of 35 moments checked by eye, 11 read
+  right, 6 wrong (the cut "1", "18 10" read "1 8"), 18 hidden or unread: the +1 path drops
+  every wrong one. Ten minutes took 55 s on the Lenovo (6 threads: 1080p60 decoding, two OCR
+  calls per sample). On synthetic boards in fonts the network never saw: flip cards 91 %
+  right and 5 % wrong, lit digits 73 % right and 9 % wrong (the rest unread).
+- **Limits**: a camera that moves takes the board out of the box (the court job's setups do
+  not move the box yet); a board far from the camera (a few pixels per digit) is not read.
 
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.

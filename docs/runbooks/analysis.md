@@ -207,6 +207,60 @@ score, the score line's final and where the serve evidence alone ends (`evidence
 accuracy of a run blind to the coach (`vs_coach`). The serve model's held-out scores are in
 the training run's `metrics.serve`; `analyse` jobs use it once it beat the rule.
 
+## The scoreboard (scoreboard job)
+
+Nothing to switch on: a coach marks the board on the video page ("Mark the scoreboard": a box
+around the score, optionally one around the sets won, the kind of board), and the API queues a
+`scoreboard` job (same `analyse` capability and background lane as the analyses). The next
+video in the same hall is offered that box (else the team's last one); the coach checks that it
+still sits on the score, since the camera rarely stands exactly where it stood.
+
+- **What it needs**: the NAS originals, ffmpeg, and for the second reader PaddleOCR's
+  recogniser from the players' weights (`/opt/nomal-weights/en_PP-OCRv5_rec_mobile.onnx` in the
+  worker image; local runs `NOMAL_WORKER_PLAYERS_WEIGHTS=/path`). Without it the light reader
+  alone runs (fine for lit digits and clean flip cards, weaker on a board seen from the side).
+- **Result**: `GET /api/videos/{id}/scoreboard` (the box, the job, what the board showed and
+  when), the scoring's `board` metrics in `GET /api/videos/{id}/analysis`, rallies flagged
+  "board" in the review. The readings (every half second) are in the video's analysis folder,
+  `scoreboard-<job8>.npz`.
+- **Check a box by eye** before marking many videos, on a local copy, without the job system:
+
+  ```bash
+  cd backend
+  uv run python -m nomal.worker.scoreboard VIDEO.mp4 X Y W H --kind flip \
+      --from 1440 --to 2040 --weights /path/to/nomal-weights --readings /tmp/readings.jsonl
+  # X Y W H: the score's box, 0..1 of the picture; prints what the board showed and when
+  ```
+
+- **Cost**: ten minutes of 1080p60 in ~55 s with 6 threads (decoding and two OCR calls per
+  half second): ~12 min for a 2 h match.
+- **Wrong scores**: "No scoreboard in this video" removes the box and its readings and scores
+  the video again from the serves; a new box reads it again.
+- **The weights**: `nomal/ml/weights/scoreboard-digits-v1.npz` (numpy arrays, no pickle; its
+  SHA-256 is checked on load), made by `scripts/ml/scoreboard_digits.py` (synthetic boards,
+  deterministic for a seed and a set of fonts; `uv run --with pillow`).
+
+## Game recap
+
+"Create game recap" on a volleyball video (coaches, team managers, sport admins) queues an
+export of kind `recap` on the main lane, like a condensed match: the best plays (from tags and
+rallies a coach stands behind; without tags, the rally finder's longest rallies and the set
+and match points), a title card and a score bug, ~2.5 min. The coach finds it under Downloads
+and gets a toast when it is ready. No commentary and no generated text: nothing leaves the
+club's machines.
+
+- **Worker image**: DejaVu Sans and DejaVu Sans Bold (`fonts-dejavu-core`); the bold face is
+  found next to `NOMAL_WORKER_FONT_FILE`.
+- **Language**: the requester's (the web app sends it); German and English.
+- **First real render, 17.10.2026**: the H3 home game vs Uster (06.02.2026, 105 min, no tags,
+  v0 rallies and scoring from its stored signals), rendered on the Lenovo from the NAS original:
+  2 min 16 s, 44.6 MB, 1080p50 H.264: the title card (no set scores: the game had no official
+  result in this check and the scoring's own sets are not written on it), six of the finder's
+  long rallies (15-22 s, each with its point and the bug switching to the new score there) and
+  the last rally as "Matchball". Without tags and with the scoring's unchecked sets (it cut
+  this match into two sets), the set number and score on the bug are the scoring's guesses:
+  a coach's review makes them facts.
+
 ## Suggested actions (serve, reception, set, attack, block, dig, freeball)
 
 What it is: [PLAN §10.4a](../PLAN.md#104a-suggested-actions-volleyball). Nothing to switch on:
@@ -285,6 +339,8 @@ analysis[-dev]/
   models/rallies/rally-v1-<job8>.pkl                              trained finders
   models/rallies/serve-v1-<job8>.pkl                              trained serve models
   models/actions/actions-v1-<job8>.pkl                            trained action proposers
+  videos/…/scoreboard-<job8>.npz                                  the scoreboard read every
+                                                                  half second
 ```
 
 Each file has a row in `analysis_artifact` with its SHA-256; the worker refuses a model file
