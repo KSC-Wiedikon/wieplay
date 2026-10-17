@@ -131,7 +131,10 @@ video's calibration.
 
 ## Players (players job)
 
-After the court job a `players` job (same `analyse` capability and background lane,
+**Beta, off by default** (`NOMAL_PLAYERS_AUTO=false` on the API): nothing queues the job by
+itself. A coach clicks "Find players (beta, takes ~2 h)" on the video page (`POST
+/api/videos/{id}/players/find`), or an admin runs the CLI below. With `NOMAL_PLAYERS_AUTO=true`
+it follows each court job. The `players` job (same `analyse` capability and background lane,
 priority −12 so a backlog's analyses go first) finds the people on the court in the rally
 windows, tracks them, groups them into clusters and reads shirt numbers (a suggestion). The
 coach names the clusters once on the video's "Players in this video" page; the actions then
@@ -145,12 +148,12 @@ get their player (PLAN §10.5).
 - **A GPU worker later**: start it with caps `gpu,nas`, `NOMAL_WORKER_PLAYERS_PROVIDERS=
   CUDAExecutionProvider,CPUExecutionProvider` and an onnxruntime-gpu image; set
   `NOMAL_PLAYERS_CAPS=gpu,nas` on the API so new jobs ask for it.
-- **Backfill** for videos with a ball track:
+- **On demand** for videos with a ball track:
 
   ```bash
-  python -m nomal.cli players --dry-run
-  python -m nomal.cli players                 # --force: also videos that have players
-  python -m nomal.cli players --video <id>    # one video, again
+  python -m nomal.cli players --all-ready --dry-run
+  python -m nomal.cli players --video <id>    # one video
+  python -m nomal.cli players --all-ready     # --force: also videos that have players
   ```
 
   A rerun replaces the clusters; a coach's number stays where the same number is read on

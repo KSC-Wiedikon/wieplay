@@ -73,7 +73,12 @@ function PlayersView({ videoId }: { videoId: string }) {
             <ChevronRightIcon className="size-4" />
           </>
         }
-        title={t('players.title')}
+        title={
+          <span className="inline-flex flex-wrap items-center gap-3">
+            {t('players.title')}
+            <Badge>{t('players.beta')}</Badge>
+          </span>
+        }
         subtitle={<p className="max-w-3xl text-sm">{t('players.intro')}</p>}
       />
       {players.isError ? (
@@ -128,7 +133,16 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
             {data.attribution && data.attribution.actions > 0 && (
               <ProgressBar value={data.attribution.identified_share ?? 0} label={t('players.setup.title')} />
             )}
-            <p className="text-sm text-muted">{t('players.setup.named', { count: named, total: people.length })}</p>
+            <p className="text-sm font-semibold">
+              {t('players.cards', {
+                count: people.length,
+                us: people.filter((c) => c.team === 'us').length,
+                them: people.filter((c) => c.team === 'them').length,
+              })}
+            </p>
+            <p className="text-sm text-muted">
+              {t('players.setup.named', { count: named, total: people.length })} · {t('players.cardsHint')}
+            </p>
             {data.attribution?.vs_coach.accuracy != null && (
               <p className="text-sm text-muted">
                 {t('players.setup.accuracy', {
@@ -258,6 +272,7 @@ function JobState({ data, onFind, finding }: { data: Players; onFind: () => void
           <Button variant="primary" onClick={onFind} disabled={finding}>
             {t('players.find')}
           </Button>
+          <p className="mt-2 text-sm text-muted">{t('players.findHint')}</p>
         </div>
       )}
     </Card>

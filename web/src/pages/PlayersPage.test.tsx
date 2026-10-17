@@ -26,9 +26,10 @@ const calls = (fetch: ReturnType<typeof vi.fn>, method: string, path: string) =>
 describe('PlayersPage', () => {
   it('shows the cards by team with their pictures, readings and how far the actions are identified', async () => {
     show(playersState())
-    expect(await screen.findByRole('heading', { name: 'Players in this video' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Players in this video/ })).toHaveTextContent('beta')
     expect(screen.getByText('25% of actions identified')).toBeInTheDocument()
-    expect(screen.getByText('0 of 3 cards named')).toBeInTheDocument()
+    expect(screen.getByText('3 cards: 2 ours, 1 theirs')).toBeInTheDocument()
+    expect(screen.getByText(/0 of 3 cards named/)).toBeInTheDocument()
     expect(screen.getByText(/Nomal agreed 75%/)).toBeInTheDocument()
     const ours = screen.getByRole('region', { name: 'Our team' })
     expect(within(ours).getAllByRole('article')).toHaveLength(2)
@@ -137,6 +138,18 @@ describe('PlayersPage', () => {
     )
     expect(await screen.findByText('Finding the players…')).toBeInTheDocument()
     expect(screen.getByText('finding the players')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Find the players' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Find players/ })).not.toBeInTheDocument()
+  })
+
+  it('finds the players on demand when nobody has (beta, about 2 h)', async () => {
+    const none = playersState({ status: 'none', run: null, sheets: null, clusters: [], attribution: null, open_suggestions: 0 })
+    const fetch = show(none, {
+      [`POST /api/videos/${ID}/players/find`]: { status: 202, body: { ...none, status: 'queued' } },
+    })
+    const button = await screen.findByRole('button', { name: 'Find players (beta, takes ~2 h)' })
+    expect(screen.getByText(/about 2 hours of the club server’s time/)).toBeInTheDocument()
+    fireEvent.click(button)
+    await waitFor(() => expect(calls(fetch, 'POST', `/api/videos/${ID}/players/find`)).toHaveLength(1))
+    expect(await screen.findByText('Waiting to find the players…')).toBeInTheDocument()
   })
 })

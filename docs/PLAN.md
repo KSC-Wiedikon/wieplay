@@ -1023,7 +1023,7 @@ the job waits in `waiting_budget` and admins are told.
 | `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
 | `trajectory` (16.10.2026) | `analyse`, `nas` | The ball's path with contacts, the court finder's proposal (§10.4, §10.6). Background lane |
-| `players` (17.10.2026) | `analyse`, `nas` (`NOMAL_PLAYERS_CAPS`, e.g. `gpu,nas` for a GPU worker) | People on the court in the rally windows (YOLO26s ONNX, ByteTrack), tracks → clusters, back crops, shirt-number suggestions (§10.5). Priority −12, background lane |
+| `players` (17.10.2026, beta) | `analyse`, `nas` (`NOMAL_PLAYERS_CAPS`, e.g. `gpu,nas` for a GPU worker) | People on the court in the rally windows (YOLO26s ONNX, ByteTrack), tracks → clusters, back crops, shirt-number suggestions (§10.5). On demand (`NOMAL_PLAYERS_AUTO` off by default; on: after each `court` job). Priority −12, background lane |
 | `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
 | `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
@@ -1531,7 +1531,11 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 - **Built 17.10.2026** (`players` job, `nomal/ml/{people,bytetrack,players}.py`, migration
   `0011`): see "Players in a video" below.
 
-**Players in a video (17.10.2026).** After the court job (§10.6), on the Lenovo's background
+**Players in a video (17.10.2026, beta).** Off by default (`NOMAL_PLAYERS_AUTO=false`): ~2 h
+of the Lenovo's CPU per match and many more cards than players (§10.9), so a coach finds them
+on demand ("Find players" on the video page, `POST /api/videos/{id}/players/find`) or an admin
+with `nomal.cli players --video ID | --all-ready`; switched on, the job follows the court job
+(§10.6). The attribution runs whenever a video has players. On the Lenovo's background
 lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, §8.3):
 
 1. **Detection and tracking**: the rally windows (±1 s, joined when < 2 s apart) are decoded
@@ -1684,6 +1688,9 @@ later move (§8.6, §16.2).
 analyse job of the same game took 59 min there with 4 threads, so the players are ~1.9× the
 analyse job. On a quiet box the detector alone runs at 87 ms a frame (~40 min a match).
 Detection only around contacts (±1 s) would save little: contacts cover most of a rally.
+The result is honest but rough: 4,601 tracks became 449 cards (260 ours, 188 theirs; 121 seen
+≥ 30 s); cards with a read shirt number are mostly one player, the rest mix teammates. Hence
+the beta, on demand.
 
 ---
 

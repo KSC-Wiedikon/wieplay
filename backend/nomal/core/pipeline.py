@@ -375,7 +375,8 @@ def complete(
     if job.kind == "court":
         calibration.complete_court(db, video, job, payload)
         actions.after_trajectory(db, video, job)  # the actions' floor positions follow
-        players.after_court(db, video, job)  # the players, on that court (PLAN §10.5)
+        # The players, on that court (PLAN §10.5), when they are switched on (players_auto).
+        players.after_court(db, video, job, auto=bool(settings and settings.players_auto))
         return
     if job.kind in calibration.KINDS:
         calibration.complete(db, video, job, payload)

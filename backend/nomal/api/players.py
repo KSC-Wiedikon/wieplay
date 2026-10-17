@@ -4,7 +4,9 @@ GET   /api/videos/{id}/players                     the clusters with their crops
                                                    action counts, the roster snapshot, how
                                                    far the actions are identified
 GET   /api/videos/{id}/players/sheets/{n}          a contact sheet of crops (JPEG)
-POST  /api/videos/{id}/players/run                 find the players (again)
+POST  /api/videos/{id}/players/find                find the players (again): on demand, the
+                                                   job does not run by itself unless
+                                                   NOMAL_PLAYERS_AUTO is on
 PATCH /api/videos/{id}/players/clusters/{cid}      give a cluster a number, or "not a player"
 POST  /api/videos/{id}/players/merge               two or more clusters are one person
 POST  /api/videos/{id}/players/clusters/{cid}/split  some of its tracks are someone else
@@ -378,10 +380,11 @@ def _reattribute(db: Session, video: Video, store: ObjectStore | None) -> None:
         log.exception("attribution of %s failed", video.id)
 
 
-@router.post("/videos/{video_id}/players/run", response_model=PlayersOut, status_code=202)
-def run_players(video_id: uuid.UUID, request: Request, viewer: ViewerDep, db: DbDep) -> PlayersOut:
-    """Find the players (again). A new run replaces the clusters; numbers the coach gave
-    stay where the same number is read on the same team."""
+@router.post("/videos/{video_id}/players/find", response_model=PlayersOut, status_code=202)
+def find_players(video_id: uuid.UUID, request: Request, viewer: ViewerDep, db: DbDep) -> PlayersOut:
+    """Find the players (again), on demand (beta, ~2 h of CPU a match). A new run replaces
+    the clusters; numbers the coach gave stay where the same number is read on the same
+    team."""
     video, access = _editable(db, viewer, video_id)
     reason = players.can_run(video)
     if reason:

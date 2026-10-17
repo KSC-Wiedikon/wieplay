@@ -230,7 +230,7 @@ export function useSwapTeams(videoId: string) {
 export function useFindPlayers(videoId: string) {
   return useGalleryMutation(
     videoId,
-    () => apiRequest<Players>(`/api/videos/${videoId}/players/run`, { method: 'POST' }),
+    () => apiRequest<Players>(`/api/videos/${videoId}/players/find`, { method: 'POST' }),
     'runFailed',
   )
 }

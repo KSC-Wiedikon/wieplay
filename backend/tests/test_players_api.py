@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from nomal.core.config import Settings
 from nomal.core.models import Event
 from nomal.core.players import Ball, box_distance, nearest
 from nomal.ml import players as pl
@@ -39,6 +40,13 @@ BOXES = {
     4: (0.40, 0.25, 0.44, 0.40),  # theirs
     5: (0.02, 0.30, 0.05, 0.50),  # the referee
 }
+
+
+@pytest.fixture
+def settings(settings: Settings) -> Settings:
+    """Most tests follow the automatic chain (court → players); off is the default and has
+    its own tests below."""
+    return settings.model_copy(update={"players_auto": True})
 
 
 @pytest.fixture
@@ -243,6 +251,78 @@ def test_the_players_job_follows_the_trajectory_with_its_inputs(
     )
 
 
+def test_players_are_off_by_default_and_found_on_demand(
+    ready: Any,
+    app: FastAPI,
+    club: dict[str, TestClient],
+    analyser: TestClient,
+    store: FakeStore,
+    as_: Any,
+) -> None:
+    app.state.settings = app.state.settings.model_copy(update={"players_auto": False})
+    assert Settings.model_fields["players_auto"].default is False
+    hit = model_event(app, ready, 12_000, "us")
+    trajectory(analyser, store)  # the court job is done: no players job follows
+    none = analyser.post(
+        "/api/worker/claim", json={"caps": CAPS, "wait": False, "kinds": ["players"]}
+    )
+    assert none.json()["jobs"] == []
+    coach = club["coach"]
+    summary = coach.get(f"/api/videos/{ready['id']}/analysis").json()["players"]
+    assert summary["status"] == "none" and summary["run_id"] is None and summary["clusters"] == 0
+    assert gallery(coach, ready)["status"] == "none"
+    # Whoever may tag finds them on demand; asking twice queues one job.
+    assert as_("player-h3").post(f"/api/videos/{ready['id']}/players/find").status_code == 403
+    first = coach.post(f"/api/videos/{ready['id']}/players/find")
+    assert first.status_code == 202 and first.json()["status"] == "queued"
+    again = coach.post(f"/api/videos/{ready['id']}/players/find")
+    assert again.json()["job"]["id"] == first.json()["job"]["id"]
+    job = claim(analyser, "players")
+    complete(analyser, job, players_result(job, store))
+    # With players there, the attribution runs as always.
+    cid = by_key(gallery(coach, ready))[1]["id"]
+    coach.patch(f"/api/videos/{ready['id']}/players/clusters/{cid}", json={"number": 7})
+    assert event(app, hit).number == 7
+    summary = coach.get(f"/api/videos/{ready['id']}/analysis").json()["players"]
+    assert summary["status"] == "done" and summary["clusters"] == 4 and summary["named"] == 1
+
+
+def test_the_cli_finds_players_on_demand(
+    ready: Any,
+    app: FastAPI,
+    analyser: TestClient,
+    store: FakeStore,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from nomal import cli
+    from nomal.core.config import get_settings
+    from tests.conftest import TEST_DB
+
+    app.state.settings = app.state.settings.model_copy(update={"players_auto": False})
+    trajectory(analyser, store)
+    monkeypatch.setenv("NOMAL_DATABASE_URL", TEST_DB)
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(SystemExit):
+            cli.main(["players"])  # --video or --all-ready
+        assert cli.main(["players", "--all-ready", "--dry-run"]) == 0
+        assert "would queue" in capsys.readouterr().out
+        assert cli.main(["players", "--all-ready"]) == 0
+        assert "1 queued" in capsys.readouterr().out
+        assert cli.main(["players", "--video", ready["id"]]) == 0
+        assert "already queued" in capsys.readouterr().out
+        job = claim(analyser, "players")
+        complete(analyser, job, players_result(job, store))
+        assert cli.main(["players", "--all-ready"]) == 0
+        out = capsys.readouterr().out
+        assert "has players" in out and "0 queued" in out
+        assert cli.main(["players", "--video", ready["id"], "--force"]) == 0
+        assert "1 queued" in capsys.readouterr().out
+    finally:
+        get_settings.cache_clear()
+
+
 def test_the_job_gets_the_court_of_each_camera_setup(
     ready: Any, analyser: TestClient, store: FakeStore
 ) -> None:
@@ -283,7 +363,7 @@ def test_permissions(
         == 403
     )
     assert member.post(f"/api/videos/{ready['id']}/players/swap-teams").status_code == 403
-    assert member.post(f"/api/videos/{ready['id']}/players/run").status_code == 403
+    assert member.post(f"/api/videos/{ready['id']}/players/find").status_code == 403
     outsider = as_("basketball-player")
     assert outsider.get(f"/api/videos/{ready['id']}/players").status_code == 404
     assert outsider.get(f"/api/videos/{ready['id']}/players/sheets/0").status_code == 404
@@ -336,7 +416,7 @@ def test_a_rerun_keeps_the_coachs_numbers_where_the_same_number_is_read(
     coach = club["coach"]
     ids = {k: c["id"] for k, c in by_key(gallery(coach, ready)).items()}
     coach.patch(f"/api/videos/{ready['id']}/players/clusters/{ids[2]}", json={"number": 3})
-    r = coach.post(f"/api/videos/{ready['id']}/players/run")
+    r = coach.post(f"/api/videos/{ready['id']}/players/find")
     assert r.status_code == 202 and r.json()["status"] == "queued"
     job = claim(analyser, "players")
     complete(analyser, job, players_result(job, store))

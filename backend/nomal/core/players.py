@@ -236,9 +236,10 @@ def queue_players(db: Session, video: Video, caps: Sequence[str] = CAPS) -> Job:
     )
 
 
-def after_court(db: Session, video: Video | None, job: Job, auto: bool = True) -> None:
-    """The ball's path and the court (its setups) are there: the players follow (once per
-    video unless asked again: a rerun replaces the clusters)."""
+def after_court(db: Session, video: Video | None, job: Job, auto: bool = False) -> None:
+    """The ball's path and the court (its setups) are there: the players follow, when they
+    are switched on (`players_auto`, off by default: a beta at ~2 h of CPU a match); once per
+    video unless asked again (a rerun replaces the clusters)."""
     if not auto or video is None or job.kind != "court" or job.status != "succeeded":
         return
     if can_run(video) is not None or video.meets_standard is False:

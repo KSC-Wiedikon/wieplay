@@ -178,7 +178,9 @@ class PlayersSummaryOut(BaseModel):
 
     status: str  # none | queued | running | done | failed (the newest players job)
     run_id: uuid.UUID | None
-    clusters: int  # people found (merged ones folded, "not a player" excluded)
+    # Cards in the gallery: people found (merged ones folded, "not a player" excluded); many
+    # more than the players who played while the clusters are fragmented (beta).
+    clusters: int
     named: int  # of them, with a number from the coach
     clusters_us: int
     clusters_them: int
@@ -387,13 +389,12 @@ def _players(db: DbDep, video: Video) -> PlayersSummaryOut | None:
         return None
     run = players.latest_run(db, video.id)
     job = players.latest_job(db, video.id)
-    if run is None and job is None:
-        return None
+    # status "none": nobody has looked for the players yet (off by default; on demand).
     rows = players.clusters(db, video.id) if run is not None else []
     people = [c for c in rows if not c.not_player]
     found = ((run.metrics or {}).get("attribution") if run is not None else None) or {}
     vs = found.get("vs_coach") or {}
-    status = STATUS.get(job.status, job.status) if job is not None else "done"
+    status = STATUS.get(job.status, job.status) if job is not None else "done" if run else "none"
     if job is not None and job.status == "leased":
         status = "running"
     return PlayersSummaryOut(
