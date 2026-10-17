@@ -33,7 +33,7 @@ import { Table, TBody, Td, Th, THead, Tr } from './Table'
 import { TagFilters } from './TagFilters'
 import { WinnerPicker } from './WinnerPicker'
 
-const SKIP_KEY = 'nomal-skip-dead-time'
+const SKIP_KEY = 'wieplay-skip-dead-time'
 
 interface RallyPanelProps {
   tagging: Tagging

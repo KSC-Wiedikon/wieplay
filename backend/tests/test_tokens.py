@@ -3,8 +3,8 @@ import time
 import jwt
 import pytest
 
-from nomal.core.tokens import TokenError, verify_bridge_token
 from tests.conftest import ISSUER, KID, OTHER_PRIVATE_PEM, PUBLIC_PEM, make_token
+from wieplay.core.tokens import TokenError, verify_bridge_token
 
 KEYS = {KID: PUBLIC_PEM}
 CLAIMS = {

@@ -9,8 +9,8 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.api.dev_fixtures import personas
 from tests.fakes import FakeStore
+from wieplay.api.dev_fixtures import personas
 
 TODAY = datetime.now(UTC).date()
 P = personas(TODAY)
@@ -81,7 +81,9 @@ def ingest_result(job: dict[str, Any], height: int = 1080, fps: int = 50) -> dic
             {
                 "file_id": f["id"],
                 "sha256": "a" * 64,
-                "nas_path": f"/nas/nomal/raw/{job['params']['raw_subdir']}/{f['part_no']:02d}.mp4",
+                "nas_path": (
+                    f"/nas/wieplay/raw/{job['params']['raw_subdir']}/{f['part_no']:02d}.mp4"
+                ),
                 "duration_ms": 3_600_000,
                 "probe": {"width": height * 16 // 9, "height": height},
             }

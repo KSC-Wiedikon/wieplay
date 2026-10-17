@@ -1,4 +1,4 @@
-"""The teams' names instead of us and them (nomal/core/names.py): ours from the club and the
+"""The teams' names instead of us and them (wieplay/core/names.py): ours from the club and the
 team, the opponent from the Wiedisync game or the video's title, a coach's names per video
 (PATCH /api/videos/{id}/setup), the setup's "no scoreboard", the stats CSV and the recap."""
 
@@ -10,12 +10,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.core import names
-from nomal.core.models import WdGame
 from tests.fakes import FakeStore
 from tests.media_helpers import H3
 from tests.test_analysis_api import make_ready
 from tests.test_videos import friendly
+from wieplay.core import names
+from wieplay.core.models import WdGame
 
 MARKS = names.markers("KSCW", "KSC Wiedikon")
 

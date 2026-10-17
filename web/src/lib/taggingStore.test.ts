@@ -83,7 +83,7 @@ describe('TaggingStore', () => {
     })
     expect(store.getView().events).toHaveLength(1)
     expect(store.getView().openRally).toEqual({ id: 'r1', start_ms: 3000 })
-    expect(JSON.parse(window.localStorage.getItem(`nomal-open-rally:${VIDEO}`) ?? 'null')).toEqual({ id: 'r1', start_ms: 3000 })
+    expect(JSON.parse(window.localStorage.getItem(`wieplay-open-rally:${VIDEO}`) ?? 'null')).toEqual({ id: 'r1', start_ms: 3000 })
 
     expect(store.undo()).toBe(true)
     expect(store.getView().events).toHaveLength(0)

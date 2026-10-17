@@ -1,4 +1,4 @@
-# Nomal media worker image (Lenovo server): ffmpeg with VAAPI for the Radeon iGPU, and
+# WiePlay media worker image (Lenovo server): ffmpeg with VAAPI for the Radeon iGPU, and
 # Deno for yt-dlp's YouTube JavaScript challenges (imports, PLAN §7.2.2): yt-dlp needs
 # Deno >= 2.3 (or Node >= 22); Debian's Node 20 is too old and YouTube then answers 403.
 # The `analysis` extra (numpy, ONNX Runtime CPU, scikit-learn, OpenCV headless for the
@@ -6,9 +6,9 @@
 # The players job (PLAN §10.5) needs a person detector and a shirt-number reader as ONNX:
 # a first, throw-away stage installs PyTorch (CPU) and Ultralytics only to export YOLO26s and
 # fetch the OCR models (scripts/ml/player_weights.py, every download SHA-256 checked); the
-# worker image gets the ONNX files in /opt/nomal-weights and no PyTorch.
-#   docker build -f Dockerfile.worker -t nomal-worker:<tag> .
-# Runs `python -m nomal.worker`; settings come from NOMAL_WORKER_* (deploy/lenovo/).
+# worker image gets the ONNX files in /opt/wieplay-weights and no PyTorch.
+#   docker build -f Dockerfile.worker -t wieplay-worker:<tag> .
+# Runs `python -m wieplay.worker`; settings come from WIEPLAY_WORKER_* (deploy/lenovo/).
 
 FROM python:3.12-slim-trixie AS player-weights
 ENV PIP_NO_CACHE_DIR=1 \
@@ -42,12 +42,12 @@ WORKDIR /app
 COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
 RUN uv sync --frozen --no-dev --extra analysis --no-install-project
 COPY backend/ ./
-RUN uv sync --frozen --no-dev --extra analysis && useradd --system --uid 10001 --create-home nomal
+RUN uv sync --frozen --no-dev --extra analysis && useradd --system --uid 10001 --create-home wieplay
 # Scratch space (the `work` volume in deploy/lenovo/compose.yaml). The worker runs as the
 # host user that owns the NAS share (any uid), so the folder is world-writable and sticky;
 # a new named volume copies this mode, an existing one needs `chmod 1777` once.
 RUN mkdir -p /work && chmod 1777 /work
-COPY --from=player-weights /weights /opt/nomal-weights
+COPY --from=player-weights /weights /opt/wieplay-weights
 ENV PATH="/app/.venv/bin:$PATH"
-USER nomal
-CMD ["python", "-m", "nomal.worker"]
+USER wieplay
+CMD ["python", "-m", "wieplay.worker"]

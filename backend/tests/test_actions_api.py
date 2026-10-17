@@ -14,13 +14,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from nomal.core.config import Settings
 from tests.fakes import FakeStore
 from tests.media_helpers import worker_client
 from tests.test_analysis_api import ANALYSE_CAPS, complete, make_ready
 from tests.test_court_api import result as trajectory_result
 from tests.test_court_api import stored
 from tests.test_scoring_api import analysed, match, rallies_of, tagging
+from wieplay.core.config import Settings
 
 KINDS = ["analyse", "train_rallies", "trajectory", "actions", "train_actions"]
 
@@ -100,7 +100,7 @@ def plan(rally: dict[str, Any], *, shift: int = 0) -> list[dict[str, Any]]:
 
 def body(actions: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
     return {
-        "model": {"name": "nomal-actions", "version": "abc123", "params": {"finder": "v0"}},
+        "model": {"name": "wieplay-actions", "version": "abc123", "params": {"finder": "v0"}},
         "finder": "v0",
         "model_run_id": None,
         "actions": actions,

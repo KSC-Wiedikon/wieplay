@@ -1,42 +1,42 @@
-# Nomal media worker on the Lenovo server (PLAN §8.2), one directory per environment
-# (~/stacks/nomal-worker-dev, ~/stacks/nomal-worker-prod) holding this file and a .env
+# WiePlay media worker on the Lenovo server (PLAN §8.2), one directory per environment
+# (~/stacks/wieplay-worker-dev, ~/stacks/wieplay-worker-prod) holding this file and a .env
 # (template: env.example). Start: docker compose up -d
 services:
   worker:
-    image: nomal-worker:${NOMAL_TAG:?NOMAL_TAG must be set in .env}
+    image: wieplay-worker:${WIEPLAY_TAG:?WIEPLAY_TAG must be set in .env}
     restart: unless-stopped
     # The NAS share is mounted (CIFS) as the host user: run as that user to write to it.
-    user: "${NOMAL_WORKER_UID:-10001}:${NOMAL_WORKER_GID:-10001}"
+    user: "${WIEPLAY_WORKER_UID:-10001}:${WIEPLAY_WORKER_GID:-10001}"
     env_file: .env
     environment:
-      NOMAL_WORKER_TOKEN_FILE: /run/secrets/nomal-worker-token
-      NOMAL_WORKER_WORK_DIR: /work
-      NOMAL_WORKER_RAW_ROOT: /nas/raw
-      NOMAL_WORKER_INBOX_ROOT: /nas/inbox
-      NOMAL_WORKER_ANALYSIS_ROOT: /nas/analysis
-      NOMAL_GIT_SHA: ${NOMAL_TAG}  # recorded with every model run (PLAN §11)
+      WIEPLAY_WORKER_TOKEN_FILE: /run/secrets/wieplay-worker-token
+      WIEPLAY_WORKER_WORK_DIR: /work
+      WIEPLAY_WORKER_RAW_ROOT: /nas/raw
+      WIEPLAY_WORKER_INBOX_ROOT: /nas/inbox
+      WIEPLAY_WORKER_ANALYSIS_ROOT: /nas/analysis
+      WIEPLAY_GIT_SHA: ${WIEPLAY_TAG}  # recorded with every model run (PLAN §11)
       HOME: /tmp  # the host uid has no home in the image (Mesa's shader cache)
-    secrets: [nomal-worker-token]
+    secrets: [wieplay-worker-token]
     volumes:
-      - ${NOMAL_NAS_RAW:?NOMAL_NAS_RAW must be set}:/nas/raw
-      - ${NOMAL_NAS_INBOX:?NOMAL_NAS_INBOX must be set}:/nas/inbox
+      - ${WIEPLAY_NAS_RAW:?WIEPLAY_NAS_RAW must be set}:/nas/raw
+      - ${WIEPLAY_NAS_INBOX:?WIEPLAY_NAS_INBOX must be set}:/nas/inbox
       # Signals and rally models of the automatic analysis (cap "analyse", PLAN §10.1).
-      - ${NOMAL_NAS_ANALYSIS:?NOMAL_NAS_ANALYSIS must be set (see env.example)}:/nas/analysis
+      - ${WIEPLAY_NAS_ANALYSIS:?WIEPLAY_NAS_ANALYSIS must be set (see env.example)}:/nas/analysis
       - work:/work
     devices:
       - /dev/dri:/dev/dri  # VAAPI on the Radeon 780M
     group_add:
-      - "${NOMAL_RENDER_GID:?getent group render | cut -d: -f3}"
+      - "${WIEPLAY_RENDER_GID:?getent group render | cut -d: -f3}"
     # The box also runs DNS and other services: cap the worker (PLAN §8.2).
     cpus: 6
     mem_limit: 8g
     read_only: true
-    tmpfs: [/tmp, /home/nomal]
+    tmpfs: [/tmp, /home/wieplay]
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
 
 secrets:
-  nomal-worker-token:
+  wieplay-worker-token:
     file: ./worker.token  # mode 0600; from Admin → Workers (shown once)
 
 volumes:

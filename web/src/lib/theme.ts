@@ -3,7 +3,7 @@ import { readStorage, writeStorage } from './storage'
 
 export type Theme = 'light' | 'dark'
 
-const KEY = 'nomal-theme'
+const KEY = 'wieplay-theme'
 const listeners = new Set<() => void>()
 const media =
   typeof window !== 'undefined' && typeof window.matchMedia === 'function'

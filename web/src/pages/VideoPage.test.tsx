@@ -274,7 +274,7 @@ describe('VideoPage', () => {
       player.currentTime = 30
       fireEvent(player, new Event('timeupdate'))
       expect(player.currentTime).toBe(30)
-      expect(window.localStorage.getItem('nomal-skip-dead-time')).toBe('off')
+      expect(window.localStorage.getItem('wieplay-skip-dead-time')).toBe('off')
     })
 
     it('lists the rallies with set and score; a click plays from 2 s before', async () => {

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Nomal spike S0 on the Framework 16: repos, Python env, weights. Idempotent.
+# WiePlay spike S0 on the Framework 16: repos, Python env, weights. Idempotent.
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
-W=$HOME/projects/nomal-s0
+W=$HOME/projects/wieplay-s0
 mkdir -p "$W"/{repos,weights,clips,out}
 cd "$W/repos"
 [ -d vball-net ] || git clone -q --depth 1 https://github.com/asigatchov/vball-net

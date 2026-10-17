@@ -14,7 +14,7 @@ npm run dev        # http://localhost:5173
 ```
 
 Vite proxies `/api` to the backend at `http://127.0.0.1:8077` (start it from `../backend`). To
-use another address, set `NOMAL_API_URL`, e.g. `NOMAL_API_URL=http://127.0.0.1:8001 npm run dev`.
+use another address, set `WIEPLAY_API_URL`, e.g. `WIEPLAY_API_URL=http://127.0.0.1:8001 npm run dev`.
 
 The proxy keeps the `Host` header, so the backend sees the dev server's origin. Configure the
 backend's public URL as `http://localhost:5173` in dev, so the login redirect chain through
@@ -41,8 +41,8 @@ The logo marks and icons are generated in `../docs/brand/` (see `../scripts/bran
 they change, run `npm run sync-brand` and commit the copies in `public/`:
 
 - `icons/vb/*`, `icons/bb/*`, `icons/site.webmanifest` go to `public/icons/`.
-- `nomal-mark-vb.svg`, `nomal-mark-bb.svg` and the two `mark-on-dark.svg` files go to
-  `public/brand/` (the dark ones as `nomal-mark-vb-dark.svg` and `nomal-mark-bb-dark.svg`).
+- `wieplay-mark-vb.svg`, `wieplay-mark-bb.svg` and the two `mark-on-dark.svg` files go to
+  `public/brand/` (the dark ones as `wieplay-mark-vb-dark.svg` and `wieplay-mark-bb-dark.svg`).
 
 The wordmark is the text "WiePlay" in Bricolage Grotesque ExtraBold, self-hosted through
 `@fontsource/bricolage-grotesque` (Latin subset, weight 800 only).
@@ -68,7 +68,7 @@ The wordmark is the text "WiePlay" in Bricolage Grotesque ExtraBold, self-hosted
   header mark. Volleyball uses blue fills with white text in light mode and yellow in dark mode;
   basketball uses orange fills with navy text. Yellow and orange are never text on light.
 - **Dark mode** follows `prefers-color-scheme` until the user picks one with the header toggle;
-  the choice is kept in `localStorage` (`nomal-theme`). Language: `nomal-lang`, English default.
+  the choice is kept in `localStorage` (`wieplay-theme`). Language: `wieplay-lang`, English default.
 - **Formats**: `src/lib/format.ts` (`formatDate` → `18.10.2026`, `formatTime` → `14:00`, locale
   `de-CH`, 24 h). API dates and times are shown as given; timestamps in Zurich time.
 - **Data**: `src/lib/api.ts` is the fetch client. It throws `ApiError` subclasses

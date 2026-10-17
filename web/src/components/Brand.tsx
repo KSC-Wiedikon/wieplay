@@ -11,7 +11,7 @@ export function Mark({ className, sport, onDark }: { className?: string; sport?:
   const dark = useTheme() === 'dark' || onDark === true
   return (
     <img
-      src={`/brand/nomal-mark-${sport ?? current}${dark ? '-dark' : ''}.svg`}
+      src={`/brand/wieplay-mark-${sport ?? current}${dark ? '-dark' : ''}.svg`}
       alt=""
       width={512}
       height={512}

@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from nomal.core.config import Settings
 from tests.fakes import FakeStore
 from tests.media_helpers import (
     H3,
@@ -23,6 +22,7 @@ from tests.media_helpers import (
     upload_all,
     worker_client,
 )
+from wieplay.core.config import Settings
 
 ANALYSE_CAPS = ["analyse", "nas"]
 KINDS = ["analyse", "train_rallies"]
@@ -87,7 +87,7 @@ def payload(
             "stats": {"whistles": 300, "ball_in_track": 0.21},
         },
         "model": {
-            "name": "nomal-signals/VballNetFastV1_155",
+            "name": "wieplay-signals/VballNetFastV1_155",
             "version": "abc123",
             "weights_sha256": "c" * 64,
             "params": {"analysis_fps": 25.0},
@@ -144,7 +144,7 @@ def test_a_ready_volleyball_video_is_analysed(
     job = claim_kind(analyser, "analyse")
     params = job["params"]
     assert params["out_dir"].startswith("videos/") and params["out_dir"].endswith(ready["id"][:8])
-    assert params["inputs"] == [f"/nas/nomal/raw/{params['out_dir'][7:]}/01.mp4"]
+    assert params["inputs"] == [f"/nas/wieplay/raw/{params['out_dir'][7:]}/01.mp4"]
     assert (params["fps"], params["has_audio"], params["duration_ms"]) == (50.0, True, 3_600_000)
     inputs = analyser.post(f"/api/worker/jobs/{job['id']}/inputs", json={})
     assert inputs.status_code == 200
@@ -226,7 +226,7 @@ def test_proposals_are_written_with_their_model_run(
 def test_video_lists_say_where_the_analysis_stands(
     ready: Any, club: dict[str, TestClient], analyser: TestClient
 ) -> None:
-    """ "Ready" says the video plays; the analysis brief says whether Nomal looked at it."""
+    """ "Ready" says the video plays; the analysis brief says whether WiePlay looked at it."""
     coach = club["coach"]
 
     def brief() -> Any:
@@ -577,8 +577,8 @@ def test_deleting_a_video_purges_its_analysis_folder(
 def test_training_waits_for_the_debounce(
     app: FastAPI, analyser: TestClient, db_engine: Engine
 ) -> None:
-    from nomal.core import analysis
-    from nomal.core.db import make_sessionmaker
+    from wieplay.core import analysis
+    from wieplay.core.db import make_sessionmaker
 
     sessions = make_sessionmaker(db_engine)
     with sessions() as db:

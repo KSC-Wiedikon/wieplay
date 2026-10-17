@@ -1,4 +1,4 @@
-"""Suggested actions (nomal/ml/actions.py, nomal/ml/action_eval.py): contact candidates from
+"""Suggested actions (wieplay/ml/actions.py, wieplay/ml/action_eval.py): contact candidates from
 the ball's path, volleyball's sequence rules on synthetic rallies (aces, errors, blocks,
 overpasses, freeballs), grade hints only when the winner is sure, and the learned proposer
 trained and scored on synthetic labelled games."""
@@ -11,10 +11,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from nomal.ml import action_eval
-from nomal.ml import actions as ac
-from nomal.ml import trajectory as tr
 from tests.test_trajectory import signals
+from wieplay.ml import action_eval
+from wieplay.ml import actions as ac
+from wieplay.ml import trajectory as tr
 
 FPS = 30.0
 VIEW = ac.View.of(ac.nominal_camera(0.43), calibrated=False)

@@ -6,7 +6,7 @@ import { en } from './en'
 
 export type Language = 'en' | 'de'
 
-const KEY = 'nomal-lang'
+const KEY = 'wieplay-lang'
 
 function syncDocumentLang(lng: string): void {
   document.documentElement.lang = lng === 'de' ? 'de-CH' : 'en'

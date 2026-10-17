@@ -18,14 +18,14 @@ jobs:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: nomal
-          POSTGRES_PASSWORD: nomal
-          POSTGRES_DB: nomal_test
+          POSTGRES_USER: wieplay
+          POSTGRES_PASSWORD: wieplay
+          POSTGRES_DB: wieplay_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U nomal" --health-interval 2s --health-retries 30
+          --health-cmd "pg_isready -U wieplay" --health-interval 2s --health-retries 30
     env:
-      NOMAL_TEST_DATABASE_URL: postgresql+psycopg://nomal:nomal@127.0.0.1:5432/nomal_test
+      WIEPLAY_TEST_DATABASE_URL: postgresql+psycopg://wieplay:wieplay@127.0.0.1:5432/wieplay_test
     steps:
       - uses: actions/checkout@v4
       - name: ffmpeg (the worker tests encode a tiny clip)
@@ -61,5 +61,5 @@ jobs:
     needs: [backend, web]
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t nomal-api:ci .
-      - run: docker build -f Dockerfile.worker -t nomal-worker:ci .
+      - run: docker build -t wieplay-api:ci .
+      - run: docker build -f Dockerfile.worker -t wieplay-worker:ci .

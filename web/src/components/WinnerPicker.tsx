@@ -25,7 +25,7 @@ export function WinnerPicker({ rally, n, names, onPick, disabled = false, classN
   const { t } = useTranslation()
   const winner = effectiveWinner(rally)
   const label = (side: Side) => sideLabel(t, side, names)
-  const empty = winner.suggested && winner.value ? t('winner.nomal', { team: label(winner.value) }) : t('winner.none')
+  const empty = winner.suggested && winner.value ? t('winner.wieplay', { team: label(winner.value) }) : t('winner.none')
   return (
     <select
       aria-label={t('winner.label', { n })}

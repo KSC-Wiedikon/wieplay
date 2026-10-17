@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from nomal.ml.features import AUDIO_HOP_S, GRID_COLS, GRID_ROWS, Signals
+from wieplay.ml.features import AUDIO_HOP_S, GRID_COLS, GRID_ROWS, Signals
 
 
 def synthetic_signals(

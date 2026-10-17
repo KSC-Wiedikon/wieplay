@@ -243,7 +243,7 @@ interface Step {
 const MAX_UNDO = 200
 
 function openRallyKey(videoId: string): string {
-  return `nomal-open-rally:${videoId}`
+  return `wieplay-open-rally:${videoId}`
 }
 
 function readOpenRally(videoId: string): OpenRally | null {

@@ -1,4 +1,4 @@
-// Court fixtures: a calibration as the server computes it (backend/nomal/core/court.py) for a
+// Court fixtures: a calibration as the server computes it (backend/wieplay/core/court.py) for a
 // camera 6 m behind the near end line, 5 m up, and where court points show in its picture.
 
 import type { Calibration, Camera, CourtState, Mat3 } from '../lib/court'

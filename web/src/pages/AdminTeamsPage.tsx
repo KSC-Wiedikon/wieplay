@@ -189,7 +189,7 @@ function AdminTeamTable({ teams, caption }: { teams: AdminTeam[]; caption: strin
         <tr>
           <Th>{t('columns.team')}</Th>
           <Th>{t('columns.league')}</Th>
-          <Th className="text-right">{t('admin.usesNomal')}</Th>
+          <Th className="text-right">{t('admin.usesWiePlay')}</Th>
         </tr>
       </THead>
       <TBody>
@@ -205,7 +205,7 @@ function AdminTeamTable({ teams, caption }: { teams: AdminTeam[]; caption: strin
             <Td tight className="text-right">
               <Switch
                 checked={team.enabled}
-                label={t('admin.usesNomalFor', { team: `${team.name} ${team.season}` })}
+                label={t('admin.usesWiePlayFor', { team: `${team.name} ${team.season}` })}
                 onChange={(enabled) => setEnabled.mutate({ team, enabled })}
               />
             </Td>

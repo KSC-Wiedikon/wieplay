@@ -16,8 +16,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.worker.config import WorkerSettings
-from nomal.worker.handlers import BACKGROUND_KINDS, HANDLERS
 from tests.fakes import FakeStore
 from tests.media_helpers import worker_client
 from tests.test_worker_analyse import (
@@ -27,6 +25,8 @@ from tests.test_worker_analyse import (
     ready_with_real_file,
     worker_settings,  # noqa: F401 - a fixture
 )
+from wieplay.worker.config import WorkerSettings
+from wieplay.worker.handlers import BACKGROUND_KINDS, HANDLERS
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 
@@ -65,7 +65,7 @@ def test_trajectory_end_to_end_on_a_generated_clip(
         puts.append((key, content, headers["Content-Type"]))
         return httpx.Response(200)
 
-    monkeypatch.setattr("nomal.worker.trajectory.httpx.put", put)
+    monkeypatch.setattr("wieplay.worker.trajectory.httpx.put", put)
     ctx = context(worker_settings, SigningApi(w), job)
     out = HANDLERS["trajectory"](ctx)
     assert w.post(f"/api/worker/jobs/{job['id']}/complete", json=out).status_code == 204

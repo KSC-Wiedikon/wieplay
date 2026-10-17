@@ -1,9 +1,9 @@
 # WiePlay: plan
 
 > *WiePlay*: **Wie**dikon + re**play**, watch it again and learn from it. Called *Nomal*
-> (Swiss German for "again") until 17.10.2026, when the repo became `KSC-Wiedikon/wieplay`
-> and the hosts `wieplay(-dev).kscw.ch`. The code, packages, settings (`NOMAL_*`), containers,
-> database and buckets keep the name `nomal` (renaming them buys nothing a user sees).
+> (Swiss German for "again") until 17.10.2026, when everything was renamed: the repo
+> (`KSC-Wiedikon/wieplay`), the hosts (`wieplay(-dev).kscw.ch`), the Python package, settings
+> (`WIEPLAY_*`), containers, databases, buckets, NAS shares and the Wiedisync bridge.
 > In-house video analysis for KSC Wiedikon, replacing what clubs pay Hudl or Balltime for.
 
 | | |
@@ -123,9 +123,9 @@ flowchart LR
   end
 
   subgraph H[Hetzner VPS]
-    API[nomal-api<br/>FastAPI + built SPA]
+    API[wieplay-api<br/>FastAPI + built SPA]
     DX[Directus<br/>Wiedisync API + bridge]
-    PG[(Postgres<br/>Wiedisync db + nomal db)]
+    PG[(Postgres<br/>Wiedisync db + wieplay db)]
   end
 
   OS[(Hetzner Object Storage<br/>renditions, staging, exports, analysis copies)]
@@ -137,7 +137,7 @@ flowchart LR
   end
 
   subgraph Later[Later: EU or Swiss GPU provider]
-    ML[nomal-ml container<br/>billed per second/minute]
+    ML[wieplay-ml container<br/>billed per second/minute]
   end
 
   B -- "app + API (cookie)" --> T --> API
@@ -165,16 +165,16 @@ the Lenovo server and the GPU.
 
 | Component | Runs on | Does | Tech |
 |---|---|---|---|
-| **nomal-web** | Built into the `nomal-api` image, served at `wieplay.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
-| **nomal-api** | Hetzner VPS (the club's account), Docker, bound to `127.0.0.1`, reached via the existing Cloudflare Tunnel; worker routes only through an SSH tunnel from the worker host (§8.1) | Auth, permissions, metadata, upload orchestration, media redirects, job queue, audit log, budget ledger | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
-| **Postgres `nomal`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All WiePlay state incl. the job queue | Postgres 16 |
+| **wieplay-web** | Built into the `wieplay-api` image, served at `wieplay.kscw.ch` | Library, player, tagging, reels, admin | React 19, TypeScript, Vite, Tailwind v4, shadcn, TanStack Query, hls.js |
+| **wieplay-api** | Hetzner VPS (the club's account), Docker, bound to `127.0.0.1`, reached via the existing Cloudflare Tunnel; worker routes only through an SSH tunnel from the worker host (§8.1) | Auth, permissions, metadata, upload orchestration, media redirects, job queue, audit log, budget ledger | Python 3.12, FastAPI, SQLAlchemy 2 + Alembic, Pydantic 2, psycopg 3 |
+| **Postgres `wieplay`** | Existing Postgres container on the VPS, separate database + own non-superuser role | All WiePlay state incl. the job queue | Postgres 16 |
 | **Object storage** | Hetzner Object Storage, same region as the VPS, private bucket | HLS renditions, thumbnails, upload staging, exports, temporary analysis copies | S3 API |
-| **Media worker** | **Lenovo server** (always on; Ryzen 7 PRO 8700GE 8C/16T, 30 GB RAM, Radeon 780M with VAAPI H.264 encode, ~690 GB free) | Ingest (NAS inbox + browser uploads), transcode, thumbnails, audio, CPU analysis (whistles, motion, scoreboard OCR), analysis copies, clip/reel export, retention | `nomal-worker` container, ffmpeg. **CPU-capped** (it also runs the LAN's DNS and other services) |
-| **GPU worker (now)** | **Framework 16** at home (RTX 5070 Laptop GPU, 8 GB; always on) | Pulls GPU jobs from the queue and runs `nomal-ml run <spec>` locally; busy guard (§8.2). Not set up yet: needs its own path to the API (§8.1) | `nomal-worker` + `nomal-ml` image (CUDA 12.8+, PyTorch), NVIDIA Container Toolkit |
-| **GPU dispatcher (later)** | Same container on the Lenovo server | Hands GPU jobs to an EU or Swiss provider once that backend is switched on (§8.6); enforces the CHF cap | Part of `nomal-worker` |
+| **Media worker** | **Lenovo server** (always on; Ryzen 7 PRO 8700GE 8C/16T, 30 GB RAM, Radeon 780M with VAAPI H.264 encode, ~690 GB free) | Ingest (NAS inbox + browser uploads), transcode, thumbnails, audio, CPU analysis (whistles, motion, scoreboard OCR), analysis copies, clip/reel export, retention | `wieplay-worker` container, ffmpeg. **CPU-capped** (it also runs the LAN's DNS and other services) |
+| **GPU worker (now)** | **Framework 16** at home (RTX 5070 Laptop GPU, 8 GB; always on) | Pulls GPU jobs from the queue and runs `wieplay-ml run <spec>` locally; busy guard (§8.2). Not set up yet: needs its own path to the API (§8.1) | `wieplay-worker` + `wieplay-ml` image (CUDA 12.8+, PyTorch), NVIDIA Container Toolkit |
+| **GPU dispatcher (later)** | Same container on the Lenovo server | Hands GPU jobs to an EU or Swiss provider once that backend is switched on (§8.6); enforces the CHF cap | Part of `wieplay-worker` |
 | **Framework 16 (dev)** | Same machine | Development, model training/fine-tuning, local test runs; a training run pauses the GPU worker | Blackwell GPU: needs a PyTorch build with CUDA 12.8 or later |
-| **NAS** | Synology at home (≈18 TB free) | Raw originals (master copies), ML datasets, model weights, weekly mirror of the bucket | NFS/SMB share `nomal` |
-| **Wiedisync bridge** | Inside Wiedisync's `kscw-endpoints` (Directus) | Mints the login token; serves roster/game sync to nomal-api | Small endpoints (§4) |
+| **NAS** | Synology at home (≈18 TB free) | Raw originals (master copies), ML datasets, model weights, weekly mirror of the bucket | NFS/SMB share `wieplay` |
+| **Wiedisync bridge** | Inside Wiedisync's `kscw-endpoints` (Directus) | Mints the login token; serves roster/game sync to wieplay-api | Small endpoints (§4) |
 
 ### 3.3 Why this shape
 
@@ -209,14 +209,14 @@ OIDC-shaped authorization flow).
 sequenceDiagram
   autonumber
   participant B as Browser
-  participant N as nomal-api (wieplay.kscw.ch)
+  participant N as wieplay-api (wieplay.kscw.ch)
   participant D as Directus bridge (directus.kscw.ch)
   participant W as Wiedisync login (wiedisync.kscw.ch)
 
   B->>N: GET /api/me
   N-->>B: 401
   B->>N: GET /api/auth/login?next=/v/123
-  N-->>B: 302 to D /kscw/nomal/v1/authorize?state=S + short state cookie
+  N-->>B: 302 to D /kscw/wieplay/v1/authorize?state=S + short state cookie
   B->>D: GET authorize (top-level, kscw_session cookie sent: SameSite=Lax)
   alt not logged in to Wiedisync
     D-->>B: 302 to W /login?next=(authorize URL, allow-listed)
@@ -226,10 +226,10 @@ sequenceDiagram
   D-->>B: 302 to N /api/auth/callback?token=JWT(60 s, single use)&state=S
   B->>N: GET callback
   N->>N: verify Ed25519 signature, iss/aud/exp, state, jti unused
-  N-->>B: Set-Cookie nomal_session (host-only, Secure, HttpOnly, Lax, 8 h) + 302 to next
+  N-->>B: Set-Cookie wieplay_session (host-only, Secure, HttpOnly, Lax, 8 h) + 302 to next
 ```
 
-- **Token**: EdDSA (Ed25519) JWT, `iss=wiedisync-prod|wiedisync-dev`, `aud=nomal`, 60 s,
+- **Token**: EdDSA (Ed25519) JWT, `iss=wiedisync-prod|wiedisync-dev`, `aud=wieplay`, 60 s,
   `jti` recorded by WiePlay so it can be used once. The private key lives only in the Directus
   env; WiePlay holds the public key(s), chosen by `kid` (rotation = add new, retire old).
 - **Return URLs are allow-listed** in the bridge. No open redirect.
@@ -238,7 +238,7 @@ sequenceDiagram
 
 ```json
 {
-  "iss": "wiedisync-prod", "aud": "nomal", "sub": "<members.uuid>", "mid": 123,
+  "iss": "wiedisync-prod", "aud": "wieplay", "sub": "<members.uuid>", "mid": 123,
   "name": "First Last", "roles": ["user"], "sport_admin": [],
   "teams": [{"team": 92, "season": "2026/27", "rel": ["player", "captain"]}],
   "state": "…", "jti": "…", "iat": 0, "exp": 60
@@ -251,11 +251,11 @@ sequenceDiagram
 
 ### 4.3 Server-to-server sync
 
-`nomal-api` keeps a small read-only mirror of the Wiedisync data it needs (§6.2):
+`wieplay-api` keeps a small read-only mirror of the Wiedisync data it needs (§6.2):
 
-- `GET /kscw/nomal/v1/teams` (metadata of every current and previous-season team) and
-  `GET /kscw/nomal/v1/sync?teams=<ids>` (only the enabled teams) on the bridge, with an
-  `X-Nomal-Service-Token` header, called over the VPS's Docker network (no Cloudflare hop). A
+- `GET /kscw/wieplay/v1/teams` (metadata of every current and previous-season team) and
+  `GET /kscw/wieplay/v1/sync?teams=<ids>` (only the enabled teams) on the bridge, with an
+  `X-WiePlay-Service-Token` header, called over the VPS's Docker network (no Cloudflare hop). A
   full snapshot each time; at this size there is no need for incremental sync.
 - Returns only **WiePlay-enabled teams** (current + previous season), their rosters (member
   ID, UUID, name, jersey number, positions, relation, guest flag), and their games and
@@ -267,12 +267,12 @@ sequenceDiagram
 
 | Change | Where | Notes |
 |---|---|---|
-| `GET /kscw/nomal/v1/authorize` | new `kscw-endpoints/src/nomal-bridge.js` | Reads `req.accountability`, builds claims, signs, redirects. Logs issuance with `writeUserLog`. |
-| `GET /kscw/nomal/v1/teams`, `GET /kscw/nomal/v1/sync?teams=` | same file | `X-Nomal-Service-Token` (not `Authorization: Bearer`, which Directus would claim), internal network only, read-only, versioned contract with tests. |
-| `GET /kscw/nomal/v1/adult-check?team=&date=` | same file | Pass/fail per rostered person for a recording date (§5.3); birthdates never leave Wiedisync. |
+| `GET /kscw/wieplay/v1/authorize` | new `kscw-endpoints/src/wieplay-bridge.js` | Reads `req.accountability`, builds claims, signs, redirects. Logs issuance with `writeUserLog`. |
+| `GET /kscw/wieplay/v1/teams`, `GET /kscw/wieplay/v1/sync?teams=` | same file | `X-WiePlay-Service-Token` (not `Authorization: Bearer`, which Directus would claim), internal network only, read-only, versioned contract with tests. |
+| `GET /kscw/wieplay/v1/adult-check?team=&date=` | same file | Pass/fail per rostered person for a recording date (§5.3); birthdates never leave Wiedisync. |
 | Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
 | ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in WiePlay**, per lineage. The bridge returns personal data only for the team ids WiePlay asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
-| Env | Directus `.env` (prod + dev) | `NOMAL_JWT_PRIVATE_KEY`, `NOMAL_JWT_KID`, `NOMAL_RETURN_URLS`, `NOMAL_SYNC_TOKEN_HASH`, and on dev `NOMAL_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
+| Env | Directus `.env` (prod + dev) | `WIEPLAY_JWT_PRIVATE_KEY`, `WIEPLAY_JWT_KID`, `WIEPLAY_RETURN_URLS`, `WIEPLAY_SYNC_TOKEN_HASH`, and on dev `WIEPLAY_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
 | Later: "Video" link on game cards | `GameCard` | Plain link to `wieplay.kscw.ch/games/<id>`. |
 | Docs | `INFRA.md`, `SECURITY.md`, `PERMISSIONS.md` | Same commit, per Wiedisync rules. |
 
@@ -378,12 +378,12 @@ the team's **lineage** (§6.3) unless a season is named.
   Guest teams have no helpers, no sport admins (Wiedisync's are KSCW's) and no NAS inbox or link
   imports. KSCW members never see a guest team; only full admins see both sides.
 
-The rules live in **one module** (`nomal/core/permissions.py`) with a table-driven test
+The rules live in **one module** (`wieplay/core/permissions.py`) with a table-driven test
 that enumerates this matrix. Every API route goes through it.
 
 ### 5.2 No public links
 
-- Every media request goes through `nomal-api` with the session cookie. Segments get a
+- Every media request goes through `wieplay-api` with the session cookie. Segments get a
   302 to an object-storage URL **signed for 5 minutes, for one 4-second segment** (§7.6).
 - Exports (MP4) are for coaches only, **burned-in watermarked** ("KSCW intern · <name> ·
   <date>"), expire after 30 days, and are downloaded through the same redirect (signed at click).
@@ -460,7 +460,7 @@ page (what, why, who sees it, how long, processors, contact, rights).
 | Upload staging | Object storage `incoming/` | Until ingested; lifecycle rule deletes after 14 days regardless |
 | Analysis copies (GPU input) | Object storage `analysis/` | Deleted when the GPU job finishes; lifecycle rule after 3 days |
 | HLS renditions, thumbnails | Object storage `media/` | Recording season + 1 (a 2026/27 match until 31.05.2028). After the recording season, the 1080p rendition is dropped and 540p kept (§16 cost lever) |
-| Raw originals | NAS `nomal/raw/` | Same as renditions; short labelled windows may stay in the ML dataset (§11) |
+| Raw originals | NAS `wieplay/raw/` | Same as renditions; short labelled windows may stay in the ML dataset (§11) |
 | Exports | Object storage `exports/` | 30 days |
 | Tags, rallies, scores, rosters | Postgres | As long as the video; member link removed when a player withdraws or leaves and asks |
 | ML datasets, models | NAS | Until the model using them is retired; listed in a dataset manifest |
@@ -789,8 +789,8 @@ login_nonce      jti, used_at
 team_grant       id, lineage_id, member_id (no FK: the mirror purges), member_name, role 'analyst',
                  note, granted_by, granted_by_name, granted_at, revoked_at, revoked_by
                  -- one open grant per (lineage, member, role); revoked rows stay as history
-consent          (unused since 16.10.2026, §5.4; dropped after M4) member_id, scope 'nomal', notice_version, status 'accepted'|'withdrawn',
-                 via 'nomal'|'paper', recorded_by, at
+consent          (unused since 16.10.2026, §5.4; dropped after M4) member_id, scope 'wieplay', notice_version, status 'accepted'|'withdrawn',
+                 via 'wieplay'|'paper', recorded_by, at
 youtube_channel  channel_id, label, owner ('club' | member_id), proposed_by, confirmed_by,
                  confirmed_at    -- allow-list: the club's and members' own channels
 team_policy      lineage_id, matches_allowed bool, trainings_allowed bool, reason, set_by, set_at
@@ -839,7 +839,7 @@ distortion (§10.6). See §19, O8.
 
 | Path | For | How |
 |---|---|---|
-| **NAS inbox** (preferred at home) | Anyone with SD-card access at home | Copy files into the `nomal-inbox` share. The Lenovo worker sees stable files (size unchanged for 2 min), probes them, groups split parts, registers *inbox files*. In WiePlay the coach picks the game (suggested from recording time vs. games that day). Nothing crosses the internet twice. |
+| **NAS inbox** (preferred at home) | Anyone with SD-card access at home | Copy files into the team's folder in `inbox/` of the `wieplay` share. The Lenovo worker sees stable files (size unchanged for 2 min), probes them, groups split parts, registers *inbox files*. In WiePlay the coach picks the game (suggested from recording time vs. games that day). Nothing crosses the internet twice. |
 | **Browser upload** | Coaches elsewhere | Resumable S3 **multipart** upload straight to object storage (`incoming/<video>/`), parts signed by the API (64 MB parts → files up to ~640 GB; 4 in parallel; survives reloads). Several files per video (split recordings). The Lenovo worker downloads, archives to NAS, deletes the staging object. |
 | **Import from a link** (planned, §7.2.2) | Matches someone already put on YouTube or Twitch | Paste a link from an allow-listed channel (the club's, members' own) or pick one Wiedisync already stores for the game; the Lenovo worker downloads it and it continues like an upload. Decided 16.10.2026; replaces the earlier plan to embed YouTube without downloading. |
 
@@ -978,9 +978,9 @@ match**, at about 0.2 CPU cores (the GPU does the work).
 | Tier | Where | Holds | Size per season (100 matches × ~1.75 h) |
 |---|---|---|---|
 | Hot | Hetzner Object Storage | HLS renditions, thumbnails, exports, staging, analysis copies | ≈ 0.5–0.6 TB |
-| Master | NAS `nomal/raw/` | Original camera files (25–50 Mb/s) | ≈ 2–4 TB (NAS has ≈ 18 TB free) |
-| ML | NAS `nomal/datasets/`, `nomal/models/` | Labelled windows, Parquet tracks, weights | tens of GB |
-| Mirror | NAS `nomal/bucket-mirror/` | Weekly `rclone sync` of the bucket | = hot |
+| Master | NAS `wieplay/raw/` | Original camera files (25–50 Mb/s) | ≈ 2–4 TB (NAS has ≈ 18 TB free) |
+| ML | NAS `wieplay/datasets/`, `wieplay/models/` | Labelled windows, Parquet tracks, weights | tens of GB |
+| Mirror | NAS `wieplay/bucket-mirror/` | Weekly `rclone sync` of the bucket | = hot |
 
 Raw originals are **not** copied offsite (2–4 TB/season; renditions are the fallback). The
 database is backed up with Wiedisync's existing pipeline (§15.2).
@@ -1027,7 +1027,7 @@ follows redirects. **Test on an iPhone in M1.**
 - **Game recap** (built 17.10.2026; Balltime's "Game Recap" without the paid parts: no
   commentary, no generated text, everything runs on the club's machines). "Create game recap"
   on the video page (whoever may export) queues an export of kind `recap`
-  (`nomal/core/recap.py` picks, the worker draws: `nomal/worker/recap.py`):
+  (`wieplay/core/recap.py` picks, the worker draws: `wieplay/worker/recap.py`):
   - **Plays from facts**: tags that stand and rallies that stand. Kills, aces and block
     points (`A#`, `S#`, `B#`; ours count more than theirs), long rallies (≥ 15 s), the rallies
     that ended a set and the match. **Without tags** (and rallies not marked done): the rally
@@ -1060,7 +1060,7 @@ follows redirects. **Test on an iPhone in M1.**
 
 ### 8.1 Queue in Postgres, workers pull
 
-No message broker. The `job` table *is* the queue; only `nomal-api` touches it. Workers call
+No message broker. The `job` table *is* the queue; only `wieplay-api` touches it. Workers call
 four endpoints through an **SSH tunnel** to the VPS (worker routes are refused when a request
 arrives through Cloudflare):
 
@@ -1076,15 +1076,15 @@ A reaper returns expired leases to the queue (`attempts+1`, back-off) or fails t
 
 **How workers reach the API (16.10.2026: SSH tunnel instead of the tailnet).** The VPS was on
 the owner's private tailnet and published the API on its tailnet address too
-(`NOMAL_TAILNET_IP`). On 16.10.2026 it moved to the club's own Hetzner account and left that
+(`WIEPLAY_TAILNET_IP`). On 16.10.2026 it moved to the club's own Hetzner account and left that
 tailnet; it is on no tailnet now. The path since then:
 
-- On the VPS, `NOMAL_TAILNET_IP` is unset, so the APIs listen on loopback only
+- On the VPS, `WIEPLAY_TAILNET_IP` is unset, so the APIs listen on loopback only
   (`127.0.0.1:8090` dev, `:8091` prod).
-- The Lenovo server connects out with the systemd unit `nomal-api-tunnel.service`
+- The Lenovo server connects out with the systemd unit `wieplay-api-tunnel.service`
   (`deploy/lenovo/`; install steps in its header). It runs `ssh -N` with two local forwards
   and publishes the APIs on the Docker bridge, where the worker containers reach them:
-  `NOMAL_WORKER_API_URL=http://172.17.0.1:18090` (dev), `…:18091` (prod).
+  `WIEPLAY_WORKER_API_URL=http://172.17.0.1:18090` (dev), `…:18091` (prod).
 - ufw on the Lenovo server lets only Docker networks reach those two ports
   (`ufw allow proto tcp from 172.16.0.0/12 to 172.17.0.1 port 18090,18091`).
 - The tunnel carries no `CF-Connecting-IP`, so the worker routes accept its requests. The
@@ -1098,8 +1098,8 @@ tailnet; it is on no tailnet now. The path since then:
 
 | Worker | Caps | Notes |
 |---|---|---|
-| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `analyse`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists). With `analyse` the worker runs a second, background lane for the analysis jobs (nice 15), so an hour of analysis never holds up an upload | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. Reaches the API through `nomal-api-tunnel.service` (§8.1). |
-| **Framework 16** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, always on. **Busy guard**: stops claiming jobs while a training run or other GPU-heavy work uses the GPU (checked from free VRAM, plus a `nomal-worker pause` switch); optionally only at night. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so a pause or reboot loses at most one chunk. Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. A dev agent (`--env dev`) runs beside it, off by default. Not set up yet: it needs its own path to the API (§8.1). |
+| **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `analyse`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists). With `analyse` the worker runs a second, background lane for the analysis jobs (nice 15), so an hour of analysis never holds up an upload | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. Reaches the API through `wieplay-api-tunnel.service` (§8.1). |
+| **Framework 16** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, always on. **Busy guard**: stops claiming jobs while a training run or other GPU-heavy work uses the GPU (checked from free VRAM, plus a `wieplay-worker pause` switch); optionally only at night. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so a pause or reboot loses at most one chunk. Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. A dev agent (`--env dev`) runs beside it, off by default. Not set up yet: it needs its own path to the API (§8.1). |
 
 ### 8.3 The GPU interface (backend-agnostic)
 
@@ -1113,21 +1113,21 @@ GpuBackend
   cancel(handle)
 
 spec (JSON)
-  job_id, image "ghcr.io/ksc-wiedikon/nomal-ml:<version>", tasks ["serve_side","ball","players"]
+  job_id, image "ghcr.io/ksc-wiedikon/wieplay-ml:<version>", tasks ["serve_side","ball","players"]
   inputs   analysis copy + time map + calibration (NAS path, or signed GET for a provider)
   outputs  Parquet + result.json (NAS path, or signed PUT for a provider)
   limits   min_vram_gb 16, max_seconds, max_cost_chf
 
-container entrypoint:  nomal-ml run --spec spec.json   -> writes outputs, exits 0/1
+container entrypoint:  wieplay-ml run --spec spec.json   -> writes outputs, exits 0/1
 ```
 
 | Backend | How it runs the image | Use |
 |---|---|---|
-| `local-agent` | A GPU host runs `nomal-worker` with `cuda` caps, **pulls** `ml_analyse` from the queue like any worker, and runs `nomal-ml run` locally; inputs and outputs on the NAS | **Production now** (Framework 16) |
+| `local-agent` | A GPU host runs `wieplay-worker` with `cuda` caps, **pulls** `ml_analyse` from the queue like any worker, and runs `wieplay-ml run` locally; inputs and outputs on the NAS | **Production now** (Framework 16) |
 | `cloud-<provider>` | The Lenovo dispatcher claims the job and **pushes** it to a provider adapter that starts the image on a rented GPU; inputs and outputs are pre-signed object URLs | Later: an EU or Swiss provider (§8.6) |
 | `fake` | Returns canned outputs | CI |
 
-The `nomal-ml` container never calls WiePlay's API: inputs and outputs are URIs in the spec, and
+The `wieplay-ml` container never calls WiePlay's API: inputs and outputs are URIs in the spec, and
 the agent or the dispatcher relays progress and results to the worker routes (§8.1). Moving to
 a provider touches only the adapter. For a provider, the analysis-copy input URLs are the only
 long-ish signed URLs in the system: they point at a temporary object no user ever sees, deleted
@@ -1151,7 +1151,7 @@ the job waits in `waiting_budget` and admins are told.
 | `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
 | `trajectory` (16.10.2026) | `analyse`, `nas` | The ball's path with contacts, the court finder's proposal (§10.4, §10.6). Background lane |
-| `players` (17.10.2026, beta) | `analyse`, `nas` (`NOMAL_PLAYERS_CAPS`, e.g. `gpu,nas` for a GPU worker) | People on the court in the rally windows (YOLO26s ONNX, ByteTrack), tracks → clusters, back crops, shirt-number suggestions (§10.5). On demand (`NOMAL_PLAYERS_AUTO` off by default; on: after each `court` job). Priority −12, background lane |
+| `players` (17.10.2026, beta) | `analyse`, `nas` (`WIEPLAY_PLAYERS_CAPS`, e.g. `gpu,nas` for a GPU worker) | People on the court in the rally windows (YOLO26s ONNX, ByteTrack), tracks → clusters, back crops, shirt-number suggestions (§10.5). On demand (`WIEPLAY_PLAYERS_AUTO` off by default; on: after each `court` job). Priority −12, background lane |
 | `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
 | `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
@@ -1208,11 +1208,11 @@ Fallbacks: Scaleway L4 (Paris, per minute, VM), SwissGPU (Ticino, very cheap, no
 found), Seeweb (Italy, hourly, DPA unconfirmed), Verda V100 (Helsinki, cheapest, old GPU).
 
 **Adapters this implies**: `openstack-vm` (Infomaniak; also OVHcloud instances): create a
-server from a GPU flavor with cloud-init that pulls the image, runs `nomal-ml run`, uploads the
+server from a GPU flavor with cloud-init that pulls the image, runs `wieplay-ml run`, uploads the
 outputs and deletes its own server with a scoped application credential; `ovh-job`
-(`ovhai job run`); `exo-vm` (Exoscale CLI/API). The image reads its spec from `NOMAL_SPEC_URL`
+(`ovhai job run`); `exo-vm` (Exoscale CLI/API). The image reads its spec from `WIEPLAY_SPEC_URL`
 (a signed GET), so a provider only has to pass one environment variable. **Cost safety**: the
-dispatcher also deletes any `nomal-job-*` server older than the job's maximum runtime, so a VM
+dispatcher also deletes any `wieplay-job-*` server older than the job's maximum runtime, so a VM
 that fails to delete itself cannot bill for days.
 
 Questions to put to the providers before signing up: research note §4.
@@ -1315,7 +1315,7 @@ A **regrade queue** (Hudl-style: the list advances, number keys set the grade, `
 makes grading passes or attacks after a quick first tagging pass fast.
 
 **Built so far (branch `feat/stats`, 16.10.2026)**: the box score, side-out and break-point %,
-and the CSV export, computed on read from the tags (`backend/nomal/core/stats.py`, no table).
+and the CSV export, computed on read from the tags (`backend/wieplay/core/stats.py`, no table).
 `GET /api/videos/{id}/stats` (the match and each set) and `GET /api/teams/{id}/stats` (every
 ready match of that team row; counts are summed, ratios recomputed), each also as `.csv`
 (`?lang=de` for German headers). Whoever may watch the video or see the team reads them. On
@@ -1418,7 +1418,7 @@ the recognition with each video". Runbook: [`runbooks/analysis.md`](runbooks/ana
 4. **Learn.** Ten minutes after the last "done", one `train_rallies` job learns v1 from every
    reviewed game, scores v0 and v1 on each game while it is held out (split by match, §11),
    and keeps v1 only when its mean boundary F1 beats v0's. A kept v1 re-proposes for every
-   game nobody has done, and the next analyses use it. `python -m nomal.cli rally-eval`
+   game nobody has done, and the next analyses use it. `python -m wieplay.cli rally-eval`
    prints the per-game scores.
 
 - **v0, rules (now)**: the ball in plausible tracks (stuck spots and parked balls removed)
@@ -1436,7 +1436,7 @@ the recognition with each video". Runbook: [`runbooks/analysis.md`](runbooks/ana
   whistle on, since, until, rate; the same over 2, 6 and 20 s and the 3 s before and after)
   plus v0's own answer, smoothed with hysteresis into rallies of 2.5–120 s. Needs two
   reviewed games (one to learn from, one to check on); each game weighs the same.
-- **Gaps (built 16.10.2026, `nomal/ml/gaps.py`)**: with the sets (§10.3), the stretch before
+- **Gaps (built 16.10.2026, `wieplay/ml/gaps.py`)**: with the sets (§10.3), the stretch before
   the first serve is `warmup`, between sets `set_break`, after the match `other_dead`; a gap
   of 30 s or more inside a set is a `timeout` when it looks like one (40–100 s, the players
   at the benches: movement along the sides of the picture, little on court, no ball in play;
@@ -1508,7 +1508,7 @@ rallies ≤ 5 %.
 
 **Built 16.10.2026** (steps 1–4; the scoreboard, step 5, on 17.10.2026: below):
 
-- **Serve side** (`nomal/ml/serve.py`, worker): the camera stands behind one end line, so the
+- **Serve side** (`wieplay/ml/serve.py`, worker): the camera stands behind one end line, so the
   far court is a narrow band around the net where the ball spends most of its time (the
   video's median ball height). v0: the ball's first plausible track after a rally starts
   shows far from that band (low, at the server's hands, or high above them on a jump-serve
@@ -1520,12 +1520,12 @@ rallies ≤ 5 %.
   the set's sides give near/far), scored leaving one game out, used only when its mean
   accuracy beats v0's. Not an image classifier yet: the ball track decides.
 - **Tracks**: the analysis (and a training, for every game, when the serve model changed)
-  sends two small series per video (`nomal/ml/tracks.py`, table `analysis_track`): P(near
+  sends two small series per video (`wieplay/ml/tracks.py`, table `analysis_track`): P(near
   serve) for a rally starting at every half-second (~10 KB) and the activity per second
   (ball, movement in the middle and along the sides, whistles; ~20 KB). Not per-frame data:
   the API has no NAS, and with them it scores any rally, also one a coach moved or added,
   without asking the worker again.
-- **Scoring** (`nomal/ml/scoring.py`, plain Python in the API, `nomal/core/scoring.py`): a
+- **Scoring** (`wieplay/ml/scoring.py`, plain Python in the API, `wieplay/core/scoring.py`): a
   dynamic programme over (score, next server) per set, given our side at its start and its
   first server; a rally can be no point (cost from the finder's confidence), points can be
   missing (cheaper in a gap long enough for a rally, with play or whistles in it), a serve
@@ -1546,7 +1546,7 @@ rallies ≤ 5 %.
 - **When**: after every analysis and training, when a coach marks the rallies done, changes
   a set (bounds, number, first serve, sides), calls a serve in review or changes who won a
   rally (a fact it keeps to), and on request
-  (`POST /api/videos/{id}/scoring`, `python -m nomal.cli score`). Each run is a `model_run`
+  (`POST /api/videos/{id}/scoring`, `python -m wieplay.cli score`). Each run is a `model_run`
   (kind "score") with the metrics in `GET /api/videos/{id}/analysis` (`scoring`): per set
   the official score, the score line's final and where the evidence alone ends; flagged
   rallies; gaps; on games with a coach's serves and winners, the serve-side and winner
@@ -1560,13 +1560,13 @@ rallies ≤ 5 %.
 - **The teams' names** (17.10.2026, owner's feedback): wherever the app would say us and
   them (who served and won, the score line and the rally lists' score head, the sets bar,
   the stats' team and opponent rows and the match CSV, the tendencies, the recap's bug and
-  title card) it writes the teams' names: ours from `NOMAL_CLUB_SHORT_NAME` (default
+  title card) it writes the teams' names: ours from `WIEPLAY_CLUB_SHORT_NAME` (default
   "KSCW") and the team ("KSCW H3"), the opponent from the video's Wiedisync game (the side
   that is not ours), else from the title of a friendly ("Friendly vs Volero" → "Volero"),
   else "Opponent". Long names lose a "VBC" / "VC" / "Volley" in front only when they do not
   fit 16 characters; the official name stays in tooltips. A coach can set both per video
   (`video.name_us`, `video.name_them`; `PATCH /api/videos/{id}/setup`). The data and the
-  keyboard stay us/them (`a` starts an opponent's tag). `nomal/core/names.py`.
+  keyboard stay us/them (`a` starts an opponent's tag). `wieplay/core/names.py`.
 - **First real run, 16.10.2026** (the H3 vs Volero Legends match of §10.1, its stored signals,
   v0 rallies, outside the workers): serve track 1.7 s and activity 0.7 s to compute, 9.5 KB
   and 22 KB stored; 191 of 193 rallies in four sets cut at the three set breaks (331, 258,
@@ -1590,8 +1590,8 @@ rallies ≤ 5 %.
   hall's), else the team's last one. "No scoreboard in this video" forgets it (most of our
   halls have none in the picture) and is remembered (`video.no_scoreboard`: the setup's
   scoreboard step is done).
-- **Reading** (`scoreboard` job, the worker's background lane, CPU; `nomal/ml/scoreboard.py`,
-  `nomal/worker/scoreboard.py`): ffmpeg crops the box from the NAS originals at 2 fps. Two
+- **Reading** (`scoreboard` job, the worker's background lane, CPU; `wieplay/ml/scoreboard.py`,
+  `wieplay/worker/scoreboard.py`): ffmpeg crops the box from the NAS originals at 2 fps. Two
   readers, both free and local: a **light one** (local threshold, glyph-shaped components, a
   one-hidden-layer network, 270 KB of numpy weights trained on synthetic flip cards and seven
   segments with 10 TrueType faces, degraded like a hall camera: `scripts/ml/scoreboard_digits.py`;
@@ -1599,7 +1599,7 @@ rallies ≤ 5 %.
   recogniser**, the ONNX file the players job already brings into the worker image, reading
   each number on its own (cut at the widest gap between the glyphs). Agreeing, they are surer;
   one reading a tens digit the other lost wins; otherwise the surer one, doubted.
-- **Smoothing** (`nomal/ml/board.py`, plain Python): a score counts only when read for ≥ 2 s
+- **Smoothing** (`wieplay/ml/board.py`, plain Python): a score counts only when read for ≥ 2 s
   (a head in front of the board does not break it, a stray misreading inside is ignored); of
   those, the path with the most support where the score only rises by +1 (a jump of a few
   points while it was hidden, at a cost) and falls back to ~0:0 at a new set; everything off
@@ -1642,7 +1642,7 @@ proposes the shot type.
   negatives; first from the halls where S0 found the models weakest (distant or very wide
   cameras).
 - Post-processing: outlier removal, gap interpolation, trajectory fitting; contact and bounce
-  candidates from direction changes. **Built 16.10.2026** (`nomal/ml/trajectory.py`, the
+  candidates from direction changes. **Built 16.10.2026** (`wieplay/ml/trajectory.py`, the
   `trajectory` job after each analysis): stuck spots and one-frame spikes out, tracks linked
   over gaps of up to 5 frames (filled), contacts where the path turns ≥ 40° or changes speed
   2.2-fold, labelled *bounce* (came down, went up slower), *low* (came down, went up as fast:
@@ -1656,7 +1656,7 @@ proposes the shot type.
 
 ### 10.4a Suggested actions (volleyball)
 
-**Built 17.10.2026** (`nomal/ml/actions.py`, `nomal/core/actions.py`, the `actions` and
+**Built 17.10.2026** (`wieplay/ml/actions.py`, `wieplay/core/actions.py`, the `actions` and
 `train_actions` jobs; migration `0010`). Per rally (a proposal or a coach's), WiePlay suggests
 the serve, receptions, sets, attacks, blocks, digs and freeballs at the ball's contacts, as
 tags with `source='model'`, `review='unreviewed'`, a `confidence` and their `model_run_id`.
@@ -1698,8 +1698,8 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   suggestions are written only once the finder in use passes it on games whose actions a
   coach reviewed, held out: at least two games, **precision of fully right suggestions**
   (contact within ±0.3 s with the coach's skill and side) **≥ 0.70** and **contact recall ≥
-  0.6** (`NOMAL_ACTION_SUGGEST_MIN_PRECISION`, `NOMAL_ACTION_SUGGEST_MIN_RECALL`;
-  `NOMAL_ACTION_SUGGESTIONS` = `auto` (default) | `on` (write anyway, for testing) | `off`).
+  0.6** (`WIEPLAY_ACTION_SUGGEST_MIN_PRECISION`, `WIEPLAY_ACTION_SUGGEST_MIN_RECALL`;
+  `WIEPLAY_ACTION_SUGGESTIONS` = `auto` (default) | `on` (write anyway, for testing) | `off`).
   Below it every run still measures itself where a coach tagged and writes nothing (its old
   untouched suggestions go); the training that first passes it brings suggestions to every
   game nobody has reviewed. The tagging page, the analysis card and the stats say plainly why
@@ -1712,7 +1712,7 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   every run; none within ±0.3 s of one a coach rejected or of a tag that is there.
 - **When**: after each trajectory job, 90 s after a scoring a coach caused (sets, serve calls,
   rallies done; debounced), after a rally training, after an accepted action training, on
-  request (`POST /api/videos/{id}/actions`, `python -m nomal.cli actions`). Seconds a match.
+  request (`POST /api/videos/{id}/actions`, `python -m wieplay.cli actions`). Seconds a match.
 - **Review**: dashed in the tag list (with an inline accept) and on the timeline; the review
   mode gains an Actions queue next to the rallies: the contact loops (1 s before to 0.5 s
   after), `Enter` accept, `X` reject, `S R E A B D F` the skill, `# + ! - / =` the grade (again:
@@ -1741,13 +1741,13 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   (MIT), masked to the court polygon + margin, at 25 fps on live segments (tracker fills in).
 - Team assignment: side of the net (volleyball); kit-colour clustering (basketball).
 - No identity across videos (§5.7). Track IDs are per video.
-- **Built 17.10.2026** (`players` job, `nomal/ml/{people,bytetrack,players}.py`, migration
+- **Built 17.10.2026** (`players` job, `wieplay/ml/{people,bytetrack,players}.py`, migration
   `0011`): see "Players in a video" below.
 
-**Players in a video (17.10.2026, beta).** Off by default (`NOMAL_PLAYERS_AUTO=false`): ~2 h
+**Players in a video (17.10.2026, beta).** Off by default (`WIEPLAY_PLAYERS_AUTO=false`): ~2 h
 of the Lenovo's CPU per match and many more cards than players (§10.9), so a coach finds them
 on demand ("Find players" on the video page, `POST /api/videos/{id}/players/find`) or an admin
-with `nomal.cli players --video ID | --all-ready`; switched on, the job follows the court job
+with `wieplay.cli players --video ID | --all-ready`; switched on, the job follows the court job
 (§10.6). The attribution runs whenever a video has players. On the Lenovo's background
 lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, §8.3):
 
@@ -1807,7 +1807,7 @@ lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, 
   the picture and check the fit) on the paused frame; the API fits the homography (DLT,
   pure Python), recovers the camera from it (focal length and position, principal point at
   the centre) so points above the floor map too, and returns the court's lines and the
-  error. Pre-filled from the court finder (`nomal/ml/court_detect.py`: vanishing point, side
+  error. Pre-filled from the court finder (`wieplay/ml/court_detect.py`: vanishing point, side
   lines, the court's spacing along them, a camera that could see it; offered at confidence
   ≥ 0.6) or from the team's last calibration (same hall first). Not yet: lens distortion
   (the wide Legends hall fits at ± 24 cm), a camera bumped during a match.
@@ -1829,7 +1829,7 @@ lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, 
     The court comes over, its lines are fitted to the new picture's, and the confidence
     weighs the matches against the court's lines on line pixels. Stäfa → Uster (same hall):
     0.92, 2.2 cm RMS against a hand calibration of Uster, landmarks within 1 px.
-  - *The finder v2* for a hall seen for the first time (`nomal/ml/court_find.py`): line
+  - *The finder v2* for a hall seen for the first time (`wieplay/ml/court_find.py`): line
     pixels grouped by paint colour (the middle of clear lines; faint pixels join the paint
     they lie towards from their floor); per colour, two side lines through the vanishing
     point and a line across fix the court up to the focal length (square pixels, principal
@@ -1849,7 +1849,7 @@ lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, 
     always wins: the job only adds the setups to it (from where the coach paused); a coach
     fixing one setup carries the fix to the setups nobody set, and becomes the hall's
     memory. Metrics per run: method, confidence, setups and bumps, the court against the
-    coach's (`vs_coach`, held out); `python -m nomal.cli court-eval`.
+    coach's (`vs_coach`, held out); `python -m wieplay.cli court-eval`.
 
 ### 10.7 Serve placement
 
@@ -1922,9 +1922,9 @@ the beta, on demand.
    nearest the ball at the contact frame, on the correct side), confirmed with the event. That
    is the player-attribution label. Built 17.10.2026 (§10.5): written into a model's actions
    with the player, beside the coach's tags in `event_player`.
-6. **Datasets are snapshots**: `nomal-ml export-dataset` writes a manifest (query, IDs, taxonomy
+6. **Datasets are snapshots**: `wieplay-ml export-dataset` writes a manifest (query, IDs, taxonomy
    version, video SHA-256s) and cuts short labelled windows from the NAS originals into
-   `nomal/datasets/<name>/`. Models record their dataset manifest. Once a raw file is deleted
+   `wieplay/datasets/<name>/`. Models record their dataset manifest. Once a raw file is deleted
    under §5.5, only these windows remain (minimisation).
 7. **Evaluation split by match**, never by frame, with held-out matches from other halls.
 8. **Training happens on the Framework 16** (RTX 5070 Laptop, 8 GB): fine-tuning TrackNet and
@@ -2035,8 +2035,8 @@ anything not tied to one sport). `docs/brand/preview.png` shows them at every si
 
 | File | What |
 |---|---|
-| `nomal-icon-vb.svg`, `nomal-icon-bb.svg` | App icon: the mark on a white rounded square (512 × 512) |
-| `nomal-mark-vb.svg`, `nomal-mark-bb.svg` | The mark alone (a trail of dots and the ball), transparent, for the app bar, login and export watermark |
+| `wieplay-icon-vb.svg`, `wieplay-icon-bb.svg` | App icon: the mark on a white rounded square (512 × 512) |
+| `wieplay-mark-vb.svg`, `wieplay-mark-bb.svg` | The mark alone (a trail of dots and the ball), transparent, for the app bar, login and export watermark |
 
 The **wordmark** is "WiePlay" (until 17.10.2026 lowercase "nomal") set as text in **Bricolage Grotesque ExtraBold** (there is
 no wordmark SVG; an outlined one can be made from the font for the export watermark). The font
@@ -2112,7 +2112,7 @@ open ones first, the completed ones grouped; folded until something needs the co
 ### 14.1 Repo layout
 
 ```text
-nomal/
+wieplay/
   README.md, LICENSE (AGPL-3.0)
   docs/
     PLAN.md                  this file
@@ -2125,10 +2125,10 @@ nomal/
     TAGGING_GUIDE.md         codes, grammar, exact-frame definitions
     RUNBOOK.md               deploy, restore, rotate keys, add a worker, switch GPU backend
   backend/                   one Python package (uv)
-    nomal/core/              models, schemas, permissions, signing, taxonomy loader
-    nomal/api/               FastAPI app, routes, auth, media redirects, job queue
-    nomal/worker/            agent loop, media jobs, CPU analysis, GPU dispatcher + backends
-    nomal/ml/                nomal-ml entrypoint, models, training, dataset export
+    wieplay/core/              models, schemas, permissions, signing, taxonomy loader
+    wieplay/api/               FastAPI app, routes, auth, media redirects, job queue
+    wieplay/worker/            agent loop, media jobs, CPU analysis, GPU dispatcher + backends
+    wieplay/ml/                wieplay-ml entrypoint, models, training, dataset export
     migrations/              Alembic
     tests/
   web/                       React app (Vite), built into the API image
@@ -2136,11 +2136,11 @@ nomal/
   scripts/brand/             icon generation
   spikes/                    throwaway spike code kept for reproducibility (s0/: models on our footage)
   deploy/
-    hetzner/compose.yaml     nomal-api (prod + dev)
+    hetzner/compose.yaml     wieplay-api (prod + dev)
     lenovo/compose.yaml      media worker (+ provider dispatcher later)
-    lenovo/nomal-api-tunnel.service  SSH tunnel from the Lenovo server to the APIs (§8.1)
+    lenovo/wieplay-api-tunnel.service  SSH tunnel from the Lenovo server to the APIs (§8.1)
     gpu/compose.yaml         internal GPU worker (local-agent, NVIDIA runtime)
-    ml/Dockerfile            nomal-ml (CUDA) image
+    ml/Dockerfile            wieplay-ml (CUDA) image
   .github/workflows/         lint, test, build images, release
 ```
 
@@ -2162,8 +2162,8 @@ nomal/
 |---|---|---|
 | Web + API | `wieplay-dev.kscw.ch` | `wieplay.kscw.ch` |
 | Wiedisync | `directus-dev.kscw.ch` (nightly scrubbed prod clone, IDs match) | `directus.kscw.ch` |
-| Database | `nomal_dev` | `nomal` |
-| Bucket | `…-nomal-dev` (lifecycle: 30 days) | `…-nomal` |
+| Database | `wieplay_dev` | `wieplay` |
+| Bucket | `…-wieplay-dev` (lifecycle: 30 days) | `…-wieplay` |
 | Workers | Same Lenovo worker, second agent with `--env dev`, lower priority | Primary |
 | GPU backend | `local-agent` (dev agent on the Framework 16), or `fake` | `local-agent` on the Framework 16 (a provider later, §8.6) |
 | Local | `docker compose`: Postgres + MinIO + a fake bridge that issues dev tokens | — |
@@ -2172,11 +2172,11 @@ Everything goes to dev first, as in Wiedisync.
 
 ### 14.4 Deploy
 
-- GitHub Actions: lint + tests on every push; on a tag, build `nomal-api`, `nomal-worker` and
-  `nomal-ml` images to GHCR (private).
+- GitHub Actions: lint + tests on every push; on a tag, build `wieplay-api`, `wieplay-worker` and
+  `wieplay-ml` images to GHCR (private).
 - VPS, once per environment: `scripts/setup-hetzner.sh dev|prod`.
-  - It creates the secrets, the database and its login role, the `NOMAL_*` lines in the
-    Directus `.env` and `/opt/nomal-<env>/.env`.
+  - It creates the secrets, the database and its login role, the `WIEPLAY_*` lines in the
+    Directus `.env` and `/opt/wieplay-<env>/.env`.
   - It recreates Directus once and runs the first deploy.
   - It moves the secrets into the vault (`scripts/vault-secrets.sh`).
   - The tunnel route (`kscw-club` → `http://127.0.0.1:8090` dev, `:8091` prod) is separate.
@@ -2185,7 +2185,7 @@ Everything goes to dev first, as in Wiedisync.
   - Then it runs Alembic, restarts, and checks `/api/health`.
 - Container limits on the VPS (it also runs prod Directus): API `mem_limit: 512m`, `cpus: 1.0`.
 - Lenovo server: `docker compose pull && up -d` (systemd timer for the tag in a `stable` file).
-  - Once: `deploy/lenovo/nomal-api-tunnel.service` and its ufw rule, so the workers reach the
+  - Once: `deploy/lenovo/wieplay-api-tunnel.service` and its ufw rule, so the workers reach the
     APIs (§8.1).
 
 ### 14.5 Testing
@@ -2220,7 +2220,7 @@ Everything goes to dev first, as in Wiedisync.
 
 | What | How |
 |---|---|
-| `nomal` DB (tags, scores: the irreplaceable part) | Add the `nomal` database to Wiedisync's existing `backup-postgres.sh` (6-hourly dump → GPG → Google Drive + R2 + NAS). Restore test extended with row floors on `event`, `segment`, `video`. |
+| `wieplay` DB (tags, scores: the irreplaceable part) | Add the `wieplay` database to Wiedisync's existing `backup-postgres.sh` (6-hourly dump → GPG → Google Drive + R2 + NAS). Restore test extended with row floors on `event`, `segment`, `video`. |
 | Renditions | Weekly mirror to NAS; re-encodable from raw while raw exists. |
 | Raw originals | NAS only (RAID). Conscious decision: no offsite copy. |
 | Models + datasets | NAS; small enough to sync offsite if wanted. |
@@ -2295,7 +2295,7 @@ including stats in M3b). Teams can start using M2 and M3 on dev before the forma
 - Wiedisync bridge: KSC-Wiedikon/wiedisync#8, merged and deployed to dev.
 
 **Live on dev since 15.10.2026**: https://wieplay-dev.kscw.ch.
-- `nomal_dev` database, Directus dev env and the `kscw-club` tunnel route are in place.
+- `wieplay_dev` database, Directus dev env and the `kscw-club` tunnel route are in place.
 - The first sync covered H3, D1, DU23-1 and Herren 1.
 
 Still open for M0: one real login by a person (the "done when" check), and the prod setup
@@ -2322,7 +2322,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
   blocked too, as long as minors are on that roster.
 - Waiting on:
   - the Hetzner bucket and its keys (budget line O7);
-  - the NAS shares `nomal/raw-*` and `nomal/inbox-*`;
+  - the NAS shares `wieplay/raw-*` and `wieplay/inbox-*`;
   - the worker deployment;
   - the browser check on desktop, Android and an iPhone with a real 2-hour match (the
     "done when").

@@ -8,10 +8,10 @@ import cv2
 import numpy as np
 import pytest
 
-from nomal.ml import court_find, court_segments
-from nomal.ml import court_register as reg
-from nomal.worker import court as job
 from tests.court_render import court_to_image, render
+from wieplay.ml import court_find, court_segments
+from wieplay.ml import court_register as reg
+from wieplay.worker import court as job
 
 SIZE = (720, 1280)
 HALL = {

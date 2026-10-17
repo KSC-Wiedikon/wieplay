@@ -13,9 +13,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
-from nomal.api.dev_bridge import FixtureBridgeClient
-from nomal.core import batch, imports
-from nomal.worker import importer
 from tests.fakes import FakeStore
 from tests.media_helpers import (
     DU23,
@@ -28,6 +25,9 @@ from tests.media_helpers import (
     transcode_result,
     worker_client,
 )
+from wieplay.api.dev_bridge import FixtureBridgeClient
+from wieplay.core import batch, imports
+from wieplay.worker import importer
 
 LUCA = {  # what yt-dlp says about a video of Luca Zbinden's channel
     "channel": "Luca Zbinden Volley",

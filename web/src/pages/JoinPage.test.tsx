@@ -68,7 +68,7 @@ describe('JoinPage', () => {
       password: 'correct horse battery',
       accept_privacy: true,
     })
-    expect(localStorage.getItem('nomal-login')).toBe('guest')
+    expect(localStorage.getItem('wieplay-login')).toBe('guest')
   })
 
   it('sets a new password without asking for the email again', async () => {

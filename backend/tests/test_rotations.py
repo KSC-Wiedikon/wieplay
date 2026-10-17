@@ -1,5 +1,5 @@
 """Step 5a/5b: rotations per set and match, the lineup per rotation, and the setter analysis
-(nomal/core/stats.py, PLAN §9.7). Every expected number is worked out by hand."""
+(wieplay/core/stats.py, PLAN §9.7). Every expected number is worked out by hand."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from nomal.core import stats
-from nomal.core.stats import RallyIn, SetIn, TagIn
-from nomal.core.taxonomy import load
+from wieplay.core import stats
+from wieplay.core.stats import RallyIn, SetIn, TagIn
+from wieplay.core.taxonomy import load
 
 TAX = load("volleyball")
 ROT_COLS = stats.rotation_columns(TAX)

@@ -11,12 +11,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.core.config import Settings
-from nomal.ml import board as bd
 from tests.fakes import FakeStore
 from tests.media_helpers import worker_client
 from tests.test_analysis_api import ANALYSE_CAPS, complete, make_ready
 from tests.test_scoring_api import analysed, match, tagging
+from wieplay.core.config import Settings
+from wieplay.ml import board as bd
 
 BOX = {"x": 0.0, "y": 0.84, "w": 0.03, "h": 0.05}
 SETS = {"x": 0.05, "y": 0.84, "w": 0.02, "h": 0.05}
@@ -64,7 +64,7 @@ def board_of(rallies: list[tuple[int, int, str, str]], left_is_us: bool = True) 
 
 def result(job: dict[str, Any], found: list[bd.Segment]) -> dict[str, Any]:
     return {
-        "model": {"name": "nomal-scoreboard", "version": "abc", "params": {"fps": 2}},
+        "model": {"name": "wieplay-scoreboard", "version": "abc", "params": {"fps": 2}},
         "region_id": job["params"]["region_id"],
         "artifact": {
             "nas_path": f"{job['params']['out_dir']}/scoreboard-test.npz",

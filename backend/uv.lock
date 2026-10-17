@@ -1049,7 +1049,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nomal"
+name = "wieplay"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -1079,7 +1079,7 @@ analysis = [
 dev = [
     { name = "boto3-stubs", extra = ["s3"] },
     { name = "mypy" },
-    { name = "nomal", extra = ["analysis"] },
+    { name = "wieplay", extra = ["analysis"] },
     { name = "pytest" },
     { name = "ruff" },
     { name = "types-pyyaml" },
@@ -1110,7 +1110,7 @@ provides-extras = ["analysis"]
 dev = [
     { name = "boto3-stubs", extras = ["s3"], specifier = ">=1.43.114" },
     { name = "mypy", specifier = ">=2.4.0" },
-    { name = "nomal", extras = ["analysis"] },
+    { name = "wieplay", extras = ["analysis"] },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.17.0" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },

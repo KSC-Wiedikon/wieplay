@@ -1,6 +1,6 @@
 """Test setup: a Postgres test database migrated with Alembic, and a test bridge key.
 
-Needs Postgres: `docker compose up -d` at the repo root (or NOMAL_TEST_DATABASE_URL).
+Needs Postgres: `docker compose up -d` at the repo root (or WIEPLAY_TEST_DATABASE_URL).
 """
 
 from __future__ import annotations
@@ -20,14 +20,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 
-from nomal.api.app import create_app
-from nomal.api.dev_bridge import FixtureBridgeClient
-from nomal.core.config import Settings
-from nomal.core.tokens import generate_keypair, sign_token
+from wieplay.api.app import create_app
+from wieplay.api.dev_bridge import FixtureBridgeClient
+from wieplay.core.config import Settings
+from wieplay.core.tokens import generate_keypair, sign_token
 
 BACKEND = Path(__file__).resolve().parents[1]
 TEST_DB = os.environ.get(
-    "NOMAL_TEST_DATABASE_URL", "postgresql+psycopg://nomal:nomal@127.0.0.1:55488/nomal_test"
+    "WIEPLAY_TEST_DATABASE_URL", "postgresql+psycopg://wieplay:wieplay@127.0.0.1:55488/wieplay_test"
 )
 PRIVATE_PEM, PUBLIC_PEM = generate_keypair()
 OTHER_PRIVATE_PEM, _ = generate_keypair()
@@ -72,7 +72,7 @@ def settings() -> Settings:
         env="local",
         database_url=TEST_DB,
         public_url=PUBLIC_URL,
-        bridge_authorize_url="https://bridge.test/kscw/nomal/v1/authorize",
+        bridge_authorize_url="https://bridge.test/kscw/wieplay/v1/authorize",
         bridge_issuer=ISSUER,
         bridge_public_keys={KID: PUBLIC_PEM},
         cookie_secure=False,
@@ -106,7 +106,7 @@ def make_token(
     now = int(time.time())
     payload = {
         "iss": ISSUER,
-        "aud": "nomal",
+        "aud": "wieplay",
         "iat": now,
         "exp": now + lifetime,
         "jti": secrets.token_urlsafe(12),

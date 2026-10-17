@@ -6,7 +6,7 @@ Run by Dockerfile.worker in a throw-away build stage (PyTorch and Ultralytics st
 worker image gets the ONNX files only), or by hand in a venv with the same packages
 (versions pinned in Dockerfile.worker). Every download is checked against its SHA-256.
 
-- yolo26s.onnx: Ultralytics YOLO26s, COCO (AGPL-3.0, like Nomal), from the official release
+- yolo26s.onnx: Ultralytics YOLO26s, COCO (AGPL-3.0, like WiePlay), from the official release
   asset, exported here to ONNX with a dynamic input size (the worker feeds the court's crop
   at 1280 px on its longer side). The export is not byte-identical from one build to the
   next (ONNX metadata), so the job records the file's SHA-256 with every run.

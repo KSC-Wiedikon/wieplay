@@ -220,7 +220,7 @@ def test_exports_render_on_the_worker_and_download_once_ready(
     condensed = coach.post("/api/exports", json={"kind": "condensed", "video_id": tagged["id"]})
     assert condensed.status_code == 201 and condensed.json()["duration_ms"] == 23_500
 
-    from nomal.api.library import sweep_exports
+    from wieplay.api.library import sweep_exports
 
     store.objects[key] = 123
     with app.state.sessionmaker() as db:

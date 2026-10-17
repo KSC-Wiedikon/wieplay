@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from nomal.core import court
+from wieplay.core import court
 
 
 def look_at(

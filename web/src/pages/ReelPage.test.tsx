@@ -91,7 +91,7 @@ describe('ReelPage', () => {
   }
 
   it('plays the reel’s moments and says when a download is not allowed', async () => {
-    window.localStorage.setItem('nomal-export-rules', '1')
+    window.localStorage.setItem('wieplay-export-rules', '1')
     const fetch = show(reel({}), [
       piece({}),
       piece({ video_id: '00000000-0000-4000-8000-0000000000b3', start_ms: 1_000, end_ms: 4_000, caption: 'Luca from zone 4', video_title: 'KSCW H3 – VBC Züri', recorded_on: '2026-10-04', score_us: 24, score_them: 22 }),

@@ -1,4 +1,4 @@
-"""The game recap (PLAN §7.7, nomal/core/recap.py): the best plays from the facts (kills, aces,
+"""The game recap (PLAN §7.7, wieplay/core/recap.py): the best plays from the facts (kills, aces,
 blocks, long rallies, set and match points), the rally finder's rallies when nothing is tagged,
 the title card and the score bug in the viewer's language, the export job that renders it."""
 
@@ -12,12 +12,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.core import recap
-from nomal.core.models import Video
 from tests.fakes import FakeStore
 from tests.media_helpers import claim, worker_client
 from tests.test_analysis_api import ANALYSE_CAPS, claim_kind, complete, make_ready, payload
 from tests.test_library import EXPORT_CAPS, tagged  # noqa: F401 - the fixture
+from wieplay.core import recap
+from wieplay.core.models import Video
 
 
 def test_a_recap_is_cut_from_the_facts(

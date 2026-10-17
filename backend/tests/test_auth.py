@@ -4,8 +4,8 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, text
 
-from nomal.api.dev_fixtures import personas
 from tests.conftest import OTHER_PRIVATE_PEM, PUBLIC_URL, login, make_token, start_login
+from wieplay.api.dev_fixtures import personas
 
 PLAYER = personas(datetime.now(UTC).date())["player-h3"]
 
@@ -15,12 +15,12 @@ def test_login_redirects_to_the_bridge_with_state_and_callback(client: TestClien
     assert response.status_code == 302
     location = urlsplit(response.headers["location"])
     assert f"{location.scheme}://{location.netloc}{location.path}" == (
-        "https://bridge.test/kscw/nomal/v1/authorize"
+        "https://bridge.test/kscw/wieplay/v1/authorize"
     )
     query = parse_qs(location.query)
     assert query["return"] == [f"{PUBLIC_URL}/api/auth/callback"]
     assert len(query["state"][0]) >= 30
-    assert "nomal_auth" in response.cookies
+    assert "wieplay_auth" in response.cookies
 
 
 def test_full_login_starts_a_session_and_returns_to_next(client: TestClient) -> None:
@@ -54,7 +54,7 @@ def test_a_token_works_only_once(client: TestClient) -> None:
     assert (
         client.get("/api/auth/callback", params={"token": token, "state": state}).status_code == 302
     )
-    client.cookies.set("nomal_auth", client.cookies.get("nomal_auth") or "", path="/api/auth")
+    client.cookies.set("wieplay_auth", client.cookies.get("wieplay_auth") or "", path="/api/auth")
     state2 = start_login(client)
     replay = client.get("/api/auth/callback", params={"token": token, "state": state2})
     assert replay.status_code == 400
@@ -119,7 +119,7 @@ def test_security_headers(client: TestClient) -> None:
 
 
 def test_spa_routes_answer_get_and_head(tmp_path, settings) -> None:  # type: ignore[no-untyped-def]
-    from nomal.api.app import create_app
+    from wieplay.api.app import create_app
 
     (tmp_path / "index.html").write_text("<!doctype html><title>WiePlay</title>")
     (tmp_path / "assets").mkdir()

@@ -1,5 +1,5 @@
 // Rotation charts and the setter analysis (docs/PLAN.md §9.7, step 5a/5b): the drawing's
-// geometry and small helpers. The numbers come from the server (backend/nomal/core/stats.py).
+// geometry and small helpers. The numbers come from the server (backend/wieplay/core/stats.py).
 
 /** Zones I..VI in Roman numerals, as on a lineup sheet. */
 export const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'] as const

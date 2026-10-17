@@ -1,14 +1,14 @@
 """Train the scoreboard's digit network (PLAN §10.3, step 5) on synthetic boards.
 
     cd backend && uv run --with pillow python ../scripts/ml/scoreboard_digits.py \
-        nomal/ml/weights/scoreboard-digits-v1.npz [--samples 120000] [--seed 7]
+        wieplay/ml/weights/scoreboard-digits-v1.npz [--samples 120000] [--seed 7]
 
-Boards are drawn by nomal/ml/scoreboard_synth.py (seven segments, OpenCV's stroke fonts) and,
+Boards are drawn by wieplay/ml/scoreboard_synth.py (seven segments, OpenCV's stroke fonts) and,
 here, with the TrueType fonts found on the machine (bold sans faces: printed flip cards), then
 degraded like a hall camera degrades them; the glyphs are cut out exactly as the reader cuts
 them. A one-hidden-layer network (scikit-learn, then stored as plain numpy arrays: no pickle)
 learns digits 0-9 and "no digit". Deterministic for a seed and a set of fonts. Prints the
-held-out accuracy; the weights' SHA-256 goes into nomal/ml/scoreboard.py and the weights
+held-out accuracy; the weights' SHA-256 goes into wieplay/ml/scoreboard.py and the weights
 README.
 """
 
@@ -26,8 +26,8 @@ import numpy as np
 BACKEND = Path(__file__).resolve().parents[2] / "backend"
 sys.path.insert(0, str(BACKEND))
 
-from nomal.ml import scoreboard_synth as synth  # noqa: E402
-from nomal.ml.scoreboard import DigitModel  # noqa: E402
+from wieplay.ml import scoreboard_synth as synth  # noqa: E402
+from wieplay.ml.scoreboard import DigitModel  # noqa: E402
 
 FONTS = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",

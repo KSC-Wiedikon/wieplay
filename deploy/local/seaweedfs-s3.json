@@ -1,8 +1,8 @@
 {
   "identities": [
     {
-      "name": "nomal-local",
-      "credentials": [{ "accessKey": "nomal-local", "secretKey": "nomal-local-secret" }],
+      "name": "wieplay-local",
+      "credentials": [{ "accessKey": "wieplay-local", "secretKey": "wieplay-local-secret" }],
       "actions": ["Admin", "Read", "Write", "List", "Tagging"]
     }
   ]

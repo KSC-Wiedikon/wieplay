@@ -1,3 +1,4 @@
+import './lib/legacy' // first: moves settings saved under the old name (Nomal)
 import '@fontsource/bricolage-grotesque/latin-800.css'
 import './index.css'
 import './i18n'

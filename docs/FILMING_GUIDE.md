@@ -77,7 +77,7 @@ cup)* with its date and a title → choose where the video comes from:
   open until it says done. An interrupted upload continues when you select the same files
   again on the video page.
 - **From the NAS inbox** (for people with access to the club NAS). Copy the camera files
-  into your team's folder in the `nomal-inbox` share (for example `vb-H3`). After a few
+  into your team's folder in the `inbox` folder of the `wieplay` share (for example `inbox/vb-H3`). After a few
   minutes they appear under *From the NAS inbox*. Pick them → *Add video*. They are not
   uploaded again.
 - **From a link.** Is the match already on YouTube or Twitch, on the club's channel or a

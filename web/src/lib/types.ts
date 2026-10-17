@@ -1,6 +1,6 @@
 import type { PlayersSummary } from './players'
 
-// Shapes returned by the WiePlay API (backend/nomal/api).
+// Shapes returned by the WiePlay API (backend/wieplay/api).
 
 export type SportName = 'volleyball' | 'basketball'
 
@@ -214,7 +214,7 @@ export interface Video {
   no_scoreboard?: boolean
 }
 
-/** The teams' names of a video (backend nomal/core/names.py). */
+/** The teams' names of a video (backend wieplay/core/names.py). */
 export interface TeamNames {
   /** Short: "KSCW H3". */
   us: string

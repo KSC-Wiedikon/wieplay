@@ -1,4 +1,4 @@
-"""Court geometry (nomal/core/court.py) and the court finder (nomal/ml/court_detect.py)."""
+"""Court geometry (wieplay/core/court.py) and the court finder (wieplay/ml/court_detect.py)."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import math
 import numpy as np
 import pytest
 
-from nomal.core import court
-from nomal.ml import court_detect
 from tests.court_render import look_at, project, render
+from wieplay.core import court
+from wieplay.ml import court_detect
 
 ASPECT = 16 / 9
 

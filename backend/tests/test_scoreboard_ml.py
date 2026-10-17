@@ -1,4 +1,4 @@
-"""Reading a scoreboard (nomal/ml/scoreboard.py): digits on synthetic flip-card and LED boards
+"""Reading a scoreboard (wieplay/ml/scoreboard.py): digits on synthetic flip-card and LED boards
 (drawn with fonts the network never saw in training), the score split into two numbers, the
 light reader and the OCR combined, and the worker's job end to end on a generated video."""
 
@@ -13,13 +13,13 @@ from typing import Any
 import numpy as np
 import pytest
 
-from nomal.ml import board as bd
-from nomal.ml import scoreboard as sb
-from nomal.ml import scoreboard_synth as synth
-from nomal.worker import scoreboard as job
-from nomal.worker.client import ClaimedJob
-from nomal.worker.config import WorkerSettings
-from nomal.worker.handlers import Context
+from wieplay.ml import board as bd
+from wieplay.ml import scoreboard as sb
+from wieplay.ml import scoreboard_synth as synth
+from wieplay.worker import scoreboard as job
+from wieplay.worker.client import ClaimedJob
+from wieplay.worker.config import WorkerSettings
+from wieplay.worker.handlers import Context
 
 
 def test_the_weights_are_the_ones_shipped() -> None:

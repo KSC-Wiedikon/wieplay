@@ -1,4 +1,4 @@
-"""M3b: the stats endpoints (nomal/api/stats.py): who may read them, the numbers, CSV."""
+"""M3b: the stats endpoints (wieplay/api/stats.py): who may read them, the numbers, CSV."""
 
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ def test_match_csv(ready: dict[str, Any], club: dict[str, TestClient]) -> None:
     assert out.status_code == 200
     assert out.headers["content-type"] == "text/csv; charset=utf-8"
     disposition = out.headers["content-disposition"]
-    assert disposition.startswith('attachment; filename="nomal-stats-')
+    assert disposition.startswith('attachment; filename="wieplay-stats-')
     assert disposition.endswith('.csv"') and " " not in disposition.split("filename=")[1]
     assert out.content.startswith(b"\xef\xbb\xbf")  # BOM for spreadsheet programs
     rows = list(csv.reader(io.StringIO(out.content.decode("utf-8-sig"))))
@@ -149,7 +149,7 @@ def test_match_csv(ready: dict[str, Any], club: dict[str, TestClient]) -> None:
     assert (seven["Player"], seven["Serve attempts"], seven["Hitting %"]) == (
         "Alex Muster", "2", "-100.0",
     )  # fmt: skip
-    # The team's and the opponent's rows by the teams' names (nomal/core/names.py).
+    # The team's and the opponent's rows by the teams' names (wieplay/core/names.py).
     team = next(line for line in lines if line["Player"] == "KSCW H3")
     assert (team["Rallies won"], team["Break-point %"]) == ("1", "50.0")
     assert sum(line["Player"] == ready["names"]["them"] for line in lines) == 2
@@ -187,7 +187,7 @@ def test_season_stats(ready: dict[str, Any], club: dict[str, TestClient], as_: A
 
     out = club["coach"].get(f"/api/teams/{H3}/stats.csv")
     assert out.status_code == 200 and out.headers["content-type"] == "text/csv; charset=utf-8"
-    assert 'filename="nomal-stats-h3-' in out.headers["content-disposition"]
+    assert 'filename="wieplay-stats-h3-' in out.headers["content-disposition"]
     rows = list(csv.reader(io.StringIO(out.content.decode("utf-8-sig"))))
     assert rows[0][3] == "Matches" and {r[0] for r in rows[1:]} == {"Season"}
 

@@ -250,7 +250,7 @@ export function useExports() {
 }
 
 /** Fired when an export was queued: the app then watches it and says when it is ready. */
-export const EXPORT_QUEUED = 'nomal:export-queued'
+export const EXPORT_QUEUED = 'wieplay:export-queued'
 
 export function useCreateExport() {
   const client = useQueryClient()

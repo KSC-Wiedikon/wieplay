@@ -11,7 +11,7 @@ import { useToast } from './toast'
 import type { ExportIn } from './types'
 
 /** Set once the rules for downloads were shown and accepted on this device. */
-const SEEN_KEY = 'nomal-export-rules'
+const SEEN_KEY = 'wieplay-export-rules'
 
 interface Pending {
   request: ExportIn

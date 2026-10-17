@@ -1,5 +1,5 @@
-# Nomal API image: the FastAPI backend serving the built web app.
-#   docker build -t nomal-api:<tag> .
+# WiePlay API image: the FastAPI backend serving the built web app.
+#   docker build -t wieplay-api:<tag> .
 
 FROM node:24-alpine AS web
 WORKDIR /src/web
@@ -20,13 +20,13 @@ WORKDIR /app
 COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY backend/ ./
-RUN uv sync --frozen --no-dev && useradd --system --uid 10001 nomal
+RUN uv sync --frozen --no-dev && useradd --system --uid 10001 wieplay
 COPY --from=web /src/web/dist /app/web-dist
 ENV PATH="/app/.venv/bin:$PATH" \
-    NOMAL_WEB_DIST=/app/web-dist
-USER nomal
+    WIEPLAY_WEB_DIST=/app/web-dist
+USER wieplay
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD ["python", "-c", "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).status != 200)"]
-CMD ["uvicorn", "--factory", "nomal.api.app:asgi", "--host", "0.0.0.0", "--port", "8000", \
+CMD ["uvicorn", "--factory", "wieplay.api.app:asgi", "--host", "0.0.0.0", "--port", "8000", \
      "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header"]

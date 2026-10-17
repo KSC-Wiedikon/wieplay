@@ -180,7 +180,7 @@ def test_rotation_and_setter_csv(ready: dict[str, Any], club: dict[str, TestClie
         return [dict(zip(rows[0], row, strict=True)) for row in rows[1:]]
 
     out = club["coach"].get(f"{url}?part=rotations")
-    assert 'filename="nomal-rotations-' in out.headers["content-disposition"]
+    assert 'filename="wieplay-rotations-' in out.headers["content-disposition"]
     rows = read(out)
     # The match and set 1, six rotations each.
     assert [(r["Set"], r["Rotation"]) for r in rows][:7] == [
@@ -188,7 +188,7 @@ def test_rotation_and_setter_csv(ready: dict[str, Any], club: dict[str, TestClie
     ]  # fmt: skip
     assert rows[0]["Lineup (zones I-VI)"] == "3 7 11 9 1 14" and rows[0]["Side-out %"] == "100.0"
     out = club["coach"].get(f"{url}?part=setter&lang=de")
-    assert 'filename="nomal-setter-' in out.headers["content-disposition"]
+    assert 'filename="wieplay-setter-' in out.headers["content-disposition"]
     rows = read(out)
     first = rows[0]
     assert (first["Satz"], first["Aufteilung"], first["Option"], first["Angriffe"]) == (

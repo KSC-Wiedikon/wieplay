@@ -1,7 +1,7 @@
 [project]
-name = "nomal"
+name = "wieplay"
 version = "0.1.0"
-description = "Nomal: video analysis for KSC Wiedikon"
+description = "WiePlay: video analysis for KSC Wiedikon"
 license = "AGPL-3.0-only"
 requires-python = ">=3.12"
 dependencies = [
@@ -32,7 +32,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["nomal"]
+packages = ["wieplay"]
 
 [tool.ruff]
 line-length = 100
@@ -46,7 +46,7 @@ ignore = ["S101"]  # assert is fine in tests
 "tests/**" = ["S105", "S106"]
 "migrations/**" = ["E501"]
 # ffmpeg/ffprobe from PATH with argument lists, never a shell.
-"nomal/worker/ffmpeg.py" = ["S603", "S607"]
+"wieplay/worker/ffmpeg.py" = ["S603", "S607"]
 "tests/test_worker_ffmpeg.py" = ["S603", "S607"]
 "tests/test_worker_analyse.py" = ["S603", "S607"]
 "tests/test_worker_recap.py" = ["S603", "S607"]
@@ -60,7 +60,7 @@ addopts = "-q"
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-packages = ["nomal"]
+packages = ["wieplay"]
 
 [[tool.mypy.overrides]]
 # The analysis extra ships no type information.
@@ -69,7 +69,7 @@ ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
-    "nomal[analysis]",
+    "wieplay[analysis]",
     "boto3-stubs[s3]>=1.43.114",
     "mypy>=2.4.0",
     "pytest>=9.1.1",

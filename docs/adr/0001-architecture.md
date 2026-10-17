@@ -12,7 +12,7 @@
    host-only and WiePlay's API needs no CORS.
 3. **Login through a Wiedisync bridge, not credentialed CORS.**
    - The Wiedisync session cookie is host-only on `directus.kscw.ch`.
-   - The bridge (`kscw-endpoints/src/nomal-bridge.js`) turns it into a 60-second,
+   - The bridge (`kscw-endpoints/src/wieplay-bridge.js`) turns it into a 60-second,
      single-use, Ed25519-signed token on a top-level redirect.
    - WiePlay verifies it with the bridge's public key, records the token id, and starts its own
      8-hour session.
@@ -25,19 +25,19 @@
    - Result: no Wiedisync migration or permission change, and coaches can't enable their own
      team.
 5. **Mirror, don't share tables.**
-   - WiePlay has its own `nomal` database on the same Postgres server.
+   - WiePlay has its own `wieplay` database on the same Postgres server.
    - It stores Wiedisync ids and a minimal mirror (no email, phone, address or birthdate),
      replaced on every sync.
    - Members not on an enabled team are purged.
 6. **Service calls stay internal.**
-   - WiePlay → bridge calls use `X-Nomal-Service-Token` over the VPS's Docker network.
+   - WiePlay → bridge calls use `X-WiePlay-Service-Token` over the VPS's Docker network.
    - The bridge refuses them when they arrive through Cloudflare.
 
 ## Consequences
 
-- One small Wiedisync PR (KSC-Wiedikon/wiedisync#8) and its env (`NOMAL_*`) are needed before
+- One small Wiedisync PR (KSC-Wiedikon/wiedisync#8) and its env (`WIEPLAY_*`) are needed before
   login works outside local development.
-- Local development needs no Wiedisync: `NOMAL_DEV_BRIDGE=true` serves a fake bridge with
+- Local development needs no Wiedisync: `WIEPLAY_DEV_BRIDGE=true` serves a fake bridge with
   made-up teams and personas, and the sync reads the same fixtures.
 - The token format is a cross-language contract. `backend/tests/test_bridge_contract.py`
   verifies a token produced by the JavaScript bridge.

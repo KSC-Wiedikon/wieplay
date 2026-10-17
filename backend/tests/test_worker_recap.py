@@ -11,10 +11,10 @@ from typing import Any
 
 import pytest
 
-from nomal.worker import ffmpeg, handlers
-from nomal.worker import recap as rp
-from nomal.worker.client import ClaimedJob
-from nomal.worker.config import WorkerSettings
+from wieplay.worker import ffmpeg, handlers
+from wieplay.worker import recap as rp
+from wieplay.worker.client import ClaimedJob
+from wieplay.worker.config import WorkerSettings
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"

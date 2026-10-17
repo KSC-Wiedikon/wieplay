@@ -46,7 +46,7 @@ const video: Video = {
   can_export: true,
   files: [],
   rallies_reviewed_at: null,
-  // The teams' names instead of us and them (the server's: backend nomal/core/names.py).
+  // The teams' names instead of us and them (the server's: backend wieplay/core/names.py).
   names: { us: 'KSCW H3', them: 'Smash 05', us_full: 'KSC Wiedikon H3', them_full: 'Volley Smash 05', them_from: 'game', us_set: null, them_set: null },
 }
 

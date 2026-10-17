@@ -12,9 +12,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from nomal.core.config import Settings
-from nomal.core.models import ModelRun
-from nomal.ml import tracks
 from tests.fakes import FakeStore
 from tests.media_helpers import worker_client
 from tests.test_analysis_api import (
@@ -25,6 +22,9 @@ from tests.test_analysis_api import (
     make_ready,
     payload,
 )
+from wieplay.core.config import Settings
+from wieplay.core.models import ModelRun
+from wieplay.ml import tracks
 
 # Game k=0 of the fixtures is a home game: [us, them] per set.
 OFFICIAL = [(25, 20), (23, 25), (25, 18), (25, 22)]
@@ -477,13 +477,13 @@ def test_score_from_the_command_line(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from nomal import cli
-    from nomal.core.config import get_settings
     from tests.conftest import TEST_DB
+    from wieplay import cli
+    from wieplay.core.config import get_settings
 
     played, _ = match()
     analysed(analyser, played)
-    monkeypatch.setenv("NOMAL_DATABASE_URL", TEST_DB)
+    monkeypatch.setenv("WIEPLAY_DATABASE_URL", TEST_DB)
     get_settings.cache_clear()
     try:
         assert cli.main(["score", "--video", ready["id"]]) == 0

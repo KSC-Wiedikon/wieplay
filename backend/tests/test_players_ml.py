@@ -9,11 +9,11 @@ import itertools
 import numpy as np
 import pytest
 
-from nomal.core import court
-from nomal.core.players import Index
-from nomal.ml import bytetrack, people
-from nomal.ml import players as pl
-from nomal.worker import players as job
+from wieplay.core import court
+from wieplay.core.players import Index
+from wieplay.ml import bytetrack, people
+from wieplay.ml import players as pl
+from wieplay.worker import players as job
 
 
 def box(cx: float, cy: float, w: float = 40, h: float = 100) -> list[float]:

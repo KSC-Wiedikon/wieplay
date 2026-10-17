@@ -11,7 +11,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nomal.core import court
 from tests.fakes import FakeStore
 from tests.test_analysis_api import (
     ANALYSE_CAPS,
@@ -21,6 +20,7 @@ from tests.test_analysis_api import (
     payload,
 )
 from tests.test_court import camera_points
+from wieplay.core import court
 
 KINDS = ["analyse", "train_rallies", "trajectory"]
 TRACK = {
@@ -67,7 +67,7 @@ def result(
 ) -> dict[str, Any]:
     data = gzip.compress(json.dumps(TRACK).encode(), mtime=0)
     return {
-        "model": {"name": "nomal-trajectory", "version": "abc123", "params": {"out_fps": 15}},
+        "model": {"name": "wieplay-trajectory", "version": "abc123", "params": {"out_fps": 15}},
         "track": {
             "nas_path": f"{job['params']['out_dir']}/ball-track-{job['id'][:8]}.json.gz",
             "key": job["params"]["track_key"],

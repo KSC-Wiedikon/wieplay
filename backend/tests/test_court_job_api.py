@@ -14,12 +14,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from nomal.core import calibration, court
-from nomal.core.models import ModelRun
 from tests.fakes import FakeStore
 from tests.test_analysis_api import ANALYSE_CAPS, claim_kind, complete, make_ready, payload
 from tests.test_court import camera_points
 from tests.test_court_api import TRACK, result, stored
+from wieplay.core import calibration, court
+from wieplay.core.models import ModelRun
 
 KINDS = ["analyse", "train_rallies", "trajectory", "court"]
 BUMP_AT = 4_350_000  # 1:12:30
@@ -100,7 +100,7 @@ def court_result(
         )
         found.append({"points": corners(0.03)})
     return {
-        "model": {"name": "nomal-court", "version": "abc123", "params": {"step_s": 30}},
+        "model": {"name": "wieplay-court", "version": "abc123", "params": {"step_s": 30}},
         "frames": {
             "nas_path": f"{job['params']['out_dir']}/court-{job['id'][:8]}.npz",
             "sha256": "e" * 64,
@@ -365,12 +365,12 @@ def test_the_cli_queues_court_jobs_and_reports_them(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from nomal import cli
-    from nomal.core.config import get_settings
+    from wieplay import cli
+    from wieplay.core.config import get_settings
 
     job = court_job(analyser, store)
     complete(analyser, job, court_result(job))
-    monkeypatch.setenv("NOMAL_DATABASE_URL", _db())
+    monkeypatch.setenv("WIEPLAY_DATABASE_URL", _db())
     get_settings.cache_clear()
     try:
         assert cli.main(["court", "--all-ready", "--dry-run"]) == 0

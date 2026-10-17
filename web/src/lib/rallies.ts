@@ -1,7 +1,7 @@
 // Rallies, sets and the score (docs/PLAN.md §6.6, §9.4).
 //
 // The server computes who served, which set a rally belongs to and the running score
-// (backend/nomal/core/tagging.py: rescore). While changes are still in the outbox, the
+// (backend/wieplay/core/tagging.py: rescore). While changes are still in the outbox, the
 // workspace shows the same computation done locally, marked as provisional; after each sync
 // the server's values replace it.
 //
