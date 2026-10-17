@@ -30,7 +30,7 @@ interface RowProps extends ComponentProps<'tr'> {
 export function Tr({ onActivate, className, ...props }: RowProps) {
   const onClick = onActivate
     ? (event: MouseEvent<HTMLTableRowElement>) => {
-        if (!(event.target as Element).closest('a, button')) onActivate()
+        if (!(event.target as Element).closest('a, button, select, input, label, textarea')) onActivate()
       }
     : undefined
   return <tr onClick={onClick} className={cx(onActivate && 'cursor-pointer', className)} {...props} />

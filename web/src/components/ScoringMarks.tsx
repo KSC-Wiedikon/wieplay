@@ -3,8 +3,10 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
 import { scoreNoteText } from '../lib/labels'
+import { useSideNames } from '../lib/sides'
 import type { Segment } from '../lib/types'
 import { AlertIcon } from './icons'
+import { Th } from './Table'
 
 /**
  * A value from Nomal rather than a coach (who served, who won, the score): muted and italic,
@@ -32,5 +34,17 @@ export function CheckMark({ rally, className }: { rally: Pick<Segment, 'score_co
       {t('tagging.scoring.check')}
       <span className="sr-only">{`: ${reason}`}</span>
     </span>
+  )
+}
+
+/** The score column's head: the teams in the score's order ("KSCW H3 – Volero"), else "Score". */
+export function ScoreHead({ className }: { className?: string }) {
+  const { t } = useTranslation()
+  const names = useSideNames()
+  if (!names) return <Th className={className}>{t('tagging.condensed.score')}</Th>
+  return (
+    <Th className={className} title={`${names.usFull} – ${names.themFull}`}>
+      <span className="sr-only">{`${t('tagging.condensed.score')}:`}</span> {`${names.us} – ${names.them}`}
+    </Th>
   )
 }

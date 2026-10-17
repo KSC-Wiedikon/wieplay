@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
 import { Link } from 'react-router'
 import { formatClock, pieceLabel, playerLabel, playerName } from '../lib/labels'
+import { useSideNames } from '../lib/sides'
 import { ralliesOf } from '../lib/rallies'
 import {
   rallyWindow,
@@ -106,6 +107,7 @@ export function SuggestedHint({ count }: { count: number }) {
 
 function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; tab: StatsTab; onTab: (tab: StatsTab) => void } & VideoStatsProps) {
   const { t } = useTranslation()
+  const sides = useSideNames()
   const tabsId = useId()
   const [setNo, setSetNo] = useState<number | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -151,7 +153,7 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; ta
     const setTag = events.get(play.set_id)
     if (!setTag || !tagging) return []
     const attack = play.attack_id ? (events.get(play.attack_id) ?? null) : null
-    const who = (tag: Tag) => playerLabel(t, tag.side, tag.number, tagging.roster, tag.member_id)
+    const who = (tag: Tag) => playerLabel(t, tag.side, tag.number, tagging.roster, tag.member_id, sides)
     const time = formatClock(setTag.t_ms, { tenths: false })
     const outcome = t(`stats.setter.outcomes.${play.outcome ?? 'none'}`)
     const label = attack ? t('stats.setter.play', { setter: who(setTag), attacker: who(attack), outcome, time }) : t('stats.setter.playNoAttack', { setter: who(setTag), outcome, time })

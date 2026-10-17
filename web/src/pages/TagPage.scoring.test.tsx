@@ -46,6 +46,8 @@ const video: Video = {
   can_export: true,
   files: [],
   rallies_reviewed_at: null,
+  // The teams' names instead of us and them (the server's: backend nomal/core/names.py).
+  names: { us: 'KSCW H3', them: 'Smash 05', us_full: 'KSC Wiedikon H3', them_full: 'Volley Smash 05', them_from: 'game', us_set: null, them_set: null },
 }
 
 const scoring = (patch: Partial<Scoring> = {}): Scoring => ({
@@ -208,7 +210,7 @@ beforeEach(() => {
 
 describe('TagPage, automatic scoring', () => {
   it("shows who served and who won, Nomal's values as suggestions, and flags rallies to check", async () => {
-    show()
+    const rendered = show()
     await screen.findByRole('region', { name: 'Tag entry' })
     fireEvent.click(screen.getByRole('button', { name: 'Rallies (3)' }))
     const table = screen.getByRole('table', { name: 'Rallies' })
@@ -219,14 +221,26 @@ describe('TagPage, automatic scoring', () => {
     // A coach's rally: facts, nothing suggested.
     expect(suggested(first)).toEqual([])
     expect(first).toHaveTextContent('1:0')
-    // Nomal's score and winner; the server is a fact (the previous winner).
-    expect(suggested(second)).toEqual(['1:1 (suggested)', 'Them (suggested)'])
+    // Nomal's score and winner; the server is a fact (the previous winner). The winner is a
+    // choice of the teams' names: none yet, so Nomal's shows in the empty choice.
+    expect(suggested(second)).toEqual(['1:1 (suggested)'])
     expect(second.querySelector('[data-suggested]')).toHaveAttribute('title', 'Suggested by Nomal')
-    expect(within(second).getByText('Us')).toBeInTheDocument()
+    expect(within(second).getAllByText('KSCW H3')[0]?.closest('td')?.querySelector('select')).toBeNull() // served: a fact
+    const point = within(second).getByRole('combobox', { name: 'Point of rally 2' })
+    expect(point).toHaveValue('')
+    expect(within(point).getAllByRole('option').map((o) => o.textContent)).toEqual(['Smash 05 (Nomal)', 'KSCW H3', 'Smash 05'])
     expect(within(second).getByTitle("The serve doesn't fit the score.")).toHaveTextContent('Check')
     expect(second).toHaveAttribute('data-check', 'true')
     // An open suggestion: its server is Nomal's too.
-    expect(suggested(third)).toEqual(['Them (suggested)', '1:2 (suggested)', 'Them (suggested)'])
+    expect(suggested(third)).toEqual(['Smash 05 (suggested)', '1:2 (suggested)'])
+    // The score's order is in the column's head.
+    expect(within(table).getByRole('columnheader', { name: 'Score: KSCW H3 – Smash 05' })).toBeInTheDocument()
+    // The coach saw KSCW H3 win rally 2: a fact, the score follows; the accepted proposal is corrected.
+    fireEvent.change(point, { target: { value: 'us' } })
+    expect(within(table).getByRole('combobox', { name: 'Point of rally 2' })).toHaveValue('us')
+    expect(rows[1]).toHaveTextContent('2:0')
+    const { server } = rendered
+    await waitFor(() => expect(server.sentSegments().get(R2)).toMatchObject({ won_by: 'us', review: 'corrected' }), { timeout: 3000 })
     expect(within(third).getByTitle('A point seems to be missing before this rally.')).toBeInTheDocument()
   })
 
@@ -256,14 +270,14 @@ describe('TagPage, automatic scoring', () => {
 
     // Then the rally: Nomal's server and winner as suggestions, and why to check it.
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
-    expect(within(panel()).getByText('Them (suggested, 87%, far court)')).toBeInTheDocument()
-    expect(within(panel()).getByText('Them (suggested, 91%)')).toBeInTheDocument()
-    expect(within(panel()).getByText('1:2 (suggested)')).toBeInTheDocument()
+    expect(within(panel()).getByText('Smash 05 (suggested, 87%, far court)')).toBeInTheDocument()
+    expect(within(panel()).getByText('Smash 05 (suggested, 91%)')).toBeInTheDocument()
+    expect(within(panel()).getByText('KSCW H3 1:2 Smash 05 (suggested)')).toBeInTheDocument()
     expect(within(panel()).getByText('Check: A point seems to be missing before this rally.')).toBeInTheDocument()
     keys('1')
-    expect(within(panel()).getByText('Serve: Us, your call.')).toBeInTheDocument()
-    expect(within(panel()).getByRole('button', { name: /We serve/ })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(panel()).getByText('Us (your call)')).toBeInTheDocument()
+    expect(within(panel()).getByText('Serve: KSCW H3, your call.')).toBeInTheDocument()
+    expect(within(panel()).getByRole('button', { name: /KSCW H3 serves/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(panel()).getByText('KSCW H3 (your call)')).toBeInTheDocument()
     keys('Enter')
 
     // The stoppage is a timeout: T relabels it (corrected) and goes on.
@@ -291,6 +305,43 @@ describe('TagPage, automatic scoring', () => {
     expect(await screen.findByText('No rally to check.')).toBeInTheDocument()
   })
 
+  it('sets who won with 3 and 4 or the buttons: a fact, the score at once, U takes it back', async () => {
+    const { server } = show(data(), { url: `/videos/${ID}/tag?mode=review` })
+    await screen.findByRole('region', { name: 'Review suggestions' })
+    keys('Enter') // the timeout first
+    expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
+    const won = within(panel()).getByRole('group', { name: 'Who won the rally' })
+    expect(within(won).getAllByRole('button').map((b) => b.textContent)).toEqual(['Point KSCW H3' + '3', 'Point Smash 05' + '4'])
+
+    // Nomal says Smash 05 won it (1:2); the coach saw KSCW H3 win: 3.
+    keys('3')
+    expect(within(panel()).getByText('Point: KSCW H3, your call.')).toBeInTheDocument()
+    expect(within(won).getByRole('button', { name: /Point KSCW H3/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(panel()).getByText('KSCW H3 (your call)')).toBeInTheDocument()
+    // The score line follows at once (Nomal's winner of the rally before still counts: suggested).
+    expect(within(panel()).getByText('KSCW H3 2:1 Smash 05 (suggested)')).toBeInTheDocument()
+    await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: 'us', review: 'corrected' }), { timeout: 3000 })
+
+    // The button does the same: Smash 05 after all.
+    fireEvent.click(within(won).getByRole('button', { name: /Point Smash 05/ }))
+    expect(within(panel()).getByText('Point: Smash 05, your call.')).toBeInTheDocument()
+    expect(within(panel()).getByText('KSCW H3 1:2 Smash 05 (suggested)')).toBeInTheDocument()
+    await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: 'them', review: 'corrected' }), { timeout: 3000 })
+
+    // U: back to KSCW H3; U again: no call, the suggestion open again.
+    keys('u')
+    expect(within(won).getByRole('button', { name: /Point KSCW H3/ })).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: 'us' }), { timeout: 3000 })
+    keys('u')
+    expect(within(won).getByRole('button', { name: /Point KSCW H3/ })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(panel()).getByText('Smash 05 (suggested, 91%)')).toBeInTheDocument()
+    await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: null, review: 'unreviewed' }), { timeout: 3000 })
+    // The same key twice takes the call back too.
+    keys('4', '4')
+    expect(within(panel()).getByText('Point call taken back.')).toBeInTheDocument()
+    expect(within(won).getByRole('button', { name: /Point Smash 05/ })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it("doesn't score again when the review is left without a change", async () => {
     const { scored } = show(data(), { url: `/videos/${ID}/tag?mode=review` })
     await screen.findByRole('region', { name: 'Review suggestions' })
@@ -304,7 +355,8 @@ describe('TagPage, automatic scoring', () => {
     await screen.findByRole('region', { name: 'Review suggestions' })
     keys('?')
     const dialog = screen.getByRole('dialog', { name: 'Keys' })
-    expect(within(dialog).getByText("We serve, they serve; the same key again takes the call back")).toBeInTheDocument()
+    expect(within(dialog).getByText('KSCW H3 serves, Smash 05 serves; the same key again takes the call back')).toBeInTheDocument()
+    expect(within(dialog).getByText('KSCW H3 won the rally, Smash 05 won it; the same key again takes it back')).toBeInTheDocument()
     expect(within(dialog).getByText('A break is a warm-up, set break, timeout, stoppage or other break')).toBeInTheDocument()
   })
 })
@@ -348,13 +400,13 @@ describe('TagPage, sets bar and the automatic score', () => {
     const { server } = show(sets())
     await screen.findByRole('region', { name: 'Tag entry' })
     const serve = screen.getByRole('group', { name: 'First serve in set 1' })
-    const guess = within(serve).getByRole('button', { name: 'Them (suggested)' })
+    const guess = within(serve).getByRole('button', { name: 'Smash 05 (suggested)' })
     expect(guess).toHaveAttribute('aria-pressed', 'false')
-    expect(guess).toHaveAttribute('title', 'Nomal guesses Them. Click to confirm.')
+    expect(guess).toHaveAttribute('title', 'Nomal guesses Smash 05. Click to confirm.')
     fireEvent.click(guess)
-    expect(within(serve).getByRole('button', { name: 'Them' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(serve).getByRole('button', { name: 'Smash 05' })).toHaveAttribute('aria-pressed', 'true')
 
-    const side = screen.getByRole('group', { name: 'Our side at the start of set 1' })
+    const side = screen.getByRole('group', { name: 'Where KSCW H3 starts set 1' })
     expect(within(side).getByRole('button', { name: 'Near (suggested)' })).toBeInTheDocument()
     fireEvent.click(within(side).getByRole('button', { name: 'Far' }))
     expect(within(side).getByRole('button', { name: 'Far' })).toHaveAttribute('aria-pressed', 'true')
@@ -398,9 +450,9 @@ describe('TagPage, sets bar and the automatic score', () => {
     const note = await screen.findByRole('note', { name: 'Set 1: who served first, and where did we start?' })
     expect(note).toHaveTextContent('Nomal is only 72% sure.')
     expect(note).toHaveTextContent('one click fixes the score of the whole match')
-    fireEvent.click(within(screen.getByRole('group', { name: 'First serve in set 1' })).getByRole('button', { name: /^Us/ }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'First serve in set 1' })).getByRole('button', { name: /^KSCW H3/ }))
     expect(screen.getByRole('note')).toBeInTheDocument()
-    fireEvent.click(within(screen.getByRole('group', { name: 'Our side at the start of set 1' })).getByRole('button', { name: /^Near/ }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Where KSCW H3 starts set 1' })).getByRole('button', { name: /^Near/ }))
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
   })
 

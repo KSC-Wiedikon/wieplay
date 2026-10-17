@@ -13,14 +13,16 @@ import { playersDe } from './players.de'
 import { playersEn } from './players.en'
 import { scoreboardDe } from './scoreboard.de'
 import { scoreboardEn } from './scoreboard.en'
+import { setupDe } from './setup.de'
+import { setupEn } from './setup.en'
 import { statsDe } from './stats.de'
 import { statsEn } from './stats.en'
 import { videoDe } from './video.de'
 import { videoEn } from './video.en'
 
 for (const [lng, bundles] of [
-  ['en', [videoEn, libraryEn, statsEn, courtEn, actionsEn, playersEn, scoreboardEn]],
-  ['de', [videoDe, libraryDe, statsDe, courtDe, actionsDe, playersDe, scoreboardDe]],
+  ['en', [videoEn, libraryEn, statsEn, courtEn, actionsEn, playersEn, scoreboardEn, setupEn]],
+  ['de', [videoDe, libraryDe, statsDe, courtDe, actionsDe, playersDe, scoreboardDe, setupDe]],
 ] as const) {
   for (const bundle of bundles) i18n.addResourceBundle(lng, 'translation', bundle, true, false)
 }

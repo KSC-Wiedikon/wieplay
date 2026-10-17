@@ -7,7 +7,7 @@ import { Card } from '../../components/Card'
 import { Select, TextInput } from '../../components/Field'
 import { AlertIcon, CheckIcon, CloseIcon, SparkleIcon } from '../../components/icons'
 import { Modal } from '../../components/Modal'
-import { SuggestedValue } from '../../components/ScoringMarks'
+import { ScoreHead, SuggestedValue } from '../../components/ScoringMarks'
 import { Table, TBody, Td, Th, THead } from '../../components/Table'
 import { useAnalysis } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
@@ -15,6 +15,7 @@ import { formatClock, periodLabel, sideLabel } from '../../lib/labels'
 import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import { ROMAN } from '../../lib/rotations'
+import { useSideNames } from '../../lib/sides'
 import { formatPercent, isSetSuggestion } from '../../lib/suggestions'
 import { newId, periodToIn } from '../../lib/taggingStore'
 import type { CourtSide, Period, PeriodIn, Segment, Side } from '../../lib/types'
@@ -216,6 +217,7 @@ const SIDES_SURE = 0.9
 
 function SetDetails({ official }: { official: (p: Period) => [number, number] | null }) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const { controller, video } = useWorkspace()
   const view = useView()
   const scoring = useAnalysis(video.id, true).data?.scoring ?? null
@@ -253,9 +255,9 @@ function SetDetails({ official }: { official: (p: Period) => [number, number] | 
           <THead>
             <tr>
               <Th>{t('tagging.sets.set')}</Th>
-              <Th>{t('tagging.sets.score')}</Th>
+              <ScoreHead />
               <Th>{t('tagging.sets.firstServe')}</Th>
-              <Th>{t('tagging.sets.weStart')}</Th>
+              <Th>{t('tagging.sets.weStart', { team: sideLabel(t, 'us', names) })}</Th>
               <Th>
                 <abbr title={t('tagging.sets.rotationHint')} className="no-underline">
                   {t('tagging.sets.rotation')}
@@ -281,15 +283,15 @@ function SetDetails({ official }: { official: (p: Period) => [number, number] | 
                     value={p.first_serve}
                     guess={p.model_first_serve ?? null}
                     options={[
-                      { value: 'us', label: t('tagging.sets.us') },
-                      { value: 'them', label: t('tagging.sets.them') },
+                      { value: 'us', label: sideLabel(t, 'us', names) },
+                      { value: 'them', label: sideLabel(t, 'them', names) },
                     ]}
                     onChange={(first_serve) => controller.updatePeriod(p.id, { first_serve })}
                   />
                 </Td>
                 <Td tight>
                   <Choice<CourtSide>
-                    label={t('tagging.sets.weStartOf', { no: p.no })}
+                    label={t('tagging.sets.weStartOf', { no: p.no, team: sideLabel(t, 'us', names) })}
                     value={p.our_court_side_at_start}
                     guess={p.model_court_side ?? null}
                     options={[
@@ -552,6 +554,7 @@ interface SetFormProps {
 
 function SetForm({ initial, isNew, periods, texts, basketball, onSave, onCancel, onDelete }: SetFormProps) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const id = useId()
   const { playhead } = useWorkspace()
   const [value, setValue] = useState(initial)
@@ -623,7 +626,7 @@ function SetForm({ initial, isNew, periods, texts, basketball, onSave, onCancel,
                 inline
                 className="w-14 tabular-nums"
                 inputMode="numeric"
-                aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'us') })}
+                aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'us', names) })}
                 value={value.start_us}
                 onChange={(e) => set({ start_us: score(e.target.value) })}
               />
@@ -632,7 +635,7 @@ function SetForm({ initial, isNew, periods, texts, basketball, onSave, onCancel,
                 inline
                 className="w-14 tabular-nums"
                 inputMode="numeric"
-                aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'them') })}
+                aria-label={t('tagging.sets.startScoreOf', { side: sideLabel(t, 'them', names) })}
                 value={value.start_them}
                 onChange={(e) => set({ start_them: score(e.target.value) })}
               />
@@ -649,8 +652,8 @@ function SetForm({ initial, isNew, periods, texts, basketball, onSave, onCancel,
               onChange={(e) => set({ first_serve: e.target.value === '' ? null : (e.target.value as Side) })}
             >
               <option value="">{t('tagging.sets.unknown')}</option>
-              <option value="us">{t('tagging.us')}</option>
-              <option value="them">{t('tagging.them')}</option>
+              <option value="us">{sideLabel(t, 'us', names)}</option>
+              <option value="them">{sideLabel(t, 'them', names)}</option>
             </Select>
           </label>
         )}

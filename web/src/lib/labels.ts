@@ -1,6 +1,7 @@
 // Display helpers for tagging: skill and grade names from the taxonomy's i18n keys, clock times.
 
 import type { TFunction } from 'i18next'
+import type { SideNames } from './sides'
 import type { RosterEntry, ScoreNote, SegmentKind, Side, TaxonomySkill } from './types'
 
 /** Volleyball's skills; their names double as the categories that have grade meanings. */
@@ -69,9 +70,10 @@ export function scoreNoteText(t: TFunction, note: ScoreNote | null | undefined):
   return note ? t(`tagging.scoring.notes.${note}`) : t('tagging.scoring.notes.unsure')
 }
 
-export function sideLabel(t: TFunction, side: Side | null | undefined): string {
-  if (side === 'us') return t('tagging.us')
-  if (side === 'them') return t('tagging.them')
+/** "KSCW H3", "Volero" with the video's names (src/lib/sides.ts); else "Us", "Them". */
+export function sideLabel(t: TFunction, side: Side | null | undefined, names?: SideNames | null): string {
+  if (side === 'us') return names?.us ?? t('tagging.us')
+  if (side === 'them') return names?.them ?? t('tagging.them')
   return '–'
 }
 
@@ -94,16 +96,18 @@ export function playerName(
   return entry?.name ?? null
 }
 
-/** "#7 Luca Brunner", "#7" (no name known), "Them #12", "Them". */
+/** "#7 Luca Brunner", "#7" (no name known), "Volero #12", "Volero" ("Them #12" without names). */
 export function playerLabel(
   t: TFunction,
   side: Side,
   number: number | null,
   roster: readonly RosterEntry[],
   memberId?: number | null,
+  names?: SideNames | null,
 ): string {
-  if (side === 'them') return number === null ? t('tagging.them') : t('tagging.themNumber', { number })
-  if (number === null) return t('tagging.us')
+  const them = names?.them ?? t('tagging.them')
+  if (side === 'them') return number === null ? them : t('tagging.themNumber', { number, team: them })
+  if (number === null) return names?.us ?? t('tagging.us')
   const name = playerName(roster, side, number, memberId)
   return name ? `#${number} ${name}` : `#${number}`
 }
@@ -145,7 +149,7 @@ export function pieceLabel(t: TFunction, piece: PieceText, skill: Pick<TaxonomyS
     side === 'them'
       ? piece.number === null
         ? t('tagging.them')
-        : t('tagging.themNumber', { number: piece.number })
+        : t('tagging.themNumber', { number: piece.number, team: t('tagging.them') })
       : piece.number === null
         ? t('tagging.us')
         : piece.player_name

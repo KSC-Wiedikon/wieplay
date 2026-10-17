@@ -1,7 +1,8 @@
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { Modal } from '../../components/Modal'
-import { gradeLabel, skillLabel } from '../../lib/labels'
+import { gradeLabel, sideLabel, skillLabel } from '../../lib/labels'
+import { useSideNames } from '../../lib/sides'
 import { useActionReview, useReview, useUi, useWorkspace } from './context'
 import { GuideLink } from './GuideLink'
 
@@ -49,6 +50,8 @@ export function Cheatsheet() {
   const reviewingActions = useActionReview().active && reviewing
   const basketball = taxonomy.sport === 'basketball'
   const examples = examplesFor(t, basketball)
+  const names = useSideNames()
+  const teams = { us: sideLabel(t, 'us', names), them: sideLabel(t, 'them', names) }
 
   const all: { title: string; rows: [string[], string][] }[] = [
     {
@@ -85,7 +88,7 @@ export function Cheatsheet() {
           title: t('tagging.keys.groups.rallies'),
           rows: [
             [['R'], t('tagging.keys.r')],
-            [['U', 'T', 'Enter', 'Esc'], t('tagging.keys.winner')],
+            [['U', 'T', 'Enter', 'Esc'], t('tagging.keys.winner', teams)],
             [['T'], t('tagging.keys.t')],
             [['B'], t('tagging.keys.b')],
           ],
@@ -102,7 +105,8 @@ export function Cheatsheet() {
               [['←', '→'], t('tagging.keys.review.start')],
               [['Shift + ←', 'Shift + →'], t('tagging.keys.review.end')],
               [['Alt'], t('tagging.keys.review.frame')],
-              [['1', '2'], t('tagging.keys.review.serve')],
+              [['1', '2'], t('tagging.keys.review.serve', teams)],
+              [['3', '4'], t('tagging.keys.review.won', teams)],
               [['W', 'B', 'T', 'D', 'O'], t('tagging.keys.review.label')],
               [['M'], t('tagging.keys.review.merge')],
               [['S'], t('tagging.keys.review.split')],

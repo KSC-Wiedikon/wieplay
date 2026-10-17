@@ -526,8 +526,9 @@ describe('downloads', () => {
     fireEvent.click(within(rules).getByRole('button', { name: 'Prepare the MP4' }))
     await screen.findByText('Preparing the MP4. Find it under Downloads.')
 
-    // The second time, straight away.
-    fireEvent.click(await screen.findByRole('button', { name: 'Download as MP4' }))
+    // The second time, straight away: the rallies only, from the page's Export menu.
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Rallies only \(MP4\)/ }))
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     await waitFor(() => expect(sent(fetch, 'POST', '/api/exports')).toHaveLength(2))
     expect(sent(fetch, 'POST', '/api/exports')).toEqual([
@@ -539,7 +540,9 @@ describe('downloads', () => {
   it('says why a download is refused', async () => {
     window.localStorage.setItem('nomal-export-rules', '1')
     show({ video: coach(), tagging: tagged(), routes: { 'POST /api/exports': { status: 409, body: { detail: 'The originals of KSCW H3 are not available' } } } })
-    fireEvent.click(await screen.findByRole('button', { name: 'Download as MP4' }))
+    await screen.findByRole('table', { name: 'Rallies' })
+    fireEvent.click(await screen.findByRole('button', { name: 'Export' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Rallies only \(MP4\)/ }))
     expect(await screen.findByText("Can't prepare the MP4: The originals of KSCW H3 are not available")).toBeInTheDocument()
   })
 
@@ -548,6 +551,7 @@ describe('downloads', () => {
     await screen.findByRole('table', { name: 'Clips' })
     await screen.findByRole('switch', { name: 'Skip dead time' })
     expect(screen.queryByRole('button', { name: /Download/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument()
   })
 
   it('follows the server: an admin who leads no team deletes, but neither downloads nor shares', async () => {

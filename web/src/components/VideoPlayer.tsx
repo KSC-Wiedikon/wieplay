@@ -1,10 +1,13 @@
+import '../i18n/pages'
 import type Hls from 'hls.js'
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Video } from '../lib/types'
 import { Button } from './Button'
 import { Select } from './Field'
+import { KeyboardIcon } from './icons'
 import { Message } from './Message'
+import { Popover } from './Popover'
 import { useFullscreen } from '../lib/trajectories'
 
 const HLS_TYPE = 'application/vnd.apple.mpegurl'
@@ -41,6 +44,8 @@ interface VideoPlayerProps {
    * button) rather than the bare video, so the overlay comes along.
    */
   overlay?: ReactNode
+  /** Playback tools in the row under the picture, before the quality and the keys. */
+  toolbar?: ReactNode
 }
 
 /**
@@ -48,7 +53,7 @@ interface VideoPlayerProps {
  * (also iOS 17.1+), native HLS otherwise (older iPhones). Segment requests
  * are answered with short-lived redirects to object storage.
  */
-export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate, overlay }: VideoPlayerProps) {
+export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate, overlay, toolbar }: VideoPlayerProps) {
   const { t } = useTranslation()
   const id = useId()
   const ref = useRef<HTMLVideoElement>(null)
@@ -185,6 +190,7 @@ export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate, ove
   }
 
   const autoLabel = chosen === -1 && playing ? t('video.player.autoWith', { quality: `${playing.height}p` }) : t('video.player.auto')
+  const quality = mode === 'hls' && levels.length > 1
 
   return (
     <div className="flex flex-col gap-3">
@@ -238,27 +244,80 @@ export function VideoPlayer({ video, videoRef, keyboard = true, onFrameRate, ove
           <span role="alert">{t('video.player.error')}</span>
         </Message>
       )}
-      {mode === 'hls' && levels.length > 1 && (
-        <div className="flex items-center gap-2">
-          <label htmlFor={`${id}-quality`} className="text-sm font-semibold">
-            {t('video.player.quality')}
-          </label>
-          <Select
-            id={`${id}-quality`}
-            inline
-            value={chosen}
-            onChange={(event) => chooseLevel(Number(event.target.value))}
-          >
-            <option value={-1}>{autoLabel}</option>
-            {levels.map((level) => (
-              <option key={level.index} value={level.index}>
-                {`${level.height}p`}
-              </option>
-            ))}
-          </Select>
+      {(toolbar || quality || keyboard) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {toolbar}
+          {(quality || keyboard) && (
+            <div className="ml-auto flex items-center gap-2">
+              {quality && (
+                <>
+                  <label htmlFor={`${id}-quality`} className="text-sm font-semibold">
+                    {t('video.player.quality')}
+                  </label>
+                  <Select
+                    id={`${id}-quality`}
+                    inline
+                    value={chosen}
+                    onChange={(event) => chooseLevel(Number(event.target.value))}
+                  >
+                    <option value={-1}>{autoLabel}</option>
+                    {levels.map((level) => (
+                      <option key={level.index} value={level.index}>
+                        {`${level.height}p`}
+                      </option>
+                    ))}
+                  </Select>
+                </>
+              )}
+              {keyboard && <PlayerKeys />}
+            </div>
+          )}
         </div>
       )}
-      {keyboard && <p className="hidden text-xs text-muted sm:block">{t('video.player.keys')}</p>}
     </div>
+  )
+}
+
+/** "Keys": what the player's keys do, in a small panel (keyboards: from sm). */
+function PlayerKeys() {
+  const { t } = useTranslation()
+  const rows: [string[], string][] = [
+    [['Space'], t('playerKeys.space')],
+    [['←', '→'], t('playerKeys.arrows')],
+    [[',', '.'], t('playerKeys.frames')],
+  ]
+  return (
+    <Popover
+      className="hidden sm:block"
+      variant="ghost"
+      align="end"
+      label={
+        <>
+          <KeyboardIcon className="size-4" />
+          {t('playerKeys.button')}
+        </>
+      }
+      panelClassName="w-80 p-3"
+    >
+      {() => (
+        <section aria-label={t('playerKeys.title')} className="flex flex-col gap-2">
+          <h3 className="text-sm font-semibold">{t('playerKeys.title')}</h3>
+          <dl className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1.5 text-sm">
+            {rows.map(([keys, text]) => (
+              <div key={text} className="contents">
+                <dt className="flex gap-1">
+                  {keys.map((k) => (
+                    <kbd key={k} className="rounded-md border border-hairline bg-sunken px-1.5 py-0.5 font-mono text-xs font-semibold whitespace-nowrap">
+                      {k}
+                    </kbd>
+                  ))}
+                </dt>
+                <dd className="text-muted">{text}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+    </Popover>
   )
 }

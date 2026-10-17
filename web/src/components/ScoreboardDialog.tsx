@@ -1,17 +1,13 @@
 import '../i18n/pages'
-import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../lib/api'
 import { formatDate } from '../lib/format'
-import { keys } from '../lib/queryClient'
 import {
   rectFrom,
   usable,
-  useReadScoreboard,
   useRemoveScoreboard,
   useSaveScoreboard,
-  useScoreboard,
   type BoardKind,
   type Rect,
   type ScoreboardState,
@@ -19,7 +15,6 @@ import {
 import { useToast } from '../lib/toast'
 import type { Video } from '../lib/types'
 import { Button } from './Button'
-import { CheckIcon } from './icons'
 import { Modal } from './Modal'
 import { Segmented } from './Segmented'
 
@@ -252,61 +247,6 @@ function Marker({ video, state, element, onClose }: { video: Video; state: Score
           {t('scoreboard.save')}
         </Button>
       </div>
-    </div>
-  )
-}
-
-/** Below the player (volleyball): "Mark the scoreboard" for those who may tag, and how the reading went. */
-export function ScoreboardTools({ video, element }: { video: Video; element: HTMLVideoElement | null }) {
-  const { t } = useTranslation()
-  const client = useQueryClient()
-  const board = useScoreboard(video.id)
-  const again = useReadScoreboard(video.id)
-  const [open, setOpen] = useState(false)
-  const status = board.data?.job?.status
-  // The score line changes once the board is read: fetch the tagging data again then.
-  const last = useRef(status)
-  useEffect(() => {
-    if (last.current && ['queued', 'running'].includes(last.current) && status === 'done') {
-      void client.invalidateQueries({ queryKey: keys.tagging(video.id) })
-      void client.invalidateQueries({ queryKey: keys.analysis(video.id) })
-    }
-    last.current = status
-  }, [status, client, video.id])
-  const data = board.data
-  if (!data || (!data.can_edit && !data.region)) return null
-  const segments = data.reading?.segments.length ?? 0
-  const note =
-    status === 'queued' || status === 'running'
-      ? data.job?.progress
-        ? t('scoreboard.readingProgress', { pct: Math.floor(data.job.progress * 100) })
-        : t('scoreboard.reading')
-      : status === 'failed'
-        ? t('scoreboard.readFailed')
-        : data.region && data.reading
-          ? segments > 0
-            ? t('scoreboard.read', { count: segments })
-            : t('scoreboard.readNothing')
-          : null
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-      {data.can_edit && (
-        <Button onClick={() => setOpen(true)} aria-haspopup="dialog">
-          {data.region && <CheckIcon className="size-4" />}
-          {data.region ? t('scoreboard.edit') : t('scoreboard.open')}
-        </Button>
-      )}
-      {note && (
-        <span className="text-sm text-muted" role="status">
-          {note}
-        </span>
-      )}
-      {data.can_edit && data.region && status === 'failed' && (
-        <Button variant="ghost" onClick={() => again.mutate(undefined)} disabled={again.isPending}>
-          {t('scoreboard.readAgain')}
-        </Button>
-      )}
-      {open && <ScoreboardDialog video={video} state={data} element={element} onClose={() => setOpen(false)} />}
     </div>
   )
 }

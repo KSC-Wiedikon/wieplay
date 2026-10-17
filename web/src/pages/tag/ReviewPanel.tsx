@@ -11,6 +11,7 @@ import { useSetRalliesReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
 import { formatClock, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { periodAt } from '../../lib/rallies'
+import { fullNameOf, useSideNames, type SideNames } from '../../lib/sides'
 import {
   ACCEPT_ALL_MIN,
   allProgress,
@@ -58,7 +59,7 @@ function Kbd({ children, hidden }: { children: ReactNode; hidden?: boolean }) {
 /** The key of each break label (W B T D O). */
 const KEY_OF = Object.fromEntries(Object.entries(GAP_KEYS).map(([key, kind]) => [kind, key.toUpperCase()])) as Record<GapKind, string>
 
-function noticeText(t: TFunction, notice: ReviewNotice, sport: string): string {
+function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: SideNames | null): string {
   const p = notice.params ?? {}
   const time = p.time === undefined ? '' : formatClock(Number(p.time))
   switch (notice.key) {
@@ -71,7 +72,9 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string): string {
     case 'relabelled':
       return t(`tagging.review.notice.${notice.key}`, { time, kind: segmentKindLabel(t, p.kind as GapKind, sport) })
     case 'serve':
-      return t('tagging.review.notice.serve', { side: sideLabel(t, p.side as Side) })
+      return t('tagging.review.notice.serve', { side: sideLabel(t, p.side as Side, names) })
+    case 'won':
+      return t('tagging.review.notice.won', { side: sideLabel(t, p.side as Side, names) })
     case 'moved':
       return p.field === 'end' ? t('tagging.review.notice.movedEnd', { time }) : t('tagging.review.notice.movedStart', { time })
     case 'acceptedAll':
@@ -90,6 +93,7 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string): string {
 export function ReviewPanel() {
   const { t } = useTranslation()
   const { review, video, narrow, taxonomy } = useWorkspace()
+  const names = useSideNames()
   const view = useView()
   const state = useReview()
   const items = useMemo(() => reviewItems(view.segments, state.pending), [view.segments, state.pending])
@@ -215,7 +219,7 @@ export function ReviewPanel() {
       )}
 
       <p role="status" className={cx('min-h-5 text-sm', state.notice?.tone === 'error' ? 'text-danger' : 'text-muted')}>
-        {state.notice ? noticeText(t, state.notice, taxonomy.sport) : t('tagging.review.hint')}
+        {state.notice ? noticeText(t, state.notice, taxonomy.sport, names) : t('tagging.review.hint')}
       </p>
 
       {sure.length > 0 && (
@@ -253,41 +257,49 @@ function suggestedDetail(t: TFunction, parts: (string | null | undefined)[]): st
 }
 
 /**
- * Who served, who won and the score after the rally: the coach's facts, else Nomal's
- * suggestions; "check" with the reason when the automatic score disagrees with something here.
- * 1 and 2 call the serving team.
+ * Who served, who won and the score after the rally, by the teams' names: the coach's facts,
+ * else Nomal's suggestions; "check" with the reason when the automatic score disagrees with
+ * something here. 1 and 2 call the serving team, 3 and 4 the winner (a fact the scoring keeps
+ * to: the score line follows at once).
  */
 function RallyFacts({ rally }: { rally: Segment }) {
   const { t } = useTranslation()
   const { review, narrow } = useWorkspace()
+  const names = useSideNames()
   const server = effectiveServer(rally)
   const winner = effectiveWinner(rally)
   const score = scoreAfter(rally)
   const call = rally.serving_manual ?? null
+  const won = rally.won_by ?? null
+  const yours = ` (${t('tagging.review.yourCall')})`
   const serveText = server.value
-    ? `${sideLabel(t, server.value)}${
+    ? `${sideLabel(t, server.value, names)}${
         server.suggested
           ? suggestedDetail(t, [formatPercent(rally.serve_confidence), rally.serving_court ? t(`tagging.scoring.${rally.serving_court}`) : null])
           : call === server.value
-            ? ` (${t('tagging.review.yourCall')})`
+            ? yours
             : ''
       }`
     : t('tagging.review.unknown')
   const wonText = winner.value
-    ? `${sideLabel(t, winner.value)}${winner.suggested ? suggestedDetail(t, [formatPercent(rally.score_confidence)]) : ''}`
+    ? `${sideLabel(t, winner.value, names)}${winner.suggested ? suggestedDetail(t, [formatPercent(rally.score_confidence)]) : won === winner.value ? yours : ''}`
     : t('tagging.review.unknown')
+  const scoreText = score
+    ? `${names ? `${names.us} ${score.text} ${names.them}` : score.text}${score.suggested ? suggestedDetail(t, []) : ''}`
+    : '–'
   const rows: [string, string, boolean][] = [
     [t('tagging.review.serve'), serveText, server.suggested],
     [t('tagging.review.won'), wonText, winner.suggested],
-    [t('tagging.review.scoreAfter'), score ? `${score.text}${score.suggested ? suggestedDetail(t, []) : ''}` : '–', score?.suggested ?? false],
+    [t('tagging.review.scoreAfter'), scoreText, score?.suggested ?? false],
   ]
+  const label = (side: Side) => sideLabel(t, side, names)
   return (
     <div className="flex flex-col gap-2 border-t border-hairline pt-2">
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
         {rows.map(([name, value, suggested]) => (
           <div key={name} className="contents">
             <dt className="font-semibold text-muted">{name}</dt>
-            <dd className={cx('tabular-nums', suggested && 'text-muted italic')}>{value}</dd>
+            <dd className={cx('min-w-0 wrap-break-word tabular-nums', suggested && 'text-muted italic')}>{value}</dd>
           </div>
         ))}
       </dl>
@@ -297,11 +309,61 @@ function RallyFacts({ rally }: { rally: Segment }) {
           {t('tagging.scoring.checkReason', { reason: scoreNoteText(t, rally.score_note) })}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-2" role="group" aria-label={t('tagging.review.serve')}>
-        {(['us', 'them'] as const).map((side) => (
-          <Button key={side} size="touch" aria-pressed={call === side} className={cx(call === side && 'ring-2 ring-accent')} onClick={press(() => review.serve(side))}>
-            {side === 'us' ? t('tagging.review.weServe') : t('tagging.review.theyServe')}
-            <Kbd hidden={narrow}>{side === 'us' ? '1' : '2'}</Kbd>
+      <CallButtons
+        label={t('tagging.review.whoServed')}
+        value={call}
+        keys={['1', '2']}
+        text={(side) => t('tagging.review.serves', { team: label(side) })}
+        title={(side) => (names ? fullNameOf(names, side) : undefined)}
+        onPick={review.serve}
+        narrow={narrow}
+      />
+      <CallButtons
+        label={t('tagging.review.whoWon')}
+        value={won}
+        keys={['3', '4']}
+        text={(side) => t('tagging.review.pointTo', { team: label(side) })}
+        title={(side) => (names ? fullNameOf(names, side) : undefined)}
+        onPick={review.won}
+        narrow={narrow}
+      />
+    </div>
+  )
+}
+
+/** Two buttons, ours and theirs, the coach's call pressed: who served (1 2), who won (3 4). */
+function CallButtons({
+  label,
+  value,
+  keys,
+  text,
+  title,
+  onPick,
+  narrow,
+}: {
+  label: string
+  value: Side | null
+  keys: [string, string]
+  text: (side: Side) => string
+  title: (side: Side) => string | undefined
+  onPick: (side: Side) => void
+  narrow: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold text-muted">{label}</span>
+      <div className="grid grid-cols-2 gap-2" role="group" aria-label={label}>
+        {(['us', 'them'] as const).map((side, i) => (
+          <Button
+            key={side}
+            size="touch"
+            aria-pressed={value === side}
+            title={title(side)}
+            className={cx('min-w-0 px-3', value === side && 'ring-2 ring-accent')}
+            onClick={press(() => onPick(side))}
+          >
+            <span className="min-w-0 truncate">{text(side)}</span>
+            <Kbd hidden={narrow}>{keys[i]}</Kbd>
           </Button>
         ))}
       </div>
@@ -365,11 +427,14 @@ function Done({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
 /** The keys the buttons don't show; ? (or "Keys") lists them all. */
 function KeyLegend() {
   const { t } = useTranslation()
+  const names = useSideNames()
+  const teams = { us: sideLabel(t, 'us', names), them: sideLabel(t, 'them', names) }
   const rows: [string, string][] = [
     ['← →', t('tagging.keys.review.start')],
     ['⇧ ← →', t('tagging.keys.review.end')],
     ['Alt', t('tagging.keys.review.frame')],
-    ['1 2', t('tagging.keys.review.serve')],
+    ['1 2', t('tagging.keys.review.serve', teams)],
+    ['3 4', t('tagging.keys.review.won', teams)],
     ['W B T D O', t('tagging.keys.review.label')],
     ['↑ ↓', t('tagging.keys.review.move')],
     ['Space', t('tagging.keys.review.space')],

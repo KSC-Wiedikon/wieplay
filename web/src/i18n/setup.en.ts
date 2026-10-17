@@ -1,0 +1,101 @@
+// Strings of the video page's setup (analysis, ball path, court, scoreboard, players, team
+// names), its export menu and keys, the teams' names and who won a rally. Registered with the
+// other on-demand strings (src/i18n/pages.ts).
+
+export const setupEn = {
+  sides: {
+    opponent: 'Opponent',
+  },
+  winner: {
+    label: 'Point of rally {{n}}',
+    nomal: '{{team}} (Nomal)',
+    none: '–',
+    changed: 'Point of rally {{n}}: {{team}}.',
+    cleared: 'Point of rally {{n}}: back to Nomal’s suggestion.',
+    undo: 'Undo',
+    failed: 'Couldn’t save the point: {{detail}}',
+  },
+  setup: {
+    title: 'Setup',
+    progress: '{{done}} of {{total}} done',
+    running_one: '{{count}} running',
+    running_other: '{{count}} running',
+    needsYou_one: '{{count}} needs you',
+    needsYou_other: '{{count}} need you',
+    completed: 'Completed',
+    state: {
+      done: 'Done',
+      busy: 'Running',
+      todo: 'To do',
+      attention: 'Needs you',
+      waiting: 'Waiting',
+      optional: 'Optional',
+    },
+    analysis: {
+      title: 'Rallies and score',
+    },
+    ball: {
+      title: 'Ball path',
+      done: 'Found. “Trajectories” under the video draws it.',
+      busy: 'Finding the ball’s path…',
+      failed: 'Couldn’t find the ball’s path.',
+      none: 'Comes after the analysis: Nomal follows the ball once it has found the rallies.',
+    },
+    court: {
+      title: 'Court',
+      none: 'Not set up. With the court, the ball’s landings count in the tendencies.',
+      busy: 'Nomal is looking for the court…',
+      auto: 'Set automatically: check that the lines sit on the court.',
+      done: 'Set up.',
+      open: 'Set up the court',
+      check: 'Check the court',
+      edit: 'Edit the court',
+    },
+    scoreboard: {
+      title: 'Scoreboard',
+      none: 'Not marked. If the scoreboard is in the picture, Nomal reads it for the score line.',
+      absent: 'No scoreboard in this video.',
+      waiting: 'Marked: waiting to be read.',
+      open: 'Mark the scoreboard',
+      edit: 'Edit the box',
+      noBoard: 'No scoreboard in this video',
+    },
+    players: {
+      title: 'Players',
+    },
+    names: {
+      title: 'Team names',
+      fromGame: 'From the game in Wiedisync.',
+      fromTitle: 'The opponent from the video’s title.',
+      fromYou: 'Set by a coach.',
+      unknown: 'The opponent isn’t known, so the app says “Opponent”. Name it here.',
+      edit: 'Edit the names',
+      dialogTitle: 'Team names',
+      intro:
+        'Shown wherever the app would say us and them: who served and won, the score, the stats, the CSV and the game recap. Leave a field empty for the name Nomal works out.',
+      us: 'Our team',
+      them: 'Opponent',
+      derived: 'Empty: {{name}}',
+      official: 'Official name: {{name}}',
+      save: 'Save names',
+      saved: 'Names saved.',
+      failed: 'Couldn’t save the names: {{detail}}',
+    },
+  },
+  exportMenu: {
+    button: 'Export',
+    condensed: 'Rallies only (MP4)',
+    condensedHint: 'The match without the dead time.',
+    noRallies: 'Mark or review the rallies first.',
+    recap: 'Game recap (MP4)',
+    recapHint: 'The best plays in 2–3 minutes, with a title card and the score.',
+    downloads: 'Your downloads',
+  },
+  playerKeys: {
+    button: 'Keys',
+    title: 'Keys of the player',
+    space: 'Play or pause',
+    arrows: '5 seconds back or forward',
+    frames: 'One frame back or forward (paused)',
+  },
+}

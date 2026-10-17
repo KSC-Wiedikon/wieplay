@@ -34,6 +34,7 @@ import {
   type Sheets,
 } from '../lib/players'
 import { useVideo } from '../lib/queries'
+import { SideNamesContext, sideNamesOf, useSideNames } from '../lib/sides'
 import { formatPercent } from '../lib/suggestions'
 import { useToast } from '../lib/toast'
 import { isUuid } from '../lib/video'
@@ -84,7 +85,9 @@ function PlayersView({ videoId }: { videoId: string }) {
       {players.isError ? (
         <LoadError onRetry={() => void players.refetch()} />
       ) : players.data ? (
-        <Gallery videoId={v.id} data={players.data} />
+        <SideNamesContext value={sideNamesOf(v, t)}>
+          <Gallery videoId={v.id} data={players.data} />
+        </SideNamesContext>
       ) : (
         <Message>{t('players.status.none')}</Message>
       )}
@@ -94,6 +97,7 @@ function PlayersView({ videoId }: { videoId: string }) {
 
 function Gallery({ videoId, data }: { videoId: string; data: Players }) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const toast = useToast()
   const find = useFindPlayers(videoId)
   const swap = useSwapTeams(videoId)
@@ -206,8 +210,8 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
 
       {data.run && data.sheets && (
         <>
-          <TeamSection title={t('players.us')} clusters={grouped.us} {...{ data, order, selected, toggle, setSplitting, videoId }} sheets={data.sheets} />
-          <TeamSection title={t('players.them')} clusters={grouped.them} {...{ data, order, selected, toggle, setSplitting, videoId }} sheets={data.sheets} />
+          <TeamSection title={names?.us ?? t('players.us')} clusters={grouped.us} {...{ data, order, selected, toggle, setSplitting, videoId }} sheets={data.sheets} />
+          <TeamSection title={names?.them ?? t('players.them')} clusters={grouped.them} {...{ data, order, selected, toggle, setSplitting, videoId }} sheets={data.sheets} />
           {grouped.brief.length > 0 && (
             <details className="group rounded-card border border-hairline bg-surface px-4 shadow-card">
               <summary className="flex min-h-11 cursor-pointer items-center font-semibold select-none">{t('players.brief', { count: grouped.brief.length })}</summary>
