@@ -747,9 +747,10 @@ def assign_numbers(chains: Sequence[Track]) -> list[Track]:
     return out
 
 
-# Someone who stands still through the rallies is not playing (a line judge, the bench, a
-# coach, people behind the court where no calibration masks them): their feet stay within
-# STILL_HEIGHTS box heights of where they stand for 90 % of STILL_MIN_S of rally time.
+# Someone who stands (or sits) still through the rallies is not playing (a line judge, the
+# bench, a coach, spectators where no calibration masks them, whatever number is read on
+# them): their feet stay within STILL_HEIGHTS box heights of where they stand for 90 % of
+# STILL_MIN_S of rally time.
 STILL_HEIGHTS = 0.6
 STILL_MIN_S = 20.0
 

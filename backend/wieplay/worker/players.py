@@ -505,7 +505,7 @@ def identify(
     chains = identities.chains_of(tracks, stitch)
     standing = 0
     for c in chains:
-        if not c.referee and c.number is None and identities.still(c, col):
+        if not c.referee and identities.still(c, col):
             c.referee = True  # stands still through the rallies: not playing
             standing += 1
     kept = identities.assign_numbers([c for c in chains if identities.in_play(c)])
