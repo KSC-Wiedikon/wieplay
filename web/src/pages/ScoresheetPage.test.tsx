@@ -1,9 +1,14 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Scoresheet, SheetIn } from '../lib/scoresheet'
+import type { SheetPhoto } from '../lib/sheetPhotos'
 import { PLAYERS_VIDEO_ID as ID, readyVideo } from '../test/players'
 import { renderRoute, stubFetch } from '../test/render'
 import { ScoresheetPage } from './ScoresheetPage'
+
+// The canvas is not in jsdom: the redaction's pixels are tested in src/lib/redact.test.ts.
+const redactToJpeg = vi.hoisted(() => vi.fn(async () => new Blob(['jpeg'], { type: 'image/jpeg' })))
+vi.mock('../lib/redact', async (original) => ({ ...(await original<typeof import('../lib/redact')>()), redactToJpeg }))
 
 const NAMES = { us: 'KSCW H3', them: 'Volley Näfels', us_full: 'KSC Wiedikon H3', them_full: 'Volley Näfels', them_from: 'game' as const, us_set: null, them_set: null }
 
@@ -27,6 +32,8 @@ const empty = (patch: Partial<Scoresheet> = {}): Scoresheet => ({
   roster: [{ number: 3, setter: true, libero: false }],
   previous_lineup: [7, 3, 11, 5, 9, 1],
   no_scoresheet: false,
+  images: null,
+  can_add_images: false,
   checks: [],
   trusted: false,
   match: null,
@@ -217,5 +224,100 @@ describe('ScoresheetPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     })
     expect(await screen.findByRole('alert')).toHaveTextContent('Someone else saved this scoresheet meanwhile.')
+  })
+
+  describe('photos of the paper sheet', () => {
+    const photo = (patch: Partial<SheetPhoto> = {}): SheetPhoto => ({
+      id: '00000000-0000-4000-8000-0000000000f1',
+      page: 1,
+      set_no: null,
+      width: 3200,
+      height: 2260,
+      bytes: 812_000,
+      uploaded_by: 'Jo Trainer',
+      uploaded_at: '2026-10-19T08:00:00Z',
+      url: `/api/videos/${ID}/scoresheet/images/00000000-0000-4000-8000-0000000000f1`,
+      ...patch,
+    })
+
+    it('shows the photo of the set being typed beside the form, and removes one', async () => {
+      const second = photo({ id: '00000000-0000-4000-8000-0000000000f2', page: 2, set_no: 2, url: `/api/videos/${ID}/scoresheet/images/f2` })
+      const { fetch } = show(empty({ images: [photo(), second], can_add_images: true }), {
+        [`DELETE /api/videos/${ID}/scoresheet/images/f2`]: { status: 204 },
+      })
+      const panel = await screen.findByRole('region', { name: 'Photo of the sheet' })
+      expect(within(panel).getByRole('img', { name: /^Photo of the scoresheet: Page 1\./ })).toBeInTheDocument()
+      expect(within(panel).getByRole('button', { name: 'Page 1' })).toHaveAttribute('aria-pressed', 'true')
+      // Set 2 has its own photo: typing set 2 shows it.
+      fireEvent.click(screen.getByRole('tab', { name: /Set 2/ }))
+      expect(within(panel).getByRole('img', { name: /^Photo of the scoresheet: Set 2\./ })).toBeInTheDocument()
+      expect(within(panel).getByText(/Added by Jo Trainer/)).toBeInTheDocument()
+
+      fireEvent.click(within(panel).getByRole('button', { name: 'Remove this photo' }))
+      const dialog = await screen.findByRole('alertdialog', { name: 'Remove this photo?' })
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove this photo' }))
+      await waitFor(() => expect(fetch).toHaveBeenCalledWith(`/api/videos/${ID}/scoresheet/images/f2`, expect.objectContaining({ method: 'DELETE' })))
+      expect(await screen.findByText('Photo removed.')).toBeInTheDocument()
+    })
+
+    it('shows no photo to players and helpers', async () => {
+      show(empty({ images: null, can_add_images: false }))
+      expect(await screen.findByRole('tab', { name: /Set 1/ })).toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'Photo of the sheet' })).not.toBeInTheDocument()
+      expect(screen.queryByText('Add a photo')).not.toBeInTheDocument()
+    })
+
+    it('uploads only after the dates of birth are blacked out', async () => {
+      const posted = `POST /api/videos/${ID}/scoresheet/images?redacted=true&boxes=1&rotation=0&cropped=false`
+      let answer: { status: number; body: unknown } = { status: 422, body: { detail: { message: 'meta', code: 'metadata' } } }
+      const { fetch } = show(empty({ images: [], can_add_images: true }), { [posted]: { body: () => answer.body } })
+      fetch.mockImplementation(
+        (async (input: RequestInfo | URL, init?: RequestInit) => {
+          const path = String(input)
+          if (`${init?.method ?? 'GET'} ${path}` === posted) {
+            return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'Content-Type': 'application/json' } })
+          }
+          return stubFetch({
+            [`/api/videos/${ID}`]: { body: readyVideo({ names: NAMES, game_id: 501 }) },
+            [`/api/videos/${ID}/scoresheet`]: { body: empty({ images: [], can_add_images: true }) },
+          })(input, init)
+        }) as typeof globalThis.fetch,
+      )
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:sheet', revokeObjectURL: () => undefined }))
+
+      const prompt = await screen.findByRole('region', { name: 'Photo of the sheet' })
+      expect(within(prompt).getByText(/Only the team’s coaches, team managers and admins see it/)).toBeInTheDocument()
+      const input = prompt.querySelector('input[type="file"]')
+      if (!(input instanceof HTMLInputElement)) throw new Error('no file input')
+      fireEvent.change(input, { target: { files: [new File(['raw'], 'IMG_0001.jpg', { type: 'image/jpeg' })] } })
+
+      const editor = await screen.findByRole('dialog', { name: 'Black out the dates of birth' })
+      const img = within(editor).getByRole('img', { name: 'The photo to black out' })
+      Object.defineProperty(img, 'naturalWidth', { value: 4000 })
+      Object.defineProperty(img, 'naturalHeight', { value: 2800 })
+      fireEvent.load(img)
+      // One box is there already, over the team lists; the upload waits for the confirmation.
+      expect(within(editor).getByRole('button', { name: /^Black box 1/ })).toBeInTheDocument()
+      const upload = within(editor).getByRole('button', { name: 'Upload' })
+      expect(upload).toBeDisabled()
+      fireEvent.click(within(editor).getByRole('checkbox', { name: 'The dates of birth are blacked out' }))
+      expect(upload).toBeEnabled()
+
+      // The server finds camera data: the editor stays open and says so.
+      fireEvent.click(upload)
+      expect(await within(editor).findByRole('alert')).toHaveTextContent('The photo still carries the camera’s data')
+      expect(redactToJpeg).toHaveBeenCalledWith(img, expect.objectContaining({ rotation: 0, boxes: [expect.objectContaining({ x: 0.77 })] }))
+      const call = fetch.mock.calls.find(([path]) => String(path).includes('/scoresheet/images?'))
+      expect(call?.[1]?.body).toBeInstanceOf(Blob)
+      expect(call?.[1]?.headers).toMatchObject({ 'Content-Type': 'image/jpeg' })
+
+      // Turned once, then accepted: the editor closes.
+      answer = { status: 201, body: photo() }
+      fireEvent.click(within(editor).getByRole('button', { name: 'Turn right' }))
+      fireEvent.click(within(editor).getByRole('button', { name: 'Turn left' }))
+      fireEvent.click(within(editor).getByRole('button', { name: 'Upload' }))
+      expect(await screen.findByText('Photo added.')).toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: 'Black out the dates of birth' })).not.toBeInTheDocument()
+    })
   })
 })

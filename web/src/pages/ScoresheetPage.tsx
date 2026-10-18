@@ -16,6 +16,7 @@ import { ApiError } from '../lib/api'
 import { cx } from '../lib/cx'
 import { formatDateTime } from '../lib/format'
 import { sideLabel } from '../lib/labels'
+import { useMediaQuery } from '../lib/mediaQuery'
 import { useVideo } from '../lib/queries'
 import {
   checkScoresheet,
@@ -37,6 +38,7 @@ import { useToast } from '../lib/toast'
 import type { Video } from '../lib/types'
 import { isUuid } from '../lib/video'
 import { SetPanel } from './sheet/SetPanel'
+import { PhotoPrompt, SheetPhotos } from './sheet/SheetPhotos'
 import { SheetStats } from './sheet/SheetStats'
 
 /**
@@ -102,7 +104,8 @@ function ScoresheetView({ videoId }: { videoId: string }) {
           <Message>{t('sheet.notReady')}</Message>
         ) : (
           // Keyed by the saved version: a save, a reload or a removal starts from the server's sheet.
-          <SheetEditor key={`${data.version}-${data.exists}`} video={v} sheet={data} tab={tab} onTab={setTab} />
+          // A photo added before anything is typed changes no typed sheet: the form stays as typed.
+          <SheetEditor key={`${data.exists ? data.version : 'new'}-${data.exists}`} video={v} sheet={data} tab={tab} onTab={setTab} />
         )}
       </div>
     </SideNamesContext>
@@ -239,206 +242,229 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
   const savedChecks = new Map(sheet.checks.map((c) => [c.no, c]))
   const serverChecks = new Map((checks?.checks ?? []).map((c) => [c.no, c]))
 
+  // The photo of the paper sheet (SS3): beside the form on wide screens, a strip above the set
+  // tabs on phones; for the team's coaches and admins only (`images` is null for everyone else).
+  const photos = sheet.images
+  const wide = useMediaQuery('(min-width: 80rem)', true)
+  const side = wide && photos !== null && photos.length > 0
+  const setNo = current?.no ?? 1
+  const photoProps = { videoId: video.id, set: setNo, sets: Math.max(sets.length, sheet.official_sets?.length ?? 0) }
+
   return (
-    // The photo of the paper sheet (SS3) goes beside the form on wide screens.
-    <div className="flex flex-col gap-6">
-      {readOnly && <Message>{t('sheet.readOnly')}</Message>}
-      {draft && !readOnly && (
-        <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-accent bg-accent-soft/40 p-3 text-sm">
-          <span className="font-semibold">{t('sheet.draft.found')}</span>
-          <Button
-            variant="primary"
-            onClick={() => {
-              touched.current = true
-              setSets(draft.sets.map((s) => normalised(s)))
-              setUseAll(draft.use_in_scoring)
-              setDraft(null)
-            }}
-          >
-            {t('sheet.draft.restore')}
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              clearDraft(video.id)
-              setDraft(null)
-            }}
-          >
-            {t('sheet.draft.discard')}
-          </Button>
-        </div>
+    <div className={cx(side && 'grid grid-cols-2 items-start gap-6')}>
+      {side && photos && (
+        <aside className="sticky top-4 h-[calc(100dvh-2rem)] min-h-96">
+          <SheetPhotos {...photoProps} photos={photos} canAdd={sheet.can_add_images} variant="side" />
+        </aside>
       )}
-      {stale && (
-        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-danger bg-danger/5 p-3 text-sm">
-          <AlertIcon className="size-5 shrink-0 text-danger" />
-          <span>{t('sheet.stale')}</span>
-          <Button variant="secondary" onClick={() => void client.invalidateQueries({ queryKey: scoresheetKey(video.id) })}>
-            {t('sheet.reload')}
-          </Button>
-        </div>
-      )}
-      {sheet.conflicts.length > 0 && (
-        <section className="flex flex-col gap-1 rounded-xl border border-hairline bg-sunken p-3 text-sm">
-          <h2 className="font-semibold">{t('sheet.conflicts.title')}</h2>
-          <ul className="list-disc pl-5">
-            {sheet.conflicts.map((c, k) => (
-              <li key={k}>
-                {t(`sheet.conflicts.${c.field as 'first_serve' | 'start_lineup' | 'start_lineup_them'}`, {
-                  set: c.set,
-                  coach: sideLabel(t, c.coach === 'us' || c.coach === 'them' ? c.coach : null, names),
-                  sheet: sideLabel(t, c.sheet === 'us' || c.sheet === 'them' ? c.sheet : null, names),
-                })}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <Card className="flex flex-col gap-5 p-4">
-        <div className="flex flex-wrap items-end gap-2">
-          <Tabs
-            label={t('sheet.sets')}
-            id="sheet-sets"
-            value={String(current?.no ?? 1)}
-            className="min-w-0 flex-1"
-            options={sets.map((s) => {
-              const d = status(s)
-              const bad = d.issues.some((i) => i.severity === 'error')
-              return {
-                value: String(s.no),
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    {t('sheet.set', { no: s.no })}
-                    {d.consistent ? (
-                      <CheckIcon className="size-4 text-on-accent-soft" aria-label={t('sheet.status.consistent')} />
-                    ) : bad ? (
-                      <AlertIcon className="size-4 text-danger" aria-label={t('sheet.status.inconsistent')} />
-                    ) : null}
-                  </span>
-                ),
-              }
-            })}
-            onChange={(value) => onTab(Number(value))}
-          />
-          {!readOnly && sets.length < 5 && (
-            <Button variant="ghost" onClick={addSet} aria-label={t('sheet.addSet', { no: (sets[sets.length - 1]?.no ?? 0) + 1 })}>
-              <PlusIcon className="size-4" />
-              <span className="hidden sm:inline">{t('sheet.addSet', { no: (sets[sets.length - 1]?.no ?? 0) + 1 })}</span>
-            </Button>
-          )}
-        </div>
-        {current && (
-          <TabPanel id="sheet-sets" value={String(current.no)}>
-            <SetPanel
-              key={current.no}
-              set={current}
-              names={names}
-              official={official(current.no)}
-              server={serverChecks.get(current.no) ?? null}
-              saved={!dirty ? (savedChecks.get(current.no) ?? null) : null}
-              readOnly={readOnly}
-              onChange={(next) => change(currentIndex, next)}
-              onRemove={() => setAskRemoveSet(current.no)}
-            />
-          </TabPanel>
-        )}
-      </Card>
-
-      <SheetStats match={checks?.match ?? null} checks={checks?.checks ?? []} bySetter={checks?.match_by_setter ?? false} names={names} />
-
-      <details className="hidden text-sm sm:block">
-        <summary className="cursor-pointer font-semibold text-muted">{t('sheet.keys.title')}</summary>
-        <dl className="mt-2 grid max-w-xl grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted">
-          {(
-            [
-              ['Tab · Space · Enter · →', t('sheet.keys.next')],
-              ['⇧ Tab · ← · Backspace', t('sheet.keys.back')],
-              ['Enter', t('sheet.keys.other')],
-              ['↑ ↓', t('sheet.keys.upDown')],
-              ['*', t('sheet.keys.circle')],
-            ] as const
-          ).map(([key, text]) => (
-            <div key={key} className="contents">
-              <dt>
-                <kbd className="rounded-md border border-hairline bg-sunken px-1.5 py-px font-mono text-[11px] font-semibold whitespace-nowrap text-fg">{key}</kbd>
-              </dt>
-              <dd>{text}</dd>
-            </div>
-          ))}
-        </dl>
-      </details>
-
-      {!readOnly && (
-        <Card className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 p-4">
-          <span className="flex items-center gap-2">
-            <Switch
-              checked={useAll}
-              label={t('sheet.useAll')}
-              describedBy="sheet-use-all"
-              onChange={(on) => {
+      <div className="@container flex min-w-0 flex-col gap-6">
+        {readOnly && <Message>{t('sheet.readOnly')}</Message>}
+        {draft && !readOnly && (
+          <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-accent bg-accent-soft/40 p-3 text-sm">
+            <span className="font-semibold">{t('sheet.draft.found')}</span>
+            <Button
+              variant="primary"
+              onClick={() => {
                 touched.current = true
-                setUseAll(on)
+                setSets(draft.sets.map((s) => normalised(s)))
+                setUseAll(draft.use_in_scoring)
+                setDraft(null)
               }}
-            />
-            <span className="flex flex-col">
-              <span className="text-sm font-semibold">{t('sheet.useAll')}</span>
-              <span id="sheet-use-all" className="text-xs text-muted">
-                {t('sheet.useAllHint')}
-              </span>
-            </span>
-          </span>
-          {sheet.exists && (
-            <Button variant="ghostDanger" onClick={() => setAskRemove(true)}>
-              <TrashIcon className="size-4" />
-              {t('sheet.remove')}
+            >
+              {t('sheet.draft.restore')}
             </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                clearDraft(video.id)
+                setDraft(null)
+              }}
+            >
+              {t('sheet.draft.discard')}
+            </Button>
+          </div>
+        )}
+        {stale && (
+          <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-danger bg-danger/5 p-3 text-sm">
+            <AlertIcon className="size-5 shrink-0 text-danger" />
+            <span>{t('sheet.stale')}</span>
+            <Button variant="secondary" onClick={() => void client.invalidateQueries({ queryKey: scoresheetKey(video.id) })}>
+              {t('sheet.reload')}
+            </Button>
+          </div>
+        )}
+        {sheet.conflicts.length > 0 && (
+          <section className="flex flex-col gap-1 rounded-xl border border-hairline bg-sunken p-3 text-sm">
+            <h2 className="font-semibold">{t('sheet.conflicts.title')}</h2>
+            <ul className="list-disc pl-5">
+              {sheet.conflicts.map((c, k) => (
+                <li key={k}>
+                  {t(`sheet.conflicts.${c.field as 'first_serve' | 'start_lineup' | 'start_lineup_them'}`, {
+                    set: c.set,
+                    coach: sideLabel(t, c.coach === 'us' || c.coach === 'them' ? c.coach : null, names),
+                    sheet: sideLabel(t, c.sheet === 'us' || c.sheet === 'them' ? c.sheet : null, names),
+                  })}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {photos !== null &&
+          !side &&
+          (photos.length > 0 ? (
+            <SheetPhotos {...photoProps} photos={photos} canAdd={sheet.can_add_images} variant="strip" />
+          ) : sheet.can_add_images ? (
+            <PhotoPrompt {...photoProps} />
+          ) : null)}
+
+        <Card className="flex flex-col gap-5 p-4">
+          <div className="flex flex-wrap items-end gap-2">
+            <Tabs
+              label={t('sheet.sets')}
+              id="sheet-sets"
+              value={String(current?.no ?? 1)}
+              className="min-w-0 flex-1"
+              options={sets.map((s) => {
+                const d = status(s)
+                const bad = d.issues.some((i) => i.severity === 'error')
+                return {
+                  value: String(s.no),
+                  label: (
+                    <span className="inline-flex items-center gap-1.5">
+                      {t('sheet.set', { no: s.no })}
+                      {d.consistent ? (
+                        <CheckIcon className="size-4 text-on-accent-soft" aria-label={t('sheet.status.consistent')} />
+                      ) : bad ? (
+                        <AlertIcon className="size-4 text-danger" aria-label={t('sheet.status.inconsistent')} />
+                      ) : null}
+                    </span>
+                  ),
+                }
+              })}
+              onChange={(value) => onTab(Number(value))}
+            />
+            {!readOnly && sets.length < 5 && (
+              <Button variant="ghost" onClick={addSet} aria-label={t('sheet.addSet', { no: (sets[sets.length - 1]?.no ?? 0) + 1 })}>
+                <PlusIcon className="size-4" />
+                <span className="hidden sm:inline">{t('sheet.addSet', { no: (sets[sets.length - 1]?.no ?? 0) + 1 })}</span>
+              </Button>
+            )}
+          </div>
+          {current && (
+            <TabPanel id="sheet-sets" value={String(current.no)}>
+              <SetPanel
+                key={current.no}
+                set={current}
+                names={names}
+                official={official(current.no)}
+                server={serverChecks.get(current.no) ?? null}
+                saved={!dirty ? (savedChecks.get(current.no) ?? null) : null}
+                readOnly={readOnly}
+                onChange={(next) => change(currentIndex, next)}
+                onRemove={() => setAskRemoveSet(current.no)}
+              />
+            </TabPanel>
           )}
         </Card>
-      )}
 
-      {!readOnly && (
-        // Saving stays in reach while typing a long set.
-        <div className="sticky bottom-0 z-10 -mx-4 flex items-center gap-4 border-t border-hairline bg-surface/95 px-4 py-2.5 shadow-raised backdrop-blur sm:mx-0 sm:rounded-card sm:border">
-          <Button variant="primary" disabled={!dirty || save.isPending} onClick={onSave}>
-            {save.isPending ? t('sheet.saving') : t('sheet.save')}
-          </Button>
-          <span className={cx('min-w-0 text-sm', dirty ? 'font-semibold' : 'text-muted')} role="status">
-            {dirty ? t('sheet.unsaved') : t('sheet.upToDate')}
-            {!dirty && sheet.trusted ? ` · ${t('sheet.trusted')}` : ''}
-          </span>
-        </div>
-      )}
+        <SheetStats match={checks?.match ?? null} checks={checks?.checks ?? []} bySetter={checks?.match_by_setter ?? false} names={names} />
 
-      <ConfirmDialog
-        open={askRemove}
-        title={t('sheet.removeTitle')}
-        confirmLabel={t('sheet.remove')}
-        onCancel={() => setAskRemove(false)}
-        onConfirm={() =>
-          remove.mutate(undefined, {
-            onSuccess: () => {
-              clearDraft(video.id)
-              setAskRemove(false)
-              toast.success(t('sheet.removed'))
-            },
-            onError: (error) => toast.error(t('sheet.saveFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') })),
-          })
-        }
-      >
-        {t('sheet.removeBody')}
-      </ConfirmDialog>
-      <ConfirmDialog
-        open={askRemoveSet !== null}
-        title={t('sheet.removeSetTitle', { no: askRemoveSet ?? 0 })}
-        confirmLabel={t('sheet.removeSet', { no: askRemoveSet ?? 0 })}
-        onCancel={() => setAskRemoveSet(null)}
-        onConfirm={() => {
-          if (askRemoveSet !== null) removeSet(askRemoveSet)
-          setAskRemoveSet(null)
-        }}
-      >
-        {t('sheet.removeSetBody')}
-      </ConfirmDialog>
+        <details className="hidden text-sm sm:block">
+          <summary className="cursor-pointer font-semibold text-muted">{t('sheet.keys.title')}</summary>
+          <dl className="mt-2 grid max-w-xl grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted">
+            {(
+              [
+                ['Tab · Space · Enter · →', t('sheet.keys.next')],
+                ['⇧ Tab · ← · Backspace', t('sheet.keys.back')],
+                ['Enter', t('sheet.keys.other')],
+                ['↑ ↓', t('sheet.keys.upDown')],
+                ['*', t('sheet.keys.circle')],
+              ] as const
+            ).map(([key, text]) => (
+              <div key={key} className="contents">
+                <dt>
+                  <kbd className="rounded-md border border-hairline bg-sunken px-1.5 py-px font-mono text-[11px] font-semibold whitespace-nowrap text-fg">{key}</kbd>
+                </dt>
+                <dd>{text}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+
+        {!readOnly && (
+          <Card className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 p-4">
+            <span className="flex items-center gap-2">
+              <Switch
+                checked={useAll}
+                label={t('sheet.useAll')}
+                describedBy="sheet-use-all"
+                onChange={(on) => {
+                  touched.current = true
+                  setUseAll(on)
+                }}
+              />
+              <span className="flex flex-col">
+                <span className="text-sm font-semibold">{t('sheet.useAll')}</span>
+                <span id="sheet-use-all" className="text-xs text-muted">
+                  {t('sheet.useAllHint')}
+                </span>
+              </span>
+            </span>
+            {sheet.exists && (
+              <Button variant="ghostDanger" onClick={() => setAskRemove(true)}>
+                <TrashIcon className="size-4" />
+                {t('sheet.remove')}
+              </Button>
+            )}
+          </Card>
+        )}
+
+        {!readOnly && (
+          // Saving stays in reach while typing a long set.
+          <div className="sticky bottom-0 z-10 -mx-4 flex items-center gap-4 border-t border-hairline bg-surface/95 px-4 py-2.5 shadow-raised backdrop-blur sm:mx-0 sm:rounded-card sm:border">
+            <Button variant="primary" disabled={!dirty || save.isPending} onClick={onSave}>
+              {save.isPending ? t('sheet.saving') : t('sheet.save')}
+            </Button>
+            <span className={cx('min-w-0 text-sm', dirty ? 'font-semibold' : 'text-muted')} role="status">
+              {dirty ? t('sheet.unsaved') : t('sheet.upToDate')}
+              {!dirty && sheet.trusted ? ` · ${t('sheet.trusted')}` : ''}
+            </span>
+          </div>
+        )}
+
+        <ConfirmDialog
+          open={askRemove}
+          title={t('sheet.removeTitle')}
+          confirmLabel={t('sheet.remove')}
+          onCancel={() => setAskRemove(false)}
+          onConfirm={() =>
+            remove.mutate(undefined, {
+              onSuccess: () => {
+                clearDraft(video.id)
+                setAskRemove(false)
+                toast.success(t('sheet.removed'))
+              },
+              onError: (error) => toast.error(t('sheet.saveFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') })),
+            })
+          }
+        >
+          {t('sheet.removeBody')}
+          {photos && photos.length > 0 ? ` ${t('sheet.removePhotos', { count: photos.length })}` : ''}
+        </ConfirmDialog>
+        <ConfirmDialog
+          open={askRemoveSet !== null}
+          title={t('sheet.removeSetTitle', { no: askRemoveSet ?? 0 })}
+          confirmLabel={t('sheet.removeSet', { no: askRemoveSet ?? 0 })}
+          onCancel={() => setAskRemoveSet(null)}
+          onConfirm={() => {
+            if (askRemoveSet !== null) removeSet(askRemoveSet)
+            setAskRemoveSet(null)
+          }}
+        >
+          {t('sheet.removeSetBody')}
+        </ConfirmDialog>
+      </div>
     </div>
   )
 }

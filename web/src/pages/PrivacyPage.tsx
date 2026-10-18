@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import { Mark, Wordmark } from '../components/Brand'
 import { Card } from '../components/Card'
 
-const SECTIONS = ['what', 'who', 'where', 'guests', 'keep', 'rights'] as const
+const SECTIONS = ['what', 'who', 'sheets', 'where', 'guests', 'keep', 'rights'] as const
 
 /**
  * The short privacy notice (docs/PRIVACY.md), readable without a login: guest clubs accept it

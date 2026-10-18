@@ -151,8 +151,17 @@ export const guideDe: Guide = {
       { keys: ['↑', '↓'], text: 'Das Kästchen darüber oder darunter' },
       { keys: ['*'], text: 'Satzresultat einkreisen' },
     ],
+    photoTitle: 'Ein Foto des Matchblatts (Coaches)',
+    photoIntro:
+      'Coaches, Teamverantwortliche und Admins können neben einem Foto der Kopie tippen: Auf dem Computer steht es neben dem Formular (Mausrad zoomt, Ziehen verschiebt), auf dem Handy als Streifen über den Sätzen. Spieler/innen und Helfer sehen es nie.',
+    photo: [
+      'Wähle auf der Seite des Matchblatts «Foto aufnehmen» auf dem Handy oder «Foto hinzufügen» auf dem Computer.',
+      'Schwärze die Geburtsdaten: Ein schwarzer Kasten liegt schon auf dem Foto. Zieh ihn über die Geburtsdaten beider Teams und an seinen Ecken auf die richtige Grösse. «Kasten hinzufügen» deckt alles Weitere ab; dreh oder schneide das Foto zu, wenn nötig.',
+      'Kreuze «Die Geburtsdaten sind geschwärzt» an und lade hoch. Nur das Bild, das du siehst, verlässt dein Gerät: Das Schwarz ist eingebrannt, Ort und Zeit der Kamera fallen weg. Hast du pro Satz ein Bild gemacht, wähle den Satz dazu: Beim Tippen dieses Satzes erscheint dann sein Foto.',
+      'Entferne ein Foto jederzeit mit dem Papierkorb. Es verschwindet auch, wenn das Matchblatt oder das Video gelöscht wird.',
+    ],
     tips: [
-      'Namen, Geburtsdaten und Lizenznummern auf dem Matchblatt bleiben auf dem Papier: WiePlay nimmt nur Rückennummern und Spielstände.',
+      'Das abgetippte Matchblatt nimmt nur Rückennummern und Spielstände; Namen, Geburtsdaten und Lizenznummern bleiben auf dem Papier (und auf dem Foto sind die Geburtsdaten schwarz).',
       'Ein Satz, der nicht passt, bleibt gespeichert und dient nur als Hinweis. Einen Satz, dem du nicht traust, kannst du ausschalten; der Rest zählt weiter.',
       'Deine eigenen Sieger gehen dem Matchblatt immer vor: Wo sie abweichen, wird der Ballwechsel markiert, damit du nochmals hinschaust.',
     ],
@@ -179,7 +188,7 @@ export const guideDe: Guide = {
       'eigene Clips und Reels anlegen, kommentieren und Clips und Reels mit dem Team teilen',
     ],
     cannotTitle: 'Du kannst nicht',
-    cannot: ['Videos herunterladen', 'Videos löschen', 'weitere Helfer hinzufügen'],
+    cannot: ['Videos herunterladen', 'Videos löschen', 'weitere Helfer hinzufügen', 'Fotos des Matchblatts sehen oder hinzufügen'],
     privacy:
       'Die Videos bleiben in WiePlay: Bitte nimm sie nicht auf und gib sie nicht ausserhalb des Clubs weiter. Ein Coach kann deinen Zugriff jederzeit beenden; deine Tags und Prüfungen bleiben.',
   },

@@ -182,7 +182,7 @@ export function SetPanel({ set, names, official, server, saved, readOnly, onChan
           onChange={setPhoneSide}
         />
       </div>
-      <div className="grid gap-8 xl:grid-cols-2">
+      <div className="grid gap-8 @min-[70rem]:grid-cols-2">
         {(['us', 'them'] as const).map((side) => (
           <div key={side} className={cx(side !== phoneSide && 'hidden sm:block')}>
             <TeamBoxes
