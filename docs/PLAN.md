@@ -538,6 +538,12 @@ segments, without audio unless a task needs it, with no names or IDs, deleted af
 - No face recognition, no face embeddings, no person re-identification across videos.
   Player attribution uses **jersey numbers and position on court only**. (Biometric data used
   for unique identification is sensitive personal data under the revDSG; avoid it entirely.)
+- Within one video, the players job links the pieces of one person by where and when they
+  were seen, the shirt number read on them, their team and the colour of their clothes
+  (head, shirt, shorts and legs regions as hue histograms: no face, no body shape, no
+  re-identification model). These colours exist **only in memory while that job runs**:
+  they are not stored, not compared with any other video, and gone when the job ends
+  (§10.5, players v2, 18.10.2026).
 - Detection is masked to the court polygon plus a margin, which also excludes spectators.
 - No third-party analytics and no third party in the browser: imported YouTube/Twitch videos
   are fetched by the worker and played from WiePlay's own storage.
@@ -824,6 +830,8 @@ player_cluster   id, video_id, model_run_id, key, team 'us'|'them', tracks jsonb
                  number NULL, member_id NULL, not_player, referee_guess, merged_into NULL,
                  source 'model'|'split', assigned_by, assigned_at
                  -- "a person in this video"; the coach's number is its only identity (§5.7)
+                 -- 0020 (18.10.2026, players v2): confidence NULL (0..1, one whole person?
+                 -- the gallery asks to check cards below 0.5; NULL once a coach merged or split)
 event_player     event_id, video_id, model_run_id, cluster_id, track_id, number, member_id,
                  method 'court'|'image', distance, confidence, contact_ms, applied_number,
                  event_version   -- who made the action as WiePlay sees it, beside the event
@@ -832,6 +840,8 @@ event_player     event_id, video_id, model_run_id, cluster_id, track_id, number,
 and the artifacts `player_tracks` (every box, `.npz` on the NAS), `player_index` (boxes per
 analysed frame for the API, JSON in the bucket and on the NAS) and `player_sheets` (the
 contact sheets of crops, JPEG in the bucket under `media/{video}/analysis/` and on the NAS).
+Written by the GPU worker (no NAS, §8.2), all three are in the bucket only, under the job's
+prefix (`tracks.npz` too), and `nas_path` holds `s3:<key>`.
 
 ### 6.10 People, access, privacy
 
@@ -1143,15 +1153,20 @@ tailnet; it is on no tailnet now. The path since then:
   security idea is unchanged: the worker routes are not reachable from the internet, only a
   machine with SSH access to the VPS can reach them, and the VPS has no access to the home
   network.
-- The Framework 16 GPU worker (§8.2) is not set up yet. It will need its own path to the API
-  (for example its own SSH tunnel), decided when it is set up.
+- The Framework 16 GPU worker (§8.2, since 18.10.2026) has its own path: a systemd user
+  unit on the laptop (`wieplay-gpu-tunnel.service`, `deploy/fw16/`) connects with a key of its
+  own to a VPS user that can do nothing but forward to the two API ports (`wieplay-tunnel`:
+  no shell, `restrict,port-forwarding,permitopen=…` in its authorized_keys) and publishes
+  them on the laptop's loopback (`127.0.0.1:18090` dev, `:18091` prod). It needs neither the
+  home network nor the Lenovo server, so the laptop works from anywhere; nothing listens
+  beyond its loopback. Runbook: [gpu-worker](runbooks/gpu-worker.md).
 
 ### 8.2 Workers
 
 | Worker | Caps | Notes |
 |---|---|---|
 | **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `analyse`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists). With `analyse` the worker runs a second, background lane for the analysis jobs (nice 15), so an hour of analysis never holds up an upload | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. Reaches the API through `wieplay-api-tunnel.service` (§8.1). |
-| **Framework 16** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, always on. **Busy guard**: stops claiming jobs while a training run or other GPU-heavy work uses the GPU (checked from free VRAM, plus a `wieplay-worker pause` switch); optionally only at night. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so a pause or reboot loses at most one chunk. Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. A dev agent (`--env dev`) runs beside it, off by default. Not set up yet: it needs its own path to the API (§8.1). |
+| **Framework 16** (`fw16-prod`, `fw16-dev`) | `cuda`, `ml` | Internal GPU worker, **built 18.10.2026** (runbook: [gpu-worker](runbooks/gpu-worker.md)). Runs `wieplay.worker` natively (no Docker on the laptop) as systemd user units `wieplay-gpu-worker@prod` (at boot) and `@dev` (started by hand for tests, off otherwise), from `~/wieplay-gpu/<env>`: a release of the repo (`git archive` of the deployed commit) with its own venv and ONNX Runtime for CUDA; `scripts/deploy-gpu-worker.sh dev\|prod` from the Lenovo server. Takes the `players` job (`WIEPLAY_PLAYERS_CAPS=cuda,ml` in the API). **No NAS share** (the laptop's mounts need root): it reads the video's 1080p rendition from the bucket through signed URLs, a stretch at a time, and writes its files to the bucket. **Busy guard** (`worker/gpu_guard.py`): before every claim it waits while `~/wieplay-gpu/PAUSE` exists, the laptop is on battery, other processes hold more than 1 GB of GPU memory (the meeting scribe holds ~4 GB while it records or transcribes) or the card is more than 40 % busy, and logs why; during a job it checks the same every 10 s between frames, stops feeding the card while someone else needs it and gives the job back after 20 min (`given_back`: the attempt does not count). ONNX Runtime's memory on the card is capped (2 GB per model); a lock file keeps dev and prod from running a job at the same time; stopping the service gives the running job back at once. Low CPU and disk priority (`Nice=10`, `CPUWeight=40`, idle I/O). Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. Optionally only at night: not built (the guard covers the day). |
 
 ### 8.3 The GPU interface (backend-agnostic)
 
@@ -1175,7 +1190,7 @@ container entrypoint:  wieplay-ml run --spec spec.json   -> writes outputs, exit
 
 | Backend | How it runs the image | Use |
 |---|---|---|
-| `local-agent` | A GPU host runs `wieplay-worker` with `cuda` caps, **pulls** `ml_analyse` from the queue like any worker, and runs `wieplay-ml run` locally; inputs and outputs on the NAS | **Production now** (Framework 16) |
+| `local-agent` | A GPU host runs `wieplay-worker` with `cuda` caps, **pulls** `ml_analyse` from the queue like any worker, and runs `wieplay-ml run` locally; inputs and outputs on the NAS | **Production now** (Framework 16). As built 18.10.2026: the worker runs the job itself (the `players` job, no `wieplay-ml` image yet), inputs and outputs through signed URLs as a provider would (the laptop has no NAS share) |
 | `cloud-<provider>` | The Lenovo dispatcher claims the job and **pushes** it to a provider adapter that starts the image on a rented GPU; inputs and outputs are pre-signed object URLs | Later: an EU or Swiss provider (§8.6) |
 | `fake` | Returns canned outputs | CI |
 
@@ -1186,7 +1201,10 @@ long-ish signed URLs in the system: they point at a temporary object no user eve
 when the job ends.
 
 **Budget guard.** Every run records GPU, CPU and memory seconds and an estimated cost in
-`compute_usage` (electricity for `local-agent`). For a provider backend, the dispatcher checks
+`compute_usage` (electricity for `local-agent`). As built 18.10.2026 the ledger is the run's
+own record: each players run on the GPU keeps `timing.gpu_s` (its time on the card, pauses
+for other users excluded), `gpu_paused_s` and the providers in its `model_run`; the
+`compute_usage` table follows with the first paid backend. For a provider backend, the dispatcher checks
 the season's spend against the `budget` cap before submitting; when the cap would be exceeded,
 the job waits in `waiting_budget` and admins are told.
 
@@ -1203,7 +1221,7 @@ the job waits in `waiting_budget` and admins are told.
 | `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
 | `trajectory` (16.10.2026) | `analyse`, `nas` | The ball's path with contacts, the court finder's proposal (§10.4, §10.6). Background lane |
-| `players` (17.10.2026, beta) | `analyse`, `nas` (`WIEPLAY_PLAYERS_CAPS`, e.g. `gpu,nas` for a GPU worker) | People on the court in the rally windows (YOLO26s ONNX, ByteTrack), tracks → clusters, back crops, shirt-number suggestions (§10.5). On demand (`WIEPLAY_PLAYERS_AUTO` off by default; on: after each `court` job). Priority −12, background lane |
+| `players` (17.10.2026, beta; v2 18.10.2026) | `WIEPLAY_PLAYERS_CAPS`: `cuda`, `ml` (the GPU worker, on dev and prod since 18.10.2026), else `analyse`, `nas` (the Lenovo's background lane) | People on the court (YOLO26s ONNX, ByteTrack): on the GPU followed through each set, linked into the players of the video by shirt numbers, team and court position, a confidence per card, back crops (§10.5). On demand (`WIEPLAY_PLAYERS_AUTO`, §10.5). Priority −12 |
 | `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
 | `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
@@ -1856,12 +1874,13 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 - **Built 17.10.2026** (`players` job, `wieplay/ml/{people,bytetrack,players}.py`, migration
   `0011`): see "Players in a video" below.
 
-**Players in a video (17.10.2026, beta).** Off by default (`WIEPLAY_PLAYERS_AUTO=false`): ~2 h
-of the Lenovo's CPU per match and many more cards than players (§10.9), so a coach finds them
-on demand ("Find players" on the video page, `POST /api/videos/{id}/players/find`) or an admin
-with `wieplay.cli players --video ID | --all-ready`; switched on, the job follows the court job
-(§10.6). The attribution runs whenever a video has players. On the Lenovo's background
-lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, §8.3):
+**Players in a video (17.10.2026, beta; v2 18.10.2026, below).** Off by default
+(`WIEPLAY_PLAYERS_AUTO=false`): a coach finds them on demand ("Find players" on the video
+page, `POST /api/videos/{id}/players/find`) or an admin with `wieplay.cli players --video ID |
+--all-ready`; switched on, the job follows the court job (§10.6). The attribution runs
+whenever a video has players. As built first, on the Lenovo's background lane (CPU, ~2 h a
+match and many more cards than players, §10.9); since 18.10.2026 on the GPU worker
+(§8.2) as players v2, which changes steps 1, 2, 3 and 4 (next paragraphs):
 
 1. **Detection and tracking**: the rally windows (±1 s, joined when < 2 s apart) are decoded
    per camera file at 10 fps, cropped to the court's ROI (the mask: side lines ± 1.75 m, end
@@ -1904,6 +1923,87 @@ lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, 
    Recomputed on every gallery change and, for new or changed tags, on the next read.
    Metrics: "% of actions identified" and the agreement with the coach's numbers, in the
    players run's `metrics.attribution` and `GET /api/videos/{id}/analysis` (`players`).
+
+**Players v2 (18.10.2026, on the GPU worker; `wieplay/ml/identities.py`).** v1 tracked each
+rally window on its own and grouped the short tracks by colour, which teammates share: ~450
+cards a match. v2 keeps every rule of §5.7 (one video, numbers and the court, no faces, no
+re-identification model; the colours of a person exist only in memory while the job runs)
+and links by what those allow:
+
+1. **Stretches**: rallies less than 40 s apart are one stretch the tracker follows, the dead
+   time between them included (a set is one to three stretches; timeouts and set breaks
+   cut). 10 fps, YOLO26s at 1280 px on the GPU, the decoding and letterboxing on a thread of
+   their own. The tracker is v1's (a looser one made longer tracks but swapped people more).
+2. **Cuts**: a track is cut where it met another (boxes overlapping, IoU ≥ 0.3 for two
+   frames: the tracker may have swapped the two people there) and where the shirt number
+   read on it changes.
+3. **Shirt numbers** (on the CPU, 4 threads, 13 ms a crop): the text detector on the torso
+   first; where it finds nothing, the glyphs that stand out from the shirt's colour, read as
+   one group (the detector misses most single digits on a back); a single digit read where
+   a two-digit number containing it is read too counts for that number; our team's
+   readings must be on the roster (the job gets the numbers, no names). On 80 crops of the
+   Legends game judged by eye, 28 with a readable number: 17 read right, none wrong, 2
+   doubtful readings on unreadable ones (v1's reader: 12 right).
+4. **Teams**: per detection, the side of the net (feet within a metre of the net do not
+   vote) and which team played on that side in that rally; a track seen only between
+   rallies takes the nearest rally's; the kits check each rally window's recorded sides
+   and swap them only where both sides clearly wear the other team's shirts.
+5. **Stitching**: a track that ends and one of the same team that starts within 4 s, close
+   enough for a player's speed, alike, with no other number, are one person (minimum-cost
+   matching; the same number lowers the cost, a track cut where it met another prefers its
+   own continuation unless the numbers say otherwise); then up to 20 s where nobody else of
+   the team could be them.
+6. **People**: every piece that reads a number claims it, the surest first; a piece seen
+   while a surer reading of the same number is on court loses it. A number spreads along a
+   chain only up to 10 s from where it was read. Pieces with the same number are one card;
+   colour joins only pieces without a number, never onto a numbered card; a card without a
+   number joins the one numbered teammate who is missing while it is seen and was seen just
+   before or after it ("who is missing", 15 s).
+7. **Confidence** per card (`player_cluster.confidence`, migration `0020`): its number read
+   at least once every two minutes it is on court, and only that number; a card without a
+   number, or with the number of a bigger card of its team, is to be checked. The gallery
+   marks those ("Check") and folds them under "Cards to check"; a coach's merge or split
+   clears the job's confidence.
+
+**Measured 18.10.2026** on three prod H3 games: the job's own stages on local copies of the
+1080p imports (`scripts/ml/players_eval.py`), with the inputs the API hands the job. No coach
+has tagged numbers on prod yet, so numbers and purity were checked by eye: per sure card 36
+pictures drawn in proportion to the time of its pieces, counting those that clearly show
+someone else.
+
+| | Legends (calibrated) | H1–H3 (no calibration) | VBC Swiss (no calibration) |
+|---|---|---|---|
+| Length; stretches tracked; rally windows | 2 h 12 min; 87 min; 183 | 1 h 43 min; 60 min; 128 | 2 h 37 min; 93 min; 203 |
+| Cards (ours / theirs), v1 → v2 | 449 (260 / 188) → 171 (72 / 98) | 141 (57 / 83) | 265 (133 / 131) |
+| Sure cards (ours / theirs) | 7 / 6: ours #12, #22, #1, #7, #10, #2, #8; theirs #12, #7, #15, #10, #1, #13 | none (all to check) | none (all to check) |
+| Players' footage on sure cards | 37 % | – | – |
+| Sure card's number = the person it mostly shows (by eye) | 12 of 12 checked (#13, 14 s, not checked) | – | – |
+| Pictures of someone else on a sure card (of 36) | 2–6, median 4 (~11 %): mostly the libero or a teammate crossing | – | – |
+| Readings of ours that are on the roster (18 of 99 numbers) | 98 % (3,590 readings in all) | 76 % (2,922; H1 is the club too, the teams mix) | 93 % (4,534) |
+| Readings on a card that agree with its number | 75 % | 69 % | 72 % |
+| Detection and tracking on the GPU; numbers and linking on the CPU | 7.3 min; 1.1 min | 6.9 min; 1.2 min | 11.8 min (a second run beside it); 1.8 min |
+
+The calibrated game gives what a coach needs: one sure card per regular, its number right,
+about one picture in nine of someone else (the coach splits it off); the far side of the net
+(numbers too small at 1080p), the liberos' changes and short appearances stay on cards to
+check. Without a calibration the sides of the net come from foot heights, the serving side
+per rally flips inside sets and the kits looked alike (both dark): whole stretches of one
+team landed on the other team's numbered cards (H1–H3 wear the same club kit), so every card
+is to be checked there; calibrating the court (§10.6) is what makes cards sure. What each
+step does (Legends, all cards / sure cards / readings that agree): v2 171 / 7+6 / 75 %;
+without the cuts where two met 140 / 8+7 / 71 % (fewer cards, more of them mixed); without
+numbers spreading along a chain 154 / 6+7 / 73 % (29 % of the footage on sure cards instead
+of 37 %); without the 20 s stitching pass 187 / 9+6 / 75 %; without "who is missing"
+241 / 9+11 / 77 % (70 more cards).
+The shirt-number reader on 80 crops of the Legends game judged by eye (28 with a readable
+number): 17 read right, none wrong, 2 doubtful readings of unreadable ones (v1's reader: 12).
+
+**Automatic run** (`WIEPLAY_PLAYERS_AUTO`): stays off, on demand. The GPU makes it cheap
+(~10 min a match), but only calibrated videos get sure cards (3 of the 22 prod videos had
+one on 18.10.2026), more than half of a match's player footage stays on cards to
+check even then, and there are no coach-tagged numbers yet to measure the attribution.
+Switch it on once the court job calibrates most videos itself and a coach-named game shows
+the attribution's agreement (`metrics.attribution.vs_coach`).
 
 ### 10.6 Court homography
 
@@ -2019,6 +2119,22 @@ Detection only around contacts (±1 s) would save little: contacts cover most of
 The result is honest but rough: 4,601 tracks became 449 cards (260 ours, 188 theirs; 121 seen
 ≥ 30 s); cards with a read shirt number are mostly one player, the rest mix teammates. Hence
 the beta, on demand.
+
+**Players v2 on the Framework 16's GPU, measured 18.10.2026** (§10.5, the job's own stages
+on local copies of three H3 games, `scripts/ml/players_eval.py`; the rendition download of a
+real job is not in these): detection and tracking at 10 fps over the stretches (the rallies
+and the dead time between them), YOLO26s 1280 px, CUDA:
+
+| Game | Length | Stretches | Frames | Detection (GPU) | Numbers and linking (CPU) |
+|---|---|---|---|---|---|
+| Legends (calibrated) | 2 h 12 min | 87 min | 52,072 | 7.3 min (120 frames/s) | ~1.1 min |
+| H1–H3 | 1 h 43 min | 60 min | 36,197 | 6.9 min | ~1.2 min |
+| VBC Swiss | 2 h 37 min | 93 min | 55,892 | 11.8 min (a second run beside it) | ~1.8 min |
+
+So **~8–13 min of GPU per match** (0.13–0.2 GPU-h), inside the 10–15 min this table
+planned for player detection and far below the Lenovo's 2 h. ONNX Runtime held ~0.5 GB of
+the card. A real job adds the rendition's download (1080p50, ~2.2 GB per hour of stretches,
+fetched while the previous stretch is decoded) and the uploads.
 
 ---
 

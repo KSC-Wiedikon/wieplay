@@ -49,16 +49,16 @@ describe('PlayersStep', () => {
 
   it('shows the search while it runs', async () => {
     show(summary({ status: 'running', run_id: null }))
-    expect(await screen.findByText('Finding the players… (about 2 hours)')).toBeInTheDocument()
+    expect(await screen.findByText('Finding the players… (about 2 hours)')).toBeInTheDocument() // older servers: no minutes, 2 h
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
   it('offers to find the players when nobody has, only to those who may tag', async () => {
     const none = summary({ status: 'none', run_id: null, clusters: 0, named: 0, clusters_us: 0, clusters_them: 0, actions: 0, identified: 0, identified_share: null })
-    const fetch = show(none, true, { [`POST /api/videos/${ID}/players/find`]: { status: 202, body: {} } })
-    expect(await screen.findByText(/takes about 2 hours per match/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Find players (beta, takes ~2 h)' }))
+    const fetch = show({ ...none, find_minutes: 20 }, true, { [`POST /api/videos/${ID}/players/find`]: { status: 202, body: {} } })
+    expect(await screen.findByText(/takes about 20 min per match/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Find players (beta, takes about 20 min)' }))
     await waitFor(() =>
       expect(fetch.mock.calls.some(([url, init]) => url === `/api/videos/${ID}/players/find` && (init as RequestInit | undefined)?.method === 'POST')).toBe(true),
     )
@@ -68,6 +68,11 @@ describe('PlayersStep', () => {
     show(summary({ status: 'none', run_id: null, clusters: 0 }), false)
     expect(await screen.findByText(/takes about 2 hours per match/)).toBeInTheDocument()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('counts the cards WiePlay is unsure of', async () => {
+    show(summary({ uncertain: 3 }))
+    expect(await screen.findByText('3 cards to check')).toBeInTheDocument()
   })
 
   it('renders nothing without players in the analysis', async () => {

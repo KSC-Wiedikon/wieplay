@@ -69,6 +69,8 @@ from wieplay.core.models import (
     Segment,
     Video,
     VideoRoster,
+    WdMember,
+    WdTeamMember,
 )
 
 KINDS = frozenset({"players"})
@@ -84,10 +86,15 @@ INDEX_SCHEMA = 1
 MAX_INDEX_BYTES = 64 * 1024 * 1024
 MAX_SHEET_BYTES = 8 * 1024 * 1024
 MAX_SHEETS = 400
-MAX_CLUSTERS = 400
+MAX_CLUSTERS = 1000  # v1 made ~450 on a 2 h match; v2 150 to 300 with the brief ones
 MAX_TRACKS = 20_000
 NAS_PATH = re.compile(r"[A-Za-z0-9._/-]+")
 SHEET_NAME = re.compile(r"sheet-(\d{1,3})\.jpg")
+RENDITION_FILE = re.compile(r"init\.mp4|seg_\d{5}\.m4s")
+# A GPU worker without the NAS share reads the video from this rendition (PLAN §8.2).
+RENDITION = "1080p"
+# Cards below this confidence ask the coach to check them (wieplay/ml/identities.py).
+UNCERTAIN = 0.5
 
 # Attribution: the contact is looked for this close to the tag (a live tag lags the play).
 CONTACT_WINDOW_MS = {"frame": 250, "adjusted": 400, "live": 700}
@@ -133,6 +140,9 @@ class PlayerCluster(Base):
     member_id: Mapped[int | None] = mapped_column(Integer)
     not_player: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     referee_guess: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Players v2 (0020): how sure the job is that the card is one whole person (0..1); the
+    # gallery asks the coach to check cards below UNCERTAIN. NULL: an older run.
+    confidence: Mapped[float | None] = mapped_column(Float)
     merged_into: Mapped[uuid.UUID | None] = mapped_column(UUID)
     source: Mapped[str] = mapped_column(String(16), default="model")  # model | split
     assigned_by: Mapped[int | None] = mapped_column(Integer)
@@ -232,8 +242,19 @@ def queue_players(db: Session, video: Video, caps: Sequence[str] = CAPS) -> Job:
             "height": video.height or 1080,
             "out_dir": analysis.analysis_subdir(db, video),
             "prefix": f"media/{video.id}/analysis/players-{token}/",
+            # A worker without the NAS reads this rendition through signed URLs.
+            "rendition": _rendition(video).name if _rendition(video) is not None else None,
         },
     )
+
+
+def _rendition(video: Video) -> Any:
+    """The rendition a GPU worker reads: 1080p, else the largest there is."""
+    found = [r for r in video.renditions if r.segment_count and r.playlist]
+    by_name = {r.name: r for r in found}
+    if RENDITION in by_name:
+        return by_name[RENDITION]
+    return max(found, key=lambda r: r.height, default=None)
 
 
 def after_court(db: Session, video: Video | None, job: Job, auto: bool = False) -> None:
@@ -250,11 +271,19 @@ def after_court(db: Session, video: Video | None, job: Job, auto: bool = False) 
 
 
 def may_sign(job: Job, op: str, key: str) -> bool:
+    """The job writes its index, sheets and (without the NAS) its boxes under its prefix;
+    it reads the video's rendition (a GPU worker without the NAS, PLAN §8.2)."""
+    if job.kind != "players":
+        return False
+    if op == "get":
+        name = job.params.get("rendition") or RENDITION
+        folder = f"media/{job.params.get('video_id')}/{name}/"
+        return key.startswith(folder) and bool(RENDITION_FILE.fullmatch(key[len(folder) :]))
     prefix = str(job.params.get("prefix", ""))
-    if job.kind != "players" or op != "put" or not prefix or not key.startswith(prefix):
+    if op != "put" or not prefix or not key.startswith(prefix):
         return False
     name = key[len(prefix) :]
-    return name == "index.json.gz" or bool(SHEET_NAME.fullmatch(name))
+    return name in ("index.json.gz", "tracks.npz") or bool(SHEET_NAME.fullmatch(name))
 
 
 # --- the sides of the rallies (inputs) -------------------------------------------------------
@@ -340,6 +369,59 @@ def calibration_for(db: Session, video: Video) -> dict[str, Any] | None:
     return {"homography": row.homography, "camera": row.camera, "status": row.status}
 
 
+def rendition_segments(video: Video) -> dict[str, Any] | None:
+    """The rendition a worker without the NAS reads: its init segment and every media
+    segment with its place in the video (from the media playlist the API keeps)."""
+    r = _rendition(video)
+    if r is None:
+        return None
+    folder = f"media/{video.id}/{r.name}/"
+    segments: list[list[Any]] = []
+    t = 0.0
+    duration: float | None = None
+    for raw in r.playlist.splitlines():
+        line = raw.strip()
+        if line.startswith("#EXTINF:"):
+            duration = float(line[len("#EXTINF:") :].split(",", 1)[0])
+        elif line and not line.startswith("#") and duration is not None:
+            if RENDITION_FILE.fullmatch(line):
+                segments.append([folder + line, round(t * 1000), round(duration * 1000)])
+            t += duration
+            duration = None
+    return {
+        "name": r.name,
+        "init": folder + "init.mp4",
+        "segments": segments,
+        "width": r.width,
+        "height": r.height,
+        "fps": r.fps,
+    }
+
+
+def roster_for_job(db: Session, video: Video) -> dict[str, list[int]]:
+    """The shirt numbers each side wears (the video's roster snapshot, else the team's
+    roster now, read without taking the snapshot): readings of other numbers are misreads.
+    Numbers only: no names, no members."""
+    rows = list(db.scalars(select(VideoRoster).where(VideoRoster.video_id == video.id)))
+    if rows:
+        out: dict[str, set[int]] = {"us": set(), "them": set()}
+        for r in rows:
+            if r.side in out and r.number is not None:
+                out[r.side].add(int(r.number))
+        return {k: sorted(v) for k, v in out.items() if v}
+    numbers = db.scalars(
+        select(WdMember.number)
+        .join(WdTeamMember, WdTeamMember.member_id == WdMember.id)
+        .where(
+            WdTeamMember.team_id == video.team_id,
+            WdTeamMember.rel == "player",
+            WdMember.number.is_not(None),
+        )
+    )
+    us = sorted({int(n) for n in numbers if n is not None})
+    return {"us": us} if us else {}
+
+
 def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     video = db.get(Video, job.video_id) if job.video_id else None
     if video is None:
@@ -349,6 +431,8 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         # Older workers read `calibration` only; newer ones pick the setup of each window.
         "calibration": calibration_for(db, video),
         "setups": setups_for(db, video),
+        "rendition": rendition_segments(video),
+        "roster": roster_for_job(db, video),
     }
 
 
@@ -374,26 +458,36 @@ class ClusterIn(BaseModel):
     referee: bool = False
     number: int | None = Field(default=None, ge=0, le=99)
     number_conf: float = Field(default=0.0, ge=0, le=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)  # players v2
     crops: list[list[int]] = Field(default_factory=list, max_length=16)
     tracks: list[TrackIn] = Field(min_length=1, max_length=MAX_TRACKS)
 
 
 class FileIn(BaseModel):
-    nas_path: str = Field(min_length=1, max_length=1024)
+    """On the NAS (`nas_path`), or in the bucket (`key`, a GPU worker without the NAS)."""
+
+    nas_path: str | None = Field(default=None, min_length=1, max_length=1024)
+    key: str | None = Field(default=None, min_length=1, max_length=512)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     bytes: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _somewhere(self) -> FileIn:
+        if (self.nas_path is None) == (self.key is None):
+            raise ValueError("a file is on the NAS or in the bucket")
+        return self
 
 
 class IndexIn(BaseModel):
     key: str = Field(min_length=1, max_length=512)
-    nas_path: str = Field(min_length=1, max_length=1024)
+    nas_path: str | None = Field(default=None, min_length=1, max_length=1024)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     bytes: int = Field(gt=0, le=MAX_INDEX_BYTES)
 
 
 class SheetsIn(BaseModel):
     keys: list[str] = Field(max_length=MAX_SHEETS)
-    nas_dir: str = Field(min_length=1, max_length=1024)
+    nas_dir: str | None = Field(default=None, min_length=1, max_length=1024)
     cell: list[int] = Field(min_length=2, max_length=2)
     cols: int = Field(ge=1, le=64)
     rows: int = Field(ge=1, le=64)
@@ -471,10 +565,15 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
     out_dir = str(job.params["out_dir"])
     prefix = str(job.params["prefix"])
     for path in (result.tracks_artifact.nas_path, result.index.nas_path):
-        if not _inside(path, out_dir):
+        if path is not None and not _inside(path, out_dir):
             raise ValueError("artifact path outside the job's analysis folder")
-    if not _inside(result.sheets.nas_dir.rstrip("/") + "/x", out_dir):
+    nas_dir = result.sheets.nas_dir
+    if nas_dir is not None and not _inside(nas_dir.rstrip("/") + "/x", out_dir):
         raise ValueError("sheets outside the job's analysis folder")
+    if result.tracks_artifact.key is not None and result.tracks_artifact.key != (
+        f"{prefix}tracks.npz"
+    ):
+        raise ValueError("boxes stored under another key")
     if result.index.key != f"{prefix}index.json.gz":
         raise ValueError("index stored under another key")
     if result.sheets.keys != [f"{prefix}sheet-{n}.jpg" for n in range(len(result.sheets.keys))]:
@@ -496,23 +595,28 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
     )
     db.add(run)
     db.flush()
+    # A file a GPU worker wrote to the bucket instead of the NAS: "s3:<key>" (the column
+    # holds a path relative to the analysis root otherwise; the key is in stats too).
+    tracks_key = result.tracks_artifact.key
     db.add_all(
         [
             AnalysisArtifact(
                 video_id=video.id, model_run_id=run.id, kind="player_tracks",
-                nas_path=result.tracks_artifact.nas_path, format="npz", schema_version=1,
+                nas_path=result.tracks_artifact.nas_path or f"s3:{tracks_key}",
+                format="npz", schema_version=1,
                 sha256=result.tracks_artifact.sha256, bytes=result.tracks_artifact.bytes,
-                stats=result.stats,
+                stats={**result.stats, **({"object_key": tracks_key} if tracks_key else {})},
             ),
             AnalysisArtifact(
                 video_id=video.id, model_run_id=run.id, kind="player_index",
-                nas_path=result.index.nas_path, format="json", schema_version=INDEX_SCHEMA,
+                nas_path=result.index.nas_path or f"s3:{result.index.key}",
+                format="json", schema_version=INDEX_SCHEMA,
                 sha256=result.index.sha256, bytes=result.index.bytes,
                 stats={"object_key": result.index.key},
             ),
             AnalysisArtifact(
                 video_id=video.id, model_run_id=run.id, kind="player_sheets",
-                nas_path=result.sheets.nas_dir, format="jpeg", schema_version=1,
+                nas_path=result.sheets.nas_dir or f"s3:{prefix}", format="jpeg", schema_version=1,
                 sha256=result.index.sha256, bytes=len(result.sheets.keys),
                 stats={
                     "keys": result.sheets.keys, "cell": result.sheets.cell,
@@ -539,6 +643,7 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
             ocr_confidence=c.number_conf if c.number is not None else None,
             not_player=c.referee,
             referee_guess=c.referee,
+            confidence=c.confidence,
             source="model",
         )
         # A rerun keeps the coach's work where it can tell: same team, same number read.
@@ -633,6 +738,7 @@ def merge(db: Session, target: PlayerCluster, sources: Sequence[PlayerCluster], 
     target.tracks = tracks
     target.crops = crops[:8]
     target.detections = sum(int(t["n"]) for t in tracks)
+    target.confidence = None  # the coach's grouping now, not the job's
     if target.number is None and not target.not_player:
         named = {s.number for s in sources if s.number is not None}
         if len(named) == 1:
@@ -670,6 +776,7 @@ def split(
         assigned_by=actor,
         assigned_at=datetime.now(UTC),
     )
+    cluster.confidence = None  # the coach's grouping now, not the job's
     cluster.tracks = staying
     moved = {tuple(t["crop"]) for t in moving if t.get("crop")}
     cluster.crops = [c for c in cluster.crops if tuple(c) not in moved] or [

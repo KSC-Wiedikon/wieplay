@@ -203,6 +203,9 @@ class PlayersSummaryOut(BaseModel):
     # WiePlay's players against the coach's numbers where both exist
     compared: int
     accuracy: float | None
+    # Players v2: cards the job is unsure of (to check), and what a search takes (minutes).
+    uncertain: int = 0
+    find_minutes: int = 120
 
 
 class ActionsOut(BaseModel):
@@ -397,7 +400,7 @@ def _actions(db: DbDep, video: Video, settings: Settings) -> ActionsOut | None:
     )
 
 
-def _players(db: DbDep, video: Video) -> PlayersSummaryOut | None:
+def _players(db: DbDep, video: Video, minutes: int = 120) -> PlayersSummaryOut | None:
     if video.sport not in players.SPORTS:
         return None
     run = players.latest_run(db, video.id)
@@ -424,6 +427,12 @@ def _players(db: DbDep, video: Video) -> PlayersSummaryOut | None:
         suggested=int(found.get("suggested", 0)),
         compared=int(vs.get("compared", 0)),
         accuracy=vs.get("accuracy"),
+        uncertain=sum(
+            1
+            for c in people
+            if c.confidence is not None and c.confidence < players.UNCERTAIN and c.number is None
+        ),
+        find_minutes=minutes,
     )
 
 
@@ -490,7 +499,7 @@ def analysis_out(
         rally_model=_rally_model(db),
         scoring=_scoring(db, video),
         actions=_actions(db, video, settings),
-        players=_players(db, video),
+        players=_players(db, video, settings.players_minutes),
     )
 
 

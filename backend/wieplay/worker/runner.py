@@ -13,6 +13,7 @@ from wieplay import __version__
 from wieplay.worker import ffmpeg
 from wieplay.worker.client import ApiClient, ApiUnavailable, ClaimedJob, NotLeased
 from wieplay.worker.config import WorkerSettings
+from wieplay.worker.gpu_guard import GpuBusy, GpuGuard, GuardSettings
 from wieplay.worker.handlers import (
     BACKGROUND_KINDS,
     HANDLERS,
@@ -63,6 +64,7 @@ class Worker:
         self.settings = settings
         self.api = ApiClient(settings.api_url, settings.resolved_token(), __version__)
         self.stopping = threading.Event()
+        self._job_cancel: threading.Event | None = None
         # Set once the API has heard "restarted" (and freed our old leases): only then may
         # the background lane claim, or the main lane's first claim would free its job.
         self.released = threading.Event()
@@ -79,9 +81,30 @@ class Worker:
         self.background_caps = [c for c in caps if c in ("analyse", "nas")]
         if "analyse" not in caps:
             self.background_caps = []
+        # A GPU worker (PLAN §8.2) claims only while nobody else needs the card.
+        self.gpu = (
+            GpuGuard(
+                GuardSettings(
+                    max_other_mib=settings.gpu_max_other_mib,
+                    max_util=settings.gpu_max_util,
+                    need_mains=settings.gpu_need_mains,
+                    pause_file=settings.gpu_pause_file,
+                    max_pause_s=settings.gpu_max_pause_s,
+                    retry_after_s=settings.gpu_retry_after_s,
+                    lock_file=settings.gpu_lock_file,
+                )
+            )
+            if settings.gpu_guard
+            else None
+        )
 
     def stop(self, *_: object) -> None:
-        log.info("stopping after the current job")
+        if self.gpu is not None and self._job_cancel is not None:
+            # A GPU job starts over anyway: give it back now rather than make the stop wait.
+            log.info("stopping: giving the current job back")
+            self._job_cancel.set()
+        else:
+            log.info("stopping after the current job")
         self.stopping.set()
 
     def run_job(self, job: ClaimedJob, api: ApiClient | None = None) -> None:
@@ -93,14 +116,34 @@ class Worker:
             return
         cancel = threading.Event()
         started = time.monotonic()
+        self._job_cancel = cancel
         with _Heartbeat(api, job.id, self.settings.heartbeat_seconds, cancel) as beat:
-            ctx = Context(self.settings, api, job, cancel, beat.update)
+            ctx = Context(self.settings, api, job, cancel, beat.update, self.gpu)
+            if self.gpu is not None:
+                self.gpu.start_job()
+                if not self.gpu.lock(cancel):
+                    self._job_cancel = None
+                    self._fail(api, job, "worker stopping", retryable=True, given_back=True)
+                    return
             try:
                 result = handler(ctx)
                 api.complete(job.id, result)
                 log.info("job %s done in %.0fs", job.id, time.monotonic() - started)
             except (ffmpeg.Cancelled, NotLeased):
-                log.warning("job %s stopped (cancelled or lease lost)", job.id)
+                if self.gpu is not None and self.stopping.is_set():
+                    log.warning("job %s given back: the worker stops", job.id)
+                    self._fail(
+                        api, job, "the GPU worker stopped", retryable=True,
+                        retry_after_s=60, given_back=True,
+                    )  # fmt: skip
+                else:
+                    log.warning("job %s stopped (cancelled or lease lost)", job.id)
+            except GpuBusy as exc:
+                # Given back, not failed: the attempt does not count.
+                log.warning("job %s given back: %s", job.id, exc)
+                self._fail(
+                    api, job, str(exc), retryable=True, retry_after_s=exc.seconds, given_back=True
+                )
             except RetryLater as exc:
                 log.warning("job %s waits %d s: %s", job.id, exc.seconds, exc)
                 self._fail(api, job, str(exc), retryable=True, retry_after_s=exc.seconds)
@@ -111,6 +154,9 @@ class Worker:
                 log.exception("job %s crashed", job.id)
                 self._fail(api, job, f"{type(exc).__name__}: {exc}", retryable=True)
             finally:
+                self._job_cancel = None
+                if self.gpu is not None:
+                    self.gpu.unlock()
                 shutil.rmtree(self.settings.work_dir / job.id, ignore_errors=True)
 
     def _fail(
@@ -121,9 +167,16 @@ class Worker:
         *,
         retryable: bool,
         retry_after_s: int | None = None,
+        given_back: bool = False,
     ) -> None:
         try:
-            api.fail(job.id, error, retryable=retryable, retry_after_s=retry_after_s)
+            api.fail(
+                job.id,
+                error,
+                retryable=retryable,
+                retry_after_s=retry_after_s,
+                given_back=given_back,
+            )
         except (ApiUnavailable, NotLeased):
             log.warning("could not report the failure of %s; the lease will expire", job.id)
 
@@ -137,8 +190,21 @@ class Worker:
                 if self.stopping.is_set():
                     return
         while not self.stopping.is_set():
+            # A GPU worker's first claim only frees the leases of its previous run (it takes
+            # no job: the card may be busy); every later one waits for the card first.
+            if (
+                self.gpu is not None
+                and not restarted
+                and not self.gpu.wait_until_free(self.stopping)
+            ):
+                return
             try:
-                jobs, paused = api.claim(caps, restarted=restarted, kinds=kinds)
+                if restarted and self.gpu is not None:
+                    jobs, paused = api.claim(
+                        caps, restarted=True, kinds=kinds, wait=False, max_jobs=0
+                    )
+                else:
+                    jobs, paused = api.claim(caps, restarted=restarted, kinds=kinds)
                 if restarted:
                     restarted = False
                     self.released.set()

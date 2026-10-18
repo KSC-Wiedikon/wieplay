@@ -6,7 +6,7 @@ import { useAnalysis } from '../lib/analysis'
 import { ApiError } from '../lib/api'
 import { useCourt, type CourtState } from '../lib/court'
 import { cx } from '../lib/cx'
-import { useFindPlayers, type PlayersSummary } from '../lib/players'
+import { useFindPlayers, useSearchTime, type PlayersSummary } from '../lib/players'
 import { keys } from '../lib/queryClient'
 import { useReadScoreboard, useScoreboard, type ScoreboardState } from '../lib/scoreboard'
 import {
@@ -312,15 +312,16 @@ function ScoreboardStep({ state, video, board, element }: { state: StepState; vi
 function PlayersStep({ state, video, players, canFind }: { state: StepState; video: Video; players: PlayersSummary; canFind: boolean }) {
   const { t } = useTranslation()
   const find = useFindPlayers(video.id)
+  const time = useSearchTime(players.find_minutes)
   const done = players.run_id !== null
   const status =
     state === 'attention'
       ? t('players.step.failed')
       : state === 'busy'
-        ? t('players.step.busy')
+        ? t('players.step.busy', { time })
         : done
           ? t('players.step.found', { total: players.clusters, us: players.clusters_us, them: players.clusters_them, named: players.named })
-          : t('players.step.none')
+          : t('players.step.none', { time })
   return (
     <Step
       title={t('setup.players.title')}
@@ -338,8 +339,8 @@ function PlayersStep({ state, video, players, canFind }: { state: StepState; vid
             {t('players.step.open')}
           </ButtonLink>
         ) : state === 'busy' || !canFind ? null : (
-          <Button variant="secondary" disabled={find.isPending} title={t('players.findHint')} onClick={() => find.mutate(undefined)}>
-            {t('players.find')}
+          <Button variant="secondary" disabled={find.isPending} title={t('players.findHint', { time })} onClick={() => find.mutate(undefined)}>
+            {t('players.find', { time })}
           </Button>
         )
       }

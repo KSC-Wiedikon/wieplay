@@ -82,6 +82,10 @@ def claim(
     """Lease up to `max_jobs` runnable jobs for this worker (only `kinds`, when given).
     Commits."""
     now = now or datetime.now(UTC)
+    if max_jobs <= 0:
+        worker.last_seen_at = now
+        db.commit()
+        return []
     usable = sorted(set(caps) & set(worker.caps))
     dep = aliased(Job)
     blocked = exists().where(dep.id == any_(Job.depends_on), dep.status != "succeeded")
@@ -190,6 +194,20 @@ def fail(
     job.status = "failed"
     job.finished_at = now
     return True
+
+
+def give_back(
+    job: Job, reason: str, *, retry_after: timedelta | None = None, now: datetime | None = None
+) -> None:
+    """A worker hands a job back unfinished, through no fault of the job (a GPU worker whose
+    card another process needs): queued again, after `retry_after`, the attempt not counted."""
+    now = now or datetime.now(UTC)
+    job.status = "queued"
+    job.error = reason[:4000]
+    job.lease_owner = None
+    job.lease_expires_at = None
+    job.attempts = max(0, job.attempts - 1)
+    job.not_before = now + retry_after if retry_after else None
 
 
 def hold(db: Session, kind: str, until: datetime) -> int:

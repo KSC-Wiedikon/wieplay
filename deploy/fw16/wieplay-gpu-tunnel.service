@@ -1,0 +1,26 @@
+# ~/.config/systemd/user/wieplay-gpu-tunnel.service on the GPU host (the Framework 16): how
+# its WiePlay workers reach the APIs on the VPS (PLAN §8.1, §8.2). Installed and started by
+# scripts/deploy-gpu-worker.sh.
+#
+# The VPS's APIs listen on its loopback only. This unit connects out with a key of its own
+# (~/.ssh/wieplay_tunnel_ed25519) to a user on the VPS that can do nothing but forward to
+# those two ports (`wieplay-tunnel`: no shell, authorized_keys with
+# `restrict,port-forwarding,permitopen="127.0.0.1:8090",permitopen="127.0.0.1:8091"`), and
+# publishes them on this machine's loopback, nowhere else:
+#   dev   WIEPLAY_WORKER_API_URL=http://127.0.0.1:18090
+#   prod  WIEPLAY_WORKER_API_URL=http://127.0.0.1:18091
+# The VPS's address and host key are local files (tunnel.env, vps_known_hosts), not in the
+# repo. The laptop needs no VPN and no home network for it: it works wherever it is online.
+[Unit]
+Description=SSH tunnel: WiePlay GPU worker -> WiePlay APIs on the VPS (dev 18090, prod 18091)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=%h/wieplay-gpu/tunnel.env
+ExecStart=/usr/bin/ssh -N -i %h/.ssh/wieplay_tunnel_ed25519 -o IdentitiesOnly=yes -o UserKnownHostsFile=%h/wieplay-gpu/vps_known_hosts -o StrictHostKeyChecking=yes -o ControlMaster=no -o ControlPath=none -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -L 127.0.0.1:18090:127.0.0.1:8090 -L 127.0.0.1:18091:127.0.0.1:8091 ${WIEPLAY_VPS}
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

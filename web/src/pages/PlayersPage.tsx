@@ -25,6 +25,7 @@ import {
   useApplySuggestions,
   useAssignPlayer,
   useFindPlayers,
+  useSearchTime,
   useMergePlayers,
   usePlayers,
   useSplitPlayer,
@@ -108,7 +109,7 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
   const [askSwap, setAskSwap] = useState(false)
   const grouped = useMemo(() => groupClusters(data.clusters), [data.clusters])
   // The order of the number fields: Enter moves to the next card.
-  const order = useMemo(() => [...grouped.us, ...grouped.them, ...grouped.brief, ...grouped.others].map((c) => c.id), [grouped])
+  const order = useMemo(() => [...grouped.us, ...grouped.them, ...grouped.check, ...grouped.brief, ...grouped.others].map((c) => c.id), [grouped])
   const byId = useMemo(() => new Map(data.clusters.map((c) => [c.id, c])), [data.clusters])
   const chosen = selected.map((id) => byId.get(id)).filter((c): c is PlayerCluster => c !== undefined)
   const oneTeam = chosen.every((c) => c.team === chosen[0]?.team)
@@ -214,6 +215,13 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
         <>
           <TeamSection title={names?.us ?? t('players.us')} clusters={grouped.us} {...{ data, order, selected, toggle, setSplitting, videoId }} sheets={data.sheets} />
           <TeamSection title={names?.them ?? t('players.them')} clusters={grouped.them} {...{ data, order, selected, toggle, setSplitting, videoId }} sheets={data.sheets} />
+          {grouped.check.length > 0 && (
+            <details className="group rounded-card border border-hairline bg-surface px-4 shadow-card">
+              <summary className="flex min-h-11 cursor-pointer items-center font-semibold select-none">{t('players.toCheck', { count: grouped.check.length })}</summary>
+              <p className="pb-2 text-sm text-muted">{t('players.toCheckHint')}</p>
+              <CardGrid clusters={grouped.check} {...{ data, order, selected, toggle, setSplitting, videoId }} sheets={data.sheets} />
+            </details>
+          )}
           {grouped.brief.length > 0 && (
             <details className="group rounded-card border border-hairline bg-surface px-4 shadow-card">
               <summary className="flex min-h-11 cursor-pointer items-center font-semibold select-none">{t('players.brief', { count: grouped.brief.length })}</summary>
@@ -261,6 +269,7 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
 
 function JobState({ data, onFind, finding }: { data: Players; onFind: () => void; finding: boolean }) {
   const { t } = useTranslation()
+  const time = useSearchTime(data.find_minutes)
   if (data.status === 'done' && data.run) return null
   const failed = data.status === 'failed'
   const busy = data.status === 'queued' || data.status === 'running'
@@ -276,9 +285,9 @@ function JobState({ data, onFind, finding }: { data: Players; onFind: () => void
       {(data.can_find ?? data.can_edit) && !busy && (
         <div>
           <Button variant="primary" onClick={onFind} disabled={finding}>
-            {t('players.find')}
+            {t('players.find', { time })}
           </Button>
-          <p className="mt-2 text-sm text-muted">{t('players.findHint')}</p>
+          <p className="mt-2 text-sm text-muted">{t('players.findHint', { time })}</p>
         </div>
       )}
     </Card>
@@ -389,6 +398,11 @@ function PlayerCard({ cluster: c, videoId, data, sheets, order, selected, toggle
           {c.number !== null && <CheckIcon className="size-5 shrink-0 text-on-accent-soft" aria-hidden="true" />}
         </div>
         {c.referee_guess && !c.not_player && <Badge>{t('players.refereeGuess')}</Badge>}
+        {c.uncertain && (
+          <p className="text-sm" title={t('players.uncertainHint')}>
+            <Badge tone="danger">{t('players.uncertain')}</Badge> <span className="text-muted">{t('players.uncertainHint')}</span>
+          </p>
+        )}
         {c.ocr_number !== null && c.number === null && (
           <p className="flex flex-wrap items-center gap-2 text-sm" title={t('players.readsHint')}>
             <Badge tone="accent">{t('players.reads', { number: c.ocr_number })}</Badge>

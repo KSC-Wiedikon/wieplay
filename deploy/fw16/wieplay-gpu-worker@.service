@@ -1,0 +1,36 @@
+# ~/.config/systemd/user/wieplay-gpu-worker@.service on the GPU host (the Framework 16): the
+# WiePlay GPU worker (PLAN §8.2), one instance per environment: wieplay-gpu-worker@prod
+# (enabled, starts with the machine: the user lingers) and wieplay-gpu-worker@dev (started by
+# hand for a test, off otherwise). Installed by scripts/deploy-gpu-worker.sh.
+#
+# It runs natively (no Docker on the laptop) from ~/wieplay-gpu/<env>, a release of the repo
+# with its own venv (onnxruntime-gpu), and takes only GPU work (caps cuda, ml). Its busy
+# guard waits while the laptop is on battery, another process holds the GPU (the meeting
+# scribe) or ~/wieplay-gpu/PAUSE exists, and gives a running job back when the card stays
+# busy (wieplay/worker/gpu_guard.py). Stop it: systemctl --user stop wieplay-gpu-worker@prod
+[Unit]
+Description=WiePlay GPU worker (%i)
+After=network-online.target wieplay-gpu-tunnel.service
+Wants=network-online.target wieplay-gpu-tunnel.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/wieplay-gpu
+EnvironmentFile=%h/wieplay-gpu/%i.env
+EnvironmentFile=%h/wieplay-gpu/%i/release.env
+Environment=WIEPLAY_WORKER_TOKEN_FILE=%h/wieplay-gpu/%i.token
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/wieplay-gpu/%i/venv/bin/python -m wieplay.worker
+Restart=on-failure
+RestartSec=30
+# A stop gives the running job back to the queue (it starts over elsewhere or later).
+TimeoutStopSec=90
+# The laptop is someone's computer: the worker comes last for the CPU and the disk.
+Nice=10
+CPUWeight=40
+IOSchedulingClass=idle
+MemoryHigh=10G
+MemoryMax=14G
+
+[Install]
+WantedBy=default.target

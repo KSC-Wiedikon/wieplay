@@ -43,6 +43,13 @@ describe('PlayersPage', () => {
     expect(screen.getByText('Not players (1)')).toBeInTheDocument()
   })
 
+  it('asks the coach to check a card WiePlay is unsure of', async () => {
+    show(playersState({ clusters: [cluster({ key: 1, seconds: 300, confidence: 0.3, uncertain: true }), cluster({ key: 2, seconds: 200, confidence: 0.9 })] }))
+    const unsure = await screen.findByRole('article', { name: 'Player 1' })
+    expect(within(unsure).getByText('Check')).toBeInTheDocument()
+    expect(within(screen.getByRole('article', { name: 'Player 2' })).queryByText('Check')).not.toBeInTheDocument()
+  })
+
   it('names a card from the keyboard and moves on to the next one', async () => {
     const named = playersState({ clusters: [cluster({ key: 1, number: 7, name: 'Alex Muster', member_id: 101, seconds: 300 }), cluster({ key: 2, seconds: 200 })] })
     const fetch = show(playersState({ clusters: [cluster({ key: 1, seconds: 300 }), cluster({ key: 2, seconds: 200 })] }), {
@@ -146,8 +153,8 @@ describe('PlayersPage', () => {
     const fetch = show(none, {
       [`POST /api/videos/${ID}/players/find`]: { status: 202, body: { ...none, status: 'queued' } },
     })
-    const button = await screen.findByRole('button', { name: 'Find players (beta, takes ~2 h)' })
-    expect(screen.getByText(/about 2 hours of the club server’s time/)).toBeInTheDocument()
+    const button = await screen.findByRole('button', { name: 'Find players (beta, takes about 2 hours)' })
+    expect(screen.getByText(/It takes about 2 hours per match/)).toBeInTheDocument()
     fireEvent.click(button)
     await waitFor(() => expect(calls(fetch, 'POST', `/api/videos/${ID}/players/find`)).toHaveLength(1))
     expect(await screen.findByText('Waiting to find the players…')).toBeInTheDocument()

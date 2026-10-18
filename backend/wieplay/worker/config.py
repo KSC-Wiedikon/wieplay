@@ -39,6 +39,27 @@ class WorkerSettings(BaseSettings):
     # e.g. CUDAExecutionProvider,CPUExecutionProvider).
     players_weights: Path | None = None
     players_providers: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # Where the players job reads the video: the originals on the NAS (the Lenovo), or the
+    # 1080p rendition from the bucket through signed URLs, writing its files there too (a
+    # GPU worker without the NAS share, PLAN §8.2).
+    players_source: Literal["nas", "bucket"] = "nas"
+    # Rally windows closer than this are one stretch the tracker follows the people through
+    # (the dead time between them decoded too): a GPU worker follows a whole set (players
+    # v2, PLAN §10.5); the CPU looks at the rallies only.
+    players_join_gap_s: float = 2.0
+    players_detect_fps: float = 10.0
+
+    # The busy guard of a GPU worker (gpu_guard.py, PLAN §8.2): before every claim and
+    # between frames, nobody else may need the card.
+    gpu_guard: bool = False
+    gpu_max_other_mib: int = 1024  # other processes' GPU memory (the meeting scribe: ~4 GB)
+    gpu_max_util: int = 40  # percent, while this worker runs nothing
+    gpu_need_mains: bool = True  # never on battery
+    gpu_pause_file: Path | None = None  # exists: wait (the local pause switch)
+    gpu_lock_file: Path | None = None  # one job at a time for the GPU workers of a machine
+    gpu_max_pause_s: int = 1200  # a job paused this long goes back to the queue
+    gpu_retry_after_s: int = 1800
+    gpu_mem_limit_mib: int = 2048  # ONNX Runtime's arena on the card, per session
     inbox_scan_seconds: int = 60
     inbox_stable_seconds: int = 120
 

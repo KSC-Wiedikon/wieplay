@@ -2,7 +2,7 @@ import '../i18n/pages'
 import { useTranslation } from 'react-i18next'
 import { useAnalysis } from '../lib/analysis'
 import { cx } from '../lib/cx'
-import { useFindPlayers } from '../lib/players'
+import { useFindPlayers, useSearchTime } from '../lib/players'
 import { formatPercent } from '../lib/suggestions'
 import type { Video } from '../lib/types'
 import { Badge } from './Badge'
@@ -14,7 +14,8 @@ import { AlertIcon, UsersIcon } from './icons'
  * "Players in this video" (docs/PLAN.md §10.5, beta) in short, as a step after the rallies:
  * how many cards WiePlay made (honestly: many more than the players), how many have their
  * number, how many actions have a player, and the way to the gallery. Finding the players
- * is on demand (about 2 h of the club server per match): "Find players" when nobody has.
+ * is on demand (about 2 h of the club server, ~20 min on the GPU worker, per match): "Find
+ * players" when nobody has; the cards WiePlay is unsure of are counted.
  * On the video page and below the review of the suggestions.
  */
 export function PlayersStep({ video, canEdit, className }: { video: Video; canEdit: boolean; className?: string }) {
@@ -22,6 +23,7 @@ export function PlayersStep({ video, canEdit, className }: { video: Video; canEd
   const analysis = useAnalysis(video.id, video.sport === 'volleyball')
   const find = useFindPlayers(video.id)
   const players = analysis.data?.players
+  const time = useSearchTime(players?.find_minutes)
   if (!players) return null
 
   const busy = players.status === 'queued' || players.status === 'running'
@@ -40,7 +42,7 @@ export function PlayersStep({ video, canEdit, className }: { video: Video; canEd
           {failed
             ? t('players.step.failed')
             : busy && !done
-              ? t('players.step.busy')
+              ? t('players.step.busy', { time })
               : done
                 ? t('players.step.found', {
                     total: players.clusters,
@@ -48,8 +50,9 @@ export function PlayersStep({ video, canEdit, className }: { video: Video; canEd
                     them: players.clusters_them,
                     named: players.named,
                   })
-                : t('players.step.none')}
+                : t('players.step.none', { time })}
         </p>
+        {done && (players.uncertain ?? 0) > 0 && <p className="text-sm text-muted">{t('players.step.uncertain', { count: players.uncertain })}</p>}
         {done && players.actions > 0 && (
           <p className="text-sm font-semibold tabular-nums">{t('players.step.identified', { value: formatPercent(players.identified_share) })}</p>
         )}
@@ -62,10 +65,10 @@ export function PlayersStep({ video, canEdit, className }: { video: Video; canEd
         <Button
           variant="secondary"
           disabled={find.isPending}
-          title={t('players.findHint')}
+          title={t('players.findHint', { time })}
           onClick={() => find.mutate(undefined, { onSuccess: () => void analysis.refetch() })}
         >
-          {t('players.find')}
+          {t('players.find', { time })}
         </Button>
       ) : null}
     </Card>

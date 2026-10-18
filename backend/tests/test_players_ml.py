@@ -11,7 +11,7 @@ import pytest
 
 from wieplay.core import court
 from wieplay.core.players import Index
-from wieplay.ml import bytetrack, people
+from wieplay.ml import bytetrack, identities, people
 from wieplay.ml import players as pl
 from wieplay.worker import players as job
 
@@ -244,13 +244,15 @@ def test_teams_from_the_rally_sides_and_from_kits() -> None:
         track(3, 60, 90, side=pl.FAR, window=1, hue=0.0),
         track(4, 60, 90, side=pl.NEAR, window=1, hue=0.62),
     ]
-    info = pl.assign_teams(tracks, ["us", None])
+    info = identities.assign_teams(tracks, ["us", None]).info
     assert [t.team for t in tracks] == ["us", "them", "us", "them"]
-    assert info == {"windows": 2, "known_windows": 1, "kit_guessed_windows": 1}
+    assert info == {
+        "windows": 2, "known_windows": 1, "kit_guessed_windows": 1, "kit_corrected_windows": 0,
+    }  # fmt: skip
     # Nothing known: near in the first window is ours, the kits do the rest.
     for t in tracks:
         t.team = "us"
-    pl.assign_teams(tracks, [None, None])
+    identities.assign_teams(tracks, [None, None])
     assert [t.team for t in tracks] == ["us", "them", "us", "them"]
 
 
@@ -262,7 +264,7 @@ def test_clusters_link_numbers_and_never_two_people_at_once() -> None:
         track(4, 200, 260, hue=0.02),  # same kit, later: may be anyone, joins by kit
         track(5, 0, 50, side=pl.FAR, hue=0.62),
     ]
-    pl.assign_teams(tracks, ["us"])
+    identities.assign_teams(tracks, ["us"])
     clusters = pl.cluster_tracks(tracks)
     by_track = {t.track_id: c for c in clusters for t in c.tracks}
     assert by_track[1] is by_track[2]
@@ -281,7 +283,7 @@ def test_different_numbers_never_merge_and_a_misread_number_is_dropped() -> None
         track(2, 100, 150, number=9),
         track(3, 20, 40, number=7, votes=1.3),  # also "7" while 1 plays: a misread
     ]
-    pl.assign_teams(tracks, ["us"])
+    identities.assign_teams(tracks, ["us"])
     clusters = pl.cluster_tracks(tracks)
     by_track = {t.track_id: c for c in clusters for t in c.tracks}
     assert by_track[1] is not by_track[2]
