@@ -355,6 +355,8 @@ class Video(Base):
     name_us: Mapped[str | None] = mapped_column(String(40))
     name_them: Mapped[str | None] = mapped_column(String(40))
     no_scoreboard: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # "No scoresheet for this video" (PLAN §10.3a): the setup's scoresheet step is done.
+    no_scoresheet: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     files: Mapped[list[VideoSourceFile]] = relationship(
         back_populates="video", order_by="VideoSourceFile.part_no", cascade="all, delete-orphan"
@@ -570,6 +572,8 @@ class Period(Base):
     start_rotation: Mapped[int | None] = mapped_column(Integer)
     # Who stood in zones I-VI at that serve: six shirt numbers (null: a zone left empty).
     start_lineup: Mapped[list[int | None] | None] = mapped_column(JSONB(none_as_null=True))
+    # The opponent's six at that serve, by shirt number only (from the scoresheet, PLAN §10.3a).
+    start_lineup_them: Mapped[list[int | None] | None] = mapped_column(JSONB(none_as_null=True))
     # The automatic scoring's guesses (PLAN §10.3), next to the coach's first_serve and
     # our_court_side_at_start: who served first, our side at the start; how sure a set the
     # model proposed is, and the run that proposed or scored it.
@@ -628,7 +632,7 @@ class Segment(Base):
     # The score line: the coach's winners, the model's where the coach has none ("model").
     score_us_after: Mapped[int | None] = mapped_column(Integer)
     score_them_after: Mapped[int | None] = mapped_column(Integer)
-    score_source: Mapped[str | None] = mapped_column(String(16))  # tags | model
+    score_source: Mapped[str | None] = mapped_column(String(16))  # tags | sheet | model
     score_confidence: Mapped[float | None] = mapped_column(Float)
     score_conflict: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     score_note: Mapped[str | None] = mapped_column(String(16))
@@ -639,6 +643,13 @@ class Segment(Base):
     log_score_us: Mapped[int | None] = mapped_column(Integer)
     log_score_them: Mapped[int | None] = mapped_column(Integer)
     log_at_ms: Mapped[int | None] = mapped_column(BigInteger)
+    # The official scoresheet (PLAN §10.3a), lined up with the rallies by the scoring: the
+    # sheet's point this rally is (1-based in its set), that point's winner and server. Written
+    # by the scoring, never a coach's. A timeout's team (us | them), from the sheet.
+    sheet_point: Mapped[int | None] = mapped_column(Integer)
+    sheet_won_by: Mapped[str | None] = mapped_column(String(8))
+    sheet_serving: Mapped[str | None] = mapped_column(String(8))
+    called_by: Mapped[str | None] = mapped_column(String(8))
     source: Mapped[str] = mapped_column(String(16), default="manual")
     import_system: Mapped[str | None] = mapped_column(String(32))
     import_ref: Mapped[str | None] = mapped_column(String(128))
@@ -947,3 +958,48 @@ class AnalysisTrack(Base):
 
 Index("ix_analysis_track_video_kind", AnalysisTrack.video_id, AnalysisTrack.kind,
       AnalysisTrack.created_at)  # fmt: skip
+
+
+# --- Official scoresheets (PLAN §10.3a) ----------------------------------------------------------
+
+
+class Scoresheet(Base):
+    """A match's official scoresheet as a coach typed it (one per video): per set the first
+    server, both lineups and every service box, timeouts, substitutions and sanctions, by shirt
+    number and score only (wieplay/core/scoresheet.py has the shape). Changes are kept by a
+    trigger (scoresheet_revision). A photo of the sheet comes later (SS3) in its own table."""
+
+    __tablename__ = "scoresheet"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), unique=True
+    )
+    game_id: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(16), default="typed")  # typed | read (SS4)
+    status: Mapped[str] = mapped_column(String(16), default="entered")  # draft | entered
+    use_in_scoring: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    sets: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    created_by: Mapped[int | None] = mapped_column(Integer)
+    updated_by: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class ScoresheetRevision(Base):
+    __tablename__ = "scoresheet_revision"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    scoresheet_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scoresheet.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    changed_by: Mapped[int | None] = mapped_column(Integer)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    action: Mapped[str] = mapped_column(String(16))
+    before: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    after: Mapped[dict[str, Any] | None] = mapped_column(JSONB)

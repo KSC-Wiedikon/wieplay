@@ -116,7 +116,16 @@ class SegmentOut(BaseModel):
     log_score_us: int | None = None
     log_score_them: int | None = None
     log_at_ms: int | None = None
-    # The score line: the coach's winners, else the model's (score_source "model").
+    # The official scoresheet (PLAN §10.3a), where the scoring lined it up with the rallies: the
+    # sheet's point this rally is (1-based in its set), that point's winner and server.
+    sheet_point: int | None = None
+    sheet_won_by: str | None = None
+    sheet_serving: str | None = None
+    # A timeout's team (us | them): the sheet's timeouts are breaks with source "import".
+    called_by: str | None = None
+    import_system: str | None = None
+    # The score line: the coach's winners, else the sheet's ("sheet"), else the model's
+    # (score_source "model").
     score_us_after: int | None
     score_them_after: int | None
     score_source: str | None
@@ -145,6 +154,8 @@ class PeriodOut(BaseModel):
     start_rotation: int | None = None
     # Our six shirt numbers in zones I-VI at that serve (null in a zone: not entered).
     start_lineup: list[int | None] | None = None
+    # The opponent's six by shirt number, from the scoresheet (PLAN §10.3a).
+    start_lineup_them: list[int | None] | None = None
     final_us: int | None
     final_them: int | None
     # manual | model (a set the scoring proposed, answered like a rally proposal).

@@ -234,6 +234,8 @@ export interface Video {
   names?: TeamNames | null
   /** A coach said there is no scoreboard in the picture (the setup's scoreboard step). */
   no_scoreboard?: boolean
+  /** ... or that there is no official scoresheet for the match (the setup's scoresheet step). */
+  no_scoresheet?: boolean
 }
 
 /** The teams' names of a video (backend wieplay/core/names.py). */
@@ -257,6 +259,7 @@ export interface VideoSetupIn {
   name_us?: string | null
   name_them?: string | null
   no_scoreboard?: boolean
+  no_scoresheet?: boolean
 }
 
 /** "Ready" says a video plays; this says whether WiePlay has analysed it (PLAN §10.1). */
@@ -408,7 +411,7 @@ export type CourtSide = 'near' | 'far'
  * for the last rally of a set, after it), it looks like no point at all (a replay), the serve
  * evidence or a coach's fact disagrees with the score, or the model is unsure.
  */
-export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure' | 'board' | 'log'
+export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure' | 'board' | 'log' | 'sheet'
 
 export interface TaxonomySkill {
   /** One letter for volleyball (S R E A B D F); one or two characters for basketball (S2 S3 FT RO … F). */
@@ -534,6 +537,16 @@ export interface Segment {
   log_score_them?: number | null
   /** When the point was pressed (video ms). */
   log_at_ms?: number | null
+  // The official scoresheet (docs/PLAN.md §10.3a), lined up with the rallies by the scoring;
+  // absent from servers before it.
+  /** The sheet's point this rally is (1-based in its set). */
+  sheet_point?: number | null
+  /** That point's winner and server on the sheet. */
+  sheet_won_by?: Side | null
+  sheet_serving?: Side | null
+  /** A timeout's team (the sheet's timeouts are breaks with source "import"). */
+  called_by?: Side | null
+  import_system?: string | null
   version: number
   /** Null while live. Deleted segments only come back in a /changes answer that touched them. */
   deleted_at: string | null

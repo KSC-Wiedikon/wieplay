@@ -359,3 +359,36 @@ def test_who_sees_saved_filters() -> None:
     assert not can_see_filter(H3_PLAYER, SOMEONE, shared=False, sees_team=True)
     assert can_see_filter(H3_PLAYER, SOMEONE, shared=True, sees_team=True)
     assert not can_see_filter(D1_PLAYER, SOMEONE, shared=True, sees_team=False)
+
+
+# Official scoresheets (PLAN §10.3a): seen by whoever watches the video, typed by whoever tags.
+from wieplay.core.permissions import can_edit_sheet, can_see_sheet  # noqa: E402
+
+SHEET_MATRIX = [
+    # (who, team, sees the sheet, types it)
+    (viewer(roles=("admin",)), H3_NOW, True, True),
+    (viewer(sport_admin=("volleyball",)), H3_NOW, True, True),
+    (viewer(sport_admin=("volleyball",)), HERREN1_NOW, False, False),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, True, True),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_PREV, True, True),  # every season
+    (viewer(teams=[{"team": 92, "rel": ["team_responsible"]}]), H3_NOW, True, True),
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, True, True),  # players tag too
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_PREV, False, False),
+    (H3_HELPER, H3_NOW, True, True),  # a helper with the paper copy in hand
+    (H3_HELPER, H3_PREV, True, True),
+    (D1_PLAYER, H3_NOW, False, False),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), D1_NOW, False, False),
+    (viewer(teams=[{"team": 99, "rel": ["coach"]}]), OFF_TEAM, False, False),  # switched off
+    (viewer(roles=("vorstand",)), H3_NOW, False, False),
+    (GUEST_COACH, GAST_NOW, True, True),
+    (GUEST_PLAYER, GAST_NOW, True, True),
+    (GUEST_COACH, H3_NOW, False, False),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), GAST_NOW, False, False),
+]
+
+
+def test_scoresheet_permission_matrix() -> None:
+    for who, team, sees, types in SHEET_MATRIX:
+        leads = lead_lineages(who, ALL_TEAMS)
+        assert can_see_sheet(who, team, ALL_TEAMS) is sees, (who, team)
+        assert can_edit_sheet(who, team, leads) is types, (who, team)

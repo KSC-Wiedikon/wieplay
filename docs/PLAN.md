@@ -554,7 +554,8 @@ segments, without audio unless a task needs it, with no names or IDs, deleted af
 Records logins, video views (once per video per session), uploads, deletions, exports and
 downloads, permission and consent changes (helpers added and removed: `helper_added`,
 `helper_removed`), admin "view as", GPU submissions (which video,
-which provider), retention deletions. Coaches see the log for their team's videos; members can
+which provider), retention deletions, scoresheets saved and removed (`scoresheet_saved`,
+`scoresheet_removed`; §10.3a). Coaches see the log for their team's videos; members can
 request their own entries.
 
 ### 5.9 Audio
@@ -1920,10 +1921,11 @@ metrics keep the shift it applied (`serve_shift`).
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
 
-### 10.3a Official scoresheets (volleyball, planned)
+### 10.3a Official scoresheets (volleyball)
 
-*Planned (owner's idea, 18.10.2026); nothing built. Research and design:
-[`research/scoresheets-2026-10.md`](research/scoresheets-2026-10.md).*
+*Owner's idea, 18.10.2026. Research and design:
+[`research/scoresheets-2026-10.md`](research/scoresheets-2026-10.md). **SS1 (typed sheet) and
+SS2 (into the scoring) built 19.10.2026**; SS3 (photo) next, SS4–SS5 later.*
 
 Coaches add the match's official scoresheet (Swiss Volley's paper Matchblatt, compulsory in
 H3's league; every team gets a carbon copy), so WiePlay knows every point in order:
@@ -1932,25 +1934,113 @@ H3's league; every team gets a carbon copy), so WiePlay knows every point in ord
   that team's own score in the server's box. Read in service-turn order and interleaved, the
   two teams' numbers give the winner and the server of every point, both teams' rotations, and
   with the lineups, substitutions and timeouts (each written with its score) who was on court
-  and where the breaks were. Penalty points are circled in the running score: points without
-  a rally.
-- **Checked** against the sheet's own finals and running score and Wiedisync's official set
-  scores; an inconsistent set gets a suggested repair (a misread or miswritten box) for the
-  coach to accept, or is used only as a soft hint.
+  and where the breaks were. Penalty points (a sanction P or DP) are points without a rally.
+- **Checked** against the sheet's circled finals and Wiedisync's official set scores; an
+  inconsistent set gets the cheapest single repair as a suggestion (a typo model: swapped
+  digits, a neighbouring key, a missing or extra box) for the coach to accept, or is used only
+  as a hint.
 - **Ranked** below the coach's facts and above the scoreboard log and the model: it is the
   signed official record, but it has no times, so which video rally is which point is
-  inferred. The scoring aligns the sheet's points with the detected rallies (the same dynamic
-  programme, its state reduced to the sheet point); the serve evidence and the score log's
-  times place the points, replays and missed rallies show as gaps in the alignment and are
-  flagged in Review. It fills `first_serve`, `start_lineup` and `start_rotation` per set (and
-  the opponent's lineup, by number); timeouts become `timeout` segments with their team,
-  substitutions events.
-- **Entry**: a form shaped like the sheet (about 10–12 minutes per match); a photo with the
-  video, redacted on the phone before upload (the sheet carries every player's date of birth
-  since 2022), visible to coaches and admins only, deleted with the video; later an automatic
-  reading on club hardware that the coach confirms cell by cell. No scoresheet leaves the club.
-- Phases SS1–SS5 in the research note: the typed sheet and its stats first, then the scoring,
-  the photo, the reading.
+  inferred.
+
+**Built (SS1, SS2; migration `0023`):**
+
+- **Data**: `scoresheet`, one per video (sets as JSON: per set the first server, both lineups
+  by shirt number, each team's service boxes in the sheet's layout, the circled finals,
+  timeouts, substitutions, sanctions without the person, "points cancelled", start and end
+  times, a per-set "use" switch), who entered it and when, every change in
+  `scoresheet_revision` (a trigger). No names, birthdates or licence numbers; extra fields are
+  refused. `period.start_lineup_them` (the opponent's six), `segment.sheet_point`,
+  `sheet_won_by`, `sheet_serving` (the sheet's point a rally was lined up with), `called_by`
+  (a timeout's team), `video.no_scoresheet`. The revision trigger treats the scoring's sheet
+  and log fields as derived (0021 had left the log's out).
+- **Decoder** (`wieplay/ml/sheet.py`): exact (a round trip over 2,100 random sets in the tests,
+  the research note's 20,000 before); the checks name the box they doubt (lower than the score,
+  past the end of the set, an empty box between two, the next box missing, not finished, the
+  circled final, the official score; timeouts, substitutions, sanctions off the path, a penalty
+  whose next point isn't the opponent's, lineups); the sheet's own numbers per team, set and
+  rotation; who stood where per point. A browser copy (`web/src/lib/scoresheet.ts`) checks on
+  every keystroke and is tested against a fixture the backend tests write.
+- **API** (`/api/videos/{id}/scoresheet`: GET, PUT with `base_version`, DELETE; POST `…/check`
+  for the repairs of an unsaved sheet). Seen by whoever may watch the video
+  (`can_see_sheet`), typed by whoever may tag it (`can_edit_sheet` = `can_tag`: coaches, team
+  managers, sport admins, admins, helpers and the season's players, as the research note
+  proposed). Saving fills the sets' empty coach fields (first server, both lineups, our
+  setter's zone when the roster names one setter among the six; a different value a coach
+  entered stays and is listed as a conflict) and scores the match again. Audit:
+  `scoresheet_saved`, `scoresheet_removed`.
+- **Page** `/videos/:id/scoresheet` (EN, DE): per set the first server, times, the official
+  result, both teams' lineups above the columns I–VI and the service boxes shaped like the
+  sheet (1/5, 2/6, 3/7, 4/8; three rows in a deciding set), typed in the sheet's order (two
+  digits move on, Tab/Space/Enter, Enter on an empty box goes to the other team, `*` circles a
+  final; one team at a time on a phone); the live check line (the score as it grows, the first
+  box that doesn't fit, the server's repair with "Apply"); timeouts, substitutions, sanctions,
+  cancelled points; the points strip; "From the scoresheet": points, side-out and break point
+  per team and per rotation for both teams (ours by the setter's zone). Our six are filled in
+  from the last match, sets 2–4 get the alternating first server; unsaved changes stay in the
+  browser. The setup card has a "Scoresheet" step (type it in, or "No scoresheet"), and a sheet
+  whose every set fits the official result completes the score step ("Score from the official
+  scoresheet"). The video page links the sheet; the guide (`/how-to-help`) explains it.
+- **Scoring** (`wieplay/ml/scoring.py`, `wieplay/core/scoresheet.py`): a consistent set's
+  points are lined up with the set's rallies by a dynamic programme over the sheet point index:
+  a rally is the next point (its serve evidence for that point's server, the board and the log
+  for its winner, a coach's serve or winner at 12 to contradict, a penalty point at 4), no point
+  (as before; a proposal followed within 8 s by the next is 1.5 cheaper as no point: the first
+  part of a rally the finder cut in two; free where the sheet says points were cancelled), or
+  points come without a rally before it (a penalty is free and needs no gap, any other point is
+  a missed rally with the gap model of §10.3). The sheet fixes the first server; our side is
+  still chosen from the evidence. A set that cannot be lined up, or doesn't fit, gives its
+  winners as a hint instead (5 to contradict: more than a sure serve reading, less than the
+  board or the log). Per rally: the sheet's point, winner and server; the score line takes the
+  coach's winner, else the sheet's (`score_source` "sheet"), else the model's; the stats count
+  the sheet's winners like a coach's. Flags: "sheet" (a coach's winner or serve, or the log,
+  disagrees with the sheet), "missing_before/after" (a point without a rally that is no
+  penalty), "extra" (a rally without a point), "unsure" (the winner below 70 % against the
+  other team and against no point). The sheet's timeouts become `timeout` breaks with their
+  team (source "import", `import_system` "scoresheet") in the gap after the point that made
+  their score, replacing the model's open label there, never a coach's. Metrics in
+  `GET /api/videos/{id}/analysis` → `scoring.sheet`. The review shows "Scoresheet: point 23, to
+  Volero" and a suggested winner from the sheet says so.
+
+**Measured** (`scripts/ml/sheet_eval.py`):
+
+- Synthetic sets (300 per row: sets to 25 at a 60 % side-out rate, serve evidence right 92 %,
+  our side known), winner right per observed rally (a replay right when called no point):
+
+  | Rally list | Official score only | With the sheet | Sheet only as a hint | Flagged (sheet) |
+  |---|---|---|---|---|
+  | complete, no extra rallies | 89.8 % | 99.9 % | 94.9 % | 0.3 % |
+  | 3 % missed, 2 % extra (replays) | 87.4 % | 97.8 % | 89.5 % | 6.3 % |
+  | 5 % missed, 3 % extra, serve reads 85 % | 79.1 % | 93.5 % | 79.8 % | 10.9 % |
+
+- Game 509 (H3 – Voléro Legends, prod's 191 rallies, mostly unreviewed proposals) with the
+  sheet built from its trusted score log (§10.10: every point in order; the boxes a scorer
+  would have written derived from it, the first server from the board's serve indicator), the
+  scoring blind to the log; reference: the log's verdict per rally (188 rallies: 173 points,
+  15 no point) and the coach's 9 winners:
+
+  | Scoring with | Winner (or no point) as the log | Score shown after the log's points | Coach's winners | Flagged |
+  |---|---|---|---|---|
+  | the official score only | 161/188 (85.6 %) | 91/173 | 9/9 | 43 |
+  | the log (before the sheet) | 188/188 (by construction) | 145/173 | 9/9 | 38 |
+  | the sheet, no log | 168/188 (89.4 %) | 152/173 | 9/9 | 31 (7 of the 20 errors) |
+  | the sheet and the log | 188/188 | 173/173 | 9/9 | 40 |
+  | the sheet, the log's non-rallies rejected (as after a review) | 166/173 points (96 %) | 157/173 | 9/9 | 24 |
+
+  This game's rally list is rough: the log says 24 of its 197 points had no rally and 15
+  rallies were no point. Most errors left are a rally the finder cut in two (the sheet puts the
+  point on the other part: same score line, another clip) or a replay next to a missed rally:
+  without times the alignment cannot tell them apart; the log can, and with both every rally
+  matches it. The sheet's 15 timeouts landed in the break where the log pressed its timeout in
+  11 cases.
+
+**Not yet:** substitutions as events (`SUB`, research §4.4): they stay on the sheet and the
+page shows where each falls in the video; a "Sheet" column, point strip and `X`/`M` keys in
+the review (§4.5); the opponent's rotations on the stats tabs (they are on the sheet page);
+the sets' clock times as a hint; the sheet's labels for the serve model's training (§4.6);
+who is on court per rally for player tracking (computed, not used). SS3: a photo of the sheet
+beside the form, redacted on the phone (O14). SS4: reading it on club hardware. SS5: a local
+vision model as a second opinion; the OpenVolley import into the same table.
 
 ### 10.4 Ball tracking
 

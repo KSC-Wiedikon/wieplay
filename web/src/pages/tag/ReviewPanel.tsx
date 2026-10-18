@@ -1,3 +1,4 @@
+import '../../i18n/pages'
 import type { TFunction } from 'i18next'
 import { useMemo, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -324,10 +325,15 @@ function RallyFacts({ rally }: { rally: Segment }) {
   // The club scoreboard's log (docs/PLAN.md §10.10): the point pressed after the rally.
   const logSays = rally.log_won_by ?? null
   const fromLog = winner.suggested && logSays !== null && logSays === winner.value
+  // The official scoresheet (docs/PLAN.md §10.3a), where the scoring lined it up with this rally.
+  const sheetSays = rally.sheet_point != null && rally.sheet_won_by ? rally.sheet_won_by : null
+  const fromSheet = winner.suggested && sheetSays !== null && sheetSays === winner.value
   const wonText = winner.value
     ? `${sideLabel(t, winner.value, names)}${
         winner.suggested
-          ? suggestedDetail(t, [fromLog ? t('tagging.scoring.log.label') : formatPercent(rally.score_confidence)])
+          ? suggestedDetail(t, [
+              fromSheet ? t('sheet.title') : fromLog ? t('tagging.scoring.log.label') : formatPercent(rally.score_confidence),
+            ])
           : won === winner.value
             ? yours
             : ''
@@ -360,6 +366,11 @@ function RallyFacts({ rally }: { rally: Segment }) {
           </div>
         ))}
       </dl>
+      {sheetSays && (
+        <p data-sheet={sheetSays} className="text-sm text-muted tabular-nums" title={t('sheetReview.title')}>
+          {t('sheetReview.point', { n: rally.sheet_point, team: sideLabel(t, sheetSays, names) })}
+        </p>
+      )}
       {logText && (
         <p data-log={logSays ?? undefined} className="text-sm text-muted tabular-nums" title={logDelay !== null ? t('tagging.scoring.log.title', { delay: logDelay }) : undefined}>
           {logText}

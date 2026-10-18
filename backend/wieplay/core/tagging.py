@@ -587,19 +587,28 @@ def rescore(db: Session, video: Video) -> None:
         serving = period.first_serve
         played = by_period.get(period.id, [])
         calls = [called(r) for r in played]
-        from_model = False
+        # A set the official scoresheet was lined up with (PLAN §10.3a): its points without a
+        # rally (penalties, missed rallies) and its winners come from the sheet.
+        sheet_set = any(r.sheet_point is not None for r in played)
+        from_model = from_sheet = False
         for n, rally in enumerate(played):
             # Points the model thinks were played before it without a rally (one it missed).
             if rally.model_missed_us or rally.model_missed_them:
                 us += rally.model_missed_us or 0
                 them += rally.model_missed_them or 0
-                from_model = True
+                if sheet_set:
+                    from_sheet = True
+                else:
+                    from_model = True
             rally.serving = calls[n] or serving
-            # The winner: the coach's; else the next rally's server (a fact); else the model's.
+            # The winner: the coach's; else the next rally's server (a fact); else the sheet's;
+            # else the model's.
             winner = rally.won_by
             if winner is None and n + 1 < len(played):
                 winner = calls[n + 1]
             fact = winner is not None
+            if winner is None and rally.sheet_won_by is not None:
+                winner, from_sheet = rally.sheet_won_by, True
             if winner is None and rally.model_won_by is not None:
                 winner, from_model = rally.model_won_by, True
             if winner == "us":
@@ -611,7 +620,7 @@ def rescore(db: Session, video: Video) -> None:
                 rally.score_source = None
             else:
                 rally.score_us_after, rally.score_them_after = us, them
-                rally.score_source = "model" if from_model else "tags"
+                rally.score_source = "model" if from_model else "sheet" if from_sheet else "tags"
             serving = winner if fact else None
         us += period.model_missed_us or 0
         them += period.model_missed_them or 0

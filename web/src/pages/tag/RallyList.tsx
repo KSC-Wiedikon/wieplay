@@ -9,7 +9,7 @@ import { SuggestionChip } from '../../components/SuggestionChip'
 import { Table, TBody, Td, Th, THead, Tr } from '../../components/Table'
 import { WinnerPicker } from '../../components/WinnerPicker'
 import { cx } from '../../lib/cx'
-import { formatClock, segmentKindLabel, sideLabel } from '../../lib/labels'
+import { formatClock, segmentLabel, sideLabel } from '../../lib/labels'
 import { periodAt, ralliesOf } from '../../lib/rallies'
 import { useSideNames } from '../../lib/sides'
 import {
@@ -157,7 +157,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                       <Td className="font-mono text-sm tabular-nums">{time}</Td>
                       <Td className="hidden text-muted tabular-nums sm:table-cell">{formatSeconds(rally.end_ms - rally.start_ms)}</Td>
                       {reviewing && (
-                        <Td className={cx('whitespace-nowrap', gap && 'font-semibold')}>{segmentKindLabel(t, rally.kind, taxonomy.sport)}</Td>
+                        <Td className={cx('whitespace-nowrap', gap && 'font-semibold')}>{segmentLabel(t, rally, taxonomy.sport, names)}</Td>
                       )}
                       {!reviewing && (
                         <Td className="hidden md:table-cell">
