@@ -35,7 +35,7 @@ from wieplay.api import (
     videos,
     worker,
 )
-from wieplay.core import scorelog
+from wieplay.core import scorelog, sheet_photos
 from wieplay.core.config import Settings, get_settings
 from wieplay.core.db import make_engine, make_sessionmaker
 from wieplay.core.retention import run_housekeeping
@@ -228,6 +228,7 @@ def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -
         if store is not None:
             videos.sweep_deleted(session, store)
             library.sweep_exports(session, store)
+            sheet_photos.sweep(session, store, datetime.now(UTC))
         now = datetime.now(UTC)
         if not _last_housekeeping or now - _last_housekeeping[-1] >= HOUSEKEEPING_EVERY:
             _last_housekeeping[:] = [now]

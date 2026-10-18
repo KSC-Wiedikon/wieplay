@@ -1051,7 +1051,7 @@ def sweep_deleted(db: Session, store: ObjectStore, now: datetime | None = None) 
     ).all()
     for video in videos:
         try:
-            for prefix in (f"media/{video.id}/", f"incoming/{video.id}/"):
+            for prefix in pipeline.bucket_prefixes(video.id):
                 store.delete_prefix(prefix)
         except (BotoCoreError, ClientError):
             log.exception("sweep of deleted video %s failed; retrying later", video.id)

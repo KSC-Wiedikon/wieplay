@@ -3,34 +3,50 @@
 GET    /api/videos/{id}/scoresheet         the sheet, each set decoded and checked, its numbers
 PUT    /api/videos/{id}/scoresheet         save it (whoever may tag); the match is scored again
 POST   /api/videos/{id}/scoresheet/check   the checks of a sheet not saved yet (repairs too)
-DELETE /api/videos/{id}/scoresheet         remove it; the match is scored again without it
+DELETE /api/videos/{id}/scoresheet         remove it (and its photos); scored again without it
 
-Shirt numbers and scores only. A photo of the paper sheet comes later (SS3) with its own rules.
+Photos of the paper sheet (SS3, wieplay/core/sheet_photos.py), for the team's coaches, team
+managers, sport admins and admins only (permissions.can_see_sheet_photo):
+GET    /api/videos/{id}/scoresheet/images             the photos
+POST   /api/videos/{id}/scoresheet/images             add one: the redacted JPEG/PNG/WebP as the
+                                                      body (≤ 10 MB), `redacted=true`
+GET    /api/videos/{id}/scoresheet/images/{image}     302 to a URL signed for 5 minutes, audited
+DELETE /api/videos/{id}/scoresheet/images/{image}     remove it: the bucket object goes at once
+
+The typed sheet holds shirt numbers and scores only; the photos carry the players' names
+(dates of birth blacked out before the upload), hence their narrower rule.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Response
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from wieplay.api.access import TeamAccess, team_refs, visible_video
-from wieplay.api.deps import DbDep, ViewerDep, audit
+from wieplay.api.deps import DbDep, SettingsDep, StoreDep, ViewerDep, audit
+from wieplay.api.media import PRIVATE
 from wieplay.core import scoresheet as ss
 from wieplay.core import scoring, tagging
-from wieplay.core.models import Period, Segment, Video, VideoRoster
+from wieplay.core import sheet_photos as sp
+from wieplay.core.models import Period, ScoresheetImage, Segment, Video, VideoRoster
 from wieplay.core.permissions import (
     Viewer,
     can_delete_video,
     can_edit_sheet,
+    can_edit_sheet_photo,
     can_see_sheet,
+    can_see_sheet_photo,
     can_upload,
 )
+from wieplay.core.storage import ObjectStore
 from wieplay.ml import sheet as sh
 
 router = APIRouter(prefix="/api", tags=["scoresheet"])
@@ -131,9 +147,23 @@ class ChecksOut(BaseModel):
     match_by_setter: bool
 
 
+class PhotoOut(BaseModel):
+    """A photo of the paper sheet; `url` answers with a short-lived signed link (audited)."""
+
+    id: uuid.UUID
+    page: int
+    set_no: int | None
+    width: int
+    height: int
+    bytes: int
+    uploaded_by: str | None
+    uploaded_at: datetime
+    url: str
+
+
 class SheetOut(ChecksOut):
     video_id: uuid.UUID
-    exists: bool
+    exists: bool  # something was typed in (a row with photos only is not a sheet yet)
     can_edit: bool
     version: int
     use_in_scoring: bool
@@ -149,6 +179,9 @@ class SheetOut(ChecksOut):
     roster: list[dict[str, Any]]
     previous_lineup: list[int | None] | None
     no_scoresheet: bool
+    # The photos of the paper sheet: None for whoever may not see them (players, helpers).
+    images: list[PhotoOut] | None = None
+    can_add_images: bool = False
 
 
 # --- helpers ------------------------------------------------------------------------------------
@@ -166,19 +199,74 @@ def _readable(db: Session, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, 
     return video, access
 
 
-def _writable(db: Session, viewer: Viewer, video_id: uuid.UUID) -> Video:
+def _writable(db: Session, viewer: Viewer, video_id: uuid.UUID) -> tuple[Video, TeamAccess]:
     video, access = _readable(db, viewer, video_id)
     if not can_edit_sheet(viewer, access.ref, access.leads):
         raise HTTPException(403, "Only those who tag this match enter its scoresheet")
+    _lock(db, video)
+    tagging.set_actor(db, viewer.member_id)
+    tagging.ensure_roster(db, video)  # the setter's zone comes from the roster snapshot
+    return video, access
+
+
+def _lock(db: Session, video: Video) -> None:
     db.execute(
         select(Video)
         .where(Video.id == video.id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    tagging.set_actor(db, viewer.member_id)
-    tagging.ensure_roster(db, video)  # the setter's zone comes from the roster snapshot
+
+
+def _photos(db: Session, viewer: Viewer, video_id: uuid.UUID, *, write: bool) -> Video:
+    """A video whose sheet photos the viewer may see (or add and remove): its team's coaches,
+    team managers, sport admins and admins. Players and helpers see the typed sheet only."""
+    video, access = _readable(db, viewer, video_id)
+    rule = can_edit_sheet_photo if write else can_see_sheet_photo
+    if not rule(viewer, access.ref, access.leads):
+        raise HTTPException(
+            403, "Only the team's coaches, team managers and admins see the scoresheet's photos"
+        )
     return video
+
+
+def _photo_out(db: Session, video: Video, row: ScoresheetImage) -> PhotoOut:
+    return PhotoOut(
+        id=row.id,
+        page=row.page,
+        set_no=row.set_no,
+        width=row.width,
+        height=row.height,
+        bytes=row.bytes,
+        uploaded_by=ss.member_name(db, row.uploaded_by),
+        uploaded_at=row.uploaded_at,
+        url=f"/api/videos/{video.id}/scoresheet/images/{row.id}",
+    )
+
+
+def _refused(exc: sp.PhotoRefused) -> HTTPException:
+    return HTTPException(exc.status, {"message": exc.message, "code": exc.code})
+
+
+async def photo_body(request: Request) -> bytes:
+    """The uploaded photo's bytes, at most 10 MB, read before anything is decoded. Resolved
+    after the viewer (a dependency listed later), so nobody uploads without a session."""
+    kind = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if kind not in sp.FORMATS:
+        raise _refused(sp.PhotoRefused(415, "type", "A scoresheet photo is a JPEG, PNG or WebP."))
+    too_large = sp.PhotoRefused(413, "too_large", "A scoresheet photo is at most 10 MB.")
+    length = request.headers.get("content-length", "")
+    if length.isdigit() and int(length) > sp.MAX_BYTES:
+        raise _refused(too_large)
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > sp.MAX_BYTES:
+            raise _refused(too_large)
+    return bytes(data)
+
+
+PhotoBody = Annotated[bytes, Depends(photo_body)]
 
 
 def _line(line: sh.Line) -> LineOut:
@@ -356,6 +444,7 @@ def _checks_out(
 
 def _state(db: Session, viewer: Viewer, video: Video, access: TeamAccess) -> SheetOut:
     row = ss.stored(db, video.id)
+    typed = ss.typed(row)
     official = ss.official_sets(db, video)
     sets = row.sets if row is not None else []
     checks = ss.check(sets, official)
@@ -384,19 +473,23 @@ def _state(db: Session, viewer: Viewer, video: Video, access: TeamAccess) -> She
         .where(VideoRoster.video_id == video.id, VideoRoster.side == "us")
         .order_by(VideoRoster.number)
     ).all()
+    photos = None
+    if can_see_sheet_photo(viewer, access.ref, access.leads):
+        photos = [_photo_out(db, video, r) for r in sp.live(db, row)]
+    entered = row if typed else None
     return SheetOut(
         **found.model_dump(),
         video_id=video.id,
-        exists=row is not None,
+        exists=typed,
         can_edit=can_edit_sheet(viewer, access.ref, access.leads) and video.status == "ready",
         version=row.version if row is not None else 0,
         use_in_scoring=on,
-        source=row.source if row is not None else None,
+        source=entered.source if entered is not None else None,
         sets=sets,
-        entered_by=ss.member_name(db, row.created_by) if row is not None else None,
-        entered_at=row.created_at if row is not None else None,
-        updated_by=ss.member_name(db, row.updated_by) if row is not None else None,
-        updated_at=row.updated_at if row is not None else None,
+        entered_by=ss.member_name(db, entered.created_by) if entered is not None else None,
+        entered_at=entered.created_at if entered is not None else None,
+        updated_by=ss.member_name(db, entered.updated_by) if entered is not None else None,
+        updated_at=entered.updated_at if entered is not None else None,
         conflicts=[c.as_json() for c in conflicts],
         official_sets=[list(s) for s in official] if official else None,
         roster=[
@@ -405,6 +498,9 @@ def _state(db: Session, viewer: Viewer, video: Video, access: TeamAccess) -> She
         ],
         previous_lineup=ss.previous_lineup(db, video),
         no_scoresheet=video.no_scoresheet,
+        images=photos,
+        can_add_images=can_edit_sheet_photo(viewer, access.ref, access.leads)
+        and video.status == "ready",
     )
 
 
@@ -471,7 +567,7 @@ def check_scoresheet(
 def put_scoresheet(video_id: uuid.UUID, body: ss.SheetIn, viewer: ViewerDep, db: DbDep) -> SheetOut:
     """Save the typed sheet; the match is scored again with it. A change based on an older
     version than the stored one (someone else saved meanwhile) is refused with 409."""
-    video = _writable(db, viewer, video_id)
+    video, _ = _writable(db, viewer, video_id)
     if video.status != "ready":
         raise HTTPException(409, "Enter the scoresheet once the video is ready")
     now = tagging.now_utc()
@@ -493,14 +589,139 @@ def put_scoresheet(video_id: uuid.UUID, body: ss.SheetIn, viewer: ViewerDep, db:
 
 
 @router.delete("/videos/{video_id}/scoresheet", status_code=204)
-def delete_scoresheet(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> Response:
+def delete_scoresheet(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, request: Request
+) -> Response:
     """Remove the sheet (kept as a revision); the match is scored again without it. What it
-    filled into the sets stays: a coach's to change."""
-    video = _writable(db, viewer, video_id)
-    if not ss.remove(db, video, viewer.member_id, tagging.now_utc()):
+    filled into the sets stays: a coach's to change. Its photos go with it, so a sheet with
+    photos is removed only by those who may remove photos."""
+    video, access = _writable(db, viewer, video_id)
+    row = ss.stored(db, video.id)
+    photos = sp.live(db, row)
+    if photos and not can_edit_sheet_photo(viewer, access.ref, access.leads):
+        raise HTTPException(403, "The scoresheet has photos: the team's coaches remove it")
+    now = tagging.now_utc()
+    if not (ss.typed(row) or photos) or not ss.remove(db, video, viewer.member_id, now):
         raise HTTPException(404, "The video has no scoresheet")
+    sp.mark_removed(photos, viewer.member_id, now)
     if video.status == "ready":
         scoring.score_video(db, video, reason="scoresheet")
-    audit(db, viewer.member_id, "scoresheet_removed", "video", str(video.id))
+    audit(db, viewer.member_id, "scoresheet_removed", "video", str(video.id),
+          photos=len(photos))  # fmt: skip
     db.commit()
+    store: ObjectStore | None = request.app.state.store
+    if photos and store is not None and sp.purge(db, store, photos, now):
+        db.commit()
+    return Response(status_code=204)
+
+
+# --- photos of the paper sheet (SS3) -----------------------------------------------------------
+
+
+@router.get("/videos/{video_id}/scoresheet/images", response_model=list[PhotoOut])
+def list_photos(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[PhotoOut]:
+    video = _photos(db, viewer, video_id, write=False)
+    out = [_photo_out(db, video, r) for r in sp.live(db, ss.stored(db, video.id))]
+    db.rollback()
+    return out
+
+
+@router.post("/videos/{video_id}/scoresheet/images", response_model=PhotoOut, status_code=201)
+def add_photo(
+    video_id: uuid.UUID,
+    viewer: ViewerDep,
+    db: DbDep,
+    store: StoreDep,
+    request: Request,
+    response: Response,
+    body: PhotoBody,
+    redacted: Annotated[bool, Query()] = False,
+    set_no: Annotated[int | None, Query(ge=1, le=5)] = None,
+    boxes: Annotated[int, Query(ge=0, le=50)] = 0,
+    rotation: Annotated[int, Query(ge=0, le=270, multiple_of=90)] = 0,
+    cropped: Annotated[bool, Query()] = False,
+) -> PhotoOut:
+    """Keep a photo of the paper sheet. Only what WiePlay's redaction step made is taken: the
+    coach confirmed the dates of birth are blacked out (`redacted`), and the image carries no
+    camera metadata. The API stores its own JPEG of the pixels; the same photo again (a
+    resend) answers 200 with the one kept already."""
+    video = _photos(db, viewer, video_id, write=True)
+    if video.status != "ready":
+        raise HTTPException(409, "Add the scoresheet's photo once the video is ready")
+    if not redacted:
+        raise _refused(
+            sp.PhotoRefused(
+                422, "not_redacted", "Black out the dates of birth on the photo first, then upload."
+            )
+        )
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    try:
+        photo = sp.clean(body, content_type)
+    except sp.PhotoRefused as exc:
+        raise _refused(exc) from None
+    _lock(db, video)
+    tagging.set_actor(db, viewer.member_id)
+    sheet = ss.ensure_row(db, video, viewer.member_id)
+    redaction = {"boxes": boxes, "rotation": rotation, "cropped": cropped}
+    try:
+        row, created = sp.add(
+            db, store, video, sheet, photo, set_no=set_no, redaction=redaction,
+            actor=viewer.member_id,
+        )  # fmt: skip
+    except sp.PhotoRefused as exc:
+        db.rollback()
+        raise _refused(exc) from None
+    except (BotoCoreError, ClientError):
+        db.rollback()
+        raise HTTPException(503, "The photo could not be stored: try again") from None
+    if created:
+        video.no_scoresheet = False
+        audit(db, viewer.member_id, "scoresheet_photo_uploaded", "video", str(video.id),
+              image=str(row.id), bytes=row.bytes, width=row.width, height=row.height,
+              boxes=boxes)  # fmt: skip
+    db.commit()
+    response.status_code = 201 if created else 200
+    return _photo_out(db, video, row)
+
+
+@router.get("/videos/{video_id}/scoresheet/images/{image_id}")
+def view_photo(
+    video_id: uuid.UUID,
+    image_id: uuid.UUID,
+    viewer: ViewerDep,
+    db: DbDep,
+    store: StoreDep,
+    settings: SettingsDep,
+) -> RedirectResponse:
+    """A 302 to the photo, signed for 5 minutes (like video media, PLAN §7.6); every view is
+    in the audit log."""
+    video = _photos(db, viewer, video_id, write=False)
+    row = sp.get(db, video.id, image_id)
+    if row is None:
+        raise HTTPException(404, "Photo not found")
+    url = store.presign_get(row.object_key, settings.media_url_ttl_seconds)
+    audit(db, viewer.member_id, "scoresheet_photo_viewed", "video", str(video.id),
+          image=str(row.id))  # fmt: skip
+    db.commit()
+    return RedirectResponse(url, status_code=302, headers=PRIVATE)
+
+
+@router.delete("/videos/{video_id}/scoresheet/images/{image_id}", status_code=204)
+def remove_photo(
+    video_id: uuid.UUID, image_id: uuid.UUID, viewer: ViewerDep, db: DbDep, store: StoreDep
+) -> Response:
+    """Remove a photo: its object leaves the bucket now (the sweep retries if the bucket is
+    unreachable); the typed sheet stays."""
+    video = _photos(db, viewer, video_id, write=True)
+    _lock(db, video)
+    row = sp.get(db, video.id, image_id)
+    if row is None:
+        raise HTTPException(404, "Photo not found")
+    now = tagging.now_utc()
+    sp.mark_removed([row], viewer.member_id, now)
+    audit(db, viewer.member_id, "scoresheet_photo_removed", "video", str(video.id),
+          image=str(row.id))  # fmt: skip
+    db.commit()
+    if sp.purge(db, store, [row], now):
+        db.commit()
     return Response(status_code=204)

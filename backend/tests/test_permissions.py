@@ -392,3 +392,46 @@ def test_scoresheet_permission_matrix() -> None:
         leads = lead_lineages(who, ALL_TEAMS)
         assert can_see_sheet(who, team, ALL_TEAMS) is sees, (who, team)
         assert can_edit_sheet(who, team, leads) is types, (who, team)
+
+
+# Photos of the paper scoresheet (PLAN §10.3a, SS3; O14): narrower than the typed sheet, since the
+# players' names stay readable on them. The team's coaches and team managers (any season), sport
+# admins and admins; a guest team's own coaches. Never players or helpers.
+from wieplay.core.permissions import can_edit_sheet_photo, can_see_sheet_photo  # noqa: E402
+
+SHEET_PHOTO_MATRIX = [
+    # (who, team, sees, adds and removes the photos)
+    (viewer(roles=("admin",)), H3_NOW, True, True),
+    (viewer(roles=("admin",)), GAST_NOW, True, True),  # admins see both sides
+    (viewer(sport_admin=("volleyball",)), H3_NOW, True, True),
+    (viewer(sport_admin=("volleyball",)), HERREN1_NOW, False, False),
+    (viewer(sport_admin=("volleyball",)), GAST_NOW, False, False),  # Wiedisync's: KSCW only
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, True, True),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_PREV, True, True),  # every season
+    (viewer(teams=[{"team": 12, "rel": ["coach"]}]), H3_NOW, True, True),  # a former coach
+    (viewer(teams=[{"team": 92, "rel": ["team_responsible"]}]), H3_NOW, True, True),
+    (viewer(teams=[{"team": 92, "rel": ["player"]}]), H3_NOW, False, False),  # types, no photo
+    (viewer(teams=[{"team": 92, "rel": ["player", "captain"]}]), H3_NOW, False, False),
+    (H3_HELPER, H3_NOW, False, False),  # helpers type the sheet, never see the photo
+    (H3_HELPER, H3_PREV, False, False),
+    (D1_PLAYER, H3_NOW, False, False),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), D1_NOW, False, False),
+    (viewer(teams=[{"team": 99, "rel": ["coach"]}]), OFF_TEAM, False, False),  # switched off
+    (viewer(roles=("vorstand",)), H3_NOW, False, False),
+    (GUEST_COACH, GAST_NOW, True, True),  # the guest club's own coach
+    (CARRIED_COACH, GAST_PREV, True, True),
+    (GUEST_PLAYER, GAST_NOW, False, False),
+    (GUEST_COACH, OTHER_GAST, False, False),
+    (GUEST_COACH, H3_NOW, False, False),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), GAST_NOW, False, False),
+]
+
+
+def test_scoresheet_photo_permission_matrix() -> None:
+    for who, team, sees, edits in SHEET_PHOTO_MATRIX:
+        leads = lead_lineages(who, ALL_TEAMS)
+        assert can_see_sheet_photo(who, team, leads) is sees, (who, team)
+        assert can_edit_sheet_photo(who, team, leads) is edits, (who, team)
+        # Whoever sees the photo sees the typed sheet: the photo's rule is the narrower one.
+        if sees:
+            assert can_see_sheet(who, team, ALL_TEAMS), (who, team)

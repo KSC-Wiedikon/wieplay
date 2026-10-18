@@ -9,6 +9,8 @@ Key layout in the bucket:
     media/<video>/<rendition>/init.mp4, seg_00001.m4s …   HLS renditions
     media/<video>/thumbs/sprite_001.jpg …, poster.jpg     scrub previews
     media/<video>/analysis/ball-track-<token>.json.gz       the ball's path (PLAN §10.4)
+    sheets/<video>/<image>.jpg                 scoresheet photos, redacted and re-encoded by the
+                                               API (PLAN §10.3a); deleted with the video
 """
 
 from __future__ import annotations
@@ -55,6 +57,7 @@ class ObjectStore(Protocol):
     def upload_gone(self, exc: Exception) -> bool: ...
     def size(self, key: str) -> int | None: ...
     def read(self, key: str, max_bytes: int) -> bytes | None: ...
+    def put(self, key: str, data: bytes, content_type: str) -> None: ...
     def delete(self, keys: Iterable[str]) -> None: ...
     def delete_prefix(self, prefix: str) -> int: ...
 
@@ -179,6 +182,16 @@ class S3Store:
             raise
         data: bytes = response["Body"].read()
         return data
+
+    def put(self, key: str, data: bytes, content_type: str) -> None:
+        """A small object written by the API itself (a scoresheet photo it re-encoded)."""
+        self._client.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            CacheControl="private, no-store",
+        )
 
     def delete(self, keys: Iterable[str]) -> None:
         batch: list[Any] = []
