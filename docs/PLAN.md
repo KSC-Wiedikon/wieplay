@@ -91,7 +91,7 @@ From the Q&A on 15.10.2026 (second round supersedes the first):
 
 | # | Topic | Decision |
 |---|---|---|
-| D1 | Capture | Each team films with **its own dedicated camera**, minimum **1080p50**; the club buys none. A **YouTube or Twitch link** is accepted as a source **for the club's own videos only** (the club's channel or a member's own channel): WiePlay imports the file (§7.2.2, decided 16.10.2026); the **original file is preferred** (the platforms re-encode) and can replace the import later. |
+| D1 | Capture | Each team films with **its own dedicated camera**, minimum **720p50** (1080p50 preferred; lowered from 1080p50 on 18.10.2026: every resolution from 720p is accepted); the club buys none. A **YouTube or Twitch link** is accepted as a source **for the club's own videos only** (the club's channel or a member's own channel): WiePlay imports the file (§7.2.2, decided 16.10.2026); the **original file is preferred** (the platforms re-encode) and can replace the import later. |
 | D2 | Teams, volume | H3, D1, DU23-1 (volleyball), Herren 1 (basketball). ~100 videos per season in total. **DU23-1: trainings only** (decided 15.10.2026, §5.3). **Matches only for now** (decided 16.10.2026): trainings removed from the product, tables kept until the cleanup migration (§5.3). |
 | D3 | Delivery | Hetzner Object Storage. **HLS**: the authenticated API serves the playlist and every segment URL is signed with a **TTL of minutes** at the moment the player asks for it. No long-lived link per video anywhere. A copied link dies quickly; a 2 h match plays without interruption (§7.6). |
 | D4 | Compute | **Lenovo server** = always-on media worker (ingest, transcode, clips/exports, CPU analysis). **Inference starts internal** (decided 15.10.2026): on the **Framework 16** (RTX 5070 Laptop GPU, 8 GB, CUDA; always on), with a researched plan to move to an **EU or Swiss provider** later (§8.6). US providers are out. The Framework 16 is also the development and training machine; the RTX 4090 PC is not part of the plan. The worker interface is backend-agnostic (queue → worker), so internal, provider and a future GPU box are interchangeable (§8). |
@@ -658,7 +658,7 @@ video             id, team_id → wd_team, kind 'match'|'training'|'other',
                   rallies_reviewed_at NULL, rallies_reviewed_by NULL  -- §10.1
                   actions_reviewed_at NULL, actions_reviewed_by NULL  -- §10.4a
 video_source_file video_id, part_no, nas_path, bytes, sha256, duration_ms, offset_ms
-video_rendition   video_id, name '1080p50'|'540p25', codec, bitrate, segment_seconds,
+video_rendition   video_id, name '1080p50'|'720p50'|'540p25', codec, bitrate, segment_seconds,
                   segment_count, storage_prefix, bytes, job_id
 video_roster      video_id, side 'us'|'them', number, member_id NULL (us only),
                   position NULL, is_libero    UNIQUE(video_id, side, number)
@@ -667,7 +667,7 @@ inbox_file        id, nas_path, size, probed jsonb, recorded_at_guess, status, v
 
 - Cameras split long recordings into several files: `video_source_file` keeps the parts and
   their offsets; ingest joins them losslessly.
-- `meets_standard = false` (e.g. 25 fps, 720p) still plays and can be tagged, but is skipped
+- `meets_standard = false` (e.g. 25 fps, 576p; 720p meets it since 18.10.2026) still plays and can be tagged, but is skipped
   by tier 2 and shown with a hint.
 - `video_roster` is a **snapshot** (numbers differ between teams, guests play); tags resolve
   number → member through it, so later roster changes never rewrite history.
@@ -1023,6 +1023,7 @@ automatically for matches that meet the standard, once those features exist.
 | Rendition | Use | Encoding (H.264 High, AAC) | ≈ size |
 |---|---|---|---|
 | `1080p50` | Tagging, desktop viewing, frame stepping | ~5 Mb/s VBR (max 7), closed GOP 2 s, 4 s fMP4 HLS segments | 2.3 GB/h |
+| `720p50` | Instead of `1080p50` for a 720p camera (18.10.2026): not shrunk to 540p | ~3 Mb/s VBR (max 4.2), same GOP and segments | 1.4 GB/h |
 | `540p25` | Phones, weak connections | ~1.2 Mb/s, GOP 2 s, 4 s segments | 0.6 GB/h |
 | Thumbnail sprite + WebVTT | Scrub previews | 1 frame / 10 s, 160 px wide | few MB |
 

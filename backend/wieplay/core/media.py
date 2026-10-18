@@ -37,18 +37,21 @@ class RenditionSpec:
         }
 
 
-# 1080p for tagging and desktop, 540p for phones and weak connections (PLAN §7.4).
+# 1080p for tagging and desktop (720p when the camera films 720p: not shrunk to 540p), 540p
+# for phones and weak connections (PLAN §7.4).
 RENDITIONS = (
     RenditionSpec("1080p", 1080, 50, 5000, 7000, 128),
+    RenditionSpec("720p", 720, 50, 3000, 4200, 128),
     RenditionSpec("540p", 540, 25, 1200, 1600, 96),
 )
+FULL, SMALL = RENDITIONS[:-1], RENDITIONS[-1]
 SEGMENT_SECONDS = 4
 THUMB_INTERVAL_SECONDS = 10
 THUMB_WIDTH = 160
 THUMB_COLUMNS = 10
 THUMB_ROWS = 10
 
-STANDARD_MIN_HEIGHT = 1080
+STANDARD_MIN_HEIGHT = 720  # 720p cameras are fine (18.10.2026; it was 1080)
 STANDARD_MIN_FPS = 49.0
 
 # Used with fullmatch: no trailing newline, ASCII digits only.
@@ -59,9 +62,10 @@ CODECS = re.compile(r"[A-Za-z0-9.,]{1,64}")
 
 
 def renditions_for(source_height: int) -> list[RenditionSpec]:
-    """Renditions at or below the source height; always at least the smallest one."""
-    fitting = [r for r in RENDITIONS if r.height <= source_height]
-    return fitting or [RENDITIONS[-1]]
+    """The largest full rendition at or below the source height (one, not 1080p and 720p
+    both) and 540p; only 540p for a source below 720p."""
+    full = next((r for r in FULL if r.height <= source_height), None)
+    return [full, SMALL] if full else [SMALL]
 
 
 def standard_issues(width: int, height: int, fps: float) -> list[str]:

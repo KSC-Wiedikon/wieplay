@@ -281,14 +281,16 @@ def test_upload_to_playback_to_deletion(
     assert actions.count("video_viewed") == 1
 
 
-def test_lower_resolution_video_is_flagged_and_gets_only_540p(
-    app: FastAPI, club: dict[str, TestClient], store: FakeStore
-) -> None:
+def _transcodes(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, height: int, fps: int
+) -> tuple[list[tuple[Any, ...]], dict[str, Any]]:
+    """Upload a video filmed at `height`p and `fps`; the renditions it was transcoded to."""
     video = upload_all(club["coach"], store, create_match(club["coach"]).json())
     w = worker_client(app, club["admin"], MEDIA_CAPS)
     [ingest] = claim(w, MEDIA_CAPS)
     w.post(
-        f"/api/worker/jobs/{ingest['id']}/complete", json=ingest_result(ingest, height=720, fps=25)
+        f"/api/worker/jobs/{ingest['id']}/complete",
+        json=ingest_result(ingest, height=height, fps=fps),
     )
     kinds = []
     while jobs := claim(w, MEDIA_CAPS):
@@ -301,10 +303,38 @@ def test_lower_resolution_video_is_flagged_and_gets_only_540p(
         )
         body = transcode_result(jobs[0]) if jobs[0]["kind"] == "transcode" else THUMBS
         w.post(f"/api/worker/jobs/{jobs[0]['id']}/complete", json=body)
-    assert ("transcode", "540p", 25.0) in kinds and not any(k[1] == "1080p" for k in kinds)
     got = club["coach"].get(f"/api/videos/{video['id']}").json()
     assert got["status"] == "ready"
-    assert got["meets_standard"] is False and got["standard_issues"] == ["720p", "25fps"]
+    return kinds, got
+
+
+def test_a_720p_video_keeps_720p_and_meets_the_standard(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    """720p is enough (it was 1080p): it plays at 720p, not shrunk to 540p, and only a
+    low frame rate is flagged."""
+    kinds, got = _transcodes(app, club, store, height=720, fps=25)
+    transcodes = [k[1:] for k in kinds if k[0] == "transcode"]
+    assert sorted(transcodes) == [("540p", 25.0), ("720p", 25.0)]
+    assert got["meets_standard"] is False and got["standard_issues"] == ["25fps"]
+    _, got = _transcodes(app, club, store, height=720, fps=50)
+    assert got["meets_standard"] is True and got["standard_issues"] == []
+
+
+def test_below_720p_is_flagged_and_gets_only_540p(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    kinds, got = _transcodes(app, club, store, height=576, fps=50)
+    assert [k[1] for k in kinds if k[0] == "transcode"] == ["540p"]
+    assert got["meets_standard"] is False and got["standard_issues"] == ["576p"]
+
+
+def test_above_1080p_gets_1080p_and_540p_only(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore
+) -> None:
+    kinds, got = _transcodes(app, club, store, height=2160, fps=50)
+    assert sorted(k[1] for k in kinds if k[0] == "transcode") == ["1080p", "540p"]
+    assert got["meets_standard"] is True
 
 
 def test_a_video_plays_after_its_first_rendition(
