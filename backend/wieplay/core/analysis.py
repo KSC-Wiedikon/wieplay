@@ -313,6 +313,14 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         .distinct()
     ):
         have_tracks.setdefault(video_id, set()).add(kind)
+    # The serve rule each video's newest serve track was made with (null: rule 1).
+    serve_rule: dict[uuid.UUID, int] = {}
+    for video_id, rule in db.execute(
+        select(AnalysisTrack.video_id, AnalysisTrack.rule)
+        .where(AnalysisTrack.video_id.in_([v.id for v in videos]), AnalysisTrack.kind == "serve")
+        .order_by(AnalysisTrack.created_at)
+    ):
+        serve_rule[video_id] = rule or 1  # the newest wins
     train: list[dict[str, Any]] = []
     others: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
@@ -325,8 +333,10 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         entry: dict[str, Any] = {
             "video_id": str(video.id),
             "features": _artifact_out(artifact),
-            # Series the API already has for it (the worker adds what is missing).
+            # Series the API already has for it (the worker adds what is missing), and the
+            # serve rule its serve track was made with (the worker redoes an older one).
             "tracks": sorted(have_tracks.get(video.id, set())),
+            "serve_rule": serve_rule.get(video.id),
         }
         rallies = human_rallies(db, video.id) if video.rallies_reviewed_at else []
         if rallies and video.lineage_id in no_training:
@@ -402,6 +412,7 @@ class TrackIn(BaseModel):
     channels: dict[str, str] = Field(max_length=8)
     finder: Literal["v0", "v1"] | None = None  # serve: the rule or the trained model
     model_run_id: uuid.UUID | None = None  # serve v1: its training
+    rule: int | None = Field(default=None, ge=1, le=1000)  # serve: the rule's version
 
     @model_validator(mode="after")
     def _channels(self) -> TrackIn:

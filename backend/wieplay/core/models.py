@@ -939,6 +939,8 @@ class AnalysisTrack(Base):
     step_ms: Mapped[int] = mapped_column(Integer)
     finder: Mapped[str | None] = mapped_column(String(16))  # serve: v0 | v1
     source_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)  # serve v1: its training
+    # serve: the serve rule's version it was computed with (wieplay/ml/serve.py RULE; null: 1)
+    rule: Mapped[int | None] = mapped_column(Integer)
     channels: Mapped[dict[str, str]] = mapped_column(JSONB)  # name: base64(zlib(bytes))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

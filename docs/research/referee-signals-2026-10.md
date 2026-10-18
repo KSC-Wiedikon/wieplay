@@ -35,8 +35,9 @@ cards, replays, change of decision etc."
   the right edge of the picture, at ≥ 95 % confidence (5 seen in one game, 17 in another), and
   in a third hall read 7 far serves as near; where it is that sure it agrees with the scoreboard's
   log on only 88 % and 82 % of the rallies, so it is a weak reference for anything that needs
-  ≥ 95 %. The end whistle is found within 3 s before the rally finder's end for 2–56 % of the
-  rally ends, depending on the hall.
+  ≥ 95 %. **Fixed the same day** (rule 2, PLAN §10.3): 78.7 % → 95.4 % over five games, and
+  ≥ 95 % now right in 97 % of the answers. The end whistle is found within 3 s before the rally
+  finder's end for 2–56 % of the rally ends, depending on the hall.
 
 ## Data and references
 
@@ -193,7 +194,11 @@ referee's. Every disagreement above was therefore looked at.
   rallies starting after the ones ending at 2819, 2864, 3092, 3363 and 6717 s); in the Volero 4
   game (camera in the corner) 17 such serves. In the Volewa Wald game it went the other way too:
   seven far serves read as near. The serve side (§10.3, `wieplay/ml/serve.py`) should look at
-  these; the scoreboard's log now shows where it errs.
+  these; the scoreboard's log now shows where it errs. *Fixed on 18.10.2026 (rule 2, PLAN
+  §10.3): the serve side now measures where the ball first shows and where it goes from the far
+  court's centre in both axes, not its height alone, and passes over a slow ball (held, carried,
+  bounced) for the next track. Against the logs and serves labelled by eye in three halls: 288
+  → 349 of 366 right; Volero 4 49 % → 87 %, Volewa Wald 85 % → 97 %.*
 - **The serve evidence is a weak reference** for anything that needs ≥ 95 %: 88 % and 82 %
   agreement with the log on the two games that have one. Measure against the log (§10.10) or
   the scoresheet (§10.3a).

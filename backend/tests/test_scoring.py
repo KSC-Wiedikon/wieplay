@@ -13,7 +13,7 @@ import pytest
 from wieplay.core import stats
 from wieplay.ml import gaps, serve, tracks
 from wieplay.ml import scoring as sc
-from wieplay.ml.features import HEIGHT, Signals
+from wieplay.ml.features import HEIGHT, WIDTH, Signals
 
 # --- a match to score ----------------------------------------------------------------------------
 
@@ -357,6 +357,123 @@ def test_v0_tells_near_from_far_serves() -> None:
         assert value is not None and (value >= 0.5) == near
     # Nothing to see: no evidence.
     assert np.isnan(serve.p_near_v0(serve.features_at(ev, [590.0]))).all()
+
+
+Point = tuple[float, float]
+
+
+def path_signals(
+    paths: list[tuple[float, list[tuple[Point, Point, int]]]],
+    centre: Point = (0.5, 0.42),
+    duration_s: float = 300.0,
+) -> Signals:
+    """A video of the ball along straight pieces (from, to, frames; picture 0..1) starting at
+    the given times, each followed by play around `centre` (the far court, where the ball
+    spends most of its time)."""
+    fps = 30.0
+    n = int(duration_s * fps)
+    vis = np.zeros(n, np.uint8)
+    x = np.full(n, -1, np.float32)
+    y = np.full(n, -1, np.float32)
+    for t, pieces in paths:
+        f = int(t * fps)
+        for (x0, y0), (x1, y1), frames in pieces:
+            for k in range(frames):
+                u = k / frames
+                if (x0, y0) != (-1.0, -1.0):  # (-1, -1): the ball not seen
+                    vis[f] = 1
+                    x[f] = WIDTH * (x0 + (x1 - x0) * u)
+                    y[f] = HEIGHT * (y0 + (y1 - y0) * u)
+                f += 1
+        for k in range(150):
+            vis[f + k] = 1
+            x[f + k] = WIDTH * (centre[0] + 0.12 * np.sin(k / 9))
+            y[f + k] = HEIGHT * (centre[1] + 0.03 * np.cos(k / 7))
+    return Signals(
+        fps=fps, duration_s=duration_s, ball_vis=vis, ball_x=x, ball_y=y,
+        ball_score=np.where(vis, 0.8, 0.0).astype(np.float16),
+        motion=np.ones((n, 3, 4), np.float16), band_db=np.zeros(0, np.float32),
+        all_db=np.zeros(0, np.float32), tonal_db=np.zeros(0, np.float32),
+        peak_hz=np.zeros(0, np.uint16), whistles=np.zeros((0, 5), np.float32),
+    )  # fmt: skip
+
+
+def p_near_at(sig: Signals, times: list[float]) -> list[float]:
+    """P(near) of rallies starting a second before each of these times."""
+    p = serve.p_near_v0(serve.features_at(serve.evidence(sig), [t - 1.0 for t in times]))
+    return [float(v) for v in p]
+
+
+# The serves of the cases below (from, to, frames), the far court's centre at (0.5, 0.42).
+FAR = [((0.5, 0.42), (0.44, 0.8), 30)]  # in the far court, then towards the camera
+NEAR_LOW = [((0.45, 0.88), (0.5, 0.45), 25)]  # at the server's hands, low in the picture
+# A jump serve at the right edge: the ball shows at the far court's height and flies left.
+NEAR_RIGHT_EDGE = [((0.95, 0.42), (0.56, 0.4), 22)]
+NEAR_LEFT_EDGE = [((0.04, 0.44), (0.42, 0.41), 22)]
+# A jump serve's toss at the right edge, high above the far court, then the hit.
+NEAR_TOSS = [((0.9, 0.3), (0.87, 0.08), 15), ((0.87, 0.08), (0.84, 0.25), 12),
+             ((0.84, 0.25), (0.55, 0.4), 15)]  # fmt: skip
+
+
+CASES = [
+    (FAR, False, 0.9),
+    (NEAR_LOW, True, 0.9),
+    (NEAR_RIGHT_EDGE, True, 0.9),
+    (NEAR_LEFT_EDGE, True, 0.9),
+    (NEAR_TOSS, True, 0.7),  # rising away from the far court at first: near, less surely
+]
+
+
+@pytest.mark.parametrize(("pieces", "near", "sure"), CASES)
+def test_the_serve_side_from_where_the_ball_shows_and_where_it_goes(
+    pieces: list[tuple[Point, Point, int]], near: bool, sure: float
+) -> None:
+    sig = path_signals([(20.0 + 20 * i, pieces) for i in range(10)])
+    for p in p_near_at(sig, [20.0 + 20 * i for i in range(10)]):
+        assert (p > sure) if near else (p < 1 - sure)
+
+
+def test_a_near_jump_serve_at_the_edge_is_near_whatever_its_height() -> None:
+    """The bug of rule 1: a near jump serve that first shows at the far court's height at the
+    right edge of the picture was read as far at >= 95 %."""
+    for height in (0.3, 0.42, 0.5):
+        pieces = [((0.95, height), (0.56, 0.41), 22)]
+        sig = path_signals([(20.0 + 20 * i, pieces) for i in range(5)])
+        assert min(p_near_at(sig, [20.0 + 20 * i for i in range(5)])) > 0.9
+
+
+def test_a_corner_camera_with_the_far_court_high_in_the_picture() -> None:
+    """The far court's centre comes from where the ball spends its time, not the middle of the
+    picture: a camera at a corner, tilted down, sees it at the top."""
+    centre = (0.55, 0.2)
+    far = [((0.55, 0.2), (0.5, 0.6), 30)]
+    near = [((0.97, 0.22), (0.62, 0.2), 22)]
+    sig = path_signals([(20.0 + 20 * i, near if i % 2 else far) for i in range(10)], centre=centre)
+    p = p_near_at(sig, [20.0 + 20 * i for i in range(10)])
+    assert [v >= 0.5 for v in p] == [i % 2 == 1 for i in range(10)]
+    assert min(max(v, 1 - v) for v in p) > 0.9
+
+
+def test_a_slow_ball_before_the_serve_is_passed_over() -> None:
+    """A ball carried to the end line, rolled or bounced (slower than SLOW) is not the serve:
+    here one moves slowly in the near court before a far serve."""
+    slow = ((0.3, 0.72), (0.33, 0.72), 20)  # 0.045 picture widths per second
+    gap = ((-1.0, -1.0), (-1.0, -1.0), 15)
+    sig = path_signals([(20.0 + 20 * i, [slow, gap, *FAR]) for i in range(10)])
+    assert max(p_near_at(sig, [20.0 + 20 * i for i in range(10)])) < 0.1
+    # Nothing but the slow ball: still some evidence, and not a sure one.
+    sig = path_signals([(20.0, [slow])])
+    [p] = p_near_at(sig, [20.0])
+    assert not np.isnan(p) and 0.03 < p < 0.97
+
+
+def test_a_late_first_track_is_trusted_less() -> None:
+    sig = path_signals([(20.0, NEAR_RIGHT_EDGE)])
+    ev = serve.evidence(sig)
+    soon, late = serve.p_near_v0(serve.features_at(ev, [19.0, 15.5]))
+    assert soon > 0.95 and 0.5 < late < 0.8
+    # No ball within the window: no evidence.
+    assert np.isnan(serve.p_near_v0(serve.features_at(ev, [10.0]))).all()
 
 
 def test_v1_learns_and_is_scored_on_held_out_games() -> None:

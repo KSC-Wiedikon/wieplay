@@ -147,6 +147,7 @@ def series(
             "step_ms": tracks.SERVE_STEP_MS,
             "finder": name,
             "model_run_id": run_id,
+            "rule": serve.RULE,
             "channels": {"p_near": tracks.encode(data)},
         }
     if "activity" in kinds:
@@ -283,10 +284,14 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
     for n, entry in enumerate(everyone):
         if ctx.cancel.is_set():
             raise ffmpeg.Cancelled()
-        # Every game gets the new serve model's track; the others what they miss.
+        # Every game gets the new serve model's track, and a new serve track when its own was
+        # made by an older serve rule; the others what they miss. (An API that does not say
+        # which rule made a track: taken as this one.)
+        stale = entry.get("serve_rule", serve.RULE) not in (None, serve.RULE)
         kinds = tuple(
             k for k in ("serve", "activity")
-            if (k == "serve" and serve_model is not None) or k not in entry.get("tracks", [])
+            if (k == "serve" and (serve_model is not None or stale))
+            or k not in entry.get("tracks", [])
         )  # fmt: skip
         propose = accepted and model is not None and entry in others
         if not kinds and not propose:
@@ -316,7 +321,7 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
                 "v0": rallies.V0Params().as_dict(),
                 "sklearn": sklearn.__version__,
                 "features": model.names if model else [],
-                "serve": {"name": SERVE_MODEL, "features": serve.FEATURES},
+                "serve": {"name": SERVE_MODEL, "features": serve.FEATURES, "rule": serve.RULE},
             },
         },
         "artifact": artifact,

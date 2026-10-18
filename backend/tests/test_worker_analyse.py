@@ -29,7 +29,7 @@ from tests.media_helpers import (
     worker_client,
 )
 from wieplay.core.analysis import TrainResult
-from wieplay.ml import rallies
+from wieplay.ml import rallies, serve
 from wieplay.ml.features import Signals
 from wieplay.worker import ffmpeg
 from wieplay.worker.client import ClaimedJob
@@ -244,10 +244,45 @@ def test_train_rallies_handler(worker_settings: WorkerSettings) -> None:
     assert set(result["serve"]["evaluation"]["videos"]) == {ids[0], ids[1]}
     assert set(result["tracks"][ids[0]]) == {"serve", "activity"}
     assert set(result["tracks"][ids[2]]) == {"serve"}  # it had its activity already
+    assert result["tracks"][ids[2]]["serve"]["rule"] == serve.RULE
     # A training never reads outside the analysis root.
     inputs["train"][0]["features"] = {"nas_path": "../../etc/passwd", "sha256": "0" * 64}
     escaped = HANDLERS["train_rallies"](context(worker_settings, FakeApi(inputs), job))
     assert [d["video_id"] for d in escaped["dataset"]] == [ids[1]]
+
+
+def test_a_training_redoes_the_serve_tracks_of_an_older_rule(
+    worker_settings: WorkerSettings,
+) -> None:
+    root = worker_settings.analysis_root
+    assert root is not None
+    true, duration = league_rallies(10, seed=70)
+    path = root / "videos" / "v" / "signals.npz"
+    path.parent.mkdir(parents=True)
+    synthetic_signals(true, duration, seed=71).save(path)
+    ref = {"nas_path": "videos/v/signals.npz",
+           "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}  # fmt: skip
+    stale, current, unknown = (str(uuid.UUID(int=k + 1)) for k in range(3))
+    both = ["activity", "serve"]
+    inputs: dict[str, Any] = {
+        "rally_model": None,
+        "serve_model": None,
+        "train": [],  # nothing reviewed: no serve model, the rule's tracks only
+        "others": [
+            {"video_id": stale, "features": ref, "tracks": both, "serve_rule": 1},
+            {"video_id": current, "features": ref, "tracks": both, "serve_rule": serve.RULE},
+            {"video_id": unknown, "features": ref, "tracks": both},  # an API that does not say
+        ],
+    }
+    job = {"id": "0123456789abcdef", "kind": "train_rallies",
+           "params": {"out_dir": "models/rallies"}}  # fmt: skip
+    result = HANDLERS["train_rallies"](context(worker_settings, FakeApi(inputs), job))
+    TrainResult.model_validate(result)
+    assert set(result["tracks"]) == {stale}
+    assert set(result["tracks"][stale]) == {"serve"}
+    assert result["tracks"][stale]["serve"]["finder"] == "v0"
+    assert result["tracks"][stale]["serve"]["rule"] == serve.RULE
+    assert result["model"]["params"]["serve"]["rule"] == serve.RULE
 
 
 def test_the_analysis_runs_on_a_background_lane(tmp_path: Path) -> None:
