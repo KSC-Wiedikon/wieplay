@@ -10,11 +10,11 @@ import logging
 import math
 import uuid
 from dataclasses import asdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any, Literal
 
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -48,6 +48,8 @@ from wieplay.core.permissions import (
     can_tag,
     can_upload,
     can_use_inbox,
+    lead_lineages,
+    visible_team_ids,
 )
 from wieplay.core.storage import ObjectStore, safe_file_name
 
@@ -60,6 +62,7 @@ UPCOMING_DAYS = 21
 FILMING_PAST_DAYS = 400
 DELETED_SWEEP_AFTER = timedelta(hours=2)  # beyond the 1 h worker upload URLs
 UPCOMING_MAX = 12
+MAX_INT4 = 2**31 - 1  # Wiedisync's ids are Postgres integers
 
 
 class FilmingBlocked(Exception):
@@ -491,6 +494,94 @@ def team_videos(
     if game_ids:
         db.scalars(select(WdGame).where(WdGame.id.in_(game_ids))).all()
     return [_video_out(db, v, access, viewer, settings, progress, analysis) for v in videos]
+
+
+class GameTeamOut(BaseModel):
+    id: int
+    name: str
+    season: str
+    sport: Literal["volleyball", "basketball"]
+    can_upload: bool
+
+
+class LinkedGameOut(BaseModel):
+    id: int
+    date: date | None
+    time: time | None
+    home_name: str | None
+    away_name: str | None
+    team: GameTeamOut
+
+
+class GameVideosOut(BaseModel):
+    """What a link from a Wiedisync game card opens (PLAN §4.4). `game` is None for a game the
+    viewer may not see, and for one WiePlay does not know: the same answer either way."""
+
+    game: LinkedGameOut | None
+    videos: list[VideoOut]
+
+
+@router.get("/games/{game_id}/videos", response_model=GameVideosOut)
+def game_videos(
+    game_id: Annotated[int, Path(ge=1, le=MAX_INT4)],
+    viewer: ViewerDep,
+    db: DbDep,
+    settings: SettingsDep,
+) -> GameVideosOut:
+    """The videos of a Wiedisync game (its id is Wiedisync's) that the viewer may watch, from
+    every team row they see; several when more than one camera filmed it. Players see ready
+    videos only, as on the team page. A game the viewer may not see answers exactly as a game
+    without videos, so the answer never tells whether it exists."""
+    refs = team_refs(db)
+    visible = visible_team_ids(viewer, refs)
+    leads = lead_lineages(viewer, refs)
+    ref_by_id = {r.id: r for r in refs}
+    accesses: dict[int, TeamAccess] = {}
+
+    def access_to(team_id: int) -> TeamAccess:
+        if team_id not in accesses:
+            team = db.get(WdTeam, team_id)
+            assert team is not None
+            accesses[team_id] = TeamAccess(team, ref_by_id[team_id], leads)
+        return accesses[team_id]
+
+    found = db.scalars(
+        select(Video)
+        .where(
+            Video.game_id == game_id,
+            Video.status != "deleted",
+            Video.team_id.in_(sorted(visible)),
+        )
+        .order_by(Video.created_at, Video.id)
+    ).all()
+    videos = [v for v in found if v.status == "ready" or _manages(viewer, access_to(v.team_id))]
+    progress, analysis = _progress(db, videos), _analysis(db, videos)
+
+    game = db.get(WdGame, game_id)
+    linked = None
+    if game is not None and game.team_id in visible:
+        access = access_to(game.team_id)
+        linked = LinkedGameOut(
+            id=game.id,
+            date=game.date,
+            time=game.time,
+            home_name=game.home_name,
+            away_name=game.away_name,
+            team=GameTeamOut(
+                id=access.team.id,
+                name=access.team.name,
+                season=access.team.season,
+                sport=access.team.sport,
+                can_upload=can_upload(viewer, access.ref),
+            ),
+        )
+    return GameVideosOut(
+        game=linked,
+        videos=[
+            _video_out(db, v, access_to(v.team_id), viewer, settings, progress, analysis)
+            for v in videos
+        ],
+    )
 
 
 def _resolve_match(db: Session, team: WdTeam, body: VideoCreateIn) -> tuple[date, str, int | None]:

@@ -521,3 +521,23 @@ describe('UploadPage', () => {
     })
   })
 })
+
+describe('UploadPage with ?game= (from the page of a Wiedisync game)', () => {
+  it('starts with that game picked', async () => {
+    vi.stubGlobal('fetch', vi.fn(uploadApi()))
+    renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload?game=501' })
+
+    expect(await screen.findByText(`Filming is allowed on ${formatDate(gameDate)}.`)).toBeInTheDocument()
+    expect(screen.getByLabelText('Match')).toHaveValue('501')
+  })
+
+  it('ignores a game that is not one of the choices', async () => {
+    vi.stubGlobal('fetch', vi.fn(uploadApi()))
+    renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload?game=999' })
+
+    const match = await screen.findByLabelText('Match')
+    await screen.findByRole('option', { name: `${formatDate(gameDate)} · Volley Näfels` })
+    expect(match).toHaveValue('')
+    expect(screen.queryByText(/Filming is allowed/)).not.toBeInTheDocument()
+  })
+})

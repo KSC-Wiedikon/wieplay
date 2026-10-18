@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { Badge, SportBadge } from '../components/Badge'
 import { Button } from '../components/Button'
 import { buttonClasses } from '../components/buttonStyles'
@@ -113,7 +113,7 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   // A guest club's team (PLAN §4.5) has no Wiedisync games, no NAS inbox and no link imports:
   // a date and a title, and the files from this device.
   const guest = team.guest === true
-  const [match, setMatch] = useState(guest ? OTHER_MATCH : '')
+  const [picked, setMatch] = useState(guest ? OTHER_MATCH : '')
   const [otherDate, setOtherDate] = useState(today)
   const [otherTitle, setOtherTitle] = useState('')
   const [source, setSource] = useState<Source>('device')
@@ -142,6 +142,11 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
     [games.data, oldest, today],
   )
 
+  // `?game=<id>`: the game is already picked (WiePlay's page for a Wiedisync game links here),
+  // as long as it is one of the choices and nothing else was picked.
+  const [searchParams] = useSearchParams()
+  const linked = searchParams.get('game')
+  const match = picked === '' && linked !== null && choices.some((c) => c.value === linked) ? linked : picked
   const other = match === OTHER_MATCH
   const choice = choices.find((c) => c.value === match)
   const otherDateOk = /^\d{4}-\d{2}-\d{2}$/.test(otherDate) && otherDate >= oldest && otherDate <= today

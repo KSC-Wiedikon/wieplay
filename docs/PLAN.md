@@ -273,8 +273,17 @@ sequenceDiagram
 | Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
 | ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in WiePlay**, per lineage. The bridge returns personal data only for the team ids WiePlay asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
 | Env | Directus `.env` (prod + dev) | `WIEPLAY_JWT_PRIVATE_KEY`, `WIEPLAY_JWT_KID`, `WIEPLAY_RETURN_URLS`, `WIEPLAY_SYNC_TOKEN_HASH`, and on dev `WIEPLAY_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
-| Later: "Video" link on game cards | `GameCard` | Plain link to `wieplay.kscw.ch/games/<id>`. |
+| "Video" link on game cards (built 18.10.2026) | `GameCard`, `GameDetailModal` | Link to `wieplay.kscw.ch/games/<id>` (dev: `wieplay-dev`), new tab, for played and today's games of teams marked `teams.wieplay_enabled`. The bridge's `/sync` sets that flag from the team ids WiePlay asks for (true for them, false for the rest), so Wiedisync learns which teams use WiePlay without a toggle of its own. |
 | Docs | `INFRA.md`, `SECURITY.md`, `PERMISSIONS.md` | Same commit, per Wiedisync rules. |
+
+**Game links (built 18.10.2026).** `/games/:id` takes a Wiedisync game id. After the normal
+login (`next`), `GET /api/games/{id}/videos` returns the game's videos the viewer may watch (any
+team row they see, not deleted; players ready ones only), and the game with its team when the
+viewer sees that team. One video: the page opens it. Several (more than one camera): a short
+list. None: "No video of this game yet", with a link to the team and, for whoever may upload and
+a game already played, to the upload page with the game picked (`/teams/<id>/upload?game=<id>`).
+A game the viewer may not see, or one WiePlay does not know, answers `{game: null, videos: []}`:
+nothing tells whether it exists.
 
 No `CORS_ORIGIN` change is needed. A Cloudflare Tunnel public hostname `wieplay.kscw.ch`
 (and `wieplay-dev.kscw.ch`) pointing at the API's local port is.
