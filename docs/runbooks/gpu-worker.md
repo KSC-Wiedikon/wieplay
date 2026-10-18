@@ -89,7 +89,9 @@ pauses excluded), `providers` and `gpu_paused_s` in its `model_run`.
 `git -C ~/repos/wieplay pull --ff-only origin main && ~/repos/wieplay/scripts/deploy-gpu-worker.sh prod`.
 The script ships the committed tree, builds the venv for a new commit (a minute; uv caches
 the wheels), copies the weights if the Lenovo image's differ, restarts the worker (a running
-job goes back to the queue) and keeps the last releases. Dev the same with `dev`; stop it
+job goes back to the queue) and keeps the last releases. Deploy the API first when the worker
+routes change: a newer worker against an older API is refused (its first claim asks for no
+job, `max: 0`, which older APIs reject with 422) and keeps retrying until the API catches up. Dev the same with `dev`; stop it
 afterwards (`ssh fw16-remote systemctl --user stop wieplay-gpu-worker@dev`).
 
 ## When something goes wrong

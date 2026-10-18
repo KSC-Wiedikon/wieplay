@@ -526,6 +526,7 @@ class Track:
     lo: int = 0
     hi: int = 0
     reads: list[tuple[int, int, float]] = field(default_factory=list)
+    team_share: float = 1.0  # its rally detections on its team's side (identities.Teams)
 
     @property
     def rally_detections(self) -> int:

@@ -89,10 +89,16 @@ class Teams:
     windows: list[int]
     info: dict[str, Any]
 
+    def assign(self, t: Track) -> None:
+        """Set the track's team, and how sure its detections are of it (`team_share`)."""
+        t.team = self.team_of(t)
+
     def team_of(self, t: Track) -> str:
         votes = {"us": 0, "them": 0}
         for (w, side), n in _window_sides(t).items():
             votes["us" if (side == NEAR) == self.near_us.get(w, True) else "them"] += n
+        total = votes["us"] + votes["them"]
+        t.team_share = max(votes.values()) / total if total >= TEAM_MIN_VOTES else 0.0
         if votes["us"] or votes["them"]:
             team = "us" if votes["us"] >= votes["them"] else "them"
         elif not self.windows:
@@ -207,6 +213,11 @@ def assign_teams(tracks: Sequence[Track], near_team: Sequence[str | None]) -> Te
 # recorded one).
 KIT_APART = 0.35
 KIT_SWAP = 0.6
+# A track is sure of its team with at least TEAM_MIN_VOTES detections in rallies (away from
+# the net) and TEAM_SURE of them on one team's side: only those claim a number (a piece of
+# their #7 whose feet were mostly at the net otherwise lands on our #7's card).
+TEAM_MIN_VOTES = 10
+TEAM_SURE = 0.75
 
 
 # --- swaps ----------------------------------------------------------------------------------
@@ -602,6 +613,7 @@ def as_chain(members: list[Track]) -> Track:
         window_sides=dict(window_sides),
         members=members,
         segments=[(m.first, m.last) for m in members],
+        team_share=sum(m.team_share * m.detections for m in members) / max(n, 1),
     )
     settle_number(chain)
     return chain
@@ -650,7 +662,12 @@ def assign_numbers(chains: Sequence[Track]) -> list[Track]:
             return not any(s0 <= t.last and t.first <= e0 for s0, e0 in held[n])
 
         owner: dict[int, int | None] = {}
-        claims = [m for c in mine for m in (c.members or [c]) if m.number is not None]
+        claims = [
+            m
+            for c in mine
+            for m in (c.members or [c])
+            if m.number is not None and m.team_share >= TEAM_SURE
+        ]
         claims.sort(key=lambda m: (-m.number_conf, -m.detections))
         for m in claims:
             n = m.number
@@ -677,6 +694,8 @@ def assign_numbers(chains: Sequence[Track]) -> list[Track]:
                 options = sorted(numbered, key=nearness)
                 owner[id(m)] = None
                 own = _likely_number(m)
+                if m.team_share < TEAM_SURE:
+                    continue  # unsure of its team: no number of either
                 for kn in options:
                     n = kn[1]
                     if nearness(kn)[0] > PROPAGATE_FRAMES:

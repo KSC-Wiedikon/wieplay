@@ -2072,6 +2072,21 @@ The result is honest but rough: 4,601 tracks became 449 cards (260 ours, 188 the
 ≥ 30 s); cards with a read shirt number are mostly one player, the rest mix teammates. Hence
 the beta, on demand.
 
+**Players v2 on the Framework 16's GPU, measured 18.10.2026** (§10.5, the job's own stages
+on local copies of three H3 games, `scripts/ml/players_eval.py`; the rendition download of a
+real job is not in these): detection and tracking at 10 fps over the stretches (the rallies
+and the dead time between them), YOLO26s 1280 px, CUDA:
+
+| Game | Length | Stretches | Frames | Detection (GPU) | Numbers and linking (CPU) |
+|---|---|---|---|---|---|
+| Legends (calibrated) | 2 h 12 min | 87 min | 52,072 | 7.3 min (120 frames/s) | ~1.1 min |
+| H1–H3 | 1 h 43 min | 60 min | 36,197 | 6.9 min | ~1.2 min |
+| VBC Swiss | 2 h 37 min | 93 min | 55,892 | 11.8 min (a second run beside it) | ~1.8 min |
+
+So **~8–13 min of GPU per match** (0.13–0.2 GPU-h), inside the 10–15 min this table
+planned for player detection and far below the Lenovo's 2 h. ONNX Runtime held ~0.5 GB of
+the card. GPU_E2E
+
 ---
 
 ## 11. Tier 1 as training data for tier 3
