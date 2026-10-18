@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -210,6 +211,82 @@ def test_a_trained_model_is_stored_and_checked(tmp_path: Path) -> None:
     assert back.trained_on == ["game-0", "game-1"]
     with pytest.raises(ValueError, match="SHA-256"):
         rallies.RallyModel.load(path, "0" * 64)
+
+
+def test_rejected_proposals_weigh_more_and_each_game_the_same() -> None:
+    """Hard negatives: the dead time inside a proposal a coach rejected weighs
+    `hard_negative` times an ordinary step; the part a kept rally covers does not."""
+    rallies_ms = [(1_000, 2_000)]
+    rejected = [(1_500, 3_000)]  # half of it is the kept rally's
+    w = rallies.game_weights(10, rallies_ms, rejected, 3.0)
+    assert w.sum() == pytest.approx(1.0)
+    ordinary = w[0]
+    assert w.tolist() == pytest.approx([ordinary] * 4 + [3 * ordinary] * 2 + [ordinary] * 4)
+    assert ordinary == pytest.approx(1 / 14)  # 8 ordinary steps + 2 at 3x
+    # No rejections (or a weight of 1): every step the same, as before.
+    assert rallies.game_weights(10, rallies_ms, [], 3.0).tolist() == pytest.approx([0.1] * 10)
+    assert rallies.game_weights(10, rallies_ms, rejected, 1.0).tolist() == pytest.approx([0.1] * 10)
+
+
+def test_training_uses_the_hard_negative_weights(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sklearn.ensemble import HistGradientBoostingClassifier
+
+    seen: dict[str, np.ndarray] = {}
+    original = HistGradientBoostingClassifier.fit
+
+    def spy(self: Any, X: Any, y: Any, **kw: Any) -> Any:
+        seen["w"] = np.asarray(kw["sample_weight"])
+        return original(self, X, y, **kw)
+
+    monkeypatch.setattr(HistGradientBoostingClassifier, "fit", spy)
+    a, b = two_games(seed=5)
+    end = a.rallies[0][1]
+    a.rejected = [(end + 3_000, end + 8_000)]  # ten steps of dead time after rally 1
+    rallies.fit([a, b], rallies.V1Params(max_iter=5), threads=1)
+    n_a = len(a.data()[0])
+    w_a, w_b = seen["w"][:n_a], seen["w"][n_a:]
+    assert w_a.sum() == pytest.approx(w_b.sum())  # each game counts the same
+    hard = rallies.labels_for(n_a, a.rejected) == 1
+    assert hard.sum() == 10
+    assert np.allclose(w_a[hard], 3 * w_a[0]) and np.allclose(w_a[~hard], w_a[0])
+    assert np.allclose(w_b, w_b[0])  # no rejections there
+
+
+def test_whistle_context_tells_serve_whistles_from_end_whistles() -> None:
+    """The owner's case (02.10.2026): after the end whistle the ball is thrown back over the
+    net. That ball follows a whistle that ended play; a rally's ball follows a serve
+    whistle that came after dead time."""
+    true = [(10.0, 20.0), (40.0, 52.0)]
+    sig = synthetic_signals(true, 70.0, seed=3, throws=True, squeaks=True)
+    f = step_features(sig)
+    ctx = rallies.whistle_context(sig, f, rallies.V0Params(min_serves=1))
+    last_play, serve_since = ctx[:, 0], ctx[:, 1]
+    assert np.isnan(last_play[:12]).all() and (serve_since[:12] == 60).all()  # none yet
+    in_rally = slice(24, 36)  # 12-18 s: after the serve whistle at 7-7.5 s
+    assert (last_play[in_rally] == 0).all()  # the squeak at 15 s is no whistle
+    assert serve_since[in_rally].min() > 4 and serve_since[in_rally].max() < 11
+    thrown = slice(42, 46)  # 21-23 s: the ball goes back after the end whistle at 19.7 s
+    assert (last_play[thrown] > 0.3).all() and (serve_since[thrown] > 13).all()
+    X, names = rallies.design(sig, f)
+    assert names[-3:] == ["v0", *rallies.WHISTLE_CONTEXT] and X.shape == (f.n_steps, len(names))
+    silent = synthetic_signals(true, 70.0, whistles=False, audio=False)
+    quiet = rallies.whistle_context(silent, step_features(silent))
+    assert np.isnan(quiet[:, 0]).all() and (quiet[:, 1] == 60).all()
+
+
+def test_a_model_loads_with_params_of_another_version(tmp_path: Path) -> None:
+    import pickle
+
+    model = rallies.fit(two_games(seed=6), rallies.V1Params(max_iter=5), threads=1)
+    stored = pickle.loads(model.dumps())  # noqa: S301 - our own bytes
+    stored["params"].pop("hard_negative")  # trained before hard negatives
+    stored["params"]["later_knob"] = 1  # or by a newer version
+    data = pickle.dumps(stored)
+    path = tmp_path / "rally.pkl"
+    path.write_bytes(data)
+    back = rallies.RallyModel.load(path, hashlib.sha256(data).hexdigest())
+    assert back.params.hard_negative == rallies.V1Params().hard_negative
+    assert back.params.max_iter == 5
 
 
 def test_labels_cover_the_steps_inside_rallies() -> None:

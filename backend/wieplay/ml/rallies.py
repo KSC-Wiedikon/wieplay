@@ -4,9 +4,11 @@
   movement on court), gaps of a few seconds bridged, split and ended at referee whistles
   when the video has them, 3-90 s long. Works without sound (friendlies, silent videos).
 - **v1** is a per-step classifier ("is this half-second in a rally?") over the features of
-  `features.step_features` plus v0's own answer, trained on every reviewed game, then
-  smoothed into rallies with hysteresis. It is only used when it beats v0 on held-out games
-  (leave one game out): boundary F1 at ±1 s, PLAN §10.1.
+  `features.step_features`, v0's own answer and what the referee's last whistle was, trained
+  on every reviewed game, then smoothed into rallies with hysteresis. The dead time inside a
+  proposal a coach rejected weighs more in the training (a hard negative: the mistakes the
+  finder made, like a ball thrown back over the net between rallies). It is only used when
+  it beats v0 on held-out games (leave one game out): boundary F1 at ±1 s, PLAN §10.1.
 """
 
 from __future__ import annotations
@@ -166,6 +168,18 @@ def _active_edges(raw: Arr, a: float, b: float) -> tuple[int, int] | None:
     return (lo + int(idx[0]), lo + int(idx[-1]) + 1) if len(idx) else None
 
 
+def _mean_between(trk: Arr, a: float, b: float) -> float:
+    """Mean of a per-step series over the steps [a, b) (0 when empty)."""
+    lo, hi = max(0, int(a)), min(len(trk), int(np.ceil(b)))
+    return float(trk[lo:hi].mean()) if hi > lo else 0.0
+
+
+def _play_before(trk: Arr, starts: Arr, p: V0Params) -> Arr:
+    """The ball's tracked share in the `quiet_s` before each whistle (starts in steps): ~0
+    before a serve whistle (dead ball), more before one that ends a rally."""
+    return np.array([_mean_between(trk, s - p.quiet_s * PER_S, s) for s in starts], dtype=float)
+
+
 def _from_activity(raw: Arr, runs: list[tuple[int, int]], p: V0Params) -> list[_Piece]:
     """No referee (friendlies, silent videos): every clear stretch of play."""
     out = []
@@ -193,12 +207,7 @@ def _with_referee(
     starts = w[:, 0].astype(np.float64) / STEP_S
     ends = (w[:, 0] + w[:, 1]).astype(np.float64) / STEP_S
     long_enough = w[:, 1] >= p.whistle_s
-
-    def mean_trk(a: float, b: float) -> float:
-        lo, hi = max(0, int(a)), min(n, int(np.ceil(b)))
-        return float(trk[lo:hi].mean()) if hi > lo else 0.0
-
-    quiet_before = np.array([mean_trk(s - p.quiet_s * PER_S, s) < p.quiet for s in starts])
+    quiet_before = _play_before(trk, starts, p) < p.quiet
     window = p.serve_window_s * PER_S
     play_after = np.array([_active_edges(raw, e, e + window) is not None for e in ends])
     serve_like = long_enough & quiet_before & play_after
@@ -243,7 +252,7 @@ def _with_referee(
                 continue
             if (last - first) * STEP_S < p.unanchored_s:
                 continue
-            if mean_trk(first, last) < p.unanchored_activity:
+            if _mean_between(trk, first, last) < p.unanchored_activity:
                 continue
             pieces.append(_Piece(first, last + p.tail_s * PER_S, False, False))
     return sorted(pieces, key=lambda q: q.first)
@@ -265,16 +274,73 @@ class V1Params:
     max_leaf_nodes: int = 31
     min_samples_leaf: int = 40
     l2: float = 1.0
+    # The dead time inside a proposal a coach rejected (a hard negative: a ball thrown back
+    # over the net, a warm-up drill) weighs this many times an ordinary step of its game.
+    hard_negative: float = 3.0
 
     def as_dict(self) -> dict[str, float]:
         return dict(self.__dict__)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> V1Params:
+        """Stored params; ones this version does not know are left out."""
+        known = cls.__dataclass_fields__
+        return cls(**{k: v for k, v in data.items() if k in known})
+
+
+WHISTLE_CONTEXT = ["wh_last_play", "serve_wh_since"]
+
+
+def whistle_context(sig: Signals, f: StepFeatures, p: V0Params | None = None) -> Arr:
+    """Per step, what the referee's last whistle was (columns WHISTLE_CONTEXT). A serve
+    whistle follows dead time and the ball comes into play after it; the whistle that ends a
+    rally follows play. So a ball in the air a few seconds after a whistle is a rally when
+    that whistle was a serve whistle, and players throwing the ball back when it ended one
+    (the owner's example, 02.10.2026).
+
+    - `wh_last_play`: the ball's tracked share in the 3 s before the last whistle (NaN
+      before the first one, or without sound);
+    - `serve_wh_since`: seconds since the last serve whistle ended (at most 60).
+
+    Short tones (shoe squeaks) do not count; with a referee (enough serve whistles), only
+    whistles of the serve whistles' pitch do (not the next court's referee)."""
+    p = p or V0Params()
+    n = f.n_steps
+    last_play = np.full(n, np.nan)
+    serve_since = np.full(n, 60.0)
+    w = sig.whistles.reshape(-1, 5)
+    w = w[np.argsort(w[:, 0], kind="stable")]
+    w = w[w[:, 1] >= p.whistle_s]
+    if len(w):
+        trk = f.col("ball_trk")
+        raw = trk >= p.edge
+        starts = w[:, 0].astype(np.float64) / STEP_S
+        ends = (w[:, 0] + w[:, 1]).astype(np.float64) / STEP_S
+        before = _play_before(trk, starts, p)
+        window = p.serve_window_s * PER_S
+        after = np.array([_active_edges(raw, e, e + window) is not None for e in ends])
+        serve = (before < p.quiet) & after
+        if serve.sum() >= p.min_serves:
+            ours = np.abs(w[:, 2] - float(np.median(w[serve, 2]))) <= p.pitch_hz
+            starts, ends, before, serve = starts[ours], ends[ours], before[ours], serve[ours]
+        centre = np.arange(n) + 0.5
+        k = np.searchsorted(ends, centre, side="right") - 1
+        last_play = np.where(k >= 0, before[np.maximum(k, 0)], np.nan)
+        serve_ends = ends[serve]
+        j = np.searchsorted(serve_ends, centre, side="right") - 1
+        if len(serve_ends):
+            since = (centre - serve_ends[np.maximum(j, 0)]) * STEP_S
+            serve_since = np.where(j >= 0, np.minimum(since, 60.0), 60.0)
+    return np.column_stack([last_play, serve_since]).astype(np.float32)
+
 
 def design(sig: Signals, feats: StepFeatures | None = None) -> tuple[Arr, list[str]]:
-    """The classifier's input: the step features plus v0's answer for each step."""
+    """The classifier's input: the step features, v0's answer and the whistle context for
+    each step."""
     f = feats or step_features(sig)
     v0 = labels_for(f.n_steps, [p.span for p in find_v0(sig, f)])
-    return np.column_stack([f.X, v0.astype(np.float32)]), [*f.names, "v0"]
+    X = np.column_stack([f.X, v0.astype(np.float32), whistle_context(sig, f)])
+    return X, [*f.names, "v0", *WHISTLE_CONTEXT]
 
 
 def segments_from_prob(prob: Arr, p: V1Params | None = None) -> list[Proposal]:
@@ -299,11 +365,30 @@ def segments_from_prob(prob: Arr, p: V1Params | None = None) -> list[Proposal]:
     return out
 
 
+def game_weights(
+    n_steps: int,
+    rallies_ms: Sequence[tuple[int, int]],
+    rejected_ms: Sequence[tuple[int, int]],
+    hard_negative: float,
+) -> Arr:
+    """Training weight of each step of one game, summing to 1 (each game counts the same):
+    a step outside the coach's rallies but inside a proposal the coach rejected weighs
+    `hard_negative` times an ordinary one. Part of a rejected proposal that a kept rally
+    covers is a rally like any other."""
+    y = labels_for(n_steps, rallies_ms)
+    hard = (labels_for(n_steps, rejected_ms) == 1) & (y == 0)
+    w = np.where(hard, max(hard_negative, 0.0), 1.0)
+    total = float(w.sum())
+    return w / total if total > 0 else np.full(n_steps, 1.0 / max(n_steps, 1))
+
+
 @dataclass
 class TrainVideo:
     video_id: str
     signals: Signals
     rallies: list[tuple[int, int]]  # the coach's, ms
+    # The model's proposals the coach rejected ("not a rally"), ms: hard negatives.
+    rejected: list[tuple[int, int]] = field(default_factory=list)
     _cache: dict[str, Any] = field(default_factory=dict)
 
     def data(self) -> tuple[Arr, list[str], Arr, StepFeatures]:
@@ -313,6 +398,10 @@ class TrainVideo:
             self._cache.update(X=X, names=names, feats=feats)
         X, feats = self._cache["X"], self._cache["feats"]
         return X, self._cache["names"], labels_for(len(X), self.rallies), feats
+
+    def weights(self, hard_negative: float) -> Arr:
+        X, _, _, _ = self.data()
+        return game_weights(len(X), self.rallies, self.rejected, hard_negative)
 
 
 @dataclass
@@ -367,7 +456,7 @@ class RallyModel:
         return cls(
             classifier=obj["classifier"],
             names=list(obj["names"]),
-            params=V1Params(**obj["params"]),
+            params=V1Params.from_dict(obj["params"]),
             trained_on=list(obj["trained_on"]),
             sklearn=obj["sklearn"],
         )
@@ -385,7 +474,7 @@ def fit(videos: Sequence[TrainVideo], p: V1Params | None = None, threads: int = 
         X, names, y, _ = v.data()
         Xs.append(X)
         ys.append(y)
-        ws.append(np.full(len(y), 1.0 / max(len(y), 1)))  # each game counts the same
+        ws.append(v.weights(p.hard_negative))  # each game sums to 1: each counts the same
     X = np.concatenate(Xs)
     # A column that is empty in every game (no sound in any of them) cannot be binned.
     X[:, np.isnan(X).all(axis=0)] = 0.0
@@ -420,7 +509,8 @@ def cross_validate(
 ) -> dict[str, Any]:
     """v0 and v1 on held-out games (split by match, PLAN §11). Returns per-video metrics,
     the summaries, the held-out v1 proposals and whether v1 is better. Stops early (without
-    v1) when `cancel` is set."""
+    v1) when `cancel` is set. Only the training weighs the rejected proposals more; the
+    held-out scores count every rally and boundary once."""
     p = p or V1Params()
     per_video: dict[str, dict[str, Any]] = {}
     held_out: dict[str, list[Proposal]] = {}

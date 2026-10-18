@@ -81,6 +81,23 @@ def human_rallies(db: Session, video_id: uuid.UUID) -> list[tuple[int, int]]:
     return [(int(s), int(e)) for s, e in rows]
 
 
+def rejected_rallies(db: Session, video_id: uuid.UUID) -> list[tuple[int, int]]:
+    """The model's rally proposals a coach rejected ("not a rally"): the hard negatives the
+    finder learns most from. A merged proposal is not one (the rally it went into covers
+    it), nor a coach's own rally they deleted (a correction of their own work)."""
+    rows = db.execute(
+        select(Segment.start_ms, Segment.end_ms)
+        .where(
+            Segment.video_id == video_id,
+            Segment.kind == "rally",
+            Segment.source == "model",
+            Segment.review == "rejected",
+        )
+        .order_by(Segment.start_ms)
+    ).all()
+    return [(int(s), int(e)) for s, e in rows]
+
+
 def _untouched_proposals() -> Any:
     return (
         (Segment.kind == "rally")
@@ -281,7 +298,8 @@ def _analysable_videos(db: Session) -> list[Video]:
 def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     """What a leased analysis job needs from the database, read when it runs (not when it
     was queued): the current rally model; for a training, the reviewed games with their
-    rallies and the other analysed games to propose rallies for."""
+    rallies and the proposals a coach rejected there, and the other analysed games to
+    propose rallies for."""
     if job.kind == "analyse":
         return {"rally_model": _rally_model_out(db), "serve_model": _serve_model_out(db)}
     if job.kind != "train_rallies":
@@ -322,6 +340,7 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
                 {
                     **entry,
                     "rallies": [list(r) for r in rallies],
+                    "rejected": [list(r) for r in rejected_rallies(db, video.id)],
                     "serves": scoring.serve_labels(db, video),
                 }
             )

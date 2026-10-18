@@ -228,13 +228,15 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
             log.warning("skipping %s: %s", entry["video_id"], exc)
             continue
         spans = [(int(s), int(e)) for s, e in entry["rallies"]]
-        videos.append(rallies.TrainVideo(entry["video_id"], sig, spans))
+        # Older APIs send no rejections: the training then has no hard negatives.
+        rejected = [(int(s), int(e)) for s, e in entry.get("rejected", [])]
+        videos.append(rallies.TrainVideo(entry["video_id"], sig, spans, rejected))
         serves = [(int(t), bool(near)) for t, near in entry.get("serves", [])]
         serve_videos.append(serve.ServeVideo(entry["video_id"], serve.evidence(sig), serves))
         loaded[entry["video_id"]] = sig
         dataset.append(
             {"video_id": entry["video_id"], "features_sha256": entry["features"]["sha256"],
-             "rallies": len(spans), "serves": len(serves)}
+             "rallies": len(spans), "rejected": len(rejected), "serves": len(serves)}
         )  # fmt: skip
     if ctx.cancel.is_set():
         raise ffmpeg.Cancelled()
@@ -322,6 +324,7 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
         "timing": {
             "wall_s": round(time.perf_counter() - started, 1),
             "games": len(videos),
+            "hard_negatives": sum(len(v.rejected) for v in videos),
             "proposed_for": len(predictions),
             "series_for": len(new_series),
             "threads": threads,

@@ -345,7 +345,7 @@ export const videoDe: Messages<typeof videoEn> = {
       gradesTitle: 'Bewertungen pro Aktion',
       review: {
         accept: 'Vorschlag übernehmen und zum nächsten',
-        reject: 'Verwerfen: kein Ballwechsel',
+        reject: 'Verwerfen: kein Ballwechsel (tote Zeit)',
         serve: '{{us}} schlägt auf, {{them}} schlägt auf; dieselbe Taste nochmals nimmt es zurück',
         won: '{{us}} hat den Ballwechsel gewonnen, {{them}} hat ihn gewonnen; dieselbe Taste nochmals nimmt es zurück',
         label: 'Eine Pause ist Einspielen, Satzpause, Timeout, Unterbruch oder eine andere Pause; auf einem Ballwechsel: kein Ballwechsel, diese Pause',
@@ -456,7 +456,7 @@ export const videoDe: Messages<typeof videoEn> = {
       next: 'Nächster Vorschlag',
       allKeys: 'Alle Tasten',
       leave: 'Zurück zum Taggen',
-      hint: 'Der Vorschlag läuft in Schleife. Nach jeder Antwort kommt der nächste.',
+      hint: 'Der Vorschlag läuft in Schleife. Nach jeder Antwort kommt der nächste. Verwerfen (X) = kein Ballwechsel (tote Zeit); markier das Spiel als geprüft, damit WiePlay daraus lernt.',
       acceptAll: 'Alle übrigen mit Sicherheit ≥ {{min}} übernehmen ({{count}})',
       acceptAllTitle_one: '{{count}} Vorschlag übernehmen?',
       acceptAllTitle_other: '{{count}} Vorschläge übernehmen?',
