@@ -131,23 +131,24 @@ video's calibration.
 
 ## Players (players job)
 
-**Beta, off by default** (`WIEPLAY_PLAYERS_AUTO=false` on the API): nothing queues the job by
-itself. A coach clicks "Find players (beta, takes ~2 h)" on the video page (`POST
+**Beta, on demand** (`WIEPLAY_PLAYERS_AUTO=false` on the API): nothing queues the job by itself.
+A coach clicks "Find players (beta, takes about …)" on the video page (`POST
 /api/videos/{id}/players/find`), or an admin runs the CLI below. With `WIEPLAY_PLAYERS_AUTO=true`
-it follows each court job. The `players` job (same `analyse` capability and background lane,
-priority −12 so a backlog's analyses go first) finds the people on the court in the rally
-windows, tracks them, groups them into clusters and reads shirt numbers (a suggestion). The
-coach names the clusters once on the video's "Players in this video" page; the actions then
-get their player (PLAN §10.5).
+it follows each court job. Since 18.10.2026 the **GPU worker** on the Framework 16 takes it
+(`WIEPLAY_PLAYERS_CAPS=cuda,ml`, `WIEPLAY_PLAYERS_MINUTES=20` on the API; runbook:
+[gpu-worker](gpu-worker.md)); without those two lines the Lenovo's background lane does (caps
+`analyse,nas`, ~2 h). Priority −12, so a backlog's analyses go first. Players v2 (PLAN §10.5):
+the people on the court followed through each set, cut where two met, linked into the
+players of the video by shirt numbers, team and court position, a confidence per card. The
+coach names the cards once on the video's "Players in this video" page (cards WiePlay is
+unsure of are folded under "Cards to check"); the actions then get their player.
 
 - **Weights**: in the worker image at `/opt/wieplay-weights` (YOLO26s ONNX, PaddleOCR detector
   and recogniser), built by `Dockerfile.worker`'s first stage from SHA-256-pinned downloads
-  (`scripts/ml/player_weights.py`; `MANIFEST.json` lists sources, licences, hashes). Local
+  (`scripts/ml/player_weights.py`; `MANIFEST.json` lists sources, licences, hashes); the GPU
+  worker gets a copy from the newest Lenovo image (`scripts/deploy-gpu-worker.sh`). Local
   runs: `WIEPLAY_WORKER_PLAYERS_WEIGHTS=/path`. Without the OCR files the job still runs (no
   number suggestions).
-- **A GPU worker later**: start it with caps `gpu,nas`, `WIEPLAY_WORKER_PLAYERS_PROVIDERS=
-  CUDAExecutionProvider,CPUExecutionProvider` and an onnxruntime-gpu image; set
-  `WIEPLAY_PLAYERS_CAPS=gpu,nas` on the API so new jobs ask for it.
 - **On demand** for videos with a ball track:
 
   ```bash
@@ -156,11 +157,15 @@ get their player (PLAN §10.5).
   python -m wieplay.cli players --all-ready     # --force: also videos that have players
   ```
 
-  A rerun replaces the clusters; a coach's number stays where the same number is read on
-  the same team.
-- **Cost** (PLAN §10.9): a 2 h 12 min match, 26 k frames of rally windows: 1 h 51 min on
-  the Lenovo with 4 threads beside the prod backfill (~1.9× its analyse job), 5.2 CPU-hours;
-  the API's index ~1.7 MB, 76 contact sheets (~250 kB each).
+  A rerun replaces the cards; a coach's number stays where the same number is read on the
+  same team.
+- **Measuring** (the numbers in PLAN §10.5): `scripts/ml/players_eval.py detect VIDEO
+  INPUTS.json OUT --gpu` then `identify OUT` runs the job's own stages on a local copy and
+  writes the summary, the cards and a picture per card for checking by eye (crops of club
+  members: delete OUT afterwards).
+- **Cost** (PLAN §10.9): on the GPU worker ~10–15 min a match (detection ~7 min for a 2 h 12
+  min match, the rest numbers and linking on the CPU); on the Lenovo 1 h 51 min for players
+  v1's rally windows.
 
 ## The learning loop
 
@@ -333,7 +338,11 @@ analysis[-dev]/
   videos/…/ball-track-<job8>.json.gz                              the ball's path (bucket copy
                                                                   is what browsers get)
   videos/…/players-<job8>.npz                                     every player box per analysed
-                                                                  frame, tracks, windows
+                                                                  frame, tracks, windows (the
+                                                                  Lenovo's runs; the GPU worker's
+                                                                  are in the bucket only:
+                                                                  media/<video>/analysis/players-
+                                                                  <token>/tracks.npz)
   videos/…/players-<job8>/index.json.gz, sheet-<n>.jpg            the API's box index and the
                                                                   gallery's crops (bucket copies
                                                                   under media/<video>/analysis/)

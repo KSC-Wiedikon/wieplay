@@ -78,13 +78,12 @@ def _window_sides(t: Track) -> dict[tuple[int, int], int]:
 
 @dataclass
 class Teams:
-    """Which team played at the camera's end in each rally window (`near_us`), what it took
-    to know it, and the two kits' mean looks (None when too alike to tell apart)."""
+    """Which team played at the camera's end in each rally window (`near_us`), and what it
+    took to know it."""
 
     near_us: dict[int, bool]
     windows: list[int]
     info: dict[str, Any]
-    kits: dict[str, np.ndarray[Any, Any]] | None = None
 
     def team_of(self, t: Track) -> str:
         votes = {"us": 0, "them": 0}
@@ -98,14 +97,6 @@ class Teams:
             k = min(bisect.bisect_left(self.windows, t.window), len(self.windows) - 1)
             near_us = self.near_us.get(self.windows[max(k, 0)], True)
             team = "us" if (t.side == NEAR) == near_us else "them"
-        # A player at the net whose feet map past it (or one crossing between rallies) is
-        # on the wrong side for a moment: the kit says whose shirt it is.
-        if self.kits is not None and t.descriptor is not None and t.detections >= KIT_MIN:
-            other = "them" if team == "us" else "us"
-            if distance(t.descriptor, self.kits[other]) < KIT_PIECE * distance(
-                t.descriptor, self.kits[team]
-            ):
-                team = other
         return team
 
 
@@ -163,9 +154,9 @@ def assign_teams(tracks: Sequence[Track], near_team: Sequence[str | None]) -> Te
                     state[w], changed = value, True
             if not changed or known:
                 break
-    # The kits check the sides the rallies say: where both sides look like the other team's
-    # shirts, the window's sides are swapped (a set's serving side recorded the wrong way
-    # round put our #12 on their #12's card, the Legends game, 18.10.2026).
+    # The kits check the sides the rallies say: where both sides clearly look like the other
+    # team's shirts, the window's sides are swapped (a serving side recorded the wrong way
+    # round). Only clearly: the looks mix shirts with the floor around far players.
     corrected = 0
     for _ in range(2):
         us_d = [d for w, v in state.items() if (d := look(w, NEAR if v else FAR)) is not None]
@@ -192,13 +183,6 @@ def assign_teams(tracks: Sequence[Track], near_team: Sequence[str | None]) -> Te
                 changed = True
         if not changed:
             break
-    kits = None
-    us_d = [d for w, v in state.items() if (d := look(w, NEAR if v else FAR)) is not None]
-    them_d = [d for w, v in state.items() if (d := look(w, FAR if v else NEAR)) is not None]
-    if us_d and them_d:
-        us_p, them_p = np.mean(np.stack(us_d), axis=0), np.mean(np.stack(them_d), axis=0)
-        if distance(us_p, them_p) >= KIT_APART:
-            kits = {"us": us_p, "them": them_p}
     teams = Teams(
         state,
         windows,
@@ -208,7 +192,6 @@ def assign_teams(tracks: Sequence[Track], near_team: Sequence[str | None]) -> Te
             "kit_guessed_windows": len(unknown),
             "kit_corrected_windows": corrected,
         },
-        kits,
     )
     for t in tracks:
         t.team = teams.team_of(t)
@@ -219,11 +202,7 @@ def assign_teams(tracks: Sequence[Track], near_team: Sequence[str | None]) -> Te
 # and swapping the sides fits clearly better (the swapped distance below KIT_SWAP times the
 # recorded one).
 KIT_APART = 0.35
-KIT_SWAP = 0.75
-# A track of at least KIT_MIN detections whose look is below KIT_PIECE times as far from the
-# other team's kit as from its own wears the other team's shirt.
-KIT_MIN = 10
-KIT_PIECE = 0.6
+KIT_SWAP = 0.6
 
 
 # --- swaps ----------------------------------------------------------------------------------
@@ -751,13 +730,14 @@ def _gap_ms(a: list[tuple[int, int]], b: list[tuple[int, int]]) -> int | None:
     return best
 
 
-def absorb(clusters: list[Cluster], max_gap_ms: int = ABSORB_GAP_MS) -> int:
+def absorb(clusters: list[Cluster], max_gap_ms: int | None = None) -> int:
     """A card without a number joins the numbered card of its team that is missing while it
     is seen and was seen just before or after it (within `max_gap_ms`): the one teammate
     it can be. Only when no other numbered card comes close (half the gap or less) and the
     two look alike. Returns how many cards were joined."""
     from wieplay.ml.players import _cluster_number
 
+    max_gap_ms = ABSORB_GAP_MS if max_gap_ms is None else max_gap_ms
     joined = 0
     for team in ("us", "them"):
         anchors = [c for c in clusters if c.team == team and not c.referee and c.number is not None]

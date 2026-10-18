@@ -47,6 +47,8 @@ OFF_SIDE_M = 0.3
 OFF_COURT_SHARE = 0.7
 # Without a calibration: the floor below this share of the frame's height.
 FALLBACK_TOP = 0.3
+# Feet this close to the net (metres) do not vote for a track's side of the net.
+NET_UNSURE_M = 1.0
 # Head room above the far end line in the ROI (a jumping blocker's hands): with the camera
 # known, points at this height; else this share of the frame above the court's top.
 HEAD_ROOM_M = 2.8
@@ -570,15 +572,19 @@ def make_track(
         side = fallback.side(None, float(np.median(foot_v)))
     window_sides: dict[tuple[int, int], int] = defaultdict(int)
     first_window = -1
-    for f, sd in zip(frames, sides, strict=True):
+    foot_at = tr.foot_at[lo:hi]
+    for f, sd, ft in zip(frames, sides, foot_at, strict=True):
         w = col.windows[f] if f < len(col.windows) else -1
         if w >= 0:
-            window_sides[(w, sd)] += 1
             if first_window < 0:
                 first_window = w
+            # Feet within a metre of the net say little about the side: a blocker's map
+            # past it, through the camera's error that far away.
+            if ft is not None and abs(ft[1] - court.NET_Y) < NET_UNSURE_M:
+                continue
+            window_sides[(w, sd)] += 1
     if first_window < 0:
         first_window = _nearest_window(col, frames[0], frames[-1])
-    foot_at = tr.foot_at[lo:hi]
     feet = [f for f in foot_at if f is not None]
     foot = None
     referee = False

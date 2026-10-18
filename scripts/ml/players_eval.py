@@ -182,18 +182,30 @@ def identify(out: Path, gpu: bool) -> None:
     print(json.dumps(found.stats))
 
 
-def review(found: Any, folder: Path, per_row: int = 12) -> None:
-    """One picture per card: a crop of every piece (track) it was linked from, in time
-    order, with the piece's time and its readings, for checking by eye."""
+def review(found: Any, folder: Path, per_row: int = 12, sample: int = 36) -> None:
+    """One picture per card: a crop of its pieces (tracks) in time order, with each piece's
+    time, length and readings, for checking by eye. At most `sample` pieces, drawn with a
+    chance in proportion to their length: the share of wrong pictures estimates the share of
+    the card's time that shows someone else."""
+    import random
+
     from PIL import Image, ImageDraw
 
     folder.mkdir(exist_ok=True)
     for old in folder.glob("card-*.jpg"):
         old.unlink()
+    rng = random.Random(7)  # noqa: S311 - a reproducible sample, no secret
     for c in found.clusters:
-        pieces = sorted((m for t in c.tracks for m in (t.members or [t])), key=lambda m: m.first)
+        pieces = [m for t in c.tracks for m in (t.members or [t])]
+        if len(pieces) > sample:
+            weights = [m.detections for m in pieces]
+            chosen: set[int] = set()
+            while len(chosen) < sample:
+                chosen.add(rng.choices(range(len(pieces)), weights)[0])
+            pieces = [pieces[i] for i in chosen]
+        pieces.sort(key=lambda m: m.first)
         cells = []
-        for m in pieces[:96]:
+        for m in pieces:
             cell = Image.new("RGB", (100, 230), (24, 24, 24))
             if m.crops:
                 img = Image.open(io.BytesIO(m.crops[0].jpeg)).convert("RGB")
@@ -241,6 +253,13 @@ def main() -> None:
     i = sub.add_parser("identify")
     i.add_argument("out", type=Path)
     i.add_argument("--gpu", action="store_true")
+    i.add_argument(
+        "--without",
+        action="append",
+        default=[],
+        choices=["absorb", "propagate", "long", "encounters"],
+        help="leave a step of the linking out (to measure what it does)",
+    )
     args = parser.parse_args()
     if args.stage == "detect" and args.loose:
         job.TRACK_BUFFER_S, job.MATCH_COST, job.SECOND_COST, job.UNCONFIRMED_COST = (
@@ -252,6 +271,16 @@ def main() -> None:
     if args.stage == "detect":
         detect(args.video, args.inputs, args.out, args.gap, args.gpu, args.imgsz, args.high)
     else:
+        from wieplay.ml import identities
+
+        if "absorb" in args.without:
+            identities.ABSORB_GAP_MS = 0
+        if "propagate" in args.without:
+            identities.PROPAGATE_FRAMES = -1
+        if "long" in args.without:
+            identities.LONG.max_gap_ms = 0
+        if "encounters" in args.without:
+            identities.ENCOUNTER_FRAMES = 10**9
         identify(args.out, args.gpu)
 
 
