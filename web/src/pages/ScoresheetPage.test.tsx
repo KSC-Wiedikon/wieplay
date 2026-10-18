@@ -206,7 +206,7 @@ describe('ScoresheetPage', () => {
     expect(box('Volley Näfels', 1, 1)).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     const numbers = screen.getByRole('region', { name: 'From the scoresheet' })
-    expect(within(numbers).getAllByText('55% (12/22)')).toHaveLength(2) // the team, its rotation
+    expect(within(numbers).getAllByTitle('12/22')).toHaveLength(2) // the team, its rotation: 55% (12/22)
     expect(within(numbers).getByText('P2')).toBeInTheDocument()
   })
 

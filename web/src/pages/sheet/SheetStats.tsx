@@ -10,8 +10,27 @@ import type { SideNames } from '../../lib/sides'
 import { formatPercent } from '../../lib/suggestions'
 import type { Side } from '../../lib/types'
 
-function pct(won: number, of: number, value: number | null): string {
-  return of ? `${formatPercent(value)} (${won}/${of})` : '–'
+/** A column's name: short on a phone ("BP"), in full from sm up. */
+function Head({ full, short }: { full: string; short: string }) {
+  return (
+    <>
+      <abbr title={full} className="no-underline sm:hidden">
+        {short}
+      </abbr>
+      <span className="hidden sm:inline">{full}</span>
+    </>
+  )
+}
+
+/** "57% (27/47)"; on a phone the share alone (the counts in its tooltip). */
+function Pct({ won, of, value }: { won: number; of: number; value: number | null }) {
+  if (!of) return <>–</>
+  return (
+    <span title={`${won}/${of}`}>
+      {formatPercent(value)}
+      <span className="hidden text-muted sm:inline">{` (${won}/${of})`}</span>
+    </span>
+  )
 }
 
 /**
@@ -44,8 +63,12 @@ export function SheetStats({ match, checks, bySetter, names }: { match: SetStats
               <tr>
                 <Th>{t('sheet.stats.team')}</Th>
                 <Th className="text-right">{t('sheet.stats.points')}</Th>
-                <Th className="text-right">{t('sheet.stats.sideOut')}</Th>
-                <Th className="text-right">{t('sheet.stats.breakPoint')}</Th>
+                <Th className="text-right">
+                  <Head full={t('sheet.stats.sideOut')} short={t('sheet.stats.short.sideOut')} />
+                </Th>
+                <Th className="text-right">
+                  <Head full={t('sheet.stats.breakPoint')} short={t('sheet.stats.short.breakPoint')} />
+                </Th>
                 <Th className="hidden text-right sm:table-cell">{t('sheet.stats.longestRun')}</Th>
               </tr>
             </THead>
@@ -54,10 +77,10 @@ export function SheetStats({ match, checks, bySetter, names }: { match: SetStats
                 const line = chosen[side].team
                 return (
                   <tr key={side}>
-                    <Td className="font-semibold">{sideLabel(t, side, names)}</Td>
+                    <Td className="font-semibold whitespace-nowrap">{sideLabel(t, side, names)}</Td>
                     <Td className="text-right tabular-nums">{line.points}</Td>
-                    <Td className="text-right tabular-nums">{pct(line.side_out_won, line.received, line.side_out_pct)}</Td>
-                    <Td className="text-right tabular-nums">{pct(line.break_won, line.served, line.break_point_pct)}</Td>
+                    <Td className="text-right tabular-nums"><Pct won={line.side_out_won} of={line.received} value={line.side_out_pct} /></Td>
+                    <Td className="text-right tabular-nums"><Pct won={line.break_won} of={line.served} value={line.break_point_pct} /></Td>
                     <Td className="hidden text-right tabular-nums sm:table-cell">{chosen[side].longest_run}</Td>
                   </tr>
                 )
@@ -81,17 +104,31 @@ export function SheetStats({ match, checks, bySetter, names }: { match: SetStats
 function Rotations({ side, stats, names }: { side: Side; stats: SideStatsOut; names: SideNames | null }) {
   const { t } = useTranslation()
   const rows = stats.rotations.filter((r) => r.line.points + r.line.lost > 0)
+  const servers = rows.some((r) => r.server !== null) // a set's lineup; the match mixes them
   const name = (r: { rotation: number; setter_zone: number | null }) =>
-    r.setter_zone ? `P${r.setter_zone}` : t('sheet.stats.rotationLabel', { n: r.rotation })
+    r.setter_zone ? (
+      `P${r.setter_zone}`
+    ) : (
+      <Head full={t('sheet.stats.rotationLabel', { n: r.rotation })} short={t('sheet.stats.short.rotation', { n: r.rotation })} />
+    )
   return (
     <Table caption={`${sideLabel(t, side, names)}: ${t('sheet.stats.rotations')}`}>
       <THead>
         <tr>
-          <Th>{`${sideLabel(t, side, names)} · ${t('sheet.stats.rotation')}`}</Th>
-          <Th className="hidden sm:table-cell">{t('sheet.stats.server')}</Th>
-          <Th className="text-right">{t('sheet.stats.wonLost')}</Th>
-          <Th className="text-right">{t('sheet.stats.sideOut')}</Th>
-          <Th className="text-right">{t('sheet.stats.breakPoint')}</Th>
+          <Th>
+            <span className="sm:hidden">{sideLabel(t, side, names)}</span>
+            <span className="hidden sm:inline">{`${sideLabel(t, side, names)} · ${t('sheet.stats.rotation')}`}</span>
+          </Th>
+          {servers && <Th className="hidden sm:table-cell">{t('sheet.stats.server')}</Th>}
+          <Th className="text-right">
+            <Head full={t('sheet.stats.wonLost')} short={t('sheet.stats.short.wonLost')} />
+          </Th>
+          <Th className="text-right">
+            <Head full={t('sheet.stats.sideOut')} short={t('sheet.stats.short.sideOut')} />
+          </Th>
+          <Th className="text-right">
+            <Head full={t('sheet.stats.breakPoint')} short={t('sheet.stats.short.breakPoint')} />
+          </Th>
         </tr>
       </THead>
       <TBody>
@@ -102,10 +139,10 @@ function Rotations({ side, stats, names }: { side: Side; stats: SideStatsOut; na
               <Td className="font-semibold whitespace-nowrap" title={r.setter_zone ? t('sheet.stats.setterZone', { zone: `P${r.setter_zone}` }) : undefined}>
                 {name(r)}
               </Td>
-              <Td className="hidden tabular-nums sm:table-cell">{r.server !== null ? `#${r.server}` : '–'}</Td>
+              {servers && <Td className="hidden tabular-nums sm:table-cell">{r.server !== null ? `#${r.server}` : '–'}</Td>}
               <Td className="text-right tabular-nums">{`${line.points}–${line.lost}`}</Td>
-              <Td className="text-right tabular-nums">{pct(line.side_out_won, line.received, line.side_out_pct)}</Td>
-              <Td className="text-right tabular-nums">{pct(line.break_won, line.served, line.break_point_pct)}</Td>
+              <Td className="text-right tabular-nums"><Pct won={line.side_out_won} of={line.received} value={line.side_out_pct} /></Td>
+              <Td className="text-right tabular-nums"><Pct won={line.break_won} of={line.served} value={line.break_point_pct} /></Td>
             </tr>
           )
         })}

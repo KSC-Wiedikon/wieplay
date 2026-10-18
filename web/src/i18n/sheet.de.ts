@@ -151,6 +151,7 @@ export const sheetDe: typeof sheetEn = {
       setterZone: 'Zuspieler in {{zone}}',
       server: 'Aufschläger',
       wonLost: 'Gewonnen–verloren',
+      short: { sideOut: 'SO', breakPoint: 'BP', wonLost: 'G–V', rotation: 'R{{n}}' },
       none: 'Die Zahlen erscheinen, sobald ein Satz passt.',
       bySetter: 'Unsere nach der Zone des Zuspielers (P1–P6), ihre ab ihrer Startaufstellung.',
       byStart: 'Nach Rotation ab der Startaufstellung (Rotation 1 = die Aufstellung auf dem Matchblatt).',

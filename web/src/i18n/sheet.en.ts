@@ -150,6 +150,7 @@ export const sheetEn = {
       setterZone: 'Setter in {{zone}}',
       server: 'Server',
       wonLost: 'Won–lost',
+      short: { sideOut: 'SO', breakPoint: 'BP', wonLost: 'W–L', rotation: 'R{{n}}' },
       none: 'Numbers appear once a set fits.',
       bySetter: 'Ours by the setter’s zone (P1–P6), theirs from their starting six.',
       byStart: 'By rotation from the starting six (rotation 1 = the lineup on the sheet).',

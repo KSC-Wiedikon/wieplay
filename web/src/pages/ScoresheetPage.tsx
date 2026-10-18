@@ -321,9 +321,9 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
             onChange={(value) => onTab(Number(value))}
           />
           {!readOnly && sets.length < 5 && (
-            <Button variant="ghost" onClick={addSet}>
+            <Button variant="ghost" onClick={addSet} aria-label={t('sheet.addSet', { no: (sets[sets.length - 1]?.no ?? 0) + 1 })}>
               <PlusIcon className="size-4" />
-              {t('sheet.addSet', { no: (sets[sets.length - 1]?.no ?? 0) + 1 })}
+              <span className="hidden sm:inline">{t('sheet.addSet', { no: (sets[sets.length - 1]?.no ?? 0) + 1 })}</span>
             </Button>
           )}
         </div>
@@ -369,15 +369,8 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
       </details>
 
       {!readOnly && (
-        <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-hairline bg-surface/95 px-4 py-3 shadow-raised backdrop-blur sm:mx-0 sm:rounded-card sm:border">
-          <Button variant="primary" disabled={!dirty || save.isPending} onClick={onSave}>
-            {save.isPending ? t('sheet.saving') : t('sheet.save')}
-          </Button>
-          <span className={cx('text-sm', dirty ? 'font-semibold' : 'text-muted')} role="status">
-            {dirty ? t('sheet.unsaved') : t('sheet.upToDate')}
-            {!dirty && sheet.trusted ? ` · ${t('sheet.trusted')}` : ''}
-          </span>
-          <span className="flex items-center gap-2 sm:ml-auto">
+        <Card className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 p-4">
+          <span className="flex items-center gap-2">
             <Switch
               checked={useAll}
               label={t('sheet.useAll')}
@@ -389,7 +382,7 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
             />
             <span className="flex flex-col">
               <span className="text-sm font-semibold">{t('sheet.useAll')}</span>
-              <span id="sheet-use-all" className="hidden text-xs text-muted sm:block">
+              <span id="sheet-use-all" className="text-xs text-muted">
                 {t('sheet.useAllHint')}
               </span>
             </span>
@@ -397,9 +390,22 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
           {sheet.exists && (
             <Button variant="ghostDanger" onClick={() => setAskRemove(true)}>
               <TrashIcon className="size-4" />
-              <span className="hidden sm:inline">{t('sheet.remove')}</span>
+              {t('sheet.remove')}
             </Button>
           )}
+        </Card>
+      )}
+
+      {!readOnly && (
+        // Saving stays in reach while typing a long set.
+        <div className="sticky bottom-0 z-10 -mx-4 flex items-center gap-4 border-t border-hairline bg-surface/95 px-4 py-2.5 shadow-raised backdrop-blur sm:mx-0 sm:rounded-card sm:border">
+          <Button variant="primary" disabled={!dirty || save.isPending} onClick={onSave}>
+            {save.isPending ? t('sheet.saving') : t('sheet.save')}
+          </Button>
+          <span className={cx('min-w-0 text-sm', dirty ? 'font-semibold' : 'text-muted')} role="status">
+            {dirty ? t('sheet.unsaved') : t('sheet.upToDate')}
+            {!dirty && sheet.trusted ? ` · ${t('sheet.trusted')}` : ''}
+          </span>
         </div>
       )}
 
