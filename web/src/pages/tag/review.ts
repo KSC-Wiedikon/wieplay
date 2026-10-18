@@ -5,7 +5,9 @@
 //   Enter accept · X reject · ←/→ move the start · Shift+←/→ move the end (0.25 s; with Alt
 //   one frame) · M merge with the next suggestion · S split at the playhead · U undo
 //   1 we serve · 2 they serve (again: no call) · 3 we won · 4 they won (again: no call;
-//   the winner is a fact the scoring keeps to) · W B T D O label a break (§10.3)
+//   the winner is a fact the scoring keeps to) · W B T D O label a break (§10.3); on a
+//   rally suggestion they say "no rally, a break": the rally is rejected and the dead time
+//   around it (from the rally before to the rally after) becomes that break
 //
 // The gap labels of the automatic scoring (warm-up, set break, timeout, stoppage, after the
 // match) are in the list too, in time order with the rallies; they are accepted, rejected,
@@ -309,7 +311,7 @@ export class ReviewController {
       return
     }
     if (!isGap(segment.kind)) {
-      this.set({ notice: this.notify('gapsOnly', undefined, 'error') })
+      this.toBreak(segment, kind)
       return
     }
     if (kind === segment.kind) {
@@ -318,6 +320,34 @@ export class ReviewController {
     }
     this.commit([segmentChange(segment, { kind })])
     this.set({ notice: this.notify('relabelled', { time: segment.start_ms, kind }) })
+    this.advance(segment)
+  }
+
+  /**
+   * W B T D O on a rally: no rally but a timeout, set break, warm-up, stoppage or other break.
+   * The rally is rejected (a negative the rally finder learns from) and the dead time around
+   * it, from the end of the rally before to the start of the rally after, becomes that break:
+   * a break already there is relabelled, else a new one is made (its edges can be moved later).
+   */
+  private toBreak(segment: Segment, kind: GapKind): void {
+    const segments = this.store.getView().segments
+    const live = (s: Segment) => !s.deleted_at && s.review !== 'rejected' && s.review !== 'merged'
+    const rallies = segments.filter((s) => s.kind === 'rally' && s.id !== segment.id && live(s))
+    const before = rallies.filter((s) => s.end_ms <= segment.start_ms).reduce((m, s) => Math.max(m, s.end_ms), -1)
+    const after = rallies.filter((s) => s.start_ms >= segment.end_ms).reduce((m, s) => Math.min(m, s.start_ms), Number.POSITIVE_INFINITY)
+    const start = before >= 0 ? before : segment.start_ms
+    const end = Number.isFinite(after) ? after : segment.end_ms
+    const gap = segments.find((s) => isGap(s.kind) && live(s) && s.start_ms < end && s.end_ms > start) ?? null
+    const pending = without(this.state.pending, segment.id)
+    if (gap) {
+      const changes: Change[] = [rejection(segment)]
+      if (gap.kind !== kind || isProposal(gap)) changes.push(segmentChange(gap, { kind, review: 'confirmed' }))
+      this.commit(changes, without(pending, gap.id))
+    } else {
+      const created: SegmentIn = { id: newId(), base_version: 0, kind, start_ms: start, end_ms: end, won_by: null }
+      this.commit([rejection(segment), { kind: 'segment', payload: created }], pending)
+    }
+    this.set({ notice: this.notify('relabelled', { time: start, kind }) })
     this.advance(segment)
   }
 

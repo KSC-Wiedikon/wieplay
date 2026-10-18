@@ -348,7 +348,7 @@ export const videoDe: Messages<typeof videoEn> = {
         reject: 'Verwerfen: kein Ballwechsel',
         serve: '{{us}} schlägt auf, {{them}} schlägt auf; dieselbe Taste nochmals nimmt es zurück',
         won: '{{us}} hat den Ballwechsel gewonnen, {{them}} hat ihn gewonnen; dieselbe Taste nochmals nimmt es zurück',
-        label: 'Eine Pause ist Einspielen, Satzpause, Timeout, Unterbruch oder eine andere Pause',
+        label: 'Eine Pause ist Einspielen, Satzpause, Timeout, Unterbruch oder eine andere Pause; auf einem Ballwechsel: kein Ballwechsel, diese Pause',
         start: 'Beginn 0.25 s früher oder später',
         end: 'Ende 0.25 s früher oder später',
         frame: 'Mit den Pfeilen: ein Bild statt 0.25 s',
