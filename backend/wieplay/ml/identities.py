@@ -702,6 +702,34 @@ def assign_numbers(chains: Sequence[Track]) -> list[Track]:
     return out
 
 
+# Someone who stands still through the rallies is not playing (a line judge, the bench, a
+# coach, people behind the court where no calibration masks them): their feet stay within
+# STILL_HEIGHTS box heights of where they stand for 90 % of STILL_MIN_S of rally time.
+STILL_HEIGHTS = 0.6
+STILL_MIN_S = 20.0
+
+
+def still(chain: Track, col: Any) -> bool:
+    """A chain whose person barely moves during the rallies (see STILL_HEIGHTS)."""
+    points: list[tuple[float, float, float]] = []
+    for m in chain.members or [chain]:
+        data = m.data
+        if data is None:
+            continue
+        for k in range(m.lo, m.hi):
+            f = data.frames[k]
+            if f < len(col.windows) and col.windows[f] >= 0:
+                u1, v1, u2, v2 = data.boxes[k]
+                points.append(((u1 + u2) / 2, v2, max(v2 - v1, 1e-6)))
+    if len(points) < STILL_MIN_S * 10:
+        return False
+    arr = np.asarray(points)
+    centre = np.median(arr[:, :2], axis=0)
+    height = float(np.median(arr[:, 2]))
+    spread = np.linalg.norm(arr[:, :2] - centre, axis=1) / height
+    return float(np.percentile(spread, 90)) < STILL_HEIGHTS
+
+
 def in_play(chain: Track) -> bool:
     """Seen during the rallies (or carrying a number): a player, not someone crossing the
     court between two rallies."""

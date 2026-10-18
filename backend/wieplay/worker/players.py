@@ -501,6 +501,11 @@ def identify(
     tracks, met = identities.split_encounters(tracks, col, teams, allowed or None)
     numbered_tracks = sum(1 for t in tracks if t.number is not None)
     chains = identities.chains_of(tracks, stitch)
+    standing = 0
+    for c in chains:
+        if not c.referee and c.number is None and identities.still(c, col):
+            c.referee = True  # stands still through the rallies: not playing
+            standing += 1
     kept = identities.assign_numbers([c for c in chains if identities.in_play(c)])
     clusters = pl.cluster_tracks(kept)
     absorbed = identities.absorb(clusters)
@@ -513,6 +518,7 @@ def identify(
         "tracks": len(tracks),
         "swaps_cut": cuts,
         "encounter_cuts": met,
+        "standing_still": standing,
         "absorbed": absorbed,
         "chains": len(chains),
         "chains_in_play": len(kept),

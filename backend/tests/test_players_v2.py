@@ -512,3 +512,16 @@ def test_feet_at_the_net_do_not_vote_and_between_rallies_takes_the_nearest_rally
     walker.foot_at = [None] * 4
     w = pl.make_track(walker, col, pl._fallback(col))
     assert w.window == 0 and w.window_sides == {}
+
+
+def test_someone_standing_still_through_the_rallies_is_not_playing() -> None:
+    geom = pl.Geometry(roi=(0.0, 0.0, 1.0, 1.0))
+    col = pl.Collector(geom, 1000, 500, (0, 0, 1000, 500))
+    img = np.zeros((500, 1000, 3), np.uint8)
+    for k in range(300):  # 30 s of rally: one stands at the side, one runs about
+        judge = [20, 300, 40, 380]
+        runner = [100 + 2 * k % 500, 200, 140 + 2 * k % 500, 330]
+        col.add(100 * k, 0, img, np.array([judge, runner], float), np.array([0.9, 0.9]),
+                np.array([1, 2]), span=0)  # fmt: skip
+    tracks = {t.track_id: identities.as_chain([t]) for t in pl.finish_tracks(col)}
+    assert identities.still(tracks[1], col) and not identities.still(tracks[2], col)
