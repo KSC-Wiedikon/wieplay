@@ -249,7 +249,7 @@ def queue_players(db: Session, video: Video, caps: Sequence[str] = CAPS) -> Job:
 
 
 def _rendition(video: Video) -> Any:
-    """The rendition a GPU worker reads: 1080p, else the largest there is."""
+    """The rendition a GPU worker reads: 1080p, else the largest there is (720p)."""
     found = [r for r in video.renditions if r.segment_count and r.playlist]
     by_name = {r.name: r for r in found}
     if RENDITION in by_name:

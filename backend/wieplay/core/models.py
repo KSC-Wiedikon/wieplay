@@ -417,7 +417,7 @@ class VideoRendition(Base):
     video_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("video.id", ondelete="CASCADE"), primary_key=True
     )
-    name: Mapped[str] = mapped_column(String(16), primary_key=True)  # 1080p | 540p
+    name: Mapped[str] = mapped_column(String(16), primary_key=True)  # 1080p | 720p | 540p
     codecs: Mapped[str] = mapped_column(String(64))  # RFC 6381, e.g. avc1.640028,mp4a.40.2
     width: Mapped[int] = mapped_column(Integer)
     height: Mapped[int] = mapped_column(Integer)
