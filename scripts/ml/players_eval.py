@@ -5,8 +5,9 @@
 
 `detect` runs detection and tracking as the job does (the same functions) and keeps the
 collected tracks in OUT_DIR/collector.pkl; `identify` links them into people from that cache
-(numbers, chains, clusters) and writes OUT_DIR/summary.json, OUT_DIR/clusters.json and the
-contact sheets, so the linking can be changed and rerun in a minute. INPUTS.json is what the
+(numbers, chains, clusters) and writes OUT_DIR/summary.json and OUT_DIR/clusters.json (with
+`--images` also the contact sheets and a picture per card for checking by eye), so the
+linking can be changed and rerun in a minute. INPUTS.json is what the
 API hands the job (rallies with their sides, calibration, setups, roster numbers) plus the
 video's duration and size, e.g. from the API container:
 
@@ -137,7 +138,7 @@ def detect(
     print(json.dumps(timing))
 
 
-def identify(out: Path, gpu: bool) -> None:
+def identify(out: Path, gpu: bool, images: bool = False) -> None:
     with (out / "collector.pkl").open("rb") as handle:
         cached = pickle.load(handle)  # noqa: S301 - our own cache
     settings = _settings(gpu, 0)
@@ -163,12 +164,13 @@ def identify(out: Path, gpu: bool) -> None:
         calibrated=setups.calibrated,
     )
     found.stats["identify_s"] = round(time.perf_counter() - started, 1)
-    sheets = out / "sheets"
-    sheets.mkdir(exist_ok=True)
-    for old in sheets.glob("sheet-*.jpg"):
-        old.unlink()
-    for n, page in enumerate(found.sheets.pages):
-        (sheets / f"sheet-{n}.jpg").write_bytes(page)
+    if images:  # crops of people: only when asked, and deleted after looking
+        sheets = out / "sheets"
+        sheets.mkdir(exist_ok=True)
+        for old in sheets.glob("sheet-*.jpg"):
+            old.unlink()
+        for n, page in enumerate(found.sheets.pages):
+            (sheets / f"sheet-{n}.jpg").write_bytes(page)
     fps = job.DETECT_FPS
     clusters = [
         {
@@ -189,7 +191,8 @@ def identify(out: Path, gpu: bool) -> None:
         for c in found.clusters
     ]
     (out / "clusters.json").write_text(json.dumps(clusters, indent=1))
-    review(found, out / "review")
+    if images:
+        review(found, out / "review")
     (out / "summary.json").write_text(json.dumps(found.stats, indent=2))
     print(json.dumps(found.stats))
 
@@ -272,6 +275,11 @@ def main() -> None:
         choices=["absorb", "propagate", "long", "encounters"],
         help="leave a step of the linking out (to measure what it does)",
     )
+    i.add_argument(
+        "--images",
+        action="store_true",
+        help="also write the contact sheets and a picture per card (crops of people)",
+    )
     args = parser.parse_args()
     if args.stage == "detect" and args.loose:
         job.TRACK_BUFFER_S, job.MATCH_COST, job.SECOND_COST, job.UNCONFIRMED_COST = (
@@ -293,7 +301,7 @@ def main() -> None:
             identities.LONG.max_gap_ms = 0
         if "encounters" in args.without:
             identities.ENCOUNTER_FRAMES = 10**9
-        identify(args.out, args.gpu)
+        identify(args.out, args.gpu, args.images)
 
 
 if __name__ == "__main__":

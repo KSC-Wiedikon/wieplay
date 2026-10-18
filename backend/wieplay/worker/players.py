@@ -502,6 +502,14 @@ def identify(
     ocr_read = 0
     if reader is not None:
         ocr_read = pl.read_numbers(tracks, reader, ocr_budget, allowed or None, OCR_WORKERS)
+    # How often the reader reads a number our roster has (before the roster drops the
+    # rest): a precision check that needs no coach (18 numbers of 99 on H3's roster).
+    ours = [n for t in tracks if t.team == "us" for _, n, _ in t.reads]
+    on_roster = (
+        round(sum(1 for n in ours if n in allowed["us"]) / len(ours), 3)
+        if ours and "us" in allowed
+        else None
+    )
     tracks, cuts = identities.split_swaps(tracks, col, teams, allowed or None)
     tracks, met = identities.split_encounters(tracks, col, teams, allowed or None)
     numbered_tracks = sum(1 for t in tracks if t.number is not None)
@@ -532,6 +540,8 @@ def identify(
         "numbers_read_tracks": numbered_tracks,
         "numbers_read": sum(1 for c in kept if c.number is not None),
         "ocr_crops": ocr_read,
+        "readings": sum(len(t.reads) for t in tracks),
+        "readings_ours_on_roster": on_roster,
         "clusters": len(clusters),
         "clusters_us": sum(1 for c in players if c.team == "us"),
         "clusters_them": sum(1 for c in players if c.team == "them"),
