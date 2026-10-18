@@ -75,7 +75,7 @@ from wieplay.core.models import (
 
 KINDS = frozenset({"players"})
 # The Lenovo's background lane; a GPU worker (PLAN §8.3, §8.6) takes the job once the API
-# asks for its caps instead, e.g. WIEPLAY_PLAYERS_CAPS=gpu,nas.
+# asks for its caps instead: since 18.10.2026 WIEPLAY_PLAYERS_CAPS=cuda,ml (the Framework 16).
 CAPS = tuple(
     c.strip() for c in os.environ.get("WIEPLAY_PLAYERS_CAPS", "analyse,nas").split(",") if c.strip()
 )
