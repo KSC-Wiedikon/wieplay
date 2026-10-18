@@ -180,6 +180,16 @@ describe('TaggingStore', () => {
     expect(store.getView().segments[0]?.serving_manual).toBe('us')
   })
 
+  it("keeps what the scoreboard log and the model say about a rally through a local change and its undo", async () => {
+    const log = { log_won_by: 'us', log_score_us: 12, log_score_them: 10, log_at_ms: 9_500, model_missed_us: 1, model_missed_them: 0 } as const
+    const r = rally({ start_ms: 1000, end_ms: 5000, source: 'model', version: 2, ...log })
+    const { store } = await setup(bundle({ segments: [r] }))
+    store.commit([{ kind: 'segment', payload: { ...segmentToIn(r), review: 'confirmed' } }])
+    expect(store.getView().segments[0]).toMatchObject({ review: 'confirmed', ...log })
+    store.undo()
+    expect(store.getView().segments[0]).toMatchObject({ review: 'unreviewed', ...log })
+  })
+
   it('sends a set with its review and starting rotation as they are', async () => {
     const set = period({ no: 1, start_ms: 0, source: 'model', review: 'unreviewed', start_rotation: 4, model_first_serve: 'them' })
     expect(periodToIn(set)).toMatchObject({ review: 'unreviewed', start_rotation: 4 })

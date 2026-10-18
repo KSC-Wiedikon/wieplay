@@ -141,6 +141,13 @@ function segmentFromIn(p: SegmentIn, prev: Segment | undefined): Segment {
     score_confidence: prev?.score_confidence ?? null,
     score_conflict: prev?.score_conflict ?? false,
     score_note: prev?.score_note ?? null,
+    model_missed_us: prev?.model_missed_us ?? null,
+    model_missed_them: prev?.model_missed_them ?? null,
+    // So does what the club scoreboard's log says about the rally (PLAN §10.10).
+    log_won_by: prev?.log_won_by ?? null,
+    log_score_us: prev?.log_score_us ?? null,
+    log_score_them: prev?.log_score_them ?? null,
+    log_at_ms: prev?.log_at_ms ?? null,
     version: prev?.version ?? 0,
     deleted_at: null,
   }

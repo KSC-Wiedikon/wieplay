@@ -244,6 +244,56 @@ describe('ReviewController', () => {
     expect(segment('s4')?.review).toBe('unreviewed')
   })
 
+  it('accepts all that match the scoreboard log after a confirmation, in one undo step, the winner left to the scoring', async () => {
+    const logged = bundle({
+      segments: [
+        suggestion('s1', 10_000, 0.6, { log_won_by: 'us', model_won_by: 'us' }),
+        suggestion('s2', 30_000, 0.95, { log_won_by: 'none', score_conflict: true, score_note: 'extra' }),
+        // The video alone was sure of the other winner: flagged, left for the coach.
+        suggestion('s3', 50_000, 0.9, { log_won_by: 'them', model_won_by: 'them', score_conflict: true, score_note: 'log' }),
+        suggestion('s4', 70_000, 0.5, { log_won_by: 'them', model_won_by: 'them' }),
+        suggestion('s5', 90_000, 0.97, { model_won_by: 'us' }), // the log says nothing
+        suggestion('s6', 110_000, 0.8, { log_won_by: 'us', model_won_by: 'us', score_conflict: true, score_note: 'missing_before' }),
+      ],
+    })
+    const { review, sent, segment, press } = await setup(logged)
+    expect(review.logMatches().map((s) => s.id)).toEqual(['s1', 's4'])
+    review.askAcceptLog()
+    expect(review.getState().confirmLog).toBe(true)
+    press('x') // keys wait while the dialog asks
+    expect(segment('s1')).toBeDefined()
+    review.confirmAcceptLog()
+    expect(review.getState().confirmLog).toBe(false)
+    expect(['s1', 's2', 's3', 's4', 's5', 's6'].map((id) => segment(id)?.review)).toEqual([
+      'confirmed',
+      'unreviewed',
+      'unreviewed',
+      'confirmed',
+      'unreviewed',
+      'unreviewed',
+    ])
+    expect(review.getState().notice).toMatchObject({ key: 'acceptedLog', params: { count: 2, left: 4, none: 1, disagree: 1, missed: 1, silent: 1 } })
+    // The one on screen was accepted: on to the next open one.
+    expect(review.getState().currentId).toBe('s2')
+    // Accepted as they are: the winner stays the model's (no coach's fact written).
+    const body = await sent()
+    expect(body).toEqual([
+      { id: 's1', base_version: 1, kind: 'rally', start_ms: 10_000, end_ms: 18_000, won_by: null, review: 'confirmed' },
+      { id: 's4', base_version: 1, kind: 'rally', start_ms: 70_000, end_ms: 78_000, won_by: null, review: 'confirmed' },
+    ])
+    press('u')
+    expect(segment('s1')?.review).toBe('unreviewed')
+    expect(segment('s4')?.review).toBe('unreviewed')
+    expect(review.getState().currentId).toBe('s1')
+  })
+
+  it('has nothing to accept from the log when the video has none', async () => {
+    const { review } = await setup()
+    expect(review.logMatches()).toEqual([])
+    review.askAcceptLog()
+    expect(review.getState().confirmLog).toBe(false)
+  })
+
   it('ends with nothing on screen once every suggestion is answered', async () => {
     const { review, press } = await setup()
     press('Enter')

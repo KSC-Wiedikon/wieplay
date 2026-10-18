@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { period, rally } from '../test/tagging'
+import type { Segment } from './types'
 import {
   allProgress,
   effectiveServer,
@@ -7,11 +8,15 @@ import {
   factualRallies,
   formatPercent,
   gapProgress,
+  hasTrustedLog,
   isGapSuggestion,
   isProposal,
   isReviewedSuggestion,
   isSetSuggestion,
   isSuggestion,
+  logCounts,
+  logMatches,
+  logVerdict,
   loopRestart,
   nextOpen,
   reviewItems,
@@ -97,6 +102,29 @@ describe('suggestions', () => {
     expect(sureSuggestions(all).map((s) => s.id)).toEqual(['a'])
     expect(sureSuggestions(all, 0.7).map((s) => s.id)).toEqual(['a', 'c'])
     expect(sureSuggestions([rally({ start_ms: 0, end_ms: 1, source: 'model', confidence: null })])).toEqual([])
+  })
+
+  it('sorts open suggestions by what the scoreboard log says about them', () => {
+    const open = (id: string, start_ms: number, patch: Partial<Segment>) => rally({ id, start_ms, end_ms: start_ms + 5_000, source: 'model', ...patch })
+    const segments = [
+      open('m2', 20_000, { log_won_by: 'them', model_won_by: 'them' }),
+      open('m1', 10_000, { log_won_by: 'us', model_won_by: 'us' }),
+      open('none', 30_000, { log_won_by: 'none', score_conflict: true, score_note: 'extra' }),
+      // The video alone was sure of the other winner: the scoring followed the log, flagged.
+      open('video', 40_000, { log_won_by: 'us', model_won_by: 'us', score_conflict: true, score_note: 'log' }),
+      open('other', 50_000, { log_won_by: 'us', model_won_by: 'them' }),
+      open('missed', 60_000, { log_won_by: 'them', model_won_by: 'them', score_conflict: true, score_note: 'missing_before' }),
+      open('silent', 70_000, { model_won_by: 'us' }),
+      // Answered already, or a rally marked by hand: not suggestions.
+      open('done', 80_000, { log_won_by: 'us', model_won_by: 'us', review: 'confirmed' }),
+      rally({ id: 'hand', start_ms: 90_000, end_ms: 95_000, log_won_by: 'us', won_by: 'us' }),
+    ]
+    expect(logMatches(segments).map((s) => s.id)).toEqual(['m1', 'm2'])
+    expect(logCounts(segments)).toEqual({ match: 2, none: 1, disagree: 2, missed: 1, silent: 1 })
+    // A coach's winner counts over the model's.
+    expect(logVerdict({ log_won_by: 'us', won_by: 'them', model_won_by: 'us' })).toBe('disagree')
+    expect(hasTrustedLog(segments)).toBe(true)
+    expect(hasTrustedLog([open('x', 0, { model_won_by: 'us' })])).toBe(false)
   })
 
   it('restarts the loop just after the rally (and its post-roll), not after a seek away', () => {

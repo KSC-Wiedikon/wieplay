@@ -54,6 +54,7 @@ export const guideDe: Guide = {
     tips: [
       'Ungefähr reicht: eine Viertelsekunde zu früh oder zu spät schadet nicht. Ein vergessener oder erfundener Ballwechsel schon.',
       '«Alle übrigen mit Sicherheit ≥ 90 % übernehmen» spart Zeit, wenn die sicheren Vorschläge stimmen; U macht es in einem Schritt rückgängig.',
+      'Ist das Protokoll der Club-Anzeigetafel zum Spiel da, übernimmt «Alle übernehmen, die zum Anzeigetafel-Protokoll passen» jeden Ballwechsel, für den das Protokoll einen Punkt hat und WiePlay denselben Gewinner; wer gewonnen hat, bleibt WiePlays Vorschlag, und der folgt dem Protokoll. Für dich bleiben: kein Punkt im Protokoll, Protokoll und WiePlay uneins, ein verpasster Ballwechsel daneben oder das Protokoll sagt nichts. U macht es in einem Schritt rückgängig.',
       'Unsicher? Lass den Vorschlag offen und geh mit ↓ weiter. Jemand anderes kann später entscheiden.',
     ],
   },
