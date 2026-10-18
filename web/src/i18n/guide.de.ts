@@ -131,6 +131,32 @@ export const guideDe: Guide = {
       { keys: ['Esc'], text: 'Zurück zur Auswahl des Durchgangs' },
     ],
   },
+  sheet: {
+    title: 'Matchblatt eintragen',
+    intro:
+      'Jedes Meisterschaftsspiel hat ein offizielles Matchblatt, und jedes Team bekommt eine Kopie. In WiePlay abgetippt (etwa zehn Minuten für vier Sätze), liefert es jeden Punkt des Spiels der Reihe nach: wer aufschlug, wer gewann, die Rotationen beider Teams, Auszeiten und Spielerwechsel. WiePlay ordnet die Punkte dann den Ballwechseln im Video zu, so stimmen Spielstand und Statistik, ohne dass jemand einen Sieger taggt.',
+    steps: [
+      'Öffne auf der Videoseite «Matchblatt» (auch im Setup). Leg dir die Papierkopie bereit.',
+      'Pro Satz: Wähle, wer zuerst aufschlug (das X im Kreis S), dann die Startaufstellung beider Teams über den Spalten I bis VI, wie auf dem Matchblatt. Unsere ist vom letzten Spiel ausgefüllt.',
+      'Tippe die Aufschlagkästchen jedes Teams in der Reihenfolge des Matchblatts: Kästchen 1 der Positionen I bis VI, dann Kästchen 2 und so weiter. Das Team, das zuerst annahm, hat das X in Position I, Kästchen 1: Es beginnt bei II. Nach zwei Ziffern geht es von selbst weiter; Tab, Leertaste oder Enter gehen weiter.',
+      'Markiere das eingekreiste Satzresultat jedes Teams mit *. Tippe die Auszeiten (der Spielstand mit dem Team, das sie verlangte, zuerst) und die Spielerwechsel (die Nummer rein, der Stand dabei, der Stand bei der Rückkehr des Startspielers).',
+      'Achte auf die Prüfung über den Kästchen: Sie zeigt den Spielstand, wie er wächst, und nennt das erste Kästchen, das nicht passt. Ist ein einzelnes Kästchen falsch, schlägt WiePlay die Korrektur vor; vergleiche sie mit deiner Kopie, bevor du sie übernimmst.',
+      'Speichere. Das Spiel wird neu gewertet: Jeder Satz, der zum offiziellen Resultat passt, wird den Ballwechseln zugeordnet; ein Ballwechsel, den WiePlay verpasst hat, eine Wiederholung oder ein Ballwechsel, bei dem dein Sieger vom Matchblatt abweicht, wird in der Durchsicht markiert.',
+    ],
+    keysTitle: 'Tasten in den Aufschlagkästchen',
+    keys: [
+      { keys: ['Tab', 'Leertaste', '→'], text: 'Nächstes Kästchen in der Reihenfolge des Matchblatts' },
+      { keys: ['Shift + Tab', '←', 'Rücktaste'], text: 'Vorheriges Kästchen (Rücktaste auf einem leeren Kästchen)' },
+      { keys: ['Enter'], text: 'Nächstes Kästchen; auf einem leeren Kästchen: das andere Team' },
+      { keys: ['↑', '↓'], text: 'Das Kästchen darüber oder darunter' },
+      { keys: ['*'], text: 'Satzresultat einkreisen' },
+    ],
+    tips: [
+      'Namen, Geburtsdaten und Lizenznummern auf dem Matchblatt bleiben auf dem Papier: WiePlay nimmt nur Rückennummern und Spielstände.',
+      'Ein Satz, der nicht passt, bleibt gespeichert und dient nur als Hinweis. Einen Satz, dem du nicht traust, kannst du ausschalten; der Rest zählt weiter.',
+      'Deine eigenen Sieger gehen dem Matchblatt immer vor: Wo sie abweichen, wird der Ballwechsel markiert, damit du nochmals hinschaust.',
+    ],
+  },
   actions: {
     title: 'Vorgeschlagene Aktionen prüfen',
     body: 'Schlägt WiePlay auch die Ballberührungen in den Ballwechseln vor (Aufschlag, Annahme, Zuspiel, Angriff…), hat das Prüfen eine zweite Liste, «Aktionen». Die Berührung läuft in einer Schleife, und du antwortest ähnlich wie bei den Ballwechseln; am Schluss markierst du auch die Aktionen als geprüft.',
@@ -148,6 +174,7 @@ export const guideDe: Guide = {
     can: [
       'die Videos, Tags und Clips des Teams anschauen, jede Saison',
       'die Vorschläge von WiePlay prüfen, taggen, Ballwechsel markieren und Spielstände korrigieren',
+      'das offizielle Matchblatt des Spiels eintragen',
       'ein Video hochladen oder verlinken und die Aufstellung eines Videos korrigieren',
       'eigene Clips und Reels anlegen, kommentieren und Clips und Reels mit dem Team teilen',
     ],

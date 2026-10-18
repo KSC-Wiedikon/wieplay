@@ -424,6 +424,7 @@ export const videoDe: Messages<typeof videoEn> = {
         unsure: 'WiePlay ist hier nicht sicher.',
         board: 'Anzeigetafel und Aufschläge widersprechen sich hier.',
         log: 'Das Protokoll der Club-Anzeigetafel sagt etwas anderes.',
+        sheet: 'Das offizielle Matchblatt sagt etwas anderes.',
       },
       log: {
         label: 'Anzeigetafel-Protokoll',

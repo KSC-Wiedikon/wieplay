@@ -8,7 +8,7 @@ import { isSuggestedTag } from '../../lib/actions'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
-import { formatClock, periodLabel, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
+import { formatClock, periodLabel, scoreNoteText, segmentKindLabel, segmentLabel, sideLabel } from '../../lib/labels'
 import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
 import { useSideNames } from '../../lib/sides'
@@ -231,6 +231,7 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
   const view = useView()
   const ui = useUi()
   const reviewState = useReview()
+  const names = useSideNames()
   const selectedId = reviewState.active ? reviewState.currentId : ui.segmentId
   const now = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 50) * 50)
   const from = now - span / 2
@@ -301,7 +302,7 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
         const open = isSuggestion(s)
         const gap = isGap(s.kind)
         const score = s.kind === 'rally' ? scoreAfter(s) : null
-        const kind = segmentKindLabel(t, s.kind, taxonomy.sport)
+        const kind = segmentLabel(t, s, taxonomy.sport, names)
         return (
           <div
             key={s.id}

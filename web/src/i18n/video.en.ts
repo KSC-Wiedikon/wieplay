@@ -426,6 +426,7 @@ export const videoEn = {
         unsure: 'WiePlay is not sure about this one.',
         board: 'The scoreboard and the serves disagree here.',
         log: 'The club scoreboard’s log says otherwise.',
+        sheet: 'The official scoresheet says otherwise.',
       },
       // The club scoreboard's log (docs/PLAN.md §10.10): the point pressed after the rally.
       log: {

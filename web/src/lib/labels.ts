@@ -2,7 +2,7 @@
 
 import type { TFunction } from 'i18next'
 import type { SideNames } from './sides'
-import type { RosterEntry, ScoreNote, SegmentKind, Side, TaxonomySkill } from './types'
+import type { RosterEntry, ScoreNote, Segment, SegmentKind, Side, TaxonomySkill } from './types'
 
 /** Volleyball's skills; their names double as the categories that have grade meanings. */
 const VOLLEYBALL = ['serve', 'reception', 'set', 'attack', 'block', 'dig', 'freeball'] as const
@@ -63,6 +63,20 @@ export function periodLabel(t: TFunction, sport: string, no: number): string {
 export function segmentKindLabel(t: TFunction, kind: SegmentKind, sport: string): string {
   if (sport === 'basketball' && kind === 'set_break') return t('tagging.basketball.quarterBreak')
   return t(`tagging.segment.kind.${kind}`)
+}
+
+/**
+ * A segment's kind in words; a timeout from the official scoresheet names the team that called
+ * it ("Timeout (Volero)"; docs/PLAN.md §10.3a).
+ */
+export function segmentLabel(
+  t: TFunction,
+  segment: Pick<Segment, 'kind' | 'called_by'>,
+  sport: string,
+  names?: SideNames | null,
+): string {
+  const kind = segmentKindLabel(t, segment.kind, sport)
+  return segment.kind === 'timeout' && segment.called_by ? `${kind} (${sideLabel(t, segment.called_by, names)})` : kind
 }
 
 /** Why the automatic scoring flags a rally, in words (needs the video strings, src/i18n/pages.ts). */

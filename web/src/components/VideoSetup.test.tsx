@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CourtState } from '../lib/court'
 import type { PlayersSummary } from '../lib/players'
 import type { ScoreboardState, ScoreLogState } from '../lib/scoreboard'
-import { analysisState, ballState, courtState as courtStepState, namesState, playersState, scoreboardState } from '../lib/setup'
+import type { Scoresheet } from '../lib/scoresheet'
+import { analysisState, ballState, courtState as courtStepState, namesState, playersState, scoreboardState, sheetState } from '../lib/setup'
 import type { Analysis, TeamNames, Video } from '../lib/types'
 import { courtState, savedCalibration } from '../test/court'
 import { PLAYERS_VIDEO_ID as ID, readyVideo } from '../test/players'
@@ -58,6 +59,53 @@ const scoreLog = (patch: Partial<ScoreLogState> = {}): ScoreLogState => ({
   ...patch,
 })
 
+const sheet = (patch: Partial<Scoresheet> = {}): Scoresheet => ({
+  video_id: ID,
+  exists: false,
+  can_edit: true,
+  version: 0,
+  use_in_scoring: true,
+  source: null,
+  sets: [],
+  entered_by: null,
+  entered_at: null,
+  updated_by: null,
+  updated_at: null,
+  conflicts: [],
+  official_sets: [
+    [25, 20],
+    [25, 20],
+    [25, 20],
+  ],
+  roster: [],
+  previous_lineup: null,
+  no_scoresheet: false,
+  checks: [],
+  trusted: false,
+  match: null,
+  match_by_setter: false,
+  ...patch,
+})
+
+const setCheck = (no: number, status: 'consistent' | 'inconsistent') => ({
+  no,
+  deciding: false,
+  status,
+  use: status === 'consistent' ? ('path' as const) : ('hint' as const),
+  wanted: true,
+  final: [25, 20] as [number, number],
+  official: [25, 20] as [number, number],
+  last: null,
+  issues: [],
+  repair: null,
+  repairs: [],
+  points: [],
+  timeouts: [],
+  subs: [],
+  stats: null,
+  scoring: null,
+})
+
 const players = (patch: Partial<PlayersSummary> = {}): PlayersSummary => ({
   status: 'none',
   run_id: null,
@@ -88,21 +136,32 @@ interface Setup {
   analysis?: Analysis | (() => Analysis)
   court?: CourtState
   scoreboard?: ScoreboardState | (() => ScoreboardState)
+  scoresheet?: Scoresheet
   routes?: Record<string, { status?: number; body?: unknown }>
   rallies?: number
 }
 
-function show({ video = {}, analysis: a = analysis(), court = courtState({ calibration: savedCalibration() }), scoreboard = board({ region, reading, job: { status: 'done', progress: null, error: null } }), routes = {}, rallies = 5 }: Setup = {}) {
+function show({
+  video = {},
+  analysis: a = analysis(),
+  court = courtState({ calibration: savedCalibration() }),
+  scoreboard = board({ region, reading, job: { status: 'done', progress: null, error: null } }),
+  // The setup's other tests: a coach said there is no scoresheet (the step is done).
+  scoresheet = sheet(),
+  routes = {},
+  rallies = 5,
+}: Setup = {}) {
   const fetch = vi.fn(
     stubFetch({
       [`/api/videos/${ID}/analysis`]: { body: a },
       [`/api/videos/${ID}/court`]: { body: court },
       [`/api/videos/${ID}/scoreboard`]: { body: scoreboard },
+      [`/api/videos/${ID}/scoresheet`]: { body: scoresheet },
       ...routes,
     }),
   )
   vi.stubGlobal('fetch', fetch)
-  const v = readyVideo({ names: names(), rallies_reviewed_at: '2026-10-16T19:00:00Z', ...video })
+  const v = readyVideo({ names: names(), rallies_reviewed_at: '2026-10-16T19:00:00Z', no_scoresheet: true, ...video })
   const view = renderRoute(<VideoSetup video={v} element={null} rallies={rallies} actionTags={0} />)
   return { ...view, fetch }
 }
@@ -154,6 +213,17 @@ describe('the states of the steps', () => {
 
     expect(namesState({ names: names() })).toBe('done')
     expect(namesState({ names: names({ them: null, them_from: null }) })).toBe('todo')
+
+    // The official scoresheet: a league game has one (to do), a friendly may (optional).
+    const league = { game_id: 501, no_scoresheet: false }
+    expect(sheetState(undefined, league)).toBe('waiting')
+    expect(sheetState(sheet(), league)).toBe('todo')
+    expect(sheetState(sheet(), { game_id: null, no_scoresheet: false })).toBe('optional')
+    expect(sheetState(sheet(), { ...league, no_scoresheet: true })).toBe('done')
+    expect(sheetState(sheet({ exists: true, trusted: true }), league)).toBe('done')
+    expect(sheetState(sheet({ exists: true, checks: [setCheck(1, 'consistent'), setCheck(2, 'inconsistent')] }), league)).toBe('attention')
+    // A scoresheet whose every set fits the official result: no scoreboard box needed.
+    expect(scoreboardState(board(), false, true)).toBe('done')
   })
 })
 
@@ -165,16 +235,17 @@ describe('VideoSetup', () => {
     })
     const court = await screen.findByRole('button', { name: 'Check the court' })
     expect(header()).toHaveAttribute('aria-expanded', 'true')
-    expect(header()).toHaveTextContent('4 of 6 done · 1 needs you')
+    expect(header()).toHaveTextContent('5 of 7 done · 1 needs you')
     expect(steps()).toEqual([
       ['Court', 'attention'],
       ['Players', 'optional'],
       ['Rallies and score', 'done'],
       ['Ball path', 'done'],
       ['Scoreboard', 'done'],
+      ['Scoresheet', 'done'],
       ['Team names', 'done'],
     ])
-    const completed = screen.getByRole('region', { name: 'Completed (4)' })
+    const completed = screen.getByRole('region', { name: 'Completed (5)' })
     expect(within(completed).getByText('Scoreboard read: 2 scores')).toBeInTheDocument()
     expect(within(completed).getByText('KSCW H3 – Volley Näfels')).toBeInTheDocument()
     expect(within(completed).getByText('From the game in Wiedisync.')).toBeInTheDocument()
@@ -188,7 +259,7 @@ describe('VideoSetup', () => {
 
   it('stays folded when nothing needs the coach, and opens on request', async () => {
     show()
-    await waitFor(() => expect(header()).toHaveTextContent('5 of 5 done'))
+    await waitFor(() => expect(header()).toHaveTextContent('6 of 6 done'))
     expect(header()).toHaveAttribute('aria-expanded', 'false')
     fireEvent.click(header())
     expect(screen.getByRole('button', { name: 'Edit the court' })).toBeInTheDocument()
@@ -231,7 +302,7 @@ describe('VideoSetup', () => {
   it('shows a video without a scoreboard as done', async () => {
     show({ scoreboard: board(), video: { no_scoreboard: true } })
     fireEvent.click(await screen.findByRole('button', { name: /^Setup/ }))
-    const completed = await screen.findByRole('region', { name: 'Completed (5)' })
+    const completed = await screen.findByRole('region', { name: 'Completed (6)' })
     expect(within(completed).getByText('No scoreboard in this video.')).toBeInTheDocument()
     expect(within(completed).getByRole('button', { name: 'Mark the scoreboard' })).toBeInTheDocument()
   })
@@ -239,7 +310,7 @@ describe('VideoSetup', () => {
   it("takes the score from the club scoreboard's log: done, no box asked for", async () => {
     show({ scoreboard: board({ log: scoreLog() }) })
     fireEvent.click(await screen.findByRole('button', { name: /^Setup/ }))
-    const completed = await screen.findByRole('region', { name: 'Completed (5)' })
+    const completed = await screen.findByRole('region', { name: 'Completed (6)' })
     expect(within(completed).getByText('Score from the club scoreboard’s log: 4 of 4 sets match the official result.')).toBeInTheDocument()
     expect(within(completed).queryByRole('button', { name: 'Mark the scoreboard' })).not.toBeInTheDocument()
   })
@@ -354,5 +425,44 @@ describe('VideoSetup', () => {
     await waitFor(() => expect(patched).toEqual([{ name_us: null, name_them: 'Volero' }]))
     expect(await screen.findByText('Names saved.')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('asks for the scoresheet of a league game: type it in, or say there is none', async () => {
+    const patched: unknown[] = []
+    show({
+      video: { no_scoresheet: false },
+      routes: {
+        [`PATCH /api/videos/${ID}/setup`]: {
+          body: ({ body }: { body: unknown }) => {
+            patched.push(body)
+            return readyVideo({ names: names(), no_scoresheet: true })
+          },
+        },
+      },
+    })
+    expect(await screen.findByText('Not entered. With the official scoresheet, every point of the match is known.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Type it in' })).toHaveAttribute('href', `/videos/${ID}/scoresheet`)
+    fireEvent.click(screen.getByRole('button', { name: 'No scoresheet' }))
+    await waitFor(() => expect(patched).toEqual([{ no_scoresheet: true }]))
+  })
+
+  it('takes the score from a scoresheet whose sets all fit: the scoreboard step is done too', async () => {
+    show({
+      scoreboard: board(),
+      video: { no_scoresheet: false },
+      scoresheet: sheet({ exists: true, version: 2, trusted: true, checks: [1, 2, 3].map((no) => setCheck(no, 'consistent')) }),
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /^Setup/ }))
+    const completed = await screen.findByRole('region', { name: 'Completed (6)' })
+    expect(within(completed).getByText('Score from the official scoresheet: every set fits the official result.')).toBeInTheDocument()
+    expect(within(completed).getByText('Entered; every set fits the official result.')).toBeInTheDocument()
+    expect(within(completed).queryByRole('button', { name: 'Mark the scoreboard' })).not.toBeInTheDocument()
+    expect(within(completed).getByRole('link', { name: 'Open the scoresheet' })).toBeInTheDocument()
+  })
+
+  it('needs the coach when a set of the scoresheet does not fit', async () => {
+    show({ video: { no_scoresheet: false }, scoresheet: sheet({ exists: true, version: 1, checks: [setCheck(1, 'consistent'), setCheck(2, 'inconsistent')] }) })
+    expect(await screen.findByText('Entered; 1 set to check.')).toBeInTheDocument()
+    expect(steps()[0]).toEqual(['Scoresheet', 'attention'])
   })
 })

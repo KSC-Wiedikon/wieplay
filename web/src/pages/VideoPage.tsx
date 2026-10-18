@@ -34,7 +34,7 @@ import { commentMoments } from '../lib/comments'
 import { PRE_ROLL_MS } from '../lib/condensed'
 import { factTags } from '../lib/facts'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
-import { formatClock, segmentKindLabel } from '../lib/labels'
+import { formatClock, segmentLabel } from '../lib/labels'
 import { useComments, useVideoClips } from '../lib/library'
 import { Playhead } from '../lib/playhead'
 import { useDeleteVideo, useMe, useTagging, useVideo, useVideoConfig } from '../lib/queries'
@@ -331,10 +331,10 @@ function Ready({ video }: { video: Video }) {
     () =>
       (data?.segments ?? []).flatMap((s) =>
         isGap(s.kind)
-          ? [{ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, kind: s.kind, label: segmentKindLabel(t, s.kind, video.sport), suggested: isGapSuggestion(s) }]
+          ? [{ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, kind: s.kind, label: segmentLabel(t, s, video.sport, names), suggested: isGapSuggestion(s) }]
           : [],
       ),
-    [data, t, video.sport],
+    [data, t, video.sport, names],
   )
   const starts = useMemo<StartMark[]>(
     () =>
@@ -458,6 +458,11 @@ function Ready({ video }: { video: Video }) {
                   <button type="button" onClick={scrollToStats} className="min-h-11 cursor-pointer link sm:min-h-9">
                     {t('stats.jump')}
                   </button>
+                )}
+                {volleyball && (
+                  <Link to={`/videos/${video.id}/scoresheet`} className="inline-flex min-h-11 items-center link sm:min-h-9">
+                    {t('sheet.title')}
+                  </Link>
                 )}
               </p>
               {data.can_tag && (

@@ -1,12 +1,14 @@
 // The video page's setup (src/components/VideoSetup.tsx): how far each step is (the analysis,
-// the ball's path, the court, the scoreboard, the players, the teams' names), and the video's
-// own setup facts (PATCH /api/videos/{id}/setup: the names a coach set, "no scoreboard").
+// the ball's path, the court, the scoreboard, the scoresheet, the players, the teams' names), and
+// the video's own setup facts (PATCH /api/videos/{id}/setup: the names a coach set, "no
+// scoreboard", "no scoresheet").
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { proposalTotal } from './analysis'
 import { apiRequest } from './api'
 import type { CourtState } from './court'
 import type { PlayersSummary } from './players'
+import type { Scoresheet } from './scoresheet'
 import { keys } from './queryClient'
 import { scoreboardKey, type ScoreboardState } from './scoreboard'
 import type { Analysis, Video, VideoSetupIn } from './types'
@@ -16,7 +18,7 @@ import type { Analysis, Video, VideoSetupIn } from './types'
  * (something to check or a failure); waiting (nothing to do yet); optional (on demand).
  */
 export type StepState = 'done' | 'busy' | 'todo' | 'attention' | 'waiting' | 'optional'
-export type StepKey = 'analysis' | 'ball' | 'court' | 'scoreboard' | 'players' | 'names'
+export type StepKey = 'analysis' | 'ball' | 'court' | 'scoreboard' | 'sheet' | 'players' | 'names'
 
 export const BUSY_JOBS = ['queued', 'running']
 
@@ -48,16 +50,29 @@ export function courtState(court: CourtState | undefined): StepState {
   return BUSY_JOBS.includes(court.court_job ?? '') ? 'busy' : 'todo'
 }
 
-export function scoreboardState(board: ScoreboardState | undefined, noScoreboard: boolean): StepState {
-  // The club scoreboard's log lined up and matching the official result: the score comes from
-  // it, nobody needs to draw a box (docs/PLAN.md §10.10).
-  if (board?.log?.trusted) return 'done'
+export function scoreboardState(board: ScoreboardState | undefined, noScoreboard: boolean, sheetTrusted = false): StepState {
+  // The club scoreboard's log lined up and matching the official result, or the official
+  // scoresheet with every set fitting it: the score comes from them, nobody needs to draw a box
+  // (docs/PLAN.md §10.10, §10.3a).
+  if (board?.log?.trusted || sheetTrusted) return 'done'
   if (!board?.region) return noScoreboard ? 'done' : board ? 'todo' : 'waiting'
   const job = board.job?.status
   if (job && BUSY_JOBS.includes(job)) return 'busy'
   if (job === 'failed') return 'attention'
   if (!board.reading) return 'waiting'
   return board.reading.segments.length > 0 ? 'done' : 'attention'
+}
+
+/**
+ * The official scoresheet (docs/PLAN.md §10.3a): done when every set fits the official result
+ * (or a coach said there is none); needs you when a set doesn't fit; to do for a league game
+ * without one (every league match has a sheet), optional for a friendly.
+ */
+export function sheetState(sheet: Scoresheet | undefined, video: Pick<Video, 'game_id' | 'no_scoresheet'>): StepState {
+  if (!sheet) return 'waiting'
+  if (!sheet.exists) return video.no_scoresheet ? 'done' : video.game_id !== null ? 'todo' : 'optional'
+  if (sheet.trusted) return 'done'
+  return sheet.checks.some((c) => c.status === 'inconsistent') ? 'attention' : 'todo'
 }
 
 export function playersState(players: PlayersSummary): StepState {
@@ -70,13 +85,14 @@ export function namesState(video: Pick<Video, 'names'>): StepState {
   return video.names?.them ? 'done' : 'todo'
 }
 
-/** PATCH /api/videos/{id}/setup: the names, "no scoreboard". */
+/** PATCH /api/videos/{id}/setup: the names, "no scoreboard", "no scoresheet". */
 export function useVideoSetup(videoId: string) {
   const client = useQueryClient()
   return useMutation({
     mutationFn: (body: VideoSetupIn) => apiRequest<Video>(`/api/videos/${videoId}/setup`, { method: 'PATCH', body }),
     onSuccess: (video, body) => {
       client.setQueryData(keys.video(videoId), video)
+      if (body.no_scoresheet !== undefined) void client.invalidateQueries({ queryKey: ['videos', videoId, 'scoresheet'] })
       if (body.no_scoreboard !== undefined) {
         // A box drawn before is forgotten and the match scored again.
         void client.invalidateQueries({ queryKey: scoreboardKey(videoId) })

@@ -5,9 +5,12 @@ Made-up numbers only."""
 
 from __future__ import annotations
 
+import json
+import os
 import random
 from collections.abc import Collection
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -384,3 +387,115 @@ def test_the_sheet_says_who_served_first() -> None:
     rallies, servers = rallies_for(played, first)
     path = sheet_set(played, servers)
     assert sc.set_cost(sc.SetIn(1, rallies, sheet=path), "near", "them") == float("inf")
+
+
+# --- the browser's decoder: the same answers (web/src/lib/scoresheet.ts) ----------------------
+
+FIXTURE = Path(__file__).resolve().parents[2] / "web" / "src" / "lib" / "scoresheet.fixture.json"
+
+
+def _doc(s: sh.SheetSet) -> dict[str, object]:
+    """A set as the API takes it (wieplay/core/scoresheet.py SetSheetIn)."""
+    n = sh.boxes_for(s.deciding)
+
+    def grid(side: sh.Side) -> list[list[int | None]]:
+        g = s.boxes.get(side) or []
+        return [[(g[p][b] if p < len(g) and b < len(g[p]) else None) for b in range(n)]
+                for p in range(6)]  # fmt: skip
+
+    return {
+        "no": s.no,
+        "deciding": s.deciding,
+        "first_serve": s.first_serve,
+        "lineup_us": list(s.lineup.get("us") or []) or None,
+        "lineup_them": list(s.lineup.get("them") or []) or None,
+        "boxes_us": grid("us"),
+        "boxes_them": grid("them"),
+        "circled_us": list(c) if (c := s.circled.get("us")) else None,
+        "circled_them": list(c) if (c := s.circled.get("them")) else None,
+        "timeouts": [{"side": t.side, "own": t.own, "opp": t.opp} for t in s.timeouts],
+        "subs": [
+            {
+                "side": u.side,
+                "position": u.position,
+                "number": u.number_in,
+                "at": list(u.at) if u.at else None,
+                "back": list(u.back) if u.back else None,
+            }
+            for u in s.subs
+        ],
+        "sanctions": [
+            {"side": x.side, "kind": x.kind, "own": x.own, "opp": x.opp} for x in s.sanctions
+        ],
+        "cancelled": [],
+        "start": None,
+        "end": None,
+        "use": True,
+    }
+
+
+def fixture_cases() -> list[dict[str, object]]:
+    rng = random.Random(7)  # noqa: S311 - test data
+    cases: list[tuple[str, sh.SheetSet, tuple[int, int] | None]] = []
+    for k in range(30):
+        s, played = sh.synthetic_set(rng, no=5 if k % 6 == 5 else 1 + k % 4, deciding=k % 6 == 5)
+        cases.append((f"random {k}", s, (played.count("us"), played.count("them"))))
+    cases += [
+        ("worked example", example(), (25, 21)),
+        ("low box", edited("them", 4, 2, 15), (25, 21)),
+        ("over", edited("them", 4, 2, 71), (25, 21)),
+        ("hole", edited("them", 3, 1, None), (25, 21)),
+        ("final missing", replace(edited("us", 1, 3, None), circled={}), (25, 21)),
+        ("official differs", example(), (25, 23)),
+        ("circled elsewhere", example(circled={"us": (6, 2), "them": (6, 2)}), None),
+        (
+            "typing",
+            replace(example(), boxes={"us": grid([[N, 1, 3, 5, 6, 7]]), "them": THEM}),
+            None,
+        ),
+        ("no first server", example(first_serve=None), None),
+        (
+            "notes",
+            example(
+                timeouts=[
+                    sh.Timeout("them", 8, 6),
+                    sh.Timeout("us", 6, 8),
+                    sh.Timeout("us", 30, 2),
+                ],
+                subs=[sh.Sub("us", 2, 12, (10, 12), (17, 17)), sh.Sub("us", 3, 7, (5, 5), None)],
+                sanctions=[sh.Sanction("them", "P", 0, 0), sh.Sanction("us", "P", 0, 0)],
+            ),
+            (25, 21),
+        ),
+    ]
+    out: list[dict[str, object]] = []
+    for name, s, official in cases:
+        d = sh.decode(s, official)
+        out.append(
+            {
+                "name": name,
+                "set": _doc(s),
+                "official": list(official) if official else None,
+                "expect": {
+                    "winners": winners(d),
+                    "penalties": [k for k, p in enumerate(d.points) if p.penalty],
+                    "final": list(d.final),
+                    "complete": d.complete,
+                    "consistent": d.consistent,
+                    "issues": [
+                        [i.code, i.severity, i.box.as_json() if i.box else None] for i in d.issues
+                    ],
+                },
+            }
+        )
+    return out
+
+
+def test_the_browsers_decoder_fixture_is_current() -> None:
+    """The fixture web/src/lib/scoresheet.test.ts checks the browser's decoder against. To
+    renew it: WIEPLAY_WRITE_SHEET_FIXTURE=1 uv run pytest tests/test_scoresheet.py."""
+    cases = fixture_cases()
+    text = json.dumps(cases, indent=1) + "\n"
+    if os.environ.get("WIEPLAY_WRITE_SHEET_FIXTURE"):
+        FIXTURE.write_text(text)
+    assert FIXTURE.exists() and json.loads(FIXTURE.read_text()) == cases

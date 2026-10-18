@@ -9,6 +9,7 @@ import { cx } from '../lib/cx'
 import { useFindPlayers, useSearchTime, type PlayersSummary } from '../lib/players'
 import { keys } from '../lib/queryClient'
 import { useReadScoreboard, useScoreboard, type ScoreboardState } from '../lib/scoreboard'
+import { useScoresheet, type Scoresheet } from '../lib/scoresheet'
 import {
   analysisState,
   ballState,
@@ -17,6 +18,7 @@ import {
   namesState,
   playersState,
   scoreboardState,
+  sheetState,
   useVideoSetup,
   type StepKey,
   type StepState,
@@ -116,6 +118,7 @@ export function VideoSetup({ video, element, rallies, actionTags }: VideoSetupPr
   const analysis = useAnalysis(video.id, true)
   const court = useCourt(video.id)
   const board = useScoreboard(video.id)
+  const sheet = useScoresheet(video.id, video.sport === 'volleyball')
   useFollowReading(video.id, board.data)
   const [open, setOpen] = useState<boolean | null>(null)
 
@@ -134,9 +137,10 @@ export function VideoSetup({ video, element, rallies, actionTags }: VideoSetupPr
     { key: 'court', state: courtState(court.data), node: (state) => <CourtStep key="court" state={state} video={video} court={court.data} element={element} /> },
     {
       key: 'scoreboard',
-      state: scoreboardState(board.data, video.no_scoreboard === true),
-      node: (state) => <ScoreboardStep key="scoreboard" state={state} video={video} board={board.data} element={element} />,
+      state: scoreboardState(board.data, video.no_scoreboard === true, sheet.data?.trusted === true),
+      node: (state) => <ScoreboardStep key="scoreboard" state={state} video={video} board={board.data} element={element} sheetTrusted={sheet.data?.trusted === true} />,
     },
+    { key: 'sheet', state: sheetState(sheet.data, video), node: (state) => <SheetStep key="sheet" state={state} video={video} sheet={sheet.data} /> },
     ...(players
       ? [{ key: 'players' as const, state: playersState(players), node: (state: StepState) => <PlayersStep key="players" state={state} video={video} players={players} canFind={analysis.data?.can_run ?? true} /> }]
       : []),
@@ -247,7 +251,19 @@ function CourtStep({ state, video, court, element }: { state: StepState; video: 
   )
 }
 
-function ScoreboardStep({ state, video, board, element }: { state: StepState; video: Video; board: ScoreboardState | undefined; element: HTMLVideoElement | null }) {
+function ScoreboardStep({
+  state,
+  video,
+  board,
+  element,
+  sheetTrusted,
+}: {
+  state: StepState
+  video: Video
+  board: ScoreboardState | undefined
+  element: HTMLVideoElement | null
+  sheetTrusted: boolean
+}) {
   const { t } = useTranslation()
   const toast = useToast()
   const again = useReadScoreboard(video.id)
@@ -278,8 +294,9 @@ function ScoreboardStep({ state, video, board, element }: { state: StepState; vi
             ? t('scoreboard.read', { count: segments })
             : t('scoreboard.readNothing')
           : t('setup.scoreboard.waiting')
-  // With a trusted log, the box is optional: say where the score comes from first.
-  const status = logLine && (log?.trusted || !board.region) ? logLine : boxStatus
+  // With a trusted log or scoresheet, the box is optional: say where the score comes from first.
+  const sheetLine = sheetTrusted ? t('setupSheet.fromSheet') : null
+  const status = sheetLine && !board.region ? sheetLine : logLine && (log?.trusted || !board.region) ? logLine : boxStatus
   return (
     <Step
       title={t('setup.scoreboard.title')}
@@ -291,7 +308,7 @@ function ScoreboardStep({ state, video, board, element }: { state: StepState; vi
         </>
       }
       actions={
-        board.can_edit && !(log?.trusted && !board.region) ? (
+        board.can_edit && !((log?.trusted || sheetTrusted) && !board.region) ? (
           <>
             <Button variant={state === 'todo' ? 'primary' : 'secondary'} onClick={() => setOpen(true)} aria-haspopup="dialog">
               {board.region ? t('setup.scoreboard.edit') : t('setup.scoreboard.open')}
@@ -318,6 +335,53 @@ function ScoreboardStep({ state, video, board, element }: { state: StepState; vi
             {open && <ScoreboardDialog video={video} state={board} element={element} onClose={() => setOpen(false)} />}
           </>
         ) : null
+      }
+    />
+  )
+}
+
+/** The official scoresheet (docs/PLAN.md §10.3a): type it in, check it, or say there is none. */
+function SheetStep({ state, video, sheet }: { state: StepState; video: Video; sheet: Scoresheet | undefined }) {
+  const { t } = useTranslation()
+  const toast = useToast()
+  const setup = useVideoSetup(video.id)
+  if (!sheet) return <Step title={t('setupSheet.title')} state={state} />
+  const checked = sheet.checks.filter((c) => c.status !== 'empty')
+  const toCheck = checked.filter((c) => c.status !== 'consistent').length
+  const status = !sheet.exists
+    ? video.no_scoresheet
+      ? t('setupSheet.absent')
+      : t('setupSheet.none')
+    : sheet.trusted
+      ? t('setupSheet.trusted')
+      : toCheck > 0
+        ? t('setupSheet.check', { count: toCheck })
+        : t('setupSheet.partial', { done: checked.length - toCheck, sets: checked.length })
+  return (
+    <Step
+      title={t('setupSheet.title')}
+      state={state}
+      status={<p role="status">{status}</p>}
+      actions={
+        <>
+          <ButtonLink to={`/videos/${video.id}/scoresheet`} variant={state === 'todo' || state === 'attention' ? 'primary' : 'secondary'}>
+            {sheet.exists ? t('setupSheet.edit') : t('setupSheet.open')}
+          </ButtonLink>
+          {sheet.can_edit && !sheet.exists && !video.no_scoresheet && (
+            <Button
+              variant="ghost"
+              disabled={setup.isPending}
+              onClick={() =>
+                setup.mutate(
+                  { no_scoresheet: true },
+                  { onError: (error) => toast.error(t('sheet.saveFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') })) },
+                )
+              }
+            >
+              {t('setupSheet.noSheet')}
+            </Button>
+          )}
+        </>
       }
     />
   )

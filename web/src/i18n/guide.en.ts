@@ -31,6 +31,7 @@ export interface Guide {
     tips: string[]
   }
   regrade: { title: string; intro: string; steps: string[]; keysTitle: string; keys: GuideKey[] }
+  sheet: { title: string; intro: string; steps: string[]; keysTitle: string; keys: GuideKey[]; tips: string[] }
   actions: { title: string; body: string; keys: GuideKey[] }
   rights: { title: string; canTitle: string; can: string[]; cannotTitle: string; cannot: string[]; privacy: string }
 }
@@ -165,6 +166,32 @@ export const guideEn: Guide = {
       { keys: ['Esc'], text: 'Back to the choice of the pass' },
     ],
   },
+  sheet: {
+    title: 'Enter the scoresheet',
+    intro:
+      'Every league match has an official scoresheet, and each team gets a copy. Typed into WiePlay (about ten minutes for four sets), it gives every point of the match in order: who served, who won, both teams’ rotations, timeouts and substitutions. WiePlay then lines the points up with the video’s rallies, so the score line and the statistics are right without anyone tagging a winner.',
+    steps: [
+      'On the video page open “Scoresheet” (also in the setup). Have the paper copy in front of you.',
+      'Per set: choose who served first (the X in circle S), then the starting six of both teams, above the columns I to VI, as on the sheet. Ours are filled in from the last match.',
+      'Type each team’s service boxes in the sheet’s own order: box 1 of positions I to VI, then box 2, and so on. The team that received first has the X in position I box 1: start at II. Two digits move on by themselves; Tab, Space or Enter move on.',
+      'Mark each team’s circled final with *. Type the timeouts (the score with the team that asked first) and the substitutions (the number in, the score then, the score when the starting player came back).',
+      'Watch the check above the boxes: it shows the score as it grows and names the first box that doesn’t fit. If a single box is off, WiePlay suggests the fix; check it against your copy before you apply it.',
+      'Save. The match is scored again: each set that fits the official result lines up with the rallies; a rally WiePlay missed, a replay, or a rally where your winner differs from the sheet is flagged in the review.',
+    ],
+    keysTitle: 'Keys in the service boxes',
+    keys: [
+      { keys: ['Tab', 'Space', '→'], text: 'Next box in the sheet’s order' },
+      { keys: ['Shift + Tab', '←', 'Backspace'], text: 'Previous box (Backspace on an empty box)' },
+      { keys: ['Enter'], text: 'Next box; on an empty box: the other team' },
+      { keys: ['↑', '↓'], text: 'The box above or below' },
+      { keys: ['*'], text: 'Circle the final' },
+    ],
+    tips: [
+      'Names, dates of birth and licence numbers on the sheet stay on paper: WiePlay takes shirt numbers and scores only.',
+      'A set that doesn’t fit is kept and used only as a hint. A set you don’t trust can be switched off; the rest still counts.',
+      'Your own winners always win over the sheet: where they differ, the rally is flagged so you can look again.',
+    ],
+  },
   actions: {
     title: 'Review suggested actions',
     body: 'When WiePlay also suggests the touches inside the rallies (serve, reception, set, attack…), the review has a second queue, “Actions”. The contact plays in a loop and you answer much like for rallies; at the end, mark the actions reviewed too.',
@@ -182,6 +209,7 @@ export const guideEn: Guide = {
     can: [
       'watch the team’s videos, tags and clips, every season',
       'review WiePlay’s suggestions, tag, mark rallies and correct scores',
+      'type in the match’s official scoresheet',
       'upload or link a video, and correct a video’s roster',
       'keep your own clips and reels, comment, and share clips and reels with the team',
     ],
