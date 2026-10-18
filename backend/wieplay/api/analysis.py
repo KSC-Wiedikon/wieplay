@@ -108,6 +108,7 @@ class ScoringSetOut(BaseModel):
     extra: int = 0  # rallies that look like no point
     first_serve: str | None
     our_side_at_start: str | None
+    sheet: str | None = None  # the scoresheet: path (lined up) | hint | None
 
 
 class ScoringVsCoachOut(BaseModel):
@@ -143,6 +144,10 @@ class ScoringOut(BaseModel):
     # against the official score, how often the score line follows it, the coach's winners
     # against it, how often the video alone disagreed.
     log: dict[str, Any] | None = None
+    # The official scoresheet (PLAN §10.3a), when the video has one: per set how it was used
+    # (lined up with the rallies, or a hint), its points lined up, penalties and missed rallies,
+    # rallies without a point; the log's and the coach's winners against the sheet's.
+    sheet: dict[str, Any] | None = None
 
 
 class ActionsVsCoachOut(BaseModel):
@@ -351,6 +356,7 @@ def _scoring(db: DbDep, video: Video) -> ScoringOut | None:
         vs_coach=ScoringVsCoachOut.model_validate(m["vs_coach"]) if m.get("vs_coach") else None,
         board=m.get("board"),
         log=m.get("log"),
+        sheet=m.get("sheet"),
     )
 
 

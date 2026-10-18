@@ -1,6 +1,6 @@
 """Who may see what (PLAN §5.1): team visibility, WiePlay administration (M0), videos (M1),
 tagging and sharing (M2, M3), team helpers (analysts), guest clubs (PLAN §4.5), saved filters
-(PLAN §9.7).
+(PLAN §9.7), official scoresheets (PLAN §10.3a).
 
 Guest clubs are walled off both ways: a guest sees only the guest team rows they are on,
 and KSCW members (players, coaches, sport admins, helpers) never see a guest team. Only
@@ -250,3 +250,18 @@ def can_manage_people(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> b
     """A guest team's roster and invite links (PLAN §4.5): its coaches (any season) and
     admins. KSCW rosters come from Wiedisync and are never edited in WiePlay."""
     return team.guest and _leads_team(viewer, team, leads)
+
+
+def can_see_sheet(viewer: Viewer, team: TeamRef, teams: Iterable[TeamRef]) -> bool:
+    """See a match's official scoresheet as it was typed in (PLAN §10.3a): whoever may watch
+    the video (`teams`: every team row, for the lineages). It holds shirt numbers and scores
+    only; a photo of the paper sheet (SS3) gets a narrower rule of its own."""
+    return team.id in visible_team_ids(viewer, teams)
+
+
+def can_edit_sheet(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Type in, correct or remove a match's official scoresheet: whoever may tag the match
+    (coaches, team managers, sport admins, admins, the team's helpers and the season's players;
+    research note §5.2: "anyone who may tag, a helper with the paper copy in hand"). Their
+    winners already outrank the sheet; every change of the sheet is kept as a revision."""
+    return can_tag(viewer, team, leads)

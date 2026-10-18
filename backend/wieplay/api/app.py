@@ -28,6 +28,7 @@ from wieplay.api import (
     media,
     players,
     scoreboard,
+    scoresheet,
     stats,
     tagging,
     teams,
@@ -196,6 +197,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(court.router)
     app.include_router(players.router)
     app.include_router(scoreboard.router)
+    app.include_router(scoresheet.router)
 
     if settings.web_dist:
         _mount_web(app, Path(settings.web_dist))

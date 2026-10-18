@@ -187,6 +187,8 @@ class VideoOut(BaseModel):
     names: NamesOut | None = None
     # A coach said there is no scoreboard in the picture (the setup's scoreboard step).
     no_scoreboard: bool = False
+    # ... or that there is no official scoresheet for this match (the setup's scoresheet step).
+    no_scoresheet: bool = False
 
 
 class SetupIn(BaseModel):
@@ -196,6 +198,7 @@ class SetupIn(BaseModel):
     name_us: str | None = Field(default=None, max_length=80)
     name_them: str | None = Field(default=None, max_length=80)
     no_scoreboard: bool | None = None
+    no_scoresheet: bool | None = None
 
 
 class FileIn(BaseModel):
@@ -398,6 +401,7 @@ def _video_out(
         analysis=analysis_by_video.get(video.id),
         names=NamesOut(**asdict(found)),
         no_scoreboard=video.no_scoreboard,
+        no_scoresheet=video.no_scoresheet,
         files=[
             FileOut(
                 id=f.id,
@@ -796,8 +800,8 @@ def get_video(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: Setti
 def update_setup(
     video_id: uuid.UUID, body: SetupIn, viewer: ViewerDep, db: DbDep, settings: SettingsDep
 ) -> VideoOut:
-    """The video's setup (the video page's "Setup"): the two teams' names, and "no
-    scoreboard in this video" (which forgets a box drawn before and scores again)."""
+    """The video's setup (the video page's "Setup"): the two teams' names, "no scoreboard in
+    this video" (which forgets a box drawn before and scores again) and "no scoresheet"."""
     video, access = visible_video(db, viewer, video_id)
     if not can_tag(viewer, access.ref, access.leads):
         raise HTTPException(403, "Only the team's members, coaches and helpers set up this video")
@@ -814,6 +818,8 @@ def update_setup(
 
             if scoreboard.remove(db, video):
                 scoring.score_video(db, video, reason="scoreboard")
+    if body.no_scoresheet is not None and body.no_scoresheet != video.no_scoresheet:
+        video.no_scoresheet = changed["no_scoresheet"] = body.no_scoresheet
     if changed:
         audit(db, viewer.member_id, "video_setup", "video", str(video.id), **changed)
     db.commit()

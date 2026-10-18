@@ -26,7 +26,11 @@ What it writes, always next to the coach's work and never in its place (PLAN §1
   and the evidence's final; flagged rallies; gaps; on the coach's rallies, how often the
   model (scored blind to them) gets the serve side and the winner right;
 - per rally, what the club scoreboard's log says (`log_won_by`, `log_score_*`, `log_at_ms`;
-  PLAN §10.10, wieplay/core/scorelog.py), in the sets where the log ends on the official score.
+  PLAN §10.10, wieplay/core/scorelog.py), in the sets where the log ends on the official score;
+- with the official scoresheet (PLAN §10.3a, wieplay/core/scoresheet.py): a consistent set's
+  points lined up with the rallies (`sheet_point`, `sheet_won_by`, `sheet_serving`), its first
+  server and lineups on the set where empty, its timeouts as `timeout` breaks with their team
+  (source "import"), a doubtful set's winners as a hint.
 """
 
 from __future__ import annotations
@@ -369,6 +373,13 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         log_spans = scorelog.set_spans(log_ev, rallies) if log_ev and log_ev.any_trusted else None
         _propose_periods(db, video, run, rallies, official, log_spans)
         periods = _live_periods(db, video)
+    # The official scoresheet (PLAN §10.3a): its first servers and lineups on the sets.
+    from wieplay.core import scoresheet
+
+    sheet = scoresheet.for_scoring(db, video)
+    if sheet is not None:
+        run.params["scoresheet"] = True
+        scoresheet.fill_periods(db, video, sheet.checks, sheet.on)
 
     calls = _serve_calls(db, video, rallies)
     by_period: dict[uuid.UUID, list[int]] = {}
@@ -391,6 +402,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     scored = [p for p in periods if by_period.get(p.id)]
     set_ins = [_set_in(p, [obs[i] for i in by_period[p.id]], official) for p in scored]
+    # The sheet: ranked below the coach, above the log and everything else.
+    if sheet is not None and set_ins:
+        set_ins = scoresheet.apply(sheet, set_ins)
     # The club scoreboard's log: the strongest evidence after a coach's (PLAN §10.10).
     if log_ev is not None and set_ins:
         set_ins = scorelog.apply(log_ev, set_ins)
@@ -409,6 +423,8 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         match, log_disagree = scorelog.flag_disagreements(set_ins, match)
         log_metrics = scorelog.metrics(log_ev, set_ins, match, log_disagree)
     scorelog.write(log_ev, rallies)
+    scoresheet.write(match, rallies)
+    sheet_metrics = scoresheet.metrics(sheet, set_ins, match) if sheet is not None else None
 
     # The rallies: clear, then write what the model found.
     by_key = {str(r.id): r for r in rallies}
@@ -442,6 +458,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         if period.source == "model":
             period.model_run_id = run.id
 
+    _sheet_timeouts(db, video, run, scoresheet.timeout_gaps(sheet, match, rallies) if sheet else [])
     gap_counts = _label_gaps(db, video, run, rallies, scored, by_period, act)
     db.flush()
     tagging.rescore(db, video)
@@ -466,6 +483,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
                 "first_serve": so.first_serve,
                 "our_side_at_start": so.our_side,
                 "feasible": so.feasible,
+                "sheet": so.sheet,
             }
         )
     flagged = sum(s["flagged"] for s in sets_out)
@@ -488,6 +506,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         "notes": dict(Counter(r.note for so in match.sets for r in so.rallies if r.note)),
         "board": board_metrics,
         "log": log_metrics,
+        "sheet": sheet_metrics,
     }
     run.timing = {"wall_s": round(time.perf_counter() - started, 3), "rallies": len(rallies)}
     from wieplay.core import actions  # the suggested actions follow the new sides (PLAN §10.4a)
@@ -539,6 +558,59 @@ def _first_serve_ms(db: Session, video: Video) -> int | None:
 
 def first_serve_ms(db: Session, video: Video) -> int | None:
     return _first_serve_ms(db, video) if video.sport in SPORTS else None
+
+
+def _sheet_timeouts(
+    db: Session, video: Video, run: ModelRun, found: Sequence[tuple[int, int, str, str]]
+) -> None:
+    """The sheet's timeouts as `timeout` breaks (source "import", with the team that called
+    it), replaced on every run unless a coach changed or removed one; never over a coach's own
+    break there."""
+    from wieplay.core import scoresheet
+
+    db.execute(
+        delete(Segment).where(
+            Segment.video_id == video.id,
+            Segment.kind == "timeout",
+            Segment.source == "import",
+            Segment.import_system == scoresheet.IMPORT_SYSTEM,
+            Segment.updated_by.is_(None),
+            Segment.deleted_at.is_(None),
+        )
+    )
+    if not found:
+        return
+    others = db.execute(
+        select(Segment.start_ms, Segment.end_ms, Segment.source, Segment.review, Segment.deleted_at)
+        .where(Segment.video_id == video.id, Segment.kind.in_(GAP_KINDS))
+    ).all()  # fmt: skip
+    blocked = [
+        (int(s), int(e))
+        for s, e, source, review, deleted in others
+        # a coach's break, or one of these a coach removed; the model's open ones are replaced
+        if (deleted is None and not (source == "model" and review == "unreviewed"))
+        or (deleted is not None and source == "import")
+    ]
+    for start, end, team, ref in found:
+        if end <= start or any(_overlap((start, end), b) >= OVERLAP for b in blocked):
+            continue
+        db.add(
+            Segment(
+                id=uuid.uuid4(),
+                video_id=video.id,
+                kind="timeout",
+                start_ms=start,
+                end_ms=end,
+                source="import",
+                import_system=scoresheet.IMPORT_SYSTEM,
+                import_ref=ref,
+                called_by=team,
+                model_run_id=run.id,
+                review="unreviewed",
+                version=1,
+            )
+        )
+    db.flush()
 
 
 def _label_gaps(

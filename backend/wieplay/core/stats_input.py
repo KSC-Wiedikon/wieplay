@@ -2,7 +2,8 @@
 takes them. Shared by the stats API and the smart reels' search (wieplay/core/reels.py).
 
 Facts only: a suggested action counts once a coach accepted it, a set the scoring proposed
-once a coach accepted it, and the rallies are those that stand (PLAN §10.3, §10.4a).
+once a coach accepted it, and the rallies are those that stand (PLAN §10.3, §10.4a); a rally's
+server and winner are the coach's, else the official scoresheet's (PLAN §10.3a).
 """
 
 from __future__ import annotations
@@ -47,7 +48,17 @@ def tag_in(e: Event) -> stats.TagIn:
 
 
 def rally_in(s: Segment) -> stats.RallyIn:
-    return stats.RallyIn(s.id, s.start_ms, s.end_ms, s.period_id, _side(s.serving), _side(s.won_by))
+    """A rally's server and winner: the coach's facts, else the official scoresheet's where the
+    scoring lined it up with one of the sheet's points (PLAN §10.3a: they count like a coach's,
+    a coach's answer still wins)."""
+    return stats.RallyIn(
+        s.id,
+        s.start_ms,
+        s.end_ms,
+        s.period_id,
+        _side(s.serving) or _side(s.sheet_serving),
+        _side(s.won_by) or _side(s.sheet_won_by),
+    )
 
 
 def _lineup(value: Any) -> tuple[int | None, ...] | None:
