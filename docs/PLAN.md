@@ -1889,6 +1889,21 @@ of the 59 near serves read wrong by rule 1 had a high toss, 4 of the 17 by rule 
 scores those videos again; a new analysis makes tracks of the current rule. The scoring's
 metrics keep the shift it applied (`serve_shift`).
 
+**On prod, 18.10.2026** (all 22 videos' serve tracks redone by a training, 52 s, then
+`score --all-ready`), rule 1 → rule 2 → rule 3:
+
+- The 20 videos filmed from behind an end line (3009 rallies): flagged rallies 1019 → 1032 →
+  **894**; flagged because the score line contradicts the serve evidence ("serve") 89 → 105 →
+  **21**; sets whose serve evidence alone ends on the official score 14 → 13 → **18** of 56.
+  The shifts that evened the matches out: −2.45 to +0.91 (most within ±1).
+- The two log games: the serve read in the video against the servers the log implies (§10.10)
+  71 % → **93 %** (409) and 88 % → **98 %** (509); rallies where the video alone was sure of
+  the other winner ("log") 19 → 6 and 20 → 12. Every log verdict (130 and 188) and the coach's
+  9 winners and 7 serves are kept; blind to the coach, the serve side of those 7 calls 5 → 7
+  right.
+- The two videos filmed from the side (Stäfa away, the Volero friendly) have no serve evidence
+  now: 264 of their 266 rallies are flagged unsure (111 before, read confidently on noise).
+
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
 
@@ -2379,6 +2394,9 @@ local database; the logs from the Wiedisync dev bridge, prod data of the nightly
 | Coach's winners vs the log | none set | 9 of 9 agree (the model alone: 6 of 9) |
 | Score line with the log | follows it on 130 of 130; every set's evidence ends on the official score (before: none) | follows it on 188 of 188; every set's evidence ends on the official score (before: none) |
 | Flagged rallies | 34 → 42: 19 "log" (the video alone was sure of the other winner), 12 no point, 11 missed rally | 61 → 59: 20 "log", 17 no point, 21 missed rally, 1 unsure |
+
+With the serve side's rule 3 (§10.3, 18.10.2026) the serve read in the video agrees with the
+servers the logs imply on 93 % (409) and 98 % (509) of the rallies.
 
 The flags left are specific now: a rally the finder missed (add it), one that was none
 (reject it), or one where the video's own evidence was confidently wrong. Not yet: the board's
