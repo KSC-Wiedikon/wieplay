@@ -1473,9 +1473,10 @@ the skill, an ungraded tag counts as an attempt that is neither a point nor an e
   `permissions.py` (`can_share_filter`, `can_see_filter`, `can_edit_filter`,
   `can_remove_filter`). The query is the words as typed, read by the web, so a filter keeps
   working as the search learns words.
-- Not yet: a search bar on a single match's stats (the API takes `?search=`; the page's rally
-  list has one), reels of rally numbers (points won in rotation 2), and search words for tempo
-  or the setter's options (the taxonomy has neither).
+- A single match's stats have their search bar too (18.10.2026, "Search the stats"): the
+  numbers come from `?search=`, and a number plays only the tags and rallies the search keeps.
+- Not yet: reels of rally numbers (points won in rotation 2), and search words for tempo or the
+  setter's options (the taxonomy has neither).
 
 ---
 
