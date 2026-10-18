@@ -2203,6 +2203,10 @@ planned for player detection and far below the Lenovo's 2 h. ONNX Runtime held ~
 the card. A real job adds the rendition's download (1080p50, ~2.2 GB per hour of stretches,
 fetched while the previous stretch is decoded) and the uploads.
 
+Real prod jobs on the GPU worker, 18.10.2026 (claim to done, the rendition's download and the
+uploads included): Legends 9.0 min, Uster 7.0 min, Volewa Wald 8.2 min. The coaches' estimate
+(`WIEPLAY_PLAYERS_MINUTES=20`) leaves room for a busy GPU.
+
 ---
 
 ## 11. Tier 1 as training data for tier 3
