@@ -1,17 +1,29 @@
 """Which end line the server stood at, per rally (PLAN §10.3, step 1), and the activity of a
 video per second (for the gaps between rallies, PLAN §10.1). Worker side: needs numpy.
 
-The camera stands behind one end line (PLAN §7.1): the near court fills the lower part of the
-picture, the far court a narrow band around the net, where the ball spends most of its time.
-So the serve shows in the ball's first plausible track after a rally starts:
+The camera stands behind one end line (PLAN §7.1), or at a corner behind it: the far court is a
+small region of the picture around the net, where the ball spends most of its time (its centre:
+the ball's median position), and the near court spreads over the rest. So the serve shows in
+the ball's first track after a rally starts that moves like a ball in flight:
 
-- **near** serve: the ball first shows far from that band (low in the picture, at the server's
-  hands, or high above them on a jump-serve toss) and flies towards it;
-- **far** serve: the ball first shows in the band and then comes towards the camera.
+- **near** serve: the ball first shows far from that centre (low in the picture at the
+  server's hands, at the picture's edge where the server stands, or high above them on a
+  jump-serve toss) and flies towards it, getting smaller and slower: it moves away from the
+  camera;
+- **far** serve: the ball first shows near the centre and then moves out of it, towards the
+  camera.
 
-v0 is that rule (`p_near_v0`). v1 is a classifier over the same features and v0's answer,
+Distance and direction are measured from the centre in both axes (picture heights): a near jump
+serve taken at the right edge of the picture shows at the far court's height, so its height
+alone (rule 1, until 18.10.2026: distance above or below the band only) read it as far. A track
+that starts slower than SLOW (a ball held, carried to the end line, rolled or bounced) is
+passed over for the next one.
+
+The rule (`p_near_v0`, version RULE) is a logistic function of those two numbers, its weights
+fitted on the rallies whose server the club scoreboard's log implies (PLAN §10.10) and checked
+on held-out games and halls. v1 is a classifier over the same features and the rule's answer,
 trained on the serves the coaches tagged or called (their serving team and the set's sides),
-used only when it beats v0 on held-out games (leave one game out, like the rally finder).
+used only when it beats the rule on held-out games (leave one game out, like the rally finder).
 
 Both are evaluated for every half-second of the video ("a rally starting here"), so the API
 can look up the serve of any rally, also one a coach moved or added: the **serve track**. The
@@ -35,11 +47,25 @@ from wieplay.ml import tracks
 from wieplay.ml.features import GRID_COLS, HEIGHT, WIDTH, Arr, Signals, Tracks, ball_tracks
 
 MODEL_FORMAT = 1
+# The rule's version: 1 read the height alone (until 18.10.2026), 2 the distance and direction
+# from the far court's centre. Kept with every serve track, so a training recomputes the tracks
+# an older rule made.
+RULE = 2
 STEP_S = tracks.SERVE_STEP_MS / 1000
 LEAD_S = 0.5  # the serve's ball track starts at most this long before the rally's start
 WINDOW_S = 5.0  # ... and at most this long after it
 EARLY_S = 0.6
 LATE_S = (0.5, 1.2)
+ASPECT = WIDTH / HEIGHT  # distances in picture heights, x scaled to them
+# A track slower than this over its first EARLY_S (picture widths per second: 1.7 px a frame
+# at 512 px and 30 fps) is a ball held, carried, rolled or bounced: the next one is the serve.
+SLOW = 0.1
+# The rule: logit P(near) = R_FIRST * r_first + R_SPEED * r_speed + R_BIAS, fitted on the
+# 258 rallies of the two games with a trusted score log (scripts/ml/serve_eval.py); checked
+# leaving one game out and on three other halls labelled by eye (PLAN §10.3).
+R_FIRST = 8.6
+R_SPEED = -4.3
+R_BIAS = -3.6
 
 FEATURES = [
     "y_first",  # where the ball first shows, relative to the band (0: in it; + lower)
@@ -56,6 +82,8 @@ FEATURES = [
     "near_motion",  # movement in the near third of the picture in the 1.5 s before
     "far_motion",  # ... in the far third
     "loud",  # loudest moment around the first track, over the video's median (dB)
+    "r_first",  # distance from the far court's centre where the ball first shows (heights)
+    "r_speed",  # how fast that distance changes in the first 0.6 s (heights/s; - towards it)
 ]
 
 
@@ -73,13 +101,16 @@ class Evidence:
     loud_t: Arr  # audio frame times
     loud: Arr  # dB over the median
     fps: float
+    centre_x: float = 0.5  # the ball's median position across the picture (0..1)
 
 
 def evidence(sig: Signals, trk: Tracks | None = None) -> Evidence:
     trk = trk or ball_tracks(sig)
     idx = np.flatnonzero(trk.in_track)
     y = sig.ball_y.astype(np.float32) / HEIGHT
+    x = sig.ball_x.astype(np.float32) / WIDTH
     band = float(np.median(y[idx])) if len(idx) else 0.45
+    centre_x = float(np.median(x[idx])) if len(idx) else 0.5
     motion = sig.motion.astype(np.float32)
     if motion.size:
         near = motion[:, -1, :].mean(1)
@@ -98,13 +129,14 @@ def evidence(sig: Signals, trk: Tracks | None = None) -> Evidence:
         band=band,
         idx=idx,
         y=y,
-        x=sig.ball_x.astype(np.float32) / WIDTH,
+        x=x,
         speed=trk.speed,
         near_motion=near,
         far_motion=far,
         loud_t=loud_t,
         loud=loud,
         fps=sig.fps,
+        centre_x=centre_x,
     )
 
 
@@ -130,6 +162,9 @@ def _first_track_features(ev: Evidence, f0: int) -> list[float]:
         loud = np.nan
     d_first = abs(y_first)
     d_late = abs(y_late) if not np.isnan(y_late) else np.nan
+    r = _radius(ev, early)
+    r_first = float(np.median(_radius(ev, first)))
+    r_speed = float(np.polyfit(early / fps, r, 1)[0]) if len(early) >= 3 else np.nan
     return [
         y_first,
         y_late,
@@ -145,7 +180,34 @@ def _first_track_features(ev: Evidence, f0: int) -> list[float]:
         near_m,
         far_m,
         loud,
+        r_first,
+        r_speed,
     ]
+
+
+def _radius(ev: Evidence, frames: Arr) -> Arr:
+    """Distance of the ball from the far court's centre (picture heights)."""
+    out: Arr = np.hypot((ev.x[frames] - ev.centre_x) * ASPECT, ev.y[frames] - ev.band)
+    return out
+
+
+def _serve_start(ev: Evidence, k: int, last_frame: float) -> int | None:
+    """The frame the serve's ball track starts at: the first tracked frame from ev.idx[k] on
+    whose first EARLY_S moves at least SLOW, else the first tracked frame (a slow ball is still
+    some evidence); None when nothing is tracked up to `last_frame`."""
+    idx, fps = ev.idx, ev.fps
+    first: int | None = None
+    while k < len(idx) and idx[k] <= last_frame:
+        f0 = int(idx[k])
+        first = f0 if first is None else first
+        end = f0 + EARLY_S * fps
+        early = idx[k : int(np.searchsorted(idx, end))]
+        sp = ev.speed[early]
+        sp = sp[~np.isnan(sp)]
+        if len(sp) and float(np.median(sp)) >= SLOW:
+            return f0
+        k = int(np.searchsorted(idx, end))
+    return first
 
 
 def features_at(ev: Evidence, starts_s: Sequence[float] | Arr) -> Arr:
@@ -160,10 +222,8 @@ def features_at(ev: Evidence, starts_s: Sequence[float] | Arr) -> Arr:
     cache: dict[int, list[float]] = {}
     delay_col = FEATURES.index("delay")
     for row, (t, kk) in enumerate(zip(starts, k, strict=True)):
-        if kk >= len(ev.idx):
-            continue
-        f0 = int(ev.idx[kk])
-        if f0 / fps > t + WINDOW_S:
+        f0 = _serve_start(ev, int(kk), (t + WINDOW_S) * fps)
+        if f0 is None:
             continue
         if f0 not in cache:
             cache[f0] = _first_track_features(ev, f0)
@@ -172,18 +232,21 @@ def features_at(ev: Evidence, starts_s: Sequence[float] | Arr) -> Arr:
     return out
 
 
-def p_near_v0(X: Arr) -> Arr:
-    """The rule: far from the band at first and flying towards it is a near serve."""
+def p_near_v0(X: Arr, weights: tuple[float, float, float] | None = None) -> Arr:
+    """The rule (version RULE): far from the far court's centre at first and flying towards
+    it is a near serve; near it and flying out of it, a far one. `weights` (r_first, r_speed,
+    bias) are for fitting and measuring it (scripts/ml/serve_eval.py)."""
+    a, b, c = weights or (R_FIRST, R_SPEED, R_BIAS)
     col = {name: i for i, name in enumerate(FEATURES)}
-    d0 = X[:, col["d_first"]].astype(np.float64)
-    towards = np.nan_to_num(X[:, col["towards"]].astype(np.float64), nan=0.0)
-    z = 30.0 * (d0 - 0.13) + 8.0 * np.clip(towards, -0.3, 0.3)
+    r0 = X[:, col["r_first"]].astype(np.float64)
+    rv = np.nan_to_num(X[:, col["r_speed"]].astype(np.float64), nan=0.0)
+    z = a * np.nan_to_num(r0) + b * np.clip(rv, -3.0, 3.0) + c
     p = 1.0 / (1.0 + np.exp(-z))
     # A track that starts late is less likely the serve's.
     delay = np.nan_to_num(X[:, col["delay"]].astype(np.float64), nan=0.0)
     trust = np.clip(1.0 - (delay - 3.0) / 3.0, 0.3, 1.0)
     p = 0.5 + (p - 0.5) * trust
-    return np.where(np.isnan(d0), np.nan, p)
+    return np.where(np.isnan(r0), np.nan, p)
 
 
 # --- v1 -----------------------------------------------------------------------------------------
@@ -201,7 +264,7 @@ class ServeModel:
 
     def p_near(self, X: Arr) -> Arr:
         D = design(X)
-        ok = ~np.isnan(X[:, FEATURES.index("d_first")])
+        ok = ~np.isnan(X[:, FEATURES.index("r_first")])
         out = np.full(len(X), np.nan)
         if ok.any():
             out[ok] = self.classifier.predict_proba(D[ok])[:, 1]
@@ -254,7 +317,7 @@ class ServeVideo:
     def data(self) -> tuple[Arr, Arr]:
         X = features_at(self.ev, [s / 1000 for s, _ in self.serves])
         y = np.array([near for _, near in self.serves], dtype=np.int8)
-        ok = ~np.isnan(X[:, FEATURES.index("d_first")])
+        ok = ~np.isnan(X[:, FEATURES.index("r_first")])
         return X[ok], y[ok]
 
 

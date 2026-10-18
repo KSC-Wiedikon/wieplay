@@ -128,6 +128,7 @@ def store_tracks(
                 step_ms=int(entry["step_ms"]),
                 finder=entry.get("finder"),
                 source_run_id=entry.get("model_run_id"),
+                rule=entry.get("rule") if kind == "serve" else None,
                 channels=dict(entry["channels"]),
             )
         )
@@ -334,6 +335,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         params={
             "reason": reason,
             "serve_finder": serve_track.finder if serve_track else None,
+            "serve_rule": (serve_track.rule or 1) if serve_track else None,
             "serve_track_run": str(serve_track.model_run_id) if serve_track else None,
             "serve_model_run": str(serve_track.source_run_id)
             if serve_track and serve_track.source_run_id
@@ -466,6 +468,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
     first_serve_ms = _first_serve_ms(db, video)
     run.metrics = {
         "serve_finder": serve_track.finder if serve_track else None,
+        "serve_rule": (serve_track.rule or 1) if serve_track else None,
         "sides_confidence": match.sides_confidence if set_ins else None,
         "rallies": in_sets,
         "flagged": flagged,

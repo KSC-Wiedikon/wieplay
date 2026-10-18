@@ -448,6 +448,52 @@ def test_training_gets_serve_labels_and_stores_the_serve_model(
     assert found["serve_model"]["nas_path"] == "models/rallies/serve-v1-test.pkl"
 
 
+def test_a_training_redoes_serve_tracks_of_an_older_rule(
+    app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    from datetime import timedelta
+
+    from wieplay.core import analysis
+    from wieplay.core.models import AnalysisTrack
+
+    played, _ = match()
+    analysed(analyser, played)  # an older worker: its serve track names no rule (rule 1)
+
+    def training_entry() -> dict[str, Any]:
+        with app.state.sessionmaker() as db:
+            analysis.queue_training(db, timedelta(0))
+            db.commit()
+        train = claim_kind(analyser, "train_rallies")
+        inputs = analyser.post(f"/api/worker/jobs/{train['id']}/inputs", json={}).json()
+        [entry] = inputs["others"]
+        assert entry["tracks"] == ["activity", "serve"]
+        return {"job": train, **entry}
+
+    entry = training_entry()
+    assert entry["serve_rule"] == 1
+    body = {
+        "model": {"name": "rallies-v1-hgb", "version": "abc123"},
+        "accepted": False,
+        "evaluation": {"summary": {}, "videos": {}},
+        "tracks": {ready["id"]: {"serve": {"step_ms": 500, "finder": "v0", "rule": 2,
+                                            "channels": {"p_near": serve_track(played)}}}},
+    }  # fmt: skip
+    complete(analyser, entry["job"], body)
+    with app.state.sessionmaker() as db:
+        rules = db.scalars(
+            select(AnalysisTrack.rule)
+            .where(AnalysisTrack.kind == "serve")
+            .order_by(AnalysisTrack.created_at)
+        ).all()
+        assert rules == [None, 2]
+        run = db.scalars(
+            select(ModelRun).where(ModelRun.kind == "score").order_by(ModelRun.created_at.desc())
+        ).first()
+        assert run is not None and run.params["reason"] == "train"
+        assert run.params["serve_rule"] == 2 and run.metrics["serve_rule"] == 2
+    assert training_entry()["serve_rule"] == 2
+
+
 def test_bad_series_fail_the_job(
     ready: Any, club: dict[str, TestClient], analyser: TestClient
 ) -> None:
