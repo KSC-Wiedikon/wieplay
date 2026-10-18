@@ -4,7 +4,8 @@ Volleyball is rally scoring: **the team that wins a rally serves the next one.**
 follows from who served each rally, plus the rules and the official result:
 
 1. **Serve evidence** per rally: P(the server stood at the near end line), from the ball at the
-   serve (wieplay/ml/serve.py, computed on the worker and stored as a track per video).
+   serve (wieplay/ml/serve.py, computed on the worker and stored as a track per video), evened
+   out per match (`balance`: about half of a match's serves are near ones).
 2. **Court side → team** per set: teams change sides after every set; in the deciding set when
    the leading team reaches 8. Who served first alternates in sets 1-4; the deciding set has a
    new toss. A coach's "we serve first" / "we start on the near side" for a set wins.
@@ -65,10 +66,49 @@ C_BOARD = 9.0  # contradicting the scoreboard (times how sure its reading is)
 C_LOG = 11.0  # contradicting the club scoreboard's log (times how sure the alignment is)
 C_LOG_MISS = 3.0  # per point a gap's missed points differ from the log's
 MAX_MISS_LOG = 4  # missed points between two rallies when the log saw them
+# Each match's serve readings are evened out: sides change after every set and each team serves
+# about as often as it scores, so about half the serves of a match are near ones (40-60 %). A
+# hall whose picture leans the readings one way (a camera high above the end line, the servers
+# in line with it) is shifted back, in log-odds, by at most BALANCE_CAP; not below BALANCE_MIN
+# readings.
+BALANCE_MIN = 20
+BALANCE_CAP = 3.0
 
 
 def other(side: Side) -> Side:
     return "them" if side == "us" else "us"
+
+
+def _logit(p: float) -> float:
+    p = min(0.998, max(0.002, p))  # a serve track's step is 1/254
+    return math.log(p / (1 - p))
+
+
+def _sigmoid(z: float) -> float:
+    return 1 / (1 + math.exp(-z)) if z >= 0 else math.exp(z) / (1 + math.exp(z))
+
+
+def balance(p_near: Sequence[float | None]) -> float:
+    """The shift (log-odds) that makes a match's serve readings average one half (`BALANCE_*`
+    above); 0 with fewer than BALANCE_MIN readings."""
+    z = [_logit(p) for p in p_near if p is not None]
+    if len(z) < BALANCE_MIN:
+        return 0.0
+    lo, hi = -BALANCE_CAP, BALANCE_CAP
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if sum(_sigmoid(v + mid) for v in z) < len(z) / 2:
+            lo = mid
+        else:
+            hi = mid
+    return round((lo + hi) / 2, 3)
+
+
+def shifted(p: float | None, shift: float) -> float | None:
+    """A serve reading moved by `shift` log-odds."""
+    if p is None or shift == 0.0:
+        return p
+    return _sigmoid(_logit(p) + shift)
 
 
 def flip(court: Court) -> Court:

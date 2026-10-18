@@ -1674,7 +1674,7 @@ rallies ≤ 5 %.
 
 - **Serve side** (`wieplay/ml/serve.py`, worker): the camera stands behind one end line, so the
   far court is a narrow band around the net where the ball spends most of its time (the
-  video's median ball height). v0 (rule 1, replaced on 18.10.2026 by rule 2, below): the
+  video's median ball height). v0 (rule 1, replaced on 18.10.2026 by rules 2 and 3, below): the
   ball's first plausible track after a rally starts
   shows far from that band (low, at the server's hands, or high above them on a jump-serve
   toss) and flies into it → near serve; it starts in the band and comes towards the camera →
@@ -1809,68 +1809,85 @@ at 61 % coverage, three referees at ≥ 95 %, two at 79–85 %, against a bar of
 ends. No replay or card occurred to measure. A camera on the side, the scoresheet (§10.3a) and
 the log answer it better. The spike also found near jump serves at the right edge of the
 picture that the serve evidence reads as far at ≥ 95 %, and that evidence agreeing with the
-log on only 82–88 % of the rallies where it is sure: fixed the same day (rule 2, below).
+log on only 82–88 % of the rallies where it is sure: fixed the same day (rules 2 and 3, below).
 
-**Serve side, rule 2** (18.10.2026; `wieplay/ml/serve.py`, measured with
-`scripts/ml/serve_eval.py`). Rule 1 read the serve side from the ball's height alone: how far
-above or below the band (its median height) the serve's ball first showed. Measured against
-the servers the two trusted score logs imply (§10.10: the winner of the log's previous point;
-rallies right after points the log saw without a rally left out, where the alignment can be a
-rally off), the coach's serve calls, and serves labelled by eye in three other halls (frames
-looked at, then deleted):
+**Serve side, rules 2 and 3** (18.10.2026; `wieplay/ml/serve.py`, the scoring's `balance` in
+`wieplay/ml/scoring.py`, measured with `scripts/ml/serve_eval.py`). Rule 1 read the serve side
+from the ball's height alone: how far above or below the band (its median height) the serve's
+ball first showed. Measured against the servers the two trusted score logs imply (§10.10: the
+winner of the log's previous point; rallies right after points the log saw without a rally left
+out, where the alignment can be a rally off), the coach's serve calls, and serves labelled by
+eye in six other halls (frames looked at, then deleted):
 
 - **The cause.** From behind the end line the camera, about 3 m up, sees a ball at about its
   own height on the band's line of the picture however near it is. A near jump serve taken at
   the right end of the end line (behind zone 1, where most servers stand) shows at the band's
-  height, a third to half of
-  the picture to the side, and flies sideways into the far court: "in the band", so far, at
-  95–99 %. 43 of the 78 wrong answers before were near serves first seen in the right third
-  of the picture (15 of 20 in the corner camera's game, where most near serves look like
-  that). The other big group, 23: far serves read as near, mostly because the first track
-  was not the serve but a ball held, carried or bounced in the near court (low, slow).
-- **The fix.** Distance and direction measured from the far court's centre in both axes (the
-  ball's median position across and up the picture, both in picture heights): a near serve
-  starts far from it and moves towards it (it moves away from the camera); a far serve starts
-  near it and moves out. P(near) is a logistic function of the distance at first sight and how
-  fast it changes in the first 0.6 s (`r_first`, `r_speed`; weights 8.6, −4.3, bias −3.6,
-  fitted on the 258 rallies of the two log games); a track slower than 0.1 picture widths a
-  second over its first 0.6 s (a ball held, carried, rolled or bounced) is passed over for
-  the next one. Both numbers are serve features, so a trained v1 sees them too. Adding the
-  height, the vertical speed or the speed did not help on held-out games.
+  height, a third to half of the picture to the side, and flies sideways into the far court:
+  "in the band", so far, at 95–99 %. 44 of the 88 wrong answers were near serves first seen in
+  the right third of the picture (15 of 20 in the corner camera's game, where most near serves
+  look like that). Another 29: far serves read as near, mostly because the first track was not
+  the serve but a ball held, carried or bounced in the near court (low, slow).
+- **Rule 2** (PR #59): distance and direction measured from the far court's centre in both axes
+  (the ball's median position across and up the picture, in picture heights): a near serve
+  starts far from it and moves towards it (away from the camera), a far serve starts near it
+  and moves out. P(near) is a logistic function of the distance at first sight and how fast it
+  changes in the first 0.6 s (`r_first`, `r_speed`), fitted on the two log games; a track slower
+  than 0.1 picture widths a second over its first 0.6 s (held, carried, rolled, bounced) is
+  passed over for the next one. Both numbers are serve features, so a trained v1 sees them too.
+- **What prod showed.** Rescored with rule 2, the flagged rallies stayed flat over all 22
+  videos (1130 → 1146): far fewer in the log games and the halls above, more in others, and in
+  several halls the readings leaned one way (16 % near serves in one, 94 % in another). Two
+  more halls labelled by eye found the reasons: where the camera stands high and the servers in
+  line with it, a near serve's toss rises in the middle of the picture just below the far court
+  and the rule leaned far (Rämi's hall: 92 % → 58 %); and two videos are filmed from the side
+  of the court, where near and far mean nothing.
+- **Rule 3**: the same rule with its weights fitted on six halls (the two log games, four
+  labelled by eye; 9.13, −6.66, bias −2.65); **each match's readings evened out** in the scoring
+  (sides change after every set and each team serves about as often as it scores, so about half
+  of a match's serves are near ones: the readings of the rallies in sets are shifted, in
+  log-odds, until they average one half; at most ±3, not below 20 readings); and **no serve
+  evidence from a camera at the side**, told by the ball crossing the picture (mean sideways over
+  mean up-and-down motion above 0.95: 1.06 and 1.10 in the two side videos, 0.61–0.81 in the 20
+  from behind an end line). Adding the height, the vertical speed or the speed did not help on
+  held-out games; evening out to a band (40–60 % or 45–55 %) instead of one half did worse.
 - **With a calibration**: tried on Legends, the only game with a confirmed one. The court's
   centre projected (the far half's middle, 2 m up) in place of the ball's: 150 instead of 151
   of 152 right, fewer sure answers; "could this be the far server's ball" through the camera
   ruled out no near serve but also 11 of 73 far serves (first seen in flight). No gain, so the
   rule uses none and works the same in every hall.
 
-Held out: each log game measured with the weights fitted on the other one; the halls labelled
-by eye with the weights of both log games (none of their rallies used for fitting).
+Held out: each of the six games measured with the weights fitted on the other five; two more
+halls (Oerlikon, Uster away), labelled after rule 3 was settled, with the weights of all six.
 
-| Game | Camera | Reference | Rule 1 | Rule 2 | Rule 1 at ≥ 95 % | Rule 2 at ≥ 95 % |
+| Game | Camera | Reference | Rule 1 | Rule 3 | Rule 1 at ≥ 95 % | Rule 3 at ≥ 95 % |
 |---|---|---|---|---|---|---|
-| H3 – Legends (509), KWI B | behind the end line, left of the centre; calibrated | log + 7 coach calls, 152 | 134 (88.2 %) | 151 (99.3 %) | 127/136 (93.4 %) | 76/76 |
-| H1 – H3 (409), KWI A | behind the end line | log, 106 | 75 (70.8 %) | 99 (93.4 %) | 64/75 (85.3 %) | 72/76 (94.7 %) |
-| Volero 4 – H3, Hirzenbach | near left corner, very wide | eye, 39 | 19 (48.7 %) | 34 (87.2 %) | 16/30 (53.3 %) | 20/21 |
-| Volewa Wald – H3, Elba | behind the end line, centred | eye, 33 | 28 (84.8 %) | 32 (97.0 %) | 26/31 (83.9 %) | 22/22 |
-| VBC Swiss – H3 | behind the end line, right of the centre | eye, 36 | 32 (88.9 %) | 33 (91.7 %) | 30/31 | 19/20 |
-| **All five** | | 366 | 288 (78.7 %) | **349 (95.4 %)** | 263/303 (86.8 %) | **209/215 (97.2 %)** |
+| H3 – Legends (509), KWI B | behind the end line, left of the centre; calibrated | log + 7 coach calls, 152 | 134 (88.2 %) | 150 (98.7 %) | 127/136 (93.4 %) | 138/138 |
+| H1 – H3 (409), KWI A | behind the end line | log, 106 | 75 (70.8 %) | 99 (93.4 %) | 64/75 (85.3 %) | 68/70 (97.1 %) |
+| Volero 4 – H3, Hirzenbach | near left corner, very wide | eye, 39 | 19 (48.7 %) | 34 (87.2 %) | 16/30 (53.3 %) | 23/24 |
+| Volewa Wald – H3, Elba | behind the end line, centred | eye, 33 | 28 (84.8 %) | 33 (100 %) | 26/31 (83.9 %) | 25/25 |
+| VBC Swiss – H3 | behind the end line, right of the centre | eye, 36 | 32 (88.9 %) | 34 (94.4 %) | 30/31 | 23/24 |
+| Rämi – H3 | high above the end line, servers in line with it | eye, 26 | 24 (92.3 %) | 23 (88.5 %) | 13/14 | 2/2 |
+| Oerlikon – H3 (held-out hall) | high above the end line | eye, 23 | 19 (82.6 %) | 22 (95.7 %) | 11/12 | 11/11 |
+| Uster – H3 (held-out hall) | low behind the end line | eye, 24 | 20 (83.3 %) | 23 (95.8 %) | 15/18 | 12/12 |
+| **All eight** | | 439 | 351 (80.0 %) | **418 (95.2 %)** | 302/347 (87.0 %) | **302/306 (98.7 %)** |
 
-The coach's seven serve calls: 5 → 7 right. Per band over all five, rule 2: 0.5–0.7 11/14,
-0.7–0.9 65/69, 0.9–0.95 64/68, ≥ 0.95 209/215; rule 1 at ≥ 0.95 was right in 87 %, now in
-97 % (one of the four misses in game 409 is the log's: the frames show a near server). Fewer
-answers are that sure (215 instead of 303): the confidence follows the evidence.
-**Left wrong** (17 of 366): 15 near serves from the middle of the picture, the server in line
-with the camera (mostly the first track is the ball the server carries or bounces, or a
-corner camera first sees it when it is already over the far court; rule 1 missed 10 such
-serves, so this case got a little worse), one near serve at the right edge and the log's one.
-Jump or float cannot be told reliably from the ball's path in the picture; by the toss (the
-ball rising more than a fifth of the picture in its first 0.6 s), 12 of the 55 near serves
-read wrong before had a high toss, 3 of the 16 after.
+The coach's seven serve calls: 5 → 7 right. Per band, rule 3: 0.5–0.7 23/29, 0.7–0.9 61/68,
+0.9–0.95 32/36, ≥ 0.95 302/306 (rule 1: 11/22, 25/40, 13/30, 302/347). One of rule 3's misses
+in game 409 is the log's: the frames show a near server. Without evening out, rule 3 is right in
+407 of 439 (92.7 %; Rämi's hall 73 %). Rule 2, deployed in between: 408 (92.9 %), Rämi's hall
+58 %.
+**Left wrong** (21 of 439): 17 near serves from the middle of the picture, the server in line
+with the camera (mostly the first track is the ball the server carries or bounces, or a corner
+camera first sees it when it is already over the far court; rule 1 missed 13 such serves), 3
+far serves and the log's one. Jump or float cannot be told reliably from the ball's path in the
+picture; by the toss (the ball rising more than a fifth of the picture in its first 0.6 s), 12
+of the 59 near serves read wrong by rule 1 had a high toss, 4 of the 17 by rule 3.
 
 **Applied** to the stored series: every serve track keeps the rule's version
 (`analysis_track.rule`, migration 0022; null = rule 1). A training
 (`python -m wieplay.cli train-rallies`) recomputes the serve tracks an older rule made and
-scores those videos again; a new analysis makes rule-2 tracks.
+scores those videos again; a new analysis makes tracks of the current rule. The scoring's
+metrics keep the shift it applied (`serve_shift`).
 
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.

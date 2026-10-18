@@ -331,11 +331,11 @@ def serve_signals(serves: list[tuple[float, bool]], duration_s: float = 600.0) -
             vis[f0 + k] = 1
             x[f0 + k] = 200 + 60 * u
             y[f0 + k] = HEIGHT * ((0.85 - 0.43 * u) if near else (0.42 + 0.3 * u))
-        # The rest of the rally around the net.
+        # The rest of the rally around the net, along the court (up and down the picture).
         for k in range(45, 200):
             vis[f0 + k] = 1
-            x[f0 + k] = 256 + 80 * np.sin(k / 9)
-            y[f0 + k] = HEIGHT * (0.42 + 0.03 * np.cos(k / 7))
+            x[f0 + k] = 256 + 20 * np.sin(k / 9)
+            y[f0 + k] = HEIGHT * (0.42 + 0.08 * np.cos(k / 7))
     return Signals(
         fps=fps, duration_s=duration_s, ball_vis=vis, ball_x=x, ball_y=y,
         ball_score=np.where(vis, 0.8, 0.0).astype(np.float16),
@@ -385,10 +385,10 @@ def path_signals(
                     x[f] = WIDTH * (x0 + (x1 - x0) * u)
                     y[f] = HEIGHT * (y0 + (y1 - y0) * u)
                 f += 1
-        for k in range(150):
+        for k in range(150):  # play along the court: up and down the picture
             vis[f + k] = 1
-            x[f + k] = WIDTH * (centre[0] + 0.12 * np.sin(k / 9))
-            y[f + k] = HEIGHT * (centre[1] + 0.03 * np.cos(k / 7))
+            x[f + k] = WIDTH * (centre[0] + 0.04 * np.sin(k / 9))
+            y[f + k] = HEIGHT * (centre[1] + 0.08 * np.cos(k / 7))
     return Signals(
         fps=fps, duration_s=duration_s, ball_vis=vis, ball_x=x, ball_y=y,
         ball_score=np.where(vis, 0.8, 0.0).astype(np.float16),
@@ -474,6 +474,50 @@ def test_a_late_first_track_is_trusted_less() -> None:
     assert soon > 0.95 and 0.5 < late < 0.8
     # No ball within the window: no evidence.
     assert np.isnan(serve.p_near_v0(serve.features_at(ev, [10.0]))).all()
+
+
+def test_a_camera_at_the_side_gives_no_serve_evidence() -> None:
+    """From the side the ball crosses the picture: near and far mean nothing there."""
+    fps, n = 30.0, 9000
+    k = np.arange(n)
+    x = (256 + 200 * np.sin(k / 40)).astype(np.float32)  # back and forth over the net
+    y = (HEIGHT * (0.5 + 0.03 * np.cos(k / 13))).astype(np.float32)
+    vis = np.ones(n, np.uint8)
+    sig = Signals(
+        fps=fps, duration_s=n / fps, ball_vis=vis, ball_x=x, ball_y=y,
+        ball_score=np.full(n, 0.8, np.float16), motion=np.ones((n, 3, 4), np.float16),
+        band_db=np.zeros(0, np.float32), all_db=np.zeros(0, np.float32),
+        tonal_db=np.zeros(0, np.float32), peak_hz=np.zeros(0, np.uint16),
+        whistles=np.zeros((0, 5), np.float32),
+    )  # fmt: skip
+    ev = serve.evidence(sig)
+    assert ev.side_view and ev.sideways > serve.SIDE_VIEW
+    assert set(serve.serve_track(sig, ev=ev)) == {tracks.NONE}
+    video = serve.ServeVideo("side", ev, [(10_000, True), (60_000, False)])
+    assert len(video.data()[1]) == 0  # no labels for the trained model either
+    # From behind the end line the ball moves up and down the picture more.
+    behind = path_signals([(20.0 + 20 * i, FAR) for i in range(10)])
+    assert not serve.evidence(behind).side_view
+
+
+def test_a_matchs_serve_readings_are_evened_out() -> None:
+    # Evened out already, or too few to tell: no shift.
+    assert sc.balance([0.97, 0.03] * 15) == 0.0
+    assert sc.balance([0.3] * (sc.BALANCE_MIN - 1)) == 0.0
+    assert sc.balance([None] * 50) == 0.0
+    # A hall that leans the readings far (near serves read 0.3, far ones 0.05): shifted back so
+    # that the near ones become near, the far ones stay far.
+    leaning = [0.3] * 20 + [0.05] * 20 + [None] * 5
+    shift = sc.balance(leaning)
+    assert 0 < shift <= sc.BALANCE_CAP
+    near, far = sc.shifted(0.3, shift), sc.shifted(0.05, shift)
+    assert near is not None and far is not None and near > 0.5 > far
+    readings = [sc.shifted(p, shift) for p in leaning]
+    known = [p for p in readings if p is not None]
+    assert abs(sum(known) / len(known) - 0.5) < 0.01
+    assert sc.shifted(None, shift) is None and sc.shifted(0.3, 0.0) == 0.3
+    # Never more than the cap, however one-sided.
+    assert sc.balance([0.001] * 40) == pytest.approx(sc.BALANCE_CAP, abs=0.01)
 
 
 def test_v1_learns_and_is_scored_on_held_out_games() -> None:

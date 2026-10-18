@@ -23,7 +23,7 @@ from tests.test_analysis_api import (
     payload,
 )
 from wieplay.core.config import Settings
-from wieplay.core.models import ModelRun
+from wieplay.core.models import ModelRun, Segment
 from wieplay.ml import tracks
 
 # Game k=0 of the fixtures is a home game: [us, them] per set.
@@ -491,6 +491,13 @@ def test_a_training_redoes_serve_tracks_of_an_older_rule(
         ).first()
         assert run is not None and run.params["reason"] == "train"
         assert run.params["serve_rule"] == 2 and run.metrics["serve_rule"] == 2
+        # The match's readings are evened out: 54 % of its serves are near ones, read at 97 %,
+        # so they are moved a little towards far, and every one keeps its side.
+        assert -1.5 < run.metrics["serve_shift"] < 0
+        sides = db.scalars(
+            select(Segment.serving_court).where(Segment.video_id == uuid.UUID(ready["id"]))
+        ).all()
+        assert sides.count("near") == 98 and sides.count("far") == 85
     assert training_entry()["serve_rule"] == 2
 
 

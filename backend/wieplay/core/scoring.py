@@ -383,6 +383,11 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         if period is not None and i > 0 and by_period[period.id][0] != i:
             gap = gaps.evidence(act, rallies[i - 1].end_ms, rally.start_ms)
         obs.append(_obs(rally, serve, calls[i], gap))
+    # About half a match's serves are near ones: its readings are evened out (the rallies in
+    # sets; a picture that leans them one way is shifted back).
+    serve_shift = sc.balance([obs[i].p_near for idx in by_period.values() for i in idx])
+    if serve_shift:
+        obs = [replace(o, p_near=sc.shifted(o.p_near, serve_shift)) for o in obs]
 
     scored = [p for p in periods if by_period.get(p.id)]
     set_ins = [_set_in(p, [obs[i] for i in by_period[p.id]], official) for p in scored]
@@ -469,6 +474,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
     run.metrics = {
         "serve_finder": serve_track.finder if serve_track else None,
         "serve_rule": (serve_track.rule or 1) if serve_track else None,
+        "serve_shift": serve_shift,
         "sides_confidence": match.sides_confidence if set_ins else None,
         "rallies": in_sets,
         "flagged": flagged,
