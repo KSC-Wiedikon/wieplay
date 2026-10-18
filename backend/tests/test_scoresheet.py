@@ -495,7 +495,7 @@ def test_the_browsers_decoder_fixture_is_current() -> None:
     """The fixture web/src/lib/scoresheet.test.ts checks the browser's decoder against. To
     renew it: WIEPLAY_WRITE_SHEET_FIXTURE=1 uv run pytest tests/test_scoresheet.py."""
     cases = fixture_cases()
-    text = json.dumps(cases, indent=1) + "\n"
+    text = "[\n" + ",\n".join(json.dumps(c, ensure_ascii=False) for c in cases) + "\n]\n"
     if os.environ.get("WIEPLAY_WRITE_SHEET_FIXTURE"):
         FIXTURE.write_text(text)
     assert FIXTURE.exists() and json.loads(FIXTURE.read_text()) == cases
