@@ -351,10 +351,14 @@ def score_log(video: str | None, all_ready: bool, dry_run: bool) -> int:
                 f"{'' if s['agrees'] else ' official ' + '-'.join(map(str, s['official'] or []))})"
                 for no, s in m["sets"].items()
             )
-            shifts = sorted({s["shift_ms"] for s in m["stretches"]})
+            own = [
+                f"set {s['set']} {(s['shift_ms'] - m['shift_ms']) / 1000:+.1f} s"
+                for s in m["stretches"]
+                if s["own"]
+            ]
             print(
                 f"{head}: {m['source']}, {m['matched']}/{m['points']} points on a rally, "
-                f"shift {', '.join(f'{x / 1000:.1f} s' for x in shifts)}, "
+                f"{'one shift' if not own else 'own shifts: ' + ', '.join(own)}, "
                 f"delay {m['delay_ms']['median']} ms, sets {sets}, "
                 f"score line follows it {m['path_agrees']}/{m['rallies_told']}, "
                 f"video disagreed {m['disagree_with_video']}"
