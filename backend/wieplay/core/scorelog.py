@@ -431,7 +431,7 @@ def metrics(
     line follows it, how often the video alone disagreed, and the coach's winners against it."""
     al = ev.alignment
     path = {o.key: o for so in match.sets for o in so.rallies}
-    told = agree = right = known = 0
+    told = agree = right = known = serve_ok = serve_n = 0
     for st in with_log:
         for r in st.rallies:
             if r.log is None:
@@ -440,6 +440,12 @@ def metrics(
             out = path.get(r.key)
             if out is not None:
                 agree += int((out.won_by if out.point else "none") == r.log)
+                # An independent check of the alignment: the serve read in the video against
+                # the server the log implies (a shift a rally off reads about half right).
+                if out.point and out.serving and r.p_near is not None:
+                    serve_n += 1
+                    near = (out.serving == "us") == (out.our_side == "near")
+                    serve_ok += int((r.p_near >= 0.5) == near)
             if r.won_fact and r.log in ("us", "them"):
                 known += 1
                 right += int(r.log == r.won_fact)
@@ -489,6 +495,7 @@ def metrics(
         "trusted": trusted > 0 and all(s["agrees"] for s in ev.sets.values() if s["official"]),
         "rallies_told": told,
         "path_agrees": agree,
+        "serve_agreement": round(serve_ok / serve_n, 4) if serve_n else None,
         "disagree_with_video": disagree,
         "vs_coach": {
             "winner_accuracy": round(right / known, 4) if known else None,

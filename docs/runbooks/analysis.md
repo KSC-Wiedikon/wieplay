@@ -245,6 +245,38 @@ still sits on the score, since the camera rarely stands exactly where it stood.
   SHA-256 is checked on load), made by `scripts/ml/scoreboard_digits.py` (synthetic boards,
   deterministic for a seed and a set of fonts; `uv run --with pillow`).
 
+## Score logs from the club scoreboard
+
+Nothing to switch on on the WiePlay side: a video with a Wiedisync game asks the bridge for the
+game's scoreboard log right after its analysis (one call), and the hourly sync asks again for
+videos that have none (each at most once a day, 20 per sweep). It needs Wiedisync's bridge route
+`GET /kscw/wieplay/v1/score-log` (Wiedisync PR #14; dev since 18.10.2026, prod with the owner's
+next Wiedisync release). Until then, and for a game the board never showed, the answer is a
+quiet "no score log" (`unavailable` / `none`); nothing fails.
+
+```bash
+python -m wieplay.cli score-log --video <id>            # import again, line up, score, print
+python -m wieplay.cli score-log --all-ready             # every ready video with a game
+python -m wieplay.cli score-log --all-ready --dry-run   # only ask the bridge what it has
+```
+
+- **What it prints**: the source (`live_match_logs`, else `live_scores_revisions`), presses on a
+  rally / presses, the shift(s) between the board's clock and the video (more than one: the
+  video was cut, e.g. between two camera files), the median delay of a press after the rally's
+  end, per set `ok`/`no` (the log's final against the official one), how often the score line
+  follows the log and how often the video alone disagreed.
+- **Where to look**: `GET /api/videos/{id}/analysis` → `scoring.log` (the same numbers, plus
+  `serve_agreement`: the serve read in the video against the servers the log implies; about
+  0.5 means the log is lined up a rally off), `GET /api/videos/{id}/scoreboard` → `log`, and per
+  rally `log_won_by`, `log_score_*`, `log_at_ms` in the tagging data. The log itself is the
+  video's `analysis_track` of kind `score_log` (compressed JSON as the bridge sent it), each
+  import a `model_run` of kind `score_log`.
+- **A set the log gets wrong** (its final is not the official one, or fewer than 60 % of its
+  presses found a rally) says nothing in the scoring; the setup's scoreboard step then stays to
+  do. Nothing to repair by hand: a coach's facts always win, and the next import (after the
+  board's own upload to `live_match_logs`, for instance) replaces the log.
+- **Privacy**: team names and scores only (PRIVACY.md §6).
+
 ## Game recap
 
 "Create game recap" on a volleyball video (coaches, team managers, sport admins) queues an

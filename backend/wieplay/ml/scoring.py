@@ -567,6 +567,7 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
             conf = _confidence({-1: per_opt.get(-1, math.inf), 0: point}, -1)
             board_overruled = r.board in ("us", "them") and r.board_p > 0
             log_overruled = r.log in ("us", "them") and r.log_p > 0
+            board_overruled = board_overruled and r.log is None  # the log outranks the board
             rallies_out.append(
                 RallyOut(
                     r.key,
@@ -601,13 +602,18 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
             note = "coach"
         elif r.log is not None and r.log_p > 0 and r.log != won:
             note = "log"
-        elif r.board is not None and r.board_p > 0 and r.board != won:
+        elif r.board is not None and r.board_p > 0 and r.board != won and r.log is None:
             note = "board"
         elif missed:
             note = "missing_before"
         elif i == n - 1 and choice[-1]:
             note = "missing_after"
-        elif serve_p is not None and serve_p < SERVE_DISAGREES and r.serve_fact is None:
+        elif (
+            serve_p is not None
+            and serve_p < SERVE_DISAGREES
+            and r.serve_fact is None
+            and r.log is None  # the log names the winners: the serve reading was wrong
+        ):
             note = "serve"
         elif conf < UNSURE and r.won_fact is None and r.board is None and r.log is None:
             note = "unsure"

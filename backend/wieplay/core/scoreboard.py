@@ -494,7 +494,8 @@ def flag_disagreements(
     ]
     blind = sc.score_match(blind_sets)
     blind_out = {o.key: o for so in blind.sets for o in so.rallies}
-    told = {r.key for st in with_board for r in st.rallies if r.board is not None}
+    # Where the club scoreboard's log speaks, it outranks the board: no flag for the board.
+    told = {r.key for st in with_board for r in st.rallies if r.board is not None and r.log is None}
     disagree = 0
     for so in match.sets:
         rallies = []

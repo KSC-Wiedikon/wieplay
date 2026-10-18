@@ -228,3 +228,23 @@ def test_no_log_is_quiet_and_tried_again_a_day_later(
         empty = LogBridge({"version": 1, "source": None, "events": [], "sets": []})
         assert scorelog.fetch(db, row, empty).status == "none"
         assert scorelog.fetch(db, row, LogBridge({"version": 7})).status == "unavailable"
+
+
+def test_sets_from_the_log_split_at_the_longest_break() -> None:
+    from types import SimpleNamespace
+
+    from wieplay.ml import scorelog as sl
+
+    starts = [0, 30, 60, 90, 120, 400, 430, 460, 490, 520]  # s; a set break before rally 5
+    rallies = [
+        SimpleNamespace(id=f"r{i}", start_ms=s * 1000, end_ms=s * 1000 + 8000)
+        for i, s in enumerate(starts)
+    ]
+    told = {1: 1, 2: 1, 3: 1, 6: 2, 7: 2, 8: 2}
+    verdicts = {f"r{i}": sl.Verdict(f"r{i}", "a", 1.0, no) for i, no in told.items()}
+    alignment = sl.Alignment(0, [], verdicts, {}, {}, 6, 6)
+    ev = scorelog.Evidence(None, alignment, {}, "a")  # type: ignore[arg-type]
+    assert scorelog.set_spans(ev, rallies) == [(1, 0, 4), (2, 5, 9)]  # type: ignore[arg-type]
+    # Sets out of order: no spans from the log.
+    verdicts["r9"] = sl.Verdict("r9", "a", 1.0, 1)
+    assert scorelog.set_spans(ev, rallies) is None  # type: ignore[arg-type]

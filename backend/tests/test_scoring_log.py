@@ -17,6 +17,7 @@ def told(rallies: list[sc.RallyObs], winners: list[sc.Side], p: float = 1.0) -> 
 
 
 def test_the_log_wins_over_serves_that_say_the_opposite() -> None:
+    """The log names the winners; a serve read against it is no reason to check the rally."""
     rallies, winners, final = play_set(1, "near", "us", seed=5, sure=0.97)
     # The camera read every serve of the middle third the wrong way round.
     third = len(rallies) // 3
@@ -28,7 +29,7 @@ def test_the_log_wins_over_serves_that_say_the_opposite() -> None:
     assert accuracy(blind, winners) < 0.95
     out = sc.run_set(sc.SetIn(1, told(wrong, winners), official=final), "near", "us")
     assert accuracy(out, winners) == 1.0
-    assert not any(r.note == "log" for r in out.rallies)  # the path follows the log
+    assert all(r.note is None for r in out.rallies)  # the path follows the log
 
 
 def test_the_log_wins_over_the_board_in_the_picture() -> None:
@@ -39,7 +40,7 @@ def test_the_log_wins_over_the_board_in_the_picture() -> None:
     ]
     out = sc.run_set(sc.SetIn(1, told(board_wrong, winners), official=final), "near", "us")
     assert out.rallies[4].won_by == winners[4]
-    assert out.rallies[4].note == "board"  # the board is overruled, and says so
+    assert out.rallies[4].note is None  # the log outranks the board: nothing to check
 
 
 def test_a_coach_fact_wins_over_the_log_and_the_rally_is_flagged() -> None:

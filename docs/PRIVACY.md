@@ -121,6 +121,13 @@ say once which roster number each card is; WiePlay then links the actions to the
 | Who sees it | The crops: those who may watch the video (they show what the video shows). Naming, merging and splitting: the team's coaches |
 | Retention | As the video: deleted with it |
 
+**The club scoreboard's log** (`docs/PLAN.md` §10.10, since 18.10.2026): for a video of a
+Wiedisync game, WiePlay asks Wiedisync for what the club's LED scoreboard showed during that
+game, point by point (each point's time on the board's clock, the score, the sets, timeouts,
+who served), and lines it up with the video's rallies to check the score line. **Team names
+and scores only**: the log names no person, and Wiedisync sends nothing about who operated the
+board. Kept with the video's analysis (deleted with the video); seen like the score line.
+
 Later stages (players and ball tracking on a GPU) run on club hardware first. A move to a
 GPU provider in Switzerland or the EU needs a DPA and an updated privacy page; the provider
 would get only short, temporary, court-cropped copies of the rallies, with no names or IDs.
