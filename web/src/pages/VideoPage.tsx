@@ -12,7 +12,7 @@ import { ClipBar, ClipsSection } from '../components/ClipsSection'
 import { CommentsSection } from '../components/CommentsSection'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ExportMenu } from '../components/ExportMenu'
-import { AlertIcon, CheckIcon, ChevronRightIcon, PlayIcon, TrashIcon } from '../components/icons'
+import { AlertIcon, CheckIcon, ChevronRightIcon, GaugeIcon, PlayIcon, TrashIcon } from '../components/icons'
 import { LoadError, Message } from '../components/Message'
 import { MomentsStrip, type BreakMark, type StartMark } from '../components/MomentsStrip'
 import { PageHeader } from '../components/PageHeader'
@@ -461,11 +461,20 @@ function Ready({ video }: { video: Video }) {
                 )}
               </p>
               {data.can_tag && (
-                // Tagging is a keyboard task: desktop only (PLAN §9.1).
-                <div className="hidden lg:block">
-                  <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
-                    {t('tagging.tagThis')}
-                  </ButtonLink>
+                <div className="flex flex-wrap gap-2">
+                  {/* Grading in a second pass works by touch too (PLAN §9.7). */}
+                  {volleyball && tagCount > 0 && (
+                    <ButtonLink to={`/videos/${video.id}/tag?mode=regrade`} title={t('regrade.openHint')}>
+                      <GaugeIcon className="size-4" />
+                      {t('regrade.open')}
+                    </ButtonLink>
+                  )}
+                  {/* Tagging is a keyboard task: desktop only (PLAN §9.1). */}
+                  <div className="hidden lg:block">
+                    <ButtonLink to={`/videos/${video.id}/tag`} variant="primary">
+                      {t('tagging.tagThis')}
+                    </ButtonLink>
+                  </div>
                 </div>
               )}
             </div>
@@ -494,6 +503,7 @@ function Ready({ video }: { video: Video }) {
                 playhead={playhead}
                 suspended={current !== null}
                 editVideoId={data.can_tag && volleyball ? video.id : null}
+                filterTeam={{ id: video.team_id, canShare: video.can_share, label: `${video.team_name} ${video.team_season}` }}
               />
             </div>
           )}

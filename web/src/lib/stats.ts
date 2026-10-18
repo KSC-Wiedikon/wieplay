@@ -190,6 +190,8 @@ export interface VideoStats {
   suggested?: number
   /** Whether WiePlay suggests actions yet. */
   actions_gate?: ActionGate | null
+  /** With ?search=: the tags it kept (`tags` stays the match's count); null without one. */
+  selected?: number | null
 }
 
 export interface MatchLine {
@@ -217,35 +219,127 @@ export interface TeamStats {
   /** Suggested actions nobody has answered yet, over the matches: not counted. */
   suggested?: number
   actions_gate?: ActionGate | null
+  /** With ?search=: the tags it kept over the matches; null (or absent) without one. */
+  selected?: number | null
 }
 
 export type CsvLanguage = 'en' | 'de'
-/** Which table a CSV holds: the box score, the rotations or the setter analysis. */
-export type CsvPart = 'box' | 'rotations' | 'setter'
+/** Which table a CSV holds: the box score, the rotations, the setter analysis or the zone maps. */
+export type CsvPart = 'box' | 'rotations' | 'setter' | 'zones'
+
+/** The stats' tabs (players, rotations, setter, zones) and the CSV part each downloads. */
+export const CSV_PART = { players: 'box', rotations: 'rotations', setter: 'setter', zones: 'zones' } as const satisfies Record<string, CsvPart>
+
+// Zone maps (heat maps of serves and attacks per zone 1–9): GET …/stats/zones.
+
+export type ZoneSkill = 'serve' | 'attack'
+export type ZoneEnd = 'from' | 'to'
+
+/** A row's serves or attacks from (or to) one zone; zone null: no zone tagged. */
+export interface ZoneCell {
+  zone: number | null
+  ta: number
+  /** Aces or kills. */
+  points: number
+  errors: number
+  /** Attacks only. */
+  blocked: number
+  in_play: number
+  point_pct: number | null
+  /** Serve: (aces − errors) ÷ TA; attack: hitting %. */
+  eff: number | null
+}
+
+export interface ZoneRow {
+  kind: RowKind
+  side: Side
+  number: number | null
+  member_id: number | null
+  name: string | null
+  filter: RowFilter
+  /** serve_from, serve_to, attack_from, attack_to. */
+  zones: Partial<Record<`${ZoneSkill}_${ZoneEnd}`, ZoneCell[]>>
+}
+
+export interface ZoneScope {
+  /** null: the match (or the season). */
+  set_no: number | null
+  rows: ZoneRow[]
+}
+
+export interface ZoneStats {
+  /** The taxonomy's code per skill drawn (serve: S, attack: A). */
+  codes: Partial<Record<ZoneSkill, string>>
+  scopes: ZoneScope[]
+}
+
+/** `?search=…` (a TagSearch as JSON, src/lib/search.ts searchParam), or nothing. */
+const searchQuery = (search: string | null | undefined, first = false) => (search ? `${first ? '?' : '&'}search=${encodeURIComponent(search)}` : '')
 
 export const statsApi = {
-  video: (id: string, signal?: AbortSignal) => apiRequest<VideoStats>(`/api/videos/${id}/stats`, { signal }),
-  team: (id: number, signal?: AbortSignal) => apiRequest<TeamStats>(`/api/teams/${id}/stats`, { signal }),
+  video: (id: string, signal?: AbortSignal, search: string | null = null) => apiRequest<VideoStats>(`/api/videos/${id}/stats${searchQuery(search, true)}`, { signal }),
+  team: (id: number, signal?: AbortSignal, search: string | null = null) => apiRequest<TeamStats>(`/api/teams/${id}/stats${searchQuery(search, true)}`, { signal }),
+  videoZones: (id: string, signal?: AbortSignal, search: string | null = null) =>
+    apiRequest<ZoneStats>(`/api/videos/${id}/stats/zones${searchQuery(search, true)}`, { signal }),
+  teamZones: (id: number, signal?: AbortSignal, search: string | null = null) =>
+    apiRequest<ZoneStats>(`/api/teams/${id}/stats/zones${searchQuery(search, true)}`, { signal }),
 }
 
 const partQuery = (part: CsvPart) => (part === 'box' ? '' : `&part=${part}`)
 
 /** The CSV download is a plain link (the session cookie goes along). */
-export function videoCsvUrl(id: string, lang: CsvLanguage, part: CsvPart = 'box'): string {
-  return `/api/videos/${id}/stats.csv?lang=${lang}${partQuery(part)}`
+export function videoCsvUrl(id: string, lang: CsvLanguage, part: CsvPart = 'box', search: string | null = null): string {
+  return `/api/videos/${id}/stats.csv?lang=${lang}${partQuery(part)}${searchQuery(search)}`
 }
 
-export function teamCsvUrl(id: number, lang: CsvLanguage, part: CsvPart = 'box'): string {
-  return `/api/teams/${id}/stats.csv?lang=${lang}${partQuery(part)}`
+export function teamCsvUrl(id: number, lang: CsvLanguage, part: CsvPart = 'box', search: string | null = null): string {
+  return `/api/teams/${id}/stats.csv?lang=${lang}${partQuery(part)}${searchQuery(search)}`
 }
 
-/** Stats follow the tagging: always asked again when the page opens. */
-export function useVideoStats(id: string, enabled: boolean) {
-  return useQuery({ queryKey: keys.videoStats(id), queryFn: ({ signal }) => statsApi.video(id, signal), enabled, staleTime: 0 })
+/** Stats follow the tagging: always asked again when the page opens. `search`: ?search= (null: none). */
+export function useVideoStats(id: string, enabled: boolean, search: string | null = null) {
+  return useQuery({
+    queryKey: [...keys.videoStats(id), search ?? ''],
+    queryFn: ({ signal }) => statsApi.video(id, signal, search),
+    enabled,
+    staleTime: 0,
+    // While a new search loads, the last numbers stay (never another video's or team's).
+    placeholderData: (previous, query) => (query?.queryKey[1] === id ? previous : undefined),
+  })
 }
 
-export function useTeamStats(id: number, enabled: boolean) {
-  return useQuery({ queryKey: keys.teamStats(id), queryFn: ({ signal }) => statsApi.team(id, signal), enabled, staleTime: 0 })
+export function useTeamStats(id: number, enabled: boolean, search: string | null = null) {
+  return useQuery({
+    queryKey: [...keys.teamStats(id), search ?? ''],
+    queryFn: ({ signal }) => statsApi.team(id, signal, search),
+    enabled,
+    staleTime: 0,
+    // While a new search loads, the last numbers stay (never another video's or team's).
+    placeholderData: (previous, query) => (query?.queryKey[1] === id ? previous : undefined),
+  })
+}
+
+/** The zone maps, loaded when their tab opens. */
+export function useVideoZones(id: string, enabled: boolean, search: string | null = null) {
+  return useQuery({
+    queryKey: [...keys.videoStats(id), 'zones', search ?? ''],
+    queryFn: ({ signal }) => statsApi.videoZones(id, signal, search),
+    enabled,
+    staleTime: 0,
+    // While a new search loads, the last numbers stay (never another video's or team's).
+    placeholderData: (previous, query) => (query?.queryKey[1] === id ? previous : undefined),
+  })
+}
+
+export function useTeamZones(id: number, enabled: boolean, search: string | null = null) {
+  return useQuery({
+    queryKey: [...keys.teamStats(id), 'zones', search ?? ''],
+    queryFn: ({ signal }) => statsApi.teamZones(id, signal, search),
+    enabled,
+    staleTime: 0,
+    // While a new search loads, the last numbers stay (never another video's or team's).
+    placeholderData: (previous, query) => (query?.queryKey[1] === id ? previous : undefined),
+  })
 }
 
 // Formats (Swiss: 33.3%, 2.15).
@@ -389,6 +483,16 @@ export function rotationTags(source: Pick<TagSource, 'events' | 'segments'>, pla
     .sort((a, b) => a.t_ms - b.t_ms)
 }
 
+/** The tags behind a zone: the row's, of the skill's code, with that zone at that end (null: no
+ * zone there), and (setNo) in that set; in time order. */
+export function zoneTags(source: TagSource, filter: RowFilter, code: string, end: ZoneEnd, zone: number | null, setNo: number | null): Tag[] {
+  return statTags(source, filter, { codes: [code], grades: null }, setNo).filter((tag) => {
+    const at = end === 'from' ? tag.attributes.zone_from : tag.attributes.zone_to
+    const known = typeof at === 'number' && at >= 1 && at <= 9 ? at : null
+    return known === zone
+  })
+}
+
 /** The sets behind a setter number: those matching every key of the filter (and the set). */
 export function setterPlays(plays: readonly SetPlay[], filter: SetFilter, setNo: number | null): SetPlay[] {
   const keys = Object.keys(filter) as (keyof SetFilter)[]
@@ -426,10 +530,10 @@ export function rallyWindow(rally: Segment, duration_ms: number | null): { start
 }
 
 /**
- * The smart reel builder with a season number's query, or null when a reel can't express the
- * row (a shirt number without a member).
+ * The smart reel builder with a season number's query (and the words of a search, `q`), or null
+ * when a reel can't express the row (a shirt number without a member).
  */
-export function reelLink(team: { id: number; season: string }, filter: RowFilter, column: Pick<StatColumn, 'codes' | 'grades'>): string | null {
+export function reelLink(team: { id: number; season: string }, filter: RowFilter, column: Pick<StatColumn, 'codes' | 'grades'>, search: string | null = null): string | null {
   const params = new URLSearchParams({ team: String(team.id), season: team.season })
   if ('number' in filter) return null
   if ('member_id' in filter) {
@@ -440,6 +544,8 @@ export function reelLink(team: { id: number; season: string }, filter: RowFilter
   }
   params.set('codes', column.codes.join(','))
   if (column.grades !== null) params.set('grades', column.grades.map((g) => g ?? NO_GRADE).join(','))
+  // The words of a search on top (the season's search bar, a zone: "set 3 from 4").
+  if (search?.trim()) params.set('q', search.trim())
   return `/reels/new?${params.toString()}`
 }
 

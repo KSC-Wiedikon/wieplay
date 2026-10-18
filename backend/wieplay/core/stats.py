@@ -65,6 +65,15 @@ Setter analysis: each of our sets (set tags, `E`) with what came of it, from the
 Distribution per attacker, zone, rotation, reception quality and setter, each with the
 attacks' kill % and hitting %. The taxonomy has no tempo, so there is none.
 
+Zone maps (heat maps): per row, its serves and attacks per zone 1-9 where they started
+(`zone_from`) and where they went (`zone_to`), with the box score's formulas: attempts, aces or
+kills (#), errors (=), blocked (attacks, /), in play, efficiency. Tags without that zone are
+counted apart.
+
+A search (wieplay/core/search.py) narrows every number to the tags and rallies it keeps: the box
+score and the zone maps count the kept tags, the team numbers the kept rallies, a setter number
+the sets whose set or attack is kept; the rotation walk still goes through every rally.
+
 Every number links to its plays: a cell's tags are those matching the row's `filter`, the
 column's `codes` and `grades`, and (per set) the set. The web plays them on the video page and
 opens a smart reel on the team page. A rotation number's plays are the rallies the walk put in
@@ -78,7 +87,7 @@ import csv
 import io
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Literal
@@ -221,6 +230,7 @@ def rotation_columns(tax: Taxonomy) -> list[Column]:
 # --- a row: counts by (code, grade) ---------------------------------------------------------
 
 Counts = Counter[tuple[str, Grade]]
+Places = Counter[tuple[str, int | None, int | None, Grade]]
 
 
 def count_tags(tags: Iterable[TagIn]) -> Counts:
@@ -279,9 +289,12 @@ class Row:
     filter: dict[str, Any]
     counts: Counts = field(default_factory=Counter)
     matches: set[uuid.UUID] = field(default_factory=set)  # season: videos with a tag
+    # Where its tags started and went: (code, zone from, zone to, grade), for the zone maps.
+    places: Places = field(default_factory=Counter)
 
     def add(self, tag: TagIn, video_id: uuid.UUID | None = None) -> None:
         self.counts[(tag.code, tag.grade)] += 1
+        self.places[(tag.code, tag.zone_from, tag.zone_to, tag.grade)] += 1
         if video_id is not None:
             self.matches.add(video_id)
 
@@ -515,10 +528,14 @@ def set_rotations(
     start_rotation: int,
     ours: dict[uuid.UUID, list[TagIn]],
     lineup: Sequence[int | None] | None = None,
+    keep: Collection[uuid.UUID] | None = None,
 ) -> Rotations:
-    """One set per rotation (rallies in time order; `ours`: our tags per rally)."""
+    """One set per rotation (rallies in time order; `ours`: our tags per rally). With `keep`
+    (a search) only those rallies count; the walk still goes through all of them."""
     lines = empty_rotations()
     for w in walk(rallies, start_rotation):
+        if keep is not None and w.rally.id not in keep:
+            continue
         line = lines[w.rotation]
         line.team.add(team_line([replace(w.rally, won_by=w.won_by)]))
         line.counts.update(count_tags(ours.get(w.rally.id, ())))
@@ -780,6 +797,71 @@ def setter_stats(plays: Sequence[SetPlay], who: Who) -> SetterStats:
     )
 
 
+# --- zones (heat maps of serves and attacks) ---------------------------------------------------
+
+# The skills drawn as zone maps, and the two ends of a tag: where it started and where it went
+# (DataVolley zones 1-9, each on the half of the team it is on).
+ZONE_SKILLS = ("serve", "attack")
+ZONE_ENDS = ("from", "to")
+ZONE_NUMBERS = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+
+
+@dataclass(frozen=True)
+class ZoneCell:
+    """A row's serves or attacks from (or to) one zone; zone None: no zone tagged.
+
+    points: aces or kills (#); errors (=); blocked (attacks only: /); the rest is in play.
+    Efficiency: serve (aces - errors) / TA, attack (kills - errors - blocked) / TA, as in the
+    box score."""
+
+    zone: int | None
+    ta: int
+    points: int
+    errors: int
+    blocked: int
+
+    @property
+    def in_play(self) -> int:
+        return self.ta - self.points - self.errors - self.blocked
+
+    @property
+    def point_pct(self) -> float | None:
+        return _ratio(self.points, self.ta)
+
+    @property
+    def eff(self) -> float | None:
+        return _ratio(self.points - self.errors - self.blocked, self.ta)
+
+
+def zone_cells(places: Places, code: str, category: str, end: str) -> list[ZoneCell]:
+    """A row's tags of one skill per zone at one end ("from" or "to"), zones in order and the
+    tags without that zone last; zones nobody played are left out."""
+    totals: dict[int | None, Counter[Grade]] = defaultdict(Counter)
+    for (c, zone_from, zone_to, grade), n in places.items():
+        if c != code:
+            continue
+        zone = zone_from if end == "from" else zone_to
+        totals[zone if zone in ZONE_NUMBERS else None][grade] += n
+    out = []
+    for zone in (*ZONE_NUMBERS, None):
+        grades = totals.get(zone)
+        if not grades:
+            continue
+        blocked = grades["/"] if category == "attack" else 0
+        out.append(ZoneCell(zone, sum(grades.values()), grades["#"], grades["="], blocked))
+    return out
+
+
+def zone_codes(tax: Taxonomy) -> dict[str, str]:
+    """The taxonomy's code per zone skill (serve -> S, attack -> A)."""
+    code_of = {s.category: s.code for s in tax.skills.values()}
+    return {c: code_of[c] for c in ZONE_SKILLS if c in code_of}
+
+
+def has_zone_tags(row: Row, codes: Mapping[str, str]) -> bool:
+    return any(c in codes.values() for c, _ in row.counts)
+
+
 # --- sets -----------------------------------------------------------------------------------
 
 
@@ -849,6 +931,35 @@ class VideoStats:
     setter: SetterStats | None = None  # None: a taxonomy without sets or attacks
 
 
+def set_rallies(rallies: Sequence[RallyIn], s: SetIn) -> list[RallyIn]:
+    """A set's rallies in time order."""
+    return sorted((r for r in rallies if r.period_id == s.id), key=lambda r: r.start_ms)
+
+
+def rotation_of_rallies(rallies: Sequence[RallyIn], sets: Sequence[SetIn]) -> dict[uuid.UUID, int]:
+    """Our rotation in each rally where the walk knows it (sets with a starting rotation)."""
+    out: dict[uuid.UUID, int] = {}
+    for s in sets:
+        if s.start_rotation in ROTATIONS:
+            assert s.start_rotation is not None
+            walked = walk(set_rallies(rallies, s), s.start_rotation)
+            out.update((w.rally.id, w.rotation) for w in walked)
+    return out
+
+
+@dataclass(frozen=True)
+class Selection:
+    """What a search keeps of a match (wieplay/core/search.py): the tags (their positions in
+    the match's tag list) and the rallies whose numbers count."""
+
+    tags: frozenset[int]
+    rallies: frozenset[uuid.UUID]
+
+
+# A search over one match: its tags (time order), rallies and sets -> what counts.
+Selector = Callable[[Sequence[TagIn], Sequence[RallyIn], Sequence[SetIn]], Selection]
+
+
 @dataclass
 class _Walked:
     """A match's rotations and sets, worked out once for its stats and its season's."""
@@ -861,30 +972,43 @@ class _Walked:
 
 
 def _walk_match(
-    tags: Sequence[TagIn], rallies: Sequence[RallyIn], sets: Sequence[SetIn]
+    tags: Sequence[TagIn],
+    rallies: Sequence[RallyIn],
+    sets: Sequence[SetIn],
+    selection: Selection | None = None,
 ) -> _Walked:
+    """With a selection, the rotations count only its tags and rallies; the walk itself and
+    the rotation of every rally still come from all of them."""
     rally_of = rally_of_tags(tags, rallies)
     set_of = set_of_tags(tags, rallies, sets, rally_of)
     ours: dict[uuid.UUID, list[TagIn]] = defaultdict(list)
-    for tag, rally in zip(tags, rally_of, strict=True):
-        if rally is not None and tag.side == "us":
+    for i, (tag, rally) in enumerate(zip(tags, rally_of, strict=True)):
+        if rally is not None and tag.side == "us" and (selection is None or i in selection.tags):
             ours[rally.id].append(tag)
+    keep = selection.rallies if selection is not None else None
     per_set: list[tuple[SetIn, list[RallyIn], Rotations | None]] = []
     total: Rotations | None = None
     rotation_of: dict[uuid.UUID, int] = {}
     for s in sorted(sets, key=lambda s: s.no):
-        played = sorted((r for r in rallies if r.period_id == s.id), key=lambda r: r.start_ms)
+        played = set_rallies(rallies, s)
         lines = None
         if s.start_rotation in ROTATIONS:
             assert s.start_rotation is not None
-            lines = set_rotations(played, s.start_rotation, ours, s.lineup)
-            for r, line in lines.items():
-                rotation_of.update((w.rally.id, r) for w in line.rallies)
+            rotation_of.update((w.rally.id, w.rotation) for w in walk(played, s.start_rotation))
+            lines = set_rotations(played, s.start_rotation, ours, s.lineup, keep)
             if total is None:
                 total = empty_rotations()
             add_rotations(total, lines)
+        if keep is not None:
+            played = [r for r in played if r.id in keep]
         per_set.append((s, played, lines))
     return _Walked(per_set, total, rally_of, set_of, rotation_of)
+
+
+def _kept_plays(plays: list[SetPlay], picked: set[int]) -> list[SetPlay]:
+    """A search keeps a set when it keeps the set's tag or the attack after it (by identity:
+    the plays hold the match's own tag objects)."""
+    return [p for p in plays if id(p.set) in picked or (p.attack and id(p.attack) in picked)]
 
 
 def video_stats(
@@ -893,28 +1017,36 @@ def video_stats(
     sets: Sequence[SetIn],
     roster: dict[int, tuple[int | None, str | None]],
     tax: Taxonomy | None = None,
+    select: Selector | None = None,
 ) -> VideoStats:
-    walked = _walk_match(tags, rallies, sets)
+    """A match's numbers; with `select` (a search) only the tags and rallies it keeps."""
+    selection = select(tags, rallies, sets) if select is not None else None
+    walked = _walk_match(tags, rallies, sets, selection)
     codes = Codes.of(tax or load("volleyball"))
     plays = (
         setter_plays(tags, walked.rally_of, walked.set_of, walked.rotation_of, codes)
         if codes
         else None
     )
+    counted = list(range(len(tags))) if selection is None else sorted(selection.tags)
+    chosen = [tags[i] for i in counted]
+    if plays is not None and selection is not None:
+        plays = _kept_plays(plays, {id(t) for t in chosen})
+    kept = rallies if selection is None else [r for r in rallies if r.id in selection.rallies]
     who = match_who(roster)
     per_set = []
     for s, played, lines in walked.per_set:
-        in_set = [t for t, sid in zip(tags, walked.set_of, strict=True) if sid == s.id]
+        in_set = [tags[i] for i in counted if walked.set_of[i] == s.id]
         setter = (
             setter_stats([p for p in plays if p.set_id == s.id], who) if plays is not None else None
         )
         per_set.append(SetStats(s, video_box(in_set, roster), team_line(played), lines, setter))
     return VideoStats(
-        video_box(tags, roster),
-        team_line(rallies),
+        video_box(chosen, roster),
+        team_line(kept),
         per_set,
-        len(tags),
-        len(rallies),
+        len(chosen),
+        len(kept),
         walked.total,
         setter_stats(plays, who) if plays is not None else None,
     )
@@ -949,27 +1081,40 @@ class SeasonStats:
 
 
 def season_stats(
-    matches: Sequence[MatchIn], names: dict[int, str], tax: Taxonomy | None = None
+    matches: Sequence[MatchIn],
+    names: dict[int, str],
+    tax: Taxonomy | None = None,
+    select: Selector | None = None,
 ) -> SeasonStats:
-    """Every ready match of a team row: counts are summed, ratios recomputed from the sums."""
+    """Every ready match of a team row: counts are summed, ratios recomputed from the sums.
+    With `select` (a search) each match counts only the tags and rallies it keeps; `tagged`
+    still counts the matches with any tag."""
     played = sorted(matches, key=lambda m: (m.recorded_on, str(m.video_id)))
-    box = season_box([VideoTags(m.video_id, m.tags) for m in played], names)
     codes = Codes.of(tax or load("volleyball"))
     total = TeamLine()
     lines = []
     rotations: Rotations | None = None
     plays: list[SetPlay] = []
+    counted: list[VideoTags] = []
     for m in played:
-        line = team_line(m.rallies)
+        selection = select(m.tags, m.rallies, m.sets) if select is not None else None
+        chosen = list(m.tags) if selection is None else [m.tags[i] for i in sorted(selection.tags)]
+        counted.append(VideoTags(m.video_id, chosen))
+        kept = (
+            m.rallies if selection is None else [r for r in m.rallies if r.id in selection.rallies]
+        )
+        line = team_line(kept)
         total.add(line)
         lines.append(MatchLine(m, line))
-        walked = _walk_match(m.tags, m.rallies, m.sets)
+        walked = _walk_match(m.tags, m.rallies, m.sets, selection)
         if walked.total is not None:
             if rotations is None:
                 rotations = empty_rotations()
             add_rotations(rotations, walked.total)
         if codes:
-            plays += setter_plays(m.tags, walked.rally_of, walked.set_of, walked.rotation_of, codes)
+            found = setter_plays(m.tags, walked.rally_of, walked.set_of, walked.rotation_of, codes)
+            plays += found if selection is None else _kept_plays(found, {id(t) for t in chosen})
+    box = season_box(counted, names)
     setter = setter_stats(plays, season_who(names)) if codes else None
     return SeasonStats(box, total, lines, sum(1 for m in played if m.tags), rotations, setter)
 
@@ -1011,6 +1156,11 @@ HEADERS: dict[str, dict[str, str]] = {
         "quality_perfect": "Perfect reception", "quality_good": "Good reception",
         "quality_poor": "Poor reception", "quality_transition": "Transition",
         "quality_unknown": "Not known",
+        # The zone maps (?part=zones).
+        "skill": "Skill", "zone_end": "Zones", "zone": "Zone", "attempts": "Attempts",
+        "zone_points": "Points (ace, kill)", "in_play": "In play",
+        "zone_point_pct": "Ace or kill %", "efficiency": "Efficiency %",
+        "skill_serve": "Serve", "skill_attack": "Attack", "end_from": "From", "end_to": "To",
     },
     "de": {
         "set": "Satz", "number": "Nummer", "player": "Spieler", "matches": "Spiele",
@@ -1044,6 +1194,10 @@ HEADERS: dict[str, dict[str, str]] = {
         "quality_perfect": "Annahme perfekt", "quality_good": "Annahme gut",
         "quality_poor": "Annahme schlecht", "quality_transition": "Transition",
         "quality_unknown": "Unbekannt",
+        "skill": "Aktion", "zone_end": "Zonen", "zone": "Zone", "attempts": "Versuche",
+        "zone_points": "Punkte (Ass, Angriffspunkt)", "in_play": "Im Spiel",
+        "zone_point_pct": "Ass- oder Punkte-%", "efficiency": "Effizienz %",
+        "skill_serve": "Aufschlag", "skill_attack": "Angriff", "end_from": "Von", "end_to": "Nach",
     },
 }  # fmt: skip
 
@@ -1153,6 +1307,48 @@ def _option(words: dict[str, str], group: str, line: SetterLine) -> str:
             return words["rotation_unknown"]
         return words["rotation_no"].format(n=line.key)
     return words[f"quality_{line.key}"]
+
+
+def zones_csv(
+    scopes: Sequence[tuple[str, BoxScore]],
+    codes: Mapping[str, str],
+    lang: str = "en",
+    labels: Mapping[str, str] | None = None,
+) -> str:
+    """The zone maps as a table: per scope (the match and each set, or the season), row (a
+    player, the team, the opponent), skill and end (from, to) one line per zone."""
+    words = {**HEADERS.get(lang, HEADERS["en"]), **(labels or {})}
+    head = [words["set"], words["number"], words["player"], words["skill"], words["zone_end"],
+            words["zone"], words["attempts"], words["zone_points"], words["errors"],
+            words["blocked"], words["in_play"], words["zone_point_pct"],
+            words["efficiency"]]  # fmt: skip
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerow(head)
+    for scope, box in scopes:
+        for row in box.rows:
+            name = row.name or (words[row.kind] if row.kind != "player" else "")
+            for category, code in codes.items():
+                for end in ZONE_ENDS:
+                    for cell in zone_cells(row.places, code, category, end):
+                        writer.writerow(
+                            [
+                                scope,
+                                "" if row.number is None else str(row.number),
+                                name,
+                                words[f"skill_{category}"],
+                                words[f"end_{end}"],
+                                words["zone_unknown"] if cell.zone is None else str(cell.zone),
+                                str(cell.ta),
+                                str(cell.points),
+                                str(cell.errors),
+                                str(cell.blocked),
+                                str(cell.in_play),
+                                csv_cell(cell.point_pct, "pct"),
+                                csv_cell(cell.eff, "pct"),
+                            ]
+                        )
+    return out.getvalue()
 
 
 SETTER_GROUPS = ("by_attacker", "by_zone", "by_rotation", "by_reception", "by_setter")

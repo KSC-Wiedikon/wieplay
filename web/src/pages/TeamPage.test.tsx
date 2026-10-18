@@ -267,8 +267,12 @@ describe('TeamPage season stats', () => {
     const table = within(section).getByRole('table', { name: 'Points per rotation' })
     const four = within(table).getByRole('rowheader', { name: 'Rotation 4' }).closest('tr') as HTMLTableRowElement
     expect(within(four).getAllByRole('cell').slice(0, 6).map((c) => c.textContent)).toEqual(['30', '18', '12', '14', '9', '64.3%'])
-    // Rotations of several matches are not played: no buttons.
+    // Rotations of several matches are not played: no buttons; our skills open a reel of the rotation.
     expect(within(section).queryByRole('button', { name: /^Play/ })).not.toBeInTheDocument()
+    expect(within(four).getByRole('link', { name: 'Open Rotation 4, Attacks as a reel: 12' })).toHaveAttribute(
+      'href',
+      '/reels/new?team=92&season=2026%2F27&side=us&codes=A&q=rotation+4',
+    )
     expect(within(section).getByText('Setter #3')).toBeInTheDocument()
 
     fireEvent.click(within(section).getByRole('tab', { name: 'Setter' }))
@@ -277,6 +281,49 @@ describe('TeamPage season stats', () => {
     expect(within(attackers).getByRole('rowheader', { name: /#7/ }).closest('tr')).toHaveTextContent('202055.6%')
     expect(within(section).getByRole('img', { name: /^Left: 38.9% of the attacks \(14\)/ })).toBeInTheDocument()
     expect(within(section).getByText('Zone not tagged', { exact: false })).toBeInTheDocument()
+  })
+
+  it('narrows the season with the search bar; numbers and zones open reels of the same search', async () => {
+    const searched = `?search=${encodeURIComponent('{"sets":[3]}')}`
+    const zones = {
+      codes: { serve: 'S', attack: 'A' },
+      scopes: [
+        {
+          set_no: null,
+          rows: [
+            {
+              kind: 'player',
+              side: 'us',
+              number: 7,
+              member_id: 107,
+              name: 'Luca Brunner',
+              filter: { side: 'us', member_id: 107 },
+              zones: { serve_to: [{ zone: 5, ta: 6, points: 2, errors: 1, blocked: 0, in_play: 3, point_pct: 2 / 6, eff: 1 / 6 }], serve_from: [], attack_from: [], attack_to: [] },
+            },
+          ],
+        },
+      ],
+    }
+    const { router } = stub(team(), [], {
+      '/api/teams/92/stats': { body: season },
+      [`/api/teams/92/stats${searched}`]: { body: { ...season, selected: 4 } },
+      [`/api/teams/92/stats/zones${searched}`]: { body: zones },
+    })
+    const section = await screen.findByRole('region', { name: 'Season stats' })
+    await within(section).findByRole('table', { name: 'Season stats · H3 2026/27' })
+    fireEvent.change(within(section).getByRole('combobox', { name: 'Search' }), { target: { value: 'set 3' } })
+    expect(await within(section).findByText(/4 tags match/)).toBeInTheDocument()
+    expect(within(section).getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/teams/92/stats.csv?lang=en${searched.replace('?', '&')}`)
+    const kills = within(section).getByRole('link', { name: 'Open #7 Luca Brunner, Kills (#) as a reel: 3' })
+    expect(kills).toHaveAttribute('href', '/reels/new?team=92&season=2026%2F27&member=107&codes=A&grades=%23&q=set+3')
+
+    fireEvent.click(within(section).getByRole('tab', { name: 'Zones' }))
+    fireEvent.change(await within(section).findByRole('combobox', { name: 'Who' }), { target: { value: 'player:107' } })
+    const court = within(section).getByTestId('zone-court')
+    const five = within(court).getByRole('link', { name: 'Open Zone 5: 6 serves, 2 aces, 1 errors, efficiency +16.7% as a reel: 6' })
+    fireEvent.click(five)
+    expect(router.state.location.pathname).toBe('/reels/new')
+    expect(new URLSearchParams(router.state.location.search).get('q')).toBe('set 3 to 5')
   })
 
   it('says when nothing of the season is tagged yet', async () => {

@@ -389,8 +389,8 @@ the team's **lineage** (§6.3) unless a season is named.
 | Action⁶ | Player | Analyst¹ | Coach / team manager | Sport admin (that sport) | Admin / superuser² |
 |---|---|---|---|---|---|
 | Watch team videos, tags, clips | own seasons³ | ✓ | ✓ all seasons | ✓ | ✓ (logged, banner) |
-| Create own private reels, comment on clips | ✓ | ✓ | ✓ | ✓ | |
-| Share a reel with the team | | ✓ | ✓ | ✓ | ✓⁴ |
+| Create own private reels and saved filters, comment on clips | ✓ | ✓ | ✓ | ✓ | |
+| Share a reel or a saved filter with the team | | ✓ | ✓ | ✓ | ✓⁴ |
 | Upload / link a video, edit roster snapshot | | ✓ | ✓ | ✓ | |
 | Tag, mark rallies, correct scores and model output | | ✓ | ✓ | ✓ | ✓⁴ |
 | Download / export MP4 (watermarked) | | | ✓ | ✓ | ✓⁴ |
@@ -746,13 +746,16 @@ comment          id, target_type 'clip'|'event'|'segment'|'video', target_id, t_
 reel             id, owner, lineage_id NULL, title, kind 'smart'|'manual',
                  query jsonb NULL, visibility 'private'|'team', created_at
 reel_item        reel_id, position, video_id, start_ms, end_ms, event_id NULL, clip_id NULL, caption
+saved_filter     id, owner, lineage_id NULL, title, query (the words), visibility 'private'|'team',
+                 created_at, updated_at, deleted_at   -- §9.7, migration 0019
 export           id, kind 'clip'|'reel'|'condensed'|'recap', source jsonb, params_hash,
                  status, object_key, bytes, requested_by, job_id, expires_at
 ```
 
 - A **clip** is a time range. Watching it seeks inside the HLS stream: no file, no storage.
 - A **per-player highlight reel** is a *smart reel*: a saved query ("member 123, attacks
-  graded #, season 2026/27") evaluated on open, so it updates as tagging continues.
+  graded #, season 2026/27") evaluated on open, so it updates as tagging continues. Its query
+  can carry a search (§9.7: "set 3 rotation 2 lost"), read per match like the stats.
 - An **export** renders a clip, reel or condensed match to MP4 with ffmpeg (§7.7).
 
 ### 6.9 Jobs, workers, ML provenance, budget
@@ -1412,8 +1415,67 @@ the skill, an ungraded tag counts as an attempt that is neither a point nor an e
     taxonomy has none.
   - API: `rotations` (richer) and `setter` on the match, each set and the season box,
     `rotation_columns`; CSV `?part=rotations` and `?part=setter`. Season numbers of these two
-    tabs are not played (a smart reel can't name a rotation yet).
-- Not yet: zone heatmaps for serves, the search bar, saved filters and the regrade queue.
+    tabs are not played; since 18.10.2026 our serve, reception and attack numbers per rotation
+    open a smart reel with the search "rotation N" (below), the team numbers and the setter's
+    stay plain (a reel is made of tags, not rallies or set-attack pairs).
+- Regrade queue (18.10.2026, branch `feat/stats-rest`): a third mode on the tag page next to
+  Tag and Review suggestions ("Regrade", `?mode=regrade`), also from the video page's
+  "Regrade" button and on tablets and phones (big grade buttons). A pass names a skill
+  (attacks first), ungraded only or all of its tags, optionally one player and one set; the
+  list is fixed when it starts. Each tag's clip window (its own pre/post roll, else the
+  skill's) plays in a loop; `1`–`6` set `# + ! - / =` in the order of the grades table (the
+  symbols work too, `0` takes the grade away), the buttons show what each grade means for the
+  skill; the list moves on by itself; `S` or `Enter` skips, `←`/`→` (and `↑`/`↓`) go back and
+  forth, `U` undoes, `Esc` goes back to the pass's setup. Grades go through the tagging store
+  and the outbox (offline, base versions, conflicts and undo as everywhere else); an accepted
+  suggestion that gets another grade becomes "corrected". Open suggestions are not in the
+  queue (they belong to the action review). The queue never ends a rally or sets its winner:
+  that stays the coach's call in the tag mode. Who may: whoever may tag (`can_tag`, players
+  included).
+- Zone maps (18.10.2026): a "Zones" tab next to Players, Rotations and Setter, per match, set
+  and season, per player, the team and the opponent: serves and attacks per zone 1–9 where
+  they went (`zone_to`, drawn on the other half, the net at the bottom) or where they started
+  (`zone_from`, their own half, the net at the top), serves "to" and attacks "from" first.
+  Each zone has the attempts, aces or kills, errors, blocked (attacks), ace or kill % and the
+  efficiency (serve: (aces − errors) ÷ TA; attack: hitting %), tinted by how many or by how
+  well (blue efficient, red errors), with a table of the same numbers and the tags without
+  that zone apart. A zone plays its tags on the video page and opens the reel builder on the
+  team page ("to 5" in its search). API `GET /api/videos/{id}/stats/zones` and
+  `GET /api/teams/{id}/stats/zones` (per scope, the rows with tags of the two skills and
+  their cells); CSV `?part=zones`. Computed on read like the rest (`Row.places`). It sits
+  beside the "Tendencies" diagram (§10.7), which draws single serves and attacks.
+- Search bar (18.10.2026): a few words over tags and rallies, English and German, commas
+  optional: players (`#7`, theirs `a12` or "them #12", a bare `7`), sides (us/them,
+  wir/gegner), skills (serve … freeball, Aufschlag … Abwehr, or the letters), grades
+  (`# + ! - / =`, "ungraded"; "ace", "kill", "blocked" name skill and grade), the tagging
+  grammar itself (`7A#`, `a12S=`, `3A#46`), zones ("from 4", "to 1", "zone 5"; von/nach),
+  outcomes ("point", "error", "in play": the tag won its side the rally, lost it, neither, by
+  `ends_rally_on`), "set 3" (Satz), "rotation 2" (rot 2, P2: our rotation from the walk),
+  "won"/"lost" (gewonnen/verloren: the rally's winner) and "break"/"side-out" (who served).
+  Words of one kind are alternatives, kinds together must all hold; a tag matches with its own
+  terms and its rally's, a rally when its terms hold and, with tag terms, one of its tags
+  matches. Suggestions while typing (keywords in the app's language first, the numbers after
+  "set"/"rotation"/"from", our players after `#`), what it understood as chips (× takes one
+  out), the words it didn't. The web parses (`web/src/lib/search.ts`) and sends the result as
+  a `TagSearch` (`backend/wieplay/core/search.py`, the same matching): the video page's rally
+  list and the tag page's tag list filter in the browser; the team page's season stats take
+  `?search=` (every number counts what it keeps, the rotation walk still sees every rally, a
+  setter number keeps a set when its set or its attack is kept; `selected` says how many tags);
+  the smart reel builder stores it in the reel's query (`search`, and `text` for the words), so
+  a smart reel can name a set, a rotation, zones, outcomes, the winner and the server. Season
+  numbers open the reel builder with the search's words (`q`).
+- Saved filters (18.10.2026): a search kept by name (`saved_filter`, migration `0019`): every
+  person keeps their own (any team), and those who may share clips and reels with a team
+  (coaches, team managers, sport admins, admins, helpers; §5.1) can share one with it (its
+  lineage, every season). Everyone who sees the team uses its shared filters; only the owner
+  changes one; the owner or the team's coaches, team managers, sport admins and admins delete
+  a shared one. `GET/POST /api/filters`, `PUT/DELETE /api/filters/{id}`; rules in
+  `permissions.py` (`can_share_filter`, `can_see_filter`, `can_edit_filter`,
+  `can_remove_filter`). The query is the words as typed, read by the web, so a filter keeps
+  working as the search learns words.
+- Not yet: a search bar on a single match's stats (the API takes `?search=`; the page's rally
+  list has one), reels of rally numbers (points won in rotation 2), and search words for tempo
+  or the setter's options (the taxonomy has neither).
 
 ---
 
@@ -1902,7 +1964,10 @@ serve and attack to the first bounce (floor) or low contact (mapped at 0.7 m wit
 camera) in its window after the tag, else from its DataVolley zones; coloured by outcome
 (point, error, in play), filterable by player, side and set; an arrow plays its moment. Not
 stored on the events yet (`court_x/court_y`): computed in the browser from the track and the
-calibration.
+calibration. The stats' zone maps (§9.7, 18.10.2026) add the counts: serves and attacks per
+DataVolley zone, where they went and where they started, with their efficiency, per match,
+set and season; they read the tags' zones only, so a serve placed by the ball but tagged
+without a zone is not in them.
 
 ### 10.8 Later: OpenVolley import
 

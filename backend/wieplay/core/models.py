@@ -1,6 +1,7 @@
 """Tables: the Wiedisync mirror, team lineage, sessions and the audit log (M0); videos, jobs,
 workers, filming policy, consent and the adult-check cache (M1). Tags arrive with M2 (PLAN §6).
-Guest clubs (PLAN §4.5) add their logins and invite links (0016).
+Guest clubs (PLAN §4.5) add their logins and invite links (0016); saved filters (PLAN §9.7)
+come with 0019.
 """
 
 from __future__ import annotations
@@ -797,6 +798,28 @@ class ReelItem(Base):
     caption: Mapped[str | None] = mapped_column(String(200))
 
     reel: Mapped[Reel] = relationship(back_populates="items")
+
+
+class SavedFilter(Base):
+    """A search someone keeps by name (PLAN §9.7): the words as typed ("set 3, rotation 2,
+    reception -"), for themselves, or shared with a team (its lineage, every season)."""
+
+    __tablename__ = "saved_filter"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True)
+    owner: Mapped[int] = mapped_column(Integer, index=True)
+    # The team it was saved for; a shared filter is the team's (null once the team is gone).
+    lineage_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("team_lineage.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(120))
+    query: Mapped[str] = mapped_column(String(300))
+    visibility: Mapped[str] = mapped_column(String(16), default="private")  # private | team
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Comment(Base):

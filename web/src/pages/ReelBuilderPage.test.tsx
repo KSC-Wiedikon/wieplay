@@ -100,6 +100,29 @@ describe('ReelBuilderPage', () => {
     await waitFor(() => expect(previews.at(-1)?.grades).toEqual(['+', '!', '-', '/']))
   })
 
+  it('takes the words of a search (from a zone or a filtered number) and keeps them in the query', async () => {
+    const { previews } = show({ url: '/reels/new?team=92&season=2026%2F27&member=107&codes=S&q=set+3+to+5', routes: { '/api/filters?team_id=92': { body: [] } } })
+    await waitFor(() =>
+      expect(previews.at(-1)).toEqual({
+        lineage_id: LINEAGE,
+        season: '2026/27',
+        member_id: 107,
+        codes: ['S'],
+        search: { zones_to: [5], sets: [3] },
+        text: 'set 3 to 5',
+        limit: 200,
+      }),
+    )
+    const search = screen.getByRole('combobox', { name: 'Search' })
+    expect(search).toHaveValue('set 3 to 5')
+    expect(screen.getByText('To zone 5')).toBeInTheDocument()
+    expect(screen.getByLabelText('Title')).toHaveAttribute('placeholder', 'Luca Brunner · Serve · set 3 to 5 · 2026/27')
+    fireEvent.change(search, { target: { value: 'won' } })
+    await waitFor(() => expect(previews.at(-1)).toMatchObject({ search: { won_by: ['us'] }, text: 'won' }))
+    fireEvent.change(search, { target: { value: '' } })
+    await waitFor(() => expect(previews.at(-1)).toEqual({ lineage_id: LINEAGE, season: '2026/27', member_id: 107, codes: ['S'], limit: 200 }))
+  })
+
   it('previews the query as it is built, then saves it as a smart reel for the team', async () => {
     const { previews, fetch, router } = show()
     // The team and its current season to begin with.

@@ -7,9 +7,11 @@ import { Select, TextInput } from '../../components/Field'
 import { AddToReelDialog } from '../../components/AddToReelDialog'
 import { CheckIcon, PencilIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { Table, TBody, Td, Th, THead, Tr } from '../../components/Table'
+import { SearchBar } from '../../components/SearchBar'
 import { TagFilters } from '../../components/TagFilters'
 import { isModelTag, isSuggestedTag, suggestedCount } from '../../lib/actions'
 import { filterTags, isFiltered, lastAtOrBefore, NO_FILTER, type TagFilter } from '../../lib/condensed'
+import { isEmptySearch, parseSearch, searchContext, searchTags } from '../../lib/search'
 import { cx } from '../../lib/cx'
 import { formatEntry, skillByCode } from '../../lib/grammar'
 import { formatClock, gradeLabel, periodLabel, playerLabel, sideLabel, skillLabel } from '../../lib/labels'
@@ -18,7 +20,7 @@ import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import type { ReelItemIn, RosterEntry, Side, Tag, TagAttributes, Taxonomy } from '../../lib/types'
 import { ActionChip } from './ActionReviewPanel'
-import { useActionReview, useUi, useView, useWorkspace } from './context'
+import { useActionReview, useRegrade, useUi, useView, useWorkspace } from './context'
 
 /** Keeps a row visible inside the scrolling box without scrolling the page. */
 function reveal(container: HTMLElement | null, id: string | null): void {
@@ -53,15 +55,26 @@ export function EventTable() {
   const view = useView()
   const ui = useUi()
   const [filter, setFilter] = useState<TagFilter>(NO_FILTER)
+  // The search bar (PLAN §9.7) narrows the list too.
+  const [text, setText] = useState('')
+  const parsed = useMemo(() => parseSearch(text, taxonomy), [text, taxonomy])
   const [adding, setAdding] = useState<Tag | null>(null)
   const item = adding ? reelItemOf(t, adding, video, taxonomy, view.roster) : null
-  const shown = useMemo(() => filterTags(view.events, view.periods, filter), [view.events, view.periods, filter])
+  const shown = useMemo(() => {
+    const filtered = filterTags(view.events, view.periods, filter)
+    if (isEmptySearch(parsed.search)) return filtered
+    return searchTags(filtered, parsed.search, searchContext(view.events, view.segments, view.periods), taxonomy)
+  }, [view.events, view.segments, view.periods, filter, parsed, taxonomy])
+  const setNumbers = useMemo(() => view.periods.map((p) => p.no).sort((a, b) => a - b), [view.periods])
+  const searching = text.trim() !== ''
   const currentId = usePlayhead(playhead, (s) => lastAtOrBefore(shown, s.t_ms)?.id ?? null)
   const container = useRef<HTMLDivElement>(null)
   const pointerInside = useRef(false)
   const suggested = useMemo(() => suggestedCount(view.events), [view.events])
   const actionReview = useActionReview()
-  const selected = actionReview.active ? actionReview.currentId : ui.selectedId
+  const regrade = useRegrade()
+  // The tag on screen in the actions queue or the regrade queue, else the selected one.
+  const selected = regrade.active && regrade.running ? (regrade.queue[regrade.index] ?? null) : actionReview.active ? actionReview.currentId : ui.selectedId
   // Basketball has quarters and no zones.
   const basketball = taxonomy.sport === 'basketball'
   const zones = taxonomy.zones.length > 0
@@ -79,13 +92,34 @@ export function EventTable() {
           {t('tagging.table.title')}
         </h2>
         <p className="text-sm text-muted tabular-nums">
-          {isFiltered(filter)
+          {isFiltered(filter) || searching
             ? t('tagging.table.count', { shown: shown.length, total: view.events.length })
             : t('tagging.tagCount', { count: view.events.length })}
           {suggested > 0 && ` · ${t('actions.table.count', { count: suggested })}`}
         </p>
       </div>
-      <TagFilters filter={filter} onChange={setFilter} taxonomy={taxonomy} tags={view.events} periods={view.periods} roster={view.roster} />
+      <TagFilters
+        filter={filter}
+        onChange={setFilter}
+        taxonomy={taxonomy}
+        tags={view.events}
+        periods={view.periods}
+        roster={view.roster}
+        search={
+          basketball ? undefined : (
+            <SearchBar
+              value={text}
+              onChange={setText}
+              taxonomy={taxonomy}
+              roster={view.roster}
+              sets={setNumbers}
+              team={{ id: video.team_id, canShare: video.can_share, label: `${video.team_name} ${video.team_season}` }}
+            />
+          )
+        }
+        searching={searching}
+        onClear={() => setText('')}
+      />
       <Card className="overflow-hidden">
         <div
           ref={container}

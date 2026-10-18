@@ -1,3 +1,4 @@
+import type { TagSearch } from './search'
 import type { PlayersSummary } from './players'
 
 // Shapes returned by the WiePlay API (backend/wieplay/api).
@@ -876,6 +877,10 @@ export interface ReelQuery {
   codes?: string[]
   /** A null stands for a tag without a grade. */
   grades?: (string | null)[]
+  /** A search on top (src/lib/search.ts): set, rotation, zones, outcome, who won… */
+  search?: Partial<TagSearch> | null
+  /** The words it was typed as, shown again in the builder. */
+  text?: string | null
   /** 1..500, default 200. */
   limit?: number
 }

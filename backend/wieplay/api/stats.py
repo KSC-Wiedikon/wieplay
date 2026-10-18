@@ -2,10 +2,14 @@
 
 GET /api/videos/{id}/stats        the match: per player, team, opponent; per set too; per
                                   rotation and the setter analysis
+GET /api/videos/{id}/stats/zones  the zone maps of serves and attacks, per row and set
 GET /api/videos/{id}/stats.csv    the same as a spreadsheet (?lang=de for German headers;
-                                  ?part=rotations or ?part=setter for those tables)
+                                  ?part=rotations, ?part=setter or ?part=zones for those tables)
 GET /api/teams/{id}/stats         the season of that team row: all its ready matches
+GET /api/teams/{id}/stats/zones
 GET /api/teams/{id}/stats.csv
+
+Each takes `?search=` (a TagSearch as JSON, wieplay/core/search.py): only what it keeps counts.
 
 Whoever may watch the video, or see the team row, may read its numbers. The numbers are
 computed on read from the tags (wieplay/core/stats.py); each one carries what is needed to
@@ -17,12 +21,11 @@ from __future__ import annotations
 import re
 import unicodedata
 import uuid
-from collections import defaultdict
 from datetime import date
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Response
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -30,11 +33,10 @@ from wieplay.api.access import visible_team
 from wieplay.api.analysis import ActionGateOut, gate_out
 from wieplay.api.deps import DbDep, SettingsDep, ViewerDep
 from wieplay.api.tagging import _readable
-from wieplay.core import guests, names, stats, tagging
+from wieplay.core import guests, names, stats, stats_input
+from wieplay.core.config import Settings
 from wieplay.core.models import (
     Event,
-    Period,
-    Segment,
     Video,
     VideoRoster,
     WdGame,
@@ -42,13 +44,16 @@ from wieplay.core.models import (
     WdTeam,
 )
 from wieplay.core.permissions import Viewer
+from wieplay.core.search import TagSearch, selector
 from wieplay.core.taxonomy import load
 
 router = APIRouter(prefix="/api", tags=["stats"])
 
 Lang = Literal["en", "de"]
-Part = Literal["box", "rotations", "setter"]
+Part = Literal["box", "rotations", "setter", "zones"]
 Number = int | float | None
+# ?search= : a TagSearch as JSON (the web's search bar, saved filters).
+SearchParam = Query(default=None, max_length=4000)
 
 
 class ColumnOut(BaseModel):
@@ -193,6 +198,8 @@ class VideoStatsOut(BaseModel):
     suggested: int = 0
     # Whether WiePlay suggests actions yet (PLAN §10.4a); null for older servers.
     actions_gate: ActionGateOut | None = None
+    # With ?search=: the tags it kept (`tags` stays the match's count); null without one.
+    selected: int | None = None
 
 
 class MatchOut(BaseModel):
@@ -219,6 +226,43 @@ class TeamStatsOut(BaseModel):
     # Suggested actions nobody has accepted or rejected yet, over the matches: not counted.
     suggested: int = 0
     actions_gate: ActionGateOut | None = None
+    # With ?search=: the tags it kept over the matches; null without one.
+    selected: int | None = None
+
+
+class ZoneCellOut(BaseModel):
+    """A row's serves or attacks from (or to) one zone; zone null: no zone tagged."""
+
+    zone: int | None
+    ta: int
+    points: int  # aces or kills
+    errors: int
+    blocked: int  # attacks only
+    in_play: int
+    point_pct: float | None
+    eff: float | None  # serve: (aces - errors) / TA; attack: hitting %
+
+
+class ZoneRowOut(BaseModel):
+    kind: str
+    side: str
+    number: int | None
+    member_id: int | None
+    name: str | None
+    filter: dict[str, Any]
+    # Per skill and end: "serve_from", "serve_to", "attack_from", "attack_to".
+    zones: dict[str, list[ZoneCellOut]]
+
+
+class ZoneScopeOut(BaseModel):
+    set_no: int | None  # null: the match (or the season)
+    rows: list[ZoneRowOut]
+
+
+class ZonesOut(BaseModel):
+    # The taxonomy's codes of the skills drawn (serve: S, attack: A), for playing a zone.
+    codes: dict[str, str]
+    scopes: list[ZoneScopeOut]
 
 
 # --- loading --------------------------------------------------------------------------------
@@ -229,49 +273,15 @@ def _check_sport(sport: str) -> None:
         raise HTTPException(409, "Stats are for volleyball so far")
 
 
-def _zone(value: Any) -> int | None:
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _tag(e: Event) -> stats.TagIn:
-    side: stats.Side = "them" if e.side == "them" else "us"
-    attributes = e.attributes or {}
-    grade = attributes.get("grade")
-    return stats.TagIn(
-        code=e.code,
-        side=side,
-        number=e.number,
-        member_id=e.member_id if side == "us" else None,
-        grade=grade if isinstance(grade, str) else None,
-        t_ms=e.t_ms,
-        segment_id=e.segment_id,
-        id=e.id,
-        zone_from=_zone(attributes.get("zone_from")),
-        zone_to=_zone(attributes.get("zone_to")),
-    )
-
-
-def _side(value: str | None) -> stats.Side | None:
-    if value == "us":
-        return "us"
-    return "them" if value == "them" else None
-
-
-def _rally(s: Segment) -> stats.RallyIn:
-    return stats.RallyIn(s.id, s.start_ms, s.end_ms, s.period_id, _side(s.serving), _side(s.won_by))
-
-
-def _lineup(value: Any) -> tuple[int | None, ...] | None:
-    if not isinstance(value, list) or len(value) != 6:
+def _search(text: str | None) -> TagSearch | None:
+    """?search= as a TagSearch; 422 when it is not one."""
+    if not text:
         return None
-    return tuple(_zone(n) for n in value)
-
-
-def _set(p: Period) -> stats.SetIn:
-    return stats.SetIn(
-        p.id, p.no, p.start_ms, p.end_ms, p.final_us, p.final_them, p.start_rotation,
-        _lineup(p.start_lineup),
-    )  # fmt: skip
+    try:
+        found = TagSearch.model_validate_json(text)
+    except ValidationError as exc:
+        raise HTTPException(422, "The search is not one WiePlay reads") from exc
+    return None if found.is_empty() else found
 
 
 def _rotations(
@@ -348,22 +358,6 @@ def _setter(
     return SetterOut(sets=setter.sets, attacks=setter.attacks, plays=plays, **lines)
 
 
-def _events(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[stats.TagIn]]:
-    out: dict[uuid.UUID, list[stats.TagIn]] = defaultdict(list)
-    rows = db.scalars(
-        select(Event)
-        .where(
-            Event.video_id.in_(video_ids),
-            Event.deleted_at.is_(None),
-            tagging.event_stands(),  # facts only: a suggested action counts once accepted
-        )
-        .order_by(Event.t_ms, Event.id)
-    )
-    for e in rows:
-        out[e.video_id].append(_tag(e))
-    return out
-
-
 def _suggested(db: Session, video_ids: list[uuid.UUID]) -> int:
     """Suggested actions nobody has answered yet: not in the numbers (PLAN §10.4a)."""
     if not video_ids:
@@ -381,38 +375,6 @@ def _suggested(db: Session, video_ids: list[uuid.UUID]) -> int:
         )
         or 0
     )
-
-
-def _rallies(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[stats.RallyIn]]:
-    out: dict[uuid.UUID, list[stats.RallyIn]] = defaultdict(list)
-    rows = db.scalars(
-        select(Segment)
-        .where(
-            Segment.video_id.in_(video_ids),
-            Segment.kind == "rally",
-            Segment.deleted_at.is_(None),
-            tagging.stands(),
-        )
-        .order_by(Segment.start_ms)
-    )
-    for s in rows:
-        out[s.video_id].append(_rally(s))
-    return out
-
-
-def _sets(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[stats.SetIn]]:
-    out: dict[uuid.UUID, list[stats.SetIn]] = defaultdict(list)
-    rows = db.scalars(
-        select(Period).where(
-            Period.video_id.in_(video_ids),
-            Period.deleted_at.is_(None),
-            # A set the scoring proposed counts once a coach accepted it.
-            ~((Period.source == "model") & (Period.review == "unreviewed")),
-        )
-    )
-    for p in rows:
-        out[p.video_id].append(_set(p))
-    return out
 
 
 def _names(db: Session, member_ids: set[int]) -> dict[int, str]:
@@ -508,27 +470,75 @@ def _csv(body: str, filename: str) -> Response:
     )
 
 
+# --- zones ----------------------------------------------------------------------------------
+
+
+def _zone_rows(box: stats.BoxScore, codes: dict[str, str]) -> list[ZoneRowOut]:
+    """The rows with serves or attacks, each with its cells per skill and end."""
+    out = []
+    for row in box.rows:
+        if not stats.has_zone_tags(row, codes):
+            continue
+        zones = {
+            f"{category}_{end}": [
+                ZoneCellOut(
+                    zone=cell.zone,
+                    ta=cell.ta,
+                    points=cell.points,
+                    errors=cell.errors,
+                    blocked=cell.blocked,
+                    in_play=cell.in_play,
+                    point_pct=cell.point_pct,
+                    eff=cell.eff,
+                )
+                for cell in stats.zone_cells(row.places, code, category, end)
+            ]
+            for category, code in codes.items()
+            for end in stats.ZONE_ENDS
+        }
+        out.append(
+            ZoneRowOut(
+                kind=row.kind,
+                side=row.side,
+                number=row.number,
+                member_id=row.member_id,
+                name=row.name,
+                filter=row.filter,
+                zones=zones,
+            )
+        )
+    return out
+
+
 # --- a match --------------------------------------------------------------------------------
 
 
 def _video_stats(
-    db: Session, viewer: Viewer, video_id: uuid.UUID
-) -> tuple[Video, stats.VideoStats, list[stats.Column]]:
+    db: Session, viewer: Viewer, video_id: uuid.UUID, search: TagSearch | None = None
+) -> tuple[Video, stats.VideoStats, list[stats.Column], int]:
+    """The match's numbers (with a search: what it keeps) and its count of tags."""
     video, _ = _readable(db, viewer, video_id)
     _check_sport(video.sport)
-    tags = _events(db, [video.id])[video.id]
-    rallies = _rallies(db, [video.id])[video.id]
-    sets = _sets(db, [video.id])[video.id]
+    tags = stats_input.load_tags(db, [video.id])[video.id]
+    rallies = stats_input.load_rallies(db, [video.id])[video.id]
+    sets = stats_input.load_sets(db, [video.id])[video.id]
     tax = load("volleyball")
-    result = stats.video_stats(tags, rallies, sets, _roster(db, video), tax)
-    return video, result, stats.columns(tax)
+    result = stats.video_stats(
+        tags, rallies, sets, _roster(db, video), tax, select=selector(search, tax)
+    )
+    return video, result, stats.columns(tax), len(tags)
 
 
 @router.get("/videos/{video_id}/stats", response_model=VideoStatsOut)
 def video_stats(
-    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+    video_id: uuid.UUID,
+    viewer: ViewerDep,
+    db: DbDep,
+    settings: SettingsDep,
+    search: str | None = SearchParam,
 ) -> VideoStatsOut:
-    video, result, cols = _video_stats(db, viewer, video_id)
+    query = _search(search)
+    video, result, cols, total = _video_stats(db, viewer, video_id, query)
     rot_cols = stats.rotation_columns(load("volleyball"))
     set_no = {s.set.id: s.set.no for s in result.sets}
     return VideoStatsOut(
@@ -536,7 +546,7 @@ def video_stats(
         team_id=video.team_id,
         title=video.title,
         recorded_on=video.recorded_on,
-        tags=result.tags,
+        tags=total,
         rallies=result.rallies,
         columns=_columns(cols),
         team_filters=stats.TEAM_FILTERS,
@@ -562,7 +572,34 @@ def video_stats(
         rotation_columns=_columns(rot_cols),
         suggested=_suggested(db, [video.id]),
         actions_gate=gate_out(db, settings),
+        selected=result.tags if query is not None else None,
     )
+
+
+@router.get("/videos/{video_id}/stats/zones", response_model=ZonesOut)
+def video_zones(
+    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, search: str | None = SearchParam
+) -> ZonesOut:
+    """The match's serves and attacks per zone: the match and each set, per row."""
+    _, result, _, _ = _video_stats(db, viewer, video_id, _search(search))
+    codes = stats.zone_codes(load("volleyball"))
+    return ZonesOut(
+        codes=codes,
+        scopes=[
+            ZoneScopeOut(set_no=None, rows=_zone_rows(result.box, codes)),
+            *(ZoneScopeOut(set_no=s.set.no, rows=_zone_rows(s.box, codes)) for s in result.sets),
+        ],
+    )
+
+
+def _labels(db: Session, video: Video, settings: Settings, words: dict[str, str]) -> dict[str, str]:
+    """The team's and the opponent's rows by their names ("KSCW H3", "Volero")."""
+    team = db.get(WdTeam, video.team_id)
+    assert team is not None
+    found = names.for_video(
+        db, video, team.name, *guests.club_names(team, settings.club_short_name, settings.club_name)
+    )
+    return {"team": found.us, "opponent": found.name("them", words["opponent"])}
 
 
 @router.get("/videos/{video_id}/stats.csv")
@@ -573,8 +610,9 @@ def video_stats_csv(
     settings: SettingsDep,
     lang: Lang = "en",
     part: Part = "box",
+    search: str | None = SearchParam,
 ) -> Response:
-    video, result, cols = _video_stats(db, viewer, video_id)
+    video, result, cols, _ = _video_stats(db, viewer, video_id, _search(search))
     words = stats.HEADERS[lang]
     match, sets = words["all"], [(str(s.set.no), s) for s in result.sets]
     if part == "rotations":
@@ -583,31 +621,27 @@ def video_stats_csv(
         body = stats.rotations_csv(rot_cols, rotations, lang)
     elif part == "setter":
         body = stats.setter_csv([(match, result.setter), *((no, s.setter) for no, s in sets)], lang)
+    elif part == "zones":
+        boxes = [(match, result.box), *((no, s.box) for no, s in sets)]
+        codes = stats.zone_codes(load("volleyball"))
+        body = stats.zones_csv(boxes, codes, lang, _labels(db, video, settings, words))
     else:
         scopes = [(match, result.box, result.team), *((no, s.box, s.team) for no, s in sets)]
-        team = db.get(WdTeam, video.team_id)
-        assert team is not None
-        found = names.for_video(
-            db,
-            video,
-            team.name,
-            *guests.club_names(team, settings.club_short_name, settings.club_name),
-        )
-        # The team's and the opponent's rows carry their names ("KSCW H3", "Volero").
-        labels = {"team": found.us, "opponent": found.name("them", words["opponent"])}
-        body = stats.to_csv(cols, scopes, lang, labels=labels)
+        body = stats.to_csv(cols, scopes, lang, labels=_labels(db, video, settings, words))
     name = f"wieplay-{_PART_NAME[part]}-{video.recorded_on.isoformat()}-{_slug(video.title)}.csv"
     return _csv(body, name)
 
 
-_PART_NAME: dict[str, str] = {"box": "stats", "rotations": "rotations", "setter": "setter"}
+_PART_NAME: dict[str, str] = {
+    "box": "stats", "rotations": "rotations", "setter": "setter", "zones": "zones",
+}  # fmt: skip
 
 
 # --- a season -------------------------------------------------------------------------------
 
 
 def _season(
-    db: Session, viewer: Viewer, team_id: int
+    db: Session, viewer: Viewer, team_id: int, search: TagSearch | None = None
 ) -> tuple[WdTeam, stats.SeasonStats, list[stats.Column], list[uuid.UUID]]:
     access = visible_team(db, viewer, team_id)
     team = access.team
@@ -620,9 +654,9 @@ def _season(
         )
     )
     ids = [v.id for v in videos]
-    tags = _events(db, ids) if ids else {}
-    rallies = _rallies(db, ids) if ids else {}
-    sets = _sets(db, ids) if ids else {}
+    tags = stats_input.load_tags(db, ids)
+    rallies = stats_input.load_rallies(db, ids)
+    sets = stats_input.load_sets(db, ids)
     game_ids = [v.game_id for v in videos if v.game_id is not None]
     games = (
         {g.id: g for g in db.scalars(select(WdGame).where(WdGame.id.in_(game_ids)))}
@@ -643,13 +677,20 @@ def _season(
     ]
     members = {t.member_id for m in matches for t in m.tags if t.member_id is not None}
     tax = load("volleyball")
-    result = stats.season_stats(matches, _names(db, members), tax)
+    result = stats.season_stats(matches, _names(db, members), tax, select=selector(search, tax))
     return team, result, stats.columns(tax), ids
 
 
 @router.get("/teams/{team_id}/stats", response_model=TeamStatsOut)
-def team_stats(team_id: int, viewer: ViewerDep, db: DbDep, settings: SettingsDep) -> TeamStatsOut:
-    team, result, cols, ids = _season(db, viewer, team_id)
+def team_stats(
+    team_id: int,
+    viewer: ViewerDep,
+    db: DbDep,
+    settings: SettingsDep,
+    search: str | None = SearchParam,
+) -> TeamStatsOut:
+    query = _search(search)
+    team, result, cols, ids = _season(db, viewer, team_id, query)
     rot_cols = stats.rotation_columns(load("volleyball"))
     return TeamStatsOut(
         team_id=team.id,
@@ -680,14 +721,33 @@ def team_stats(team_id: int, viewer: ViewerDep, db: DbDep, settings: SettingsDep
         ],
         suggested=_suggested(db, ids),
         actions_gate=gate_out(db, settings),
+        selected=sum(result.box.team.counts.values()) + sum(result.box.opponent.counts.values())
+        if query is not None
+        else None,
     )
+
+
+@router.get("/teams/{team_id}/stats/zones", response_model=ZonesOut)
+def team_zones(
+    team_id: int, viewer: ViewerDep, db: DbDep, search: str | None = SearchParam
+) -> ZonesOut:
+    """The season's serves and attacks per zone, per row."""
+    _, result, _, _ = _season(db, viewer, team_id, _search(search))
+    codes = stats.zone_codes(load("volleyball"))
+    scope = ZoneScopeOut(set_no=None, rows=_zone_rows(result.box, codes))
+    return ZonesOut(codes=codes, scopes=[scope])
 
 
 @router.get("/teams/{team_id}/stats.csv")
 def team_stats_csv(
-    team_id: int, viewer: ViewerDep, db: DbDep, lang: Lang = "en", part: Part = "box"
+    team_id: int,
+    viewer: ViewerDep,
+    db: DbDep,
+    lang: Lang = "en",
+    part: Part = "box",
+    search: str | None = SearchParam,
 ) -> Response:
-    team, result, cols, _ = _season(db, viewer, team_id)
+    team, result, cols, _ = _season(db, viewer, team_id, _search(search))
     words = stats.HEADERS[lang]
     scope = words["season"]
     if part == "rotations":
@@ -695,6 +755,9 @@ def team_stats_csv(
         body = stats.rotations_csv(rot_cols, [(scope, result.rotations)], lang)
     elif part == "setter":
         body = stats.setter_csv([(scope, result.setter)], lang)
+    elif part == "zones":
+        codes = stats.zone_codes(load("volleyball"))
+        body = stats.zones_csv([(scope, result.box)], codes, lang)
     else:
         body = stats.to_csv(cols, [(scope, result.box, result.team)], lang, True)
     season = team.season.replace("/", "-")
