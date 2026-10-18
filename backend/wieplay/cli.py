@@ -9,6 +9,8 @@ python -m wieplay.cli analyse --video ID | --team TEAM_ID | --all-ready   queue 
 python -m wieplay.cli train-rallies              train the rally finder now
 python -m wieplay.cli rally-eval [--run ID]      per-game scores of v0 and v1 (latest training)
 python -m wieplay.cli score --video ID | --all-ready   score again: servers, winners, sets, gaps
+python -m wieplay.cli score-log --video ID | --all-ready [--dry-run]   import the club scoreboard's
+                                                  log of the game again, line it up, score again
 python -m wieplay.cli trajectories [--force]     ball tracks and court proposals for analysed videos
 python -m wieplay.cli court --video ID | --all-ready [--force]   find the court (hall memory,
                                                                   setups)
@@ -292,6 +294,74 @@ def score(video: str | None, all_ready: bool) -> int:
                 f"{row.recorded_on:%d.%m.%Y} {row.title}: {m['rallies']} rallies, "
                 f"{m['flagged']} to check, serve {m['serve_finder'] or '-'}, sets {sets or '-'}, "
                 f"gaps {sum(m['gaps'].values())}"
+            )
+    return 0
+
+
+def score_log(video: str | None, all_ready: bool, dry_run: bool) -> int:
+    """Import the club scoreboard's log of each video's game again (PLAN §10.10), line it up
+    with the rallies and score the video with it. Nothing a coach set is changed."""
+    from wieplay.core import scorelog, scoring
+    from wieplay.core.models import Video
+    from wieplay.core.sync import BridgeError, HttpBridgeClient
+    from wieplay.ml import scorelog as sl
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    try:
+        client = HttpBridgeClient(settings.bridge_api_url, settings.bridge_service_token)
+    except BridgeError as exc:
+        print(f"bridge: {exc}", file=sys.stderr)
+        return 2
+    with sessions() as db:
+        query = select(Video).where(
+            Video.status == "ready", Video.sport.in_(scorelog.SPORTS), Video.game_id.is_not(None)
+        )
+        if video:
+            query = query.where(Video.id == uuid.UUID(video))
+        elif not all_ready:
+            print("name --video or --all-ready", file=sys.stderr)
+            return 2
+        for row in db.scalars(query.order_by(Video.recorded_on)):
+            head = f"{row.recorded_on:%d.%m.%Y} {row.title}"
+            if dry_run:
+                try:
+                    payload = client.score_log(row.game_id or 0)
+                    found = sl.parse(payload)
+                except (BridgeError, ValueError) as exc:
+                    print(f"{head}: no score log ({exc})")
+                    continue
+                points = len(found.points) if found else 0
+                print(f"{head}: {found.source if found else 'no score log'}, {points} points")
+                continue
+            done = scorelog.fetch(db, row, client)
+            db.commit()
+            if done.status != "stored":
+                detail = f": {done.detail}" if done.detail else ""
+                print(f"{head}: no score log ({done.status}{detail})")
+                continue
+            run = scoring.latest_run(db, row.id)
+            m = (run.metrics or {}).get("log") if run else None
+            if not m:
+                print(f"{head}: {done.detail}, stored (no rallies to line up yet)")
+                continue
+            sets = " ".join(
+                f"{no}:{'ok' if s['trusted'] else 'no'}"
+                f"({'-'.join(map(str, s['final'] or []))}"
+                f"{'' if s['agrees'] else ' official ' + '-'.join(map(str, s['official'] or []))})"
+                for no, s in m["sets"].items()
+            )
+            own = [
+                f"set {s['set']} {(s['shift_ms'] - m['shift_ms']) / 1000:+.1f} s"
+                for s in m["stretches"]
+                if s["own"]
+            ]
+            print(
+                f"{head}: {m['source']}, {m['matched']}/{m['points']} points on a rally, "
+                f"{'one shift' if not own else 'own shifts: ' + ', '.join(own)}, "
+                f"delay {m['delay_ms']['median']} ms, sets {sets}, "
+                f"score line follows it {m['path_agrees']}/{m['rallies_told']}, "
+                f"video disagreed {m['disagree_with_video']}"
             )
     return 0
 
@@ -670,6 +740,11 @@ def main(argv: list[str] | None = None) -> int:
     scope = score_cmd.add_mutually_exclusive_group(required=True)
     scope.add_argument("--video", help="one video id")
     scope.add_argument("--all-ready", action="store_true", help="every ready volleyball video")
+    log_cmd = sub.add_parser("score-log", help="import the club scoreboard's log again")
+    log_scope = log_cmd.add_mutually_exclusive_group(required=True)
+    log_scope.add_argument("--video", help="one video id")
+    log_scope.add_argument("--all-ready", action="store_true", help="every ready video with a game")
+    log_cmd.add_argument("--dry-run", action="store_true", help="only ask the bridge")
     track_cmd = sub.add_parser("trajectories", help="ball tracks and court proposals")
     track_cmd.add_argument("--force", action="store_true", help="also videos that have one")
     track_cmd.add_argument("--dry-run", action="store_true")
@@ -715,6 +790,8 @@ def main(argv: list[str] | None = None) -> int:
         return trajectories(args.force, args.dry_run)
     if args.command == "score":
         return score(args.video, args.all_ready)
+    if args.command == "score-log":
+        return score_log(args.video, args.all_ready, args.dry_run)
     if args.command == "analyse":
         return analyse(args.video, args.team, args.all_ready, args.force, args.dry_run)
     if args.command == "train-rallies":

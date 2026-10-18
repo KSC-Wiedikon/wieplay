@@ -56,6 +56,8 @@ export const setupDe: Messages<typeof setupEn> = {
       none: 'Nicht markiert. Ist die Anzeigetafel im Bild, liest WiePlay sie für den Spielstand.',
       absent: 'Keine Anzeigetafel in diesem Video.',
       waiting: 'Markiert: wartet aufs Lesen.',
+      fromLog: 'Spielstand aus dem Protokoll der Club-Anzeigetafel: {{trusted}} von {{sets}} Sätzen stimmen mit dem offiziellen Resultat.',
+      logUntrusted: 'Das Protokoll der Club-Anzeigetafel passt nicht zum offiziellen Resultat: {{trusted}} von {{sets}} Sätzen verwendet.',
       open: 'Anzeigetafel markieren',
       edit: 'Rahmen bearbeiten',
       noBoard: 'Keine Anzeigetafel in diesem Video',

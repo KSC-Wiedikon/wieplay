@@ -50,6 +50,8 @@ class BridgeClient(Protocol):
 
     def adult_check(self, team_id: int, on: date) -> Mapping[str, Any]: ...
 
+    def score_log(self, game_id: int) -> Mapping[str, Any]: ...
+
 
 class HttpBridgeClient:
     """Calls the bridge in Wiedisync's kscw-endpoints over the local network."""
@@ -83,6 +85,11 @@ class HttpBridgeClient:
 
     def adult_check(self, team_id: int, on: date) -> Mapping[str, Any]:
         return self._get("/adult-check", {"team": str(team_id), "date": on.isoformat()})
+
+    def score_log(self, game_id: int) -> Mapping[str, Any]:
+        """The club scoreboard's log of a game (PLAN §10.10); 404 from a Wiedisync without
+        the route, or for a game it does not know: a BridgeError like any other."""
+        return self._get("/score-log", {"game": str(game_id)})
 
 
 @dataclass(frozen=True)

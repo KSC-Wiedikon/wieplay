@@ -270,6 +270,7 @@ sequenceDiagram
 | `GET /kscw/wieplay/v1/authorize` | new `kscw-endpoints/src/wieplay-bridge.js` | Reads `req.accountability`, builds claims, signs, redirects. Logs issuance with `writeUserLog`. |
 | `GET /kscw/wieplay/v1/teams`, `GET /kscw/wieplay/v1/sync?teams=` | same file | `X-WiePlay-Service-Token` (not `Authorization: Bearer`, which Directus would claim), internal network only, read-only, versioned contract with tests. |
 | `GET /kscw/wieplay/v1/adult-check?team=&date=` | same file | Pass/fail per rostered person for a recording date (§5.3); birthdates never leave Wiedisync. |
+| `GET /kscw/wieplay/v1/score-log?game=` (built 18.10.2026, Wiedisync PR #14) | `kscw-endpoints/src/wieplay-score-log.js` | The club scoreboard's point-by-point log of a game (§10.10): team names and scores only, read-only. |
 | Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
 | ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in WiePlay**, per lineage. The bridge returns personal data only for the team ids WiePlay asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
 | Env | Directus `.env` (prod + dev) | `WIEPLAY_JWT_PRIVATE_KEY`, `WIEPLAY_JWT_KID`, `WIEPLAY_RETURN_URLS`, `WIEPLAY_SYNC_TOKEN_HASH`, and on dev `WIEPLAY_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
@@ -1792,6 +1793,10 @@ rallies ≤ 5 %.
 - **Limits**: a camera that moves takes the board out of the box (the court job's setups do
   not move the box yet); a board far from the camera (a few pixels per digit) is not read.
 
+**The club scoreboard's log** (§10.10, 18.10.2026) outranks the board read in the picture
+wherever it speaks: a board reading that disagrees with it is not flagged. In most of our
+halls the LED board is hard to read from the camera anyway; there the log is the source.
+
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
 
@@ -2150,7 +2155,11 @@ OpenVolley's e-scoresheet logs every point with a wall-clock time plus rosters w
 With one `sync_point` (first serve), it gives rally ends, scores and the serving team: perfect
 labels for §10.1 and §10.3. The model is ready (§6.6); the importer is not planned yet.
 It would fill the same tables as the paper scoresheet (§10.3a), with point times. As of
-18.10.2026 OpenVolley holds no H3 match (three indoor matches in all, none of H3).
+18.10.2026 OpenVolley holds no H3 match (three indoor matches in all, none of H3). Since
+§10.10 the seam is ready: an e-scoresheet's points are a score log like the club
+scoreboard's (`wieplay/ml/scorelog.py`: events by team with a clock, set finals), and
+`wieplay/core/scorelog.py` takes any client with `score_log(game_id)`; its clock even makes
+the shift easier (server time, no board), and its serve team per point is a fact.
 
 ### 10.9 GPU time per video
 
@@ -2206,6 +2215,83 @@ fetched while the previous stretch is decoded) and the uploads.
 Real prod jobs on the GPU worker, 18.10.2026 (claim to done, the rendition's download and the
 uploads included): Legends 9.0 min, Uster 7.0 min, Volewa Wald 8.2 min. The coaches' estimate
 (`WIEPLAY_PLAYERS_MINUTES=20`) leaves room for a busy GPU.
+
+### 10.10 Score logs from the club scoreboard
+
+*Built 18.10.2026 (owner: "we (should) have old timestamps from point-hub, can we use them to
+double check the score?"). WiePlay PR #57, Wiedisync PR #14.*
+
+The club's LED scoreboard (point-hub, the "LedBox") is operated at the scorer's table with a
+phone or tablet: +1 a few seconds after each rally. Wiedisync keeps what it showed: since
+02.10.2026 the board uploads each finished match's play-by-play (`live_match_logs`), and every
+change of its live row went through the items API, so Directus's revisions hold one snapshot
+per change (only while the board was online; 150 ms coalescing). That is a timestamped point
+sequence of the game, and the camera's footage has the rallies: line them up and every rally
+gets its winner and the running score, independently of what the video shows.
+
+**The bridge** (Wiedisync `GET /kscw/wieplay/v1/score-log?game=<games.id>`): the game's
+`live_match_logs` row, else the `live_scores` snapshots of the game's window (kickoff − 3 h to
++ 5 h, both team names matching), diffed into events by team (a = home, b = away; the board's
+change of ends undone by the names): point, untimed jump (several points at once), undo (a
+score going down takes the newest point back: replayed, not counted), reset, timeout, set end,
+match end; the running score recomputed after the replay. Team names and scores only.
+
+**The import** (`wieplay/core/scorelog.py`): once per video with a game, right after its
+analysis, else in the hourly sync (each video at most once a day; a Wiedisync without the route
+or a game without a log is a quiet "no score log"), and `python -m wieplay.cli score-log`. Kept
+as the bridge sent it (`analysis_track` "score_log", a `model_run` per import), lined up again
+at every scoring.
+
+**Lining up** (`wieplay/ml/scorelog.py`, a tenth of a second per match): a YouTube import has
+no wall clock, so the shift between the board's clock and the video's is found from the data.
+Every (press, rally end) pair votes for a shift; around the busiest ones the shift that puts
+most presses 0.3–8 s after a rally end, and the board's timeouts and set ends in long breaks
+(the anchors that tell the true shift from one a rally off), wins; the middle of its plateau is
+kept. Each set (or stretch after 10 minutes without a press) may take its own shift when it
+explains clearly more presses: the video was cut. Presses go to rallies by a monotone
+assignment (one per rally, 0.5–12 s after the end best, still in the rally's last part since
+an end can be late, up to 45 s for a late press). A press without a rally is a rally the finder
+missed (who won it included); a rally between two consecutive presses that found theirs is no
+point (a replay, or no rally).
+
+**Trust per set**: a set counts only when the log's final is the official one (Wiedisync's
+`sets`) and at least 60 % of its presses found a rally (45 % within 0.3–8 s); the others say
+nothing. Which team is us: the game's home/away side.
+
+**In the scoring** (§10.3): per rally the log's winner (as sure as its press fits, ≥ 0.5),
+"no point", and the missed points before it (how many and whose) are evidence in the
+alignment: contradicting the log costs 11 × its weight, more than the board (9) and far more
+than the serves, less than a coach's fact (12; a coach's winner silences the log on its rally).
+The log's set membership proposes the sets when no coach set them. Flags: "log" where a coach's
+fact disagrees with it, and where the scoring blind to the log (same sides and first servers)
+was sure (≥ 70 %) of another answer; serve readings and board readings that disagree with the
+log are not flagged any more. Per rally `log_won_by` (us | them | none), `log_score_*` and
+`log_at_ms` (migration 0021); the review shows "Scoreboard log: point to Voléro (12:10)" and a
+suggested winner from the log says so. The setup's scoreboard step is done ("Score from the
+club scoreboard's log") when every set with an official score agrees: nobody is asked to draw
+a box. Metrics in `GET /api/videos/{id}/analysis` → `scoring.log`.
+
+**First check, 18.10.2026** (WiePlay prod's rallies and serve tracks, copied read-only into a
+local database; the logs from the Wiedisync dev bridge, prod data of the nightly clone):
+
+| | Game 409, H1 – H3, 23.09.2026 | Game 509, H3 – Voléro Legends, 02.10.2026 |
+|---|---|---|
+| Log | 164 snapshots: 130 timed points + 4 untimed at the start (board offline) = 134 = official | 254 snapshots: 197 points = official; 4 corrections replayed |
+| Set finals vs official | 25:23, 25:15, 25:21: all three agree | 25:27, 26:24, 22:25, 23:25: all four agree |
+| Shift | one for the match | one for sets 1–2, sets 3–4 23 s less (the video was cut in the set break) |
+| Presses on a rally | 119 of 130 (92 %), median 4.3 s after the end the video has (p10 −2.0 s, p90 8.1 s) | 173 of 197 (88 %), median 5.1 s (p10 −4.3 s, p90 8.4 s) |
+| Rallies told | 119 winners, 11 no point (all unreviewed proposals) | 173 winners, 15 no point (all unreviewed proposals) |
+| Missed rallies (presses without a rally) | 11 | 24 |
+| Serve read in the video vs the servers the log implies (independent of the fit) | 71 % (per set 78, 67, 68 %); shifted a rally either way 53–67 % | 88 % (per set 91, 63, 93, 91 %); a set shifted a rally 51–64 % |
+| The model's winners before (prod) vs the log | 34 of 117 agree: the model had our side and first server the wrong way round (it was 77 % sure); the log turns them | 132 of 163 (81 %) |
+| Coach's winners vs the log | none set | 9 of 9 agree (the model alone: 6 of 9) |
+| Score line with the log | follows it on 130 of 130; every set's evidence ends on the official score (before: none) | follows it on 188 of 188; every set's evidence ends on the official score (before: none) |
+| Flagged rallies | 34 → 42: 19 "log" (the video alone was sure of the other winner), 12 no point, 11 missed rally | 61 → 59: 20 "log", 17 no point, 21 missed rally, 1 unsure |
+
+The flags left are specific now: a rally the finder missed (add it), one that was none
+(reject it), or one where the video's own evidence was confidently wrong. Not yet: the board's
+uploaded match logs (`live_match_logs`, empty on prod until the board is next used) are
+preferred automatically once there; OpenVolley as a third source (§10.8).
 
 ---
 
@@ -2639,7 +2725,7 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | **M3b** | Stats and reports | Box score with click-to-video; side-out/break-point %; starting rotations + rotation analysis; zone heatmaps; search bar + saved filters; regrade queue; CSV export (§9.7) | A coach answers "how do we side out in rotation 1?" in WiePlay without a spreadsheet |
 | **M4** | Launch | Basketball taxonomy + grammar for Herren 1; import from YouTube/Twitch links (§7.2.2); automatic stitching of split recordings (§7.2.1); German UI; privacy page; filming/tagging guides; runbook; prod deploy; onboard the 4 teams | First prod match of each team tagged by its coach without your help |
 | **M5** | Tier 2a: automatic dead time | CPU v0 (ball + whistles + motion) on the Lenovo worker; rally review UI; analysis copies; internal GPU worker on the Framework 16 (`local-agent`, busy guard) + GPU-hour ledger; learned v1 from the reviewed games. **16.10.2026**: analyse job, v0, v1 with its training loop and per-game scores built (§10.1); review UI, analysis copies and the GPU worker open | F1 ≥ 0.9 at ±1 s; condensed mode is the default for new matches |
-| **M6** | Tier 2b: automatic scoring (VB) | Serve-side classifier from tier-1 serve tags; side-switch rules; official-set-score constraint; scoreboard region UI + OCR; score correction UI | ≥ 98 % correct rally winners with ≤ 5 % flagged on held-out matches |
+| **M6** | Tier 2b: automatic scoring (VB) | Serve-side classifier from tier-1 serve tags; side-switch rules; official-set-score constraint; scoreboard region UI + OCR; score correction UI; **the club scoreboard's log as evidence (§10.10, 18.10.2026)** | ≥ 98 % correct rally winners with ≤ 5 % flagged on held-out matches |
 | **M7** | Tier 2c: ball | Ball-labelling tool; TrackNet fine-tune on the Framework 16; Parquet artifacts | Ball bar met on near court; far court measured |
 | **M8** | Tier 2d: players + court | YOLO + ByteTrack; calibration UI; serve placement charts | Serve zones agree ≥ 80 % with manual tags |
 | **M9** | Basketball tier 2 + tier 3 spike | Clock/score OCR for basketball dead time and scoring; event proposals from tracks + ball contacts; unidentified-athlete queue | Measured precision per skill; decide whether to continue |

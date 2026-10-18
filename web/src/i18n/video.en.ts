@@ -425,6 +425,15 @@ export const videoEn = {
         coach: "Doesn't fit a winner or serve you set.",
         unsure: 'WiePlay is not sure about this one.',
         board: 'The scoreboard and the serves disagree here.',
+        log: 'The club scoreboard’s log says otherwise.',
+      },
+      // The club scoreboard's log (docs/PLAN.md §10.10): the point pressed after the rally.
+      log: {
+        label: 'Scoreboard log',
+        point: 'Scoreboard log: point to {{team}}',
+        pointScore: 'Scoreboard log: point to {{team}} ({{score}})',
+        none: 'Scoreboard log: no point',
+        title: 'Pressed on the club scoreboard {{delay}} s after the rally’s end',
       },
     },
     review: {

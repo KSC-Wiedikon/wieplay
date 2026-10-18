@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from wieplay.api.deps import BridgeDep, DbDep, SettingsDep, audit
-from wieplay.core import actions, analysis, jobs, pipeline, players
+from wieplay.core import actions, analysis, jobs, pipeline, players, scorelog
 from wieplay.core.filming import CAMERA_DATE_WINDOW_DAYS, camera_day, check_filming
 from wieplay.core.models import InboxFile, Job, Video, WdTeam, Worker
 from wieplay.core.storage import ObjectStore
@@ -298,6 +298,9 @@ def complete(
         raise HTTPException(422, f"Invalid result: {exc}") from exc
     if job.kind == "ingest" and video is not None and video.status == "processing":
         _check_camera_day(db, bridge, video)
+    if job.kind == "analyse":
+        # The club scoreboard's log of the game, once (PLAN §10.10): one bridge call, quiet.
+        scorelog.after_analysis(db, video, bridge)
     if (
         (job.kind in players.KINDS or job.kind in actions.KINDS)
         and video is not None

@@ -408,7 +408,7 @@ export type CourtSide = 'near' | 'far'
  * for the last rally of a set, after it), it looks like no point at all (a replay), the serve
  * evidence or a coach's fact disagrees with the score, or the model is unsure.
  */
-export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure' | 'board'
+export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure' | 'board' | 'log'
 
 export interface TaxonomySkill {
   /** One letter for volleyball (S R E A B D F); one or two characters for basketball (S2 S3 FT RO … F). */
@@ -525,6 +525,15 @@ export interface Segment {
   /** Model: points it thinks were played right before this rally without one (counted in the score line). */
   model_missed_us?: number | null
   model_missed_them?: number | null
+  // The club scoreboard's log (docs/PLAN.md §10.10), in sets that end on the official score;
+  // absent from servers before it.
+  /** Who won by the point pressed on the scoreboard after the rally; 'none': no point. */
+  log_won_by?: Side | 'none' | null
+  /** The set's score after the rally, as the scoreboard had it. */
+  log_score_us?: number | null
+  log_score_them?: number | null
+  /** When the point was pressed (video ms). */
+  log_at_ms?: number | null
   version: number
   /** Null while live. Deleted segments only come back in a /changes answer that touched them. */
   deleted_at: string | null

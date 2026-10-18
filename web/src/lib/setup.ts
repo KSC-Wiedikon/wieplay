@@ -49,6 +49,9 @@ export function courtState(court: CourtState | undefined): StepState {
 }
 
 export function scoreboardState(board: ScoreboardState | undefined, noScoreboard: boolean): StepState {
+  // The club scoreboard's log lined up and matching the official result: the score comes from
+  // it, nobody needs to draw a box (docs/PLAN.md §10.10).
+  if (board?.log?.trusted) return 'done'
   if (!board?.region) return noScoreboard ? 'done' : board ? 'todo' : 'waiting'
   const job = board.job?.status
   if (job && BUSY_JOBS.includes(job)) return 'busy'

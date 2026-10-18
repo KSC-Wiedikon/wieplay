@@ -305,6 +305,23 @@ describe('TagPage, automatic scoring', () => {
     expect(await screen.findByText('No rally to check.')).toBeInTheDocument()
   })
 
+  it("shows the club scoreboard's log on the rally and flags where it decided against the video", async () => {
+    const initial = data()
+    initial.segments = initial.segments.map((s) =>
+      s.id === S1
+        ? { ...s, model_won_by: 'us', score_us_after: 2, score_them_after: 1, score_note: 'log', log_won_by: 'us', log_score_us: 2, log_score_them: 1, log_at_ms: 71_500 }
+        : s,
+    )
+    show(initial, { url: `/videos/${ID}/tag?mode=review` })
+    await screen.findByRole('region', { name: 'Review suggestions' })
+    keys('Enter') // the timeout first
+    expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
+    const line = within(panel()).getByText('Scoreboard log: point to KSCW H3 (2:1)')
+    expect(line).toHaveAttribute('title', 'Pressed on the club scoreboard 3.5 s after the rally’s end')
+    expect(within(panel()).getByText('KSCW H3 (suggested, Scoreboard log)')).toBeInTheDocument()
+    expect(within(panel()).getByText('Check: The club scoreboard’s log says otherwise.')).toBeInTheDocument()
+  })
+
   it('sets who won with 3 and 4 or the buttons: a fact, the score at once, U takes it back', async () => {
     const { server } = show(data(), { url: `/videos/${ID}/tag?mode=review` })
     await screen.findByRole('region', { name: 'Review suggestions' })

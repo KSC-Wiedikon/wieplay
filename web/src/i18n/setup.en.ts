@@ -56,6 +56,8 @@ export const setupEn = {
       none: 'Not marked. If the scoreboard is in the picture, WiePlay reads it for the score line.',
       absent: 'No scoreboard in this video.',
       waiting: 'Marked: waiting to be read.',
+      fromLog: 'Score from the club scoreboard’s log: {{trusted}} of {{sets}} sets match the official result.',
+      logUntrusted: 'The club scoreboard’s log doesn’t match the official result: {{trusted}} of {{sets}} sets used.',
       open: 'Mark the scoreboard',
       edit: 'Edit the box',
       noBoard: 'No scoreboard in this video',
