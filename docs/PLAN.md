@@ -1762,6 +1762,38 @@ rallies ≤ 5 %.
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
 
+### 10.3a Official scoresheets (volleyball, planned)
+
+*Planned (owner's idea, 18.10.2026); nothing built. Research and design:
+[`research/scoresheets-2026-10.md`](research/scoresheets-2026-10.md).*
+
+Coaches add the match's official scoresheet (Swiss Volley's paper Matchblatt, compulsory in
+H3's league; every team gets a carbon copy), so WiePlay knows every point in order:
+
+- **The service boxes are enough.** When the serving team loses the serve, the scorer writes
+  that team's own score in the server's box. Read in service-turn order and interleaved, the
+  two teams' numbers give the winner and the server of every point, both teams' rotations, and
+  with the lineups, substitutions and timeouts (each written with its score) who was on court
+  and where the breaks were. Penalty points are circled in the running score: points without
+  a rally.
+- **Checked** against the sheet's own finals and running score and Wiedisync's official set
+  scores; an inconsistent set gets a suggested repair (a misread or miswritten box) for the
+  coach to accept, or is used only as a soft hint.
+- **Ranked** below the coach's facts and above the scoreboard log and the model: it is the
+  signed official record, but it has no times, so which video rally is which point is
+  inferred. The scoring aligns the sheet's points with the detected rallies (the same dynamic
+  programme, its state reduced to the sheet point); the serve evidence and the score log's
+  times place the points, replays and missed rallies show as gaps in the alignment and are
+  flagged in Review. It fills `first_serve`, `start_lineup` and `start_rotation` per set (and
+  the opponent's lineup, by number); timeouts become `timeout` segments with their team,
+  substitutions events.
+- **Entry**: a form shaped like the sheet (about 10–12 minutes per match); a photo with the
+  video, redacted on the phone before upload (the sheet carries every player's date of birth
+  since 2022), visible to coaches and admins only, deleted with the video; later an automatic
+  reading on club hardware that the coach confirms cell by cell. No scoresheet leaves the club.
+- Phases SS1–SS5 in the research note: the typed sheet and its stats first, then the scoring,
+  the photo, the reading.
+
 ### 10.4 Ball tracking
 
 - TrackNet-family heatmap model on 3-frame stacks at 30 fps, fine-tuned on our footage on the
@@ -2084,6 +2116,8 @@ without a zone is not in them.
 OpenVolley's e-scoresheet logs every point with a wall-clock time plus rosters with numbers.
 With one `sync_point` (first serve), it gives rally ends, scores and the serving team: perfect
 labels for §10.1 and §10.3. The model is ready (§6.6); the importer is not planned yet.
+It would fill the same tables as the paper scoresheet (§10.3a), with point times. As of
+18.10.2026 OpenVolley holds no H3 match (three indoor matches in all, none of H3).
 
 ### 10.9 GPU time per video
 
@@ -2349,7 +2383,7 @@ wieplay/
     PLAN.md                  this file
     adr/                     one file per decision change
     brand/                   logo assets (provided), generated icons
-    research/                competitor and GPU-provider research, spike reports (2026-10)
+    research/                competitor, GPU-provider and scoresheet research, spike reports (2026-10)
     ARCHITECTURE.md          written in M0 from §3–§8, kept current
     PRIVACY.md               processing record, processors, retention, rights, residual risks
     FILMING_GUIDE.md         §7.1 for coaches, one page per camera model
@@ -2618,3 +2652,4 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | O11 | Brand | ✓ **Done 15.10.2026**: assets in `docs/brand/`, icons generated, `mark-on-dark.svg` and the ball-only favicon approved (§13.3). |
 | O12 | Repo visibility | Private now; flip to public when you're happy, like Wiedisync. |
 | O13 ⚠ | Guest clubs (§4.5) on prod | Built 17.10.2026. Before inviting a real club: the club board's OK, a written agreement with each guest club (its footage, informing its people, adults only, training yes or no, deletion), and the privacy page text (`/privacy`, a draft) checked by the club's privacy contact. Runbook: `docs/runbooks/guest-club.md`. |
+| O14 | Scoresheet photos (§10.3a, planned) | Before the photo step: the club's privacy contact checks the redaction on the phone, who may see the picture, the retention and the privacy page paragraph (research note §5.1). |
