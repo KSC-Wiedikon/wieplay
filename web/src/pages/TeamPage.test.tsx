@@ -293,3 +293,26 @@ describe('TeamPage season stats', () => {
     expect(screen.queryByRole('region', { name: 'Season stats' })).not.toBeInTheDocument()
   })
 })
+
+describe('TeamPage seasons', () => {
+  it('switches to another season of the team the viewer can see', async () => {
+    const { router } = stub(team(), [], {
+      '/api/teams/92/seasons': {
+        body: [
+          { team_id: 92, name: 'H3', season: '2026/27' },
+          { team_id: 77, name: 'H4', season: '2025/26' },
+        ],
+      },
+    })
+    const pick = await screen.findByRole('combobox', { name: 'Season of H3' })
+    expect(within(pick).getAllByRole('option').map((o) => o.textContent)).toEqual(['2026/27', '2025/26 · H4'])
+    fireEvent.change(pick, { target: { value: '77' } })
+    expect(router.state.location.pathname).toBe('/teams/77')
+  })
+
+  it('shows no switch for a team with one season', async () => {
+    stub(team(), [], { '/api/teams/92/seasons': { body: [{ team_id: 92, name: 'H3', season: '2026/27' }] } })
+    expect(await screen.findByRole('heading', { level: 1, name: 'H3' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Season of H3' })).not.toBeInTheDocument()
+  })
+})

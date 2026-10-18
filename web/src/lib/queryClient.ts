@@ -12,6 +12,7 @@ export const keys = {
   upcomingFilming: (id: number) => ['teams', id, 'upcoming-filming'] as const,
   teamHelpers: (id: number) => ['teams', id, 'helpers'] as const,
   teamPeople: (id: number) => ['teams', id, 'people'] as const,
+  earlierPeople: (id: number) => ['teams', id, 'people', 'earlier'] as const,
   guestTeams: ['admin', 'guest-teams'] as const,
   invite: (token: string) => ['invite', token] as const,
   helperCandidates: (id: number, q: string) => ['teams', id, 'helpers', 'candidates', q] as const,

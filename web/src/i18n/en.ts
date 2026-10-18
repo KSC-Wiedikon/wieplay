@@ -115,6 +115,7 @@ export const en = {
     highlights: 'My highlights',
     highlightsHint: 'Your tagged moments of this season, updated as tagging goes on.',
     highlightsWatch: 'Watch my highlights',
+    seasonOf: 'Season of {{team}}',
     // A helper's own view of the team (PLAN §5.1 "analyst").
     helping: {
       title: 'You help this team',

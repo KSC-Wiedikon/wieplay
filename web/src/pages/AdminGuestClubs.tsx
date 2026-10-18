@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react'
+import { Fragment, useId, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Badge, SportBadge } from '../components/Badge'
 import { Button, ButtonLink } from '../components/Button'
@@ -14,6 +14,7 @@ import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { ApiError, ForbiddenError } from '../lib/api'
 import { todayIso } from '../lib/format'
 import { seasonOf, useCreateGuestTeam, useGuestTeams, useInviteCoach, useUpdateGuestTeam } from '../lib/guests'
+import { groupBySeasons } from '../lib/teams'
 import { useToast } from '../lib/toast'
 import type { CoachInvited, GuestTeam } from '../lib/types'
 import { InviteLinkNotice } from './GuestSections'
@@ -22,10 +23,20 @@ function label(team: GuestTeam): string {
   return `${team.club} ${team.name} ${team.season}`
 }
 
+const collator = new Intl.Collator('de-CH', { numeric: true, sensitivity: 'base' })
+
+/** One entry per guest team (lineage), by club and name: its newest season, then the earlier ones. */
+function byTeam(teams: GuestTeam[]): { latest: GuestTeam; earlier: GuestTeam[] }[] {
+  return groupBySeasons(teams).sort(
+    (a, b) => collator.compare(a.latest.club, b.latest.club) || collator.compare(a.latest.name, b.latest.name),
+  )
+}
+
 /**
  * Admin → Teams → Guest clubs (PLAN §4.5): other clubs' teams with their own logins. Create one,
  * invite its first coach (a link shown once), set its video limit and whether its games may train
- * WiePlay, switch it off. Its people and their new password links are on its team page.
+ * WiePlay, switch it off. Its people, their new password links and its next season are on its team
+ * page. Each team shows its newest season with the switches, its earlier seasons below it.
  */
 export function GuestClubsSection() {
   const { t } = useTranslation()
@@ -79,80 +90,85 @@ export function GuestClubsSection() {
               </tr>
             </THead>
             <TBody>
-              {teams.data.map((team) => (
-                <tr key={team.id} className="[&>td]:align-middle">
-                  <Td>
-                    <span className="flex items-start gap-2">
-                      <SportBadge sport={team.sport} />
-                      <span className="flex flex-col">
-                        <span className="font-semibold">
-                          {team.club} · {team.name}
-                        </span>
-                        <span className="text-xs text-muted">
-                          {[team.league, team.season].filter(Boolean).join(' · ')}
-                        </span>
-                        <span className="mt-1">
-                          <Badge tone={team.adults_declared_at ? 'neutral' : 'danger'}>
-                            {team.adults_declared_at ? t('guests.admin.declared') : t('guests.admin.notDeclared')}
-                          </Badge>
+              {byTeam(teams.data).map(({ latest: team, earlier }) => (
+                <Fragment key={team.lineage_id}>
+                  <tr className="[&>td]:align-middle">
+                    <Td>
+                      <span className="flex items-start gap-2">
+                        <SportBadge sport={team.sport} />
+                        <span className="flex flex-col">
+                          <span className="font-semibold">
+                            {team.club} · {team.name}
+                          </span>
+                          <span className="text-xs text-muted">
+                            {[team.league, team.season].filter(Boolean).join(' · ')}
+                          </span>
+                          <span className="mt-1">
+                            <Badge tone={team.adults_declared_at ? 'neutral' : 'danger'}>
+                              {team.adults_declared_at ? t('guests.admin.declared') : t('guests.admin.notDeclared')}
+                            </Badge>
+                          </span>
                         </span>
                       </span>
-                    </span>
-                  </Td>
-                  <Td className="hidden whitespace-nowrap tabular-nums md:table-cell">
-                    {team.people} · {t('guests.admin.logins')} {team.accounts}
-                  </Td>
-                  <Td className="whitespace-nowrap tabular-nums">
-                    {team.video_limit == null
-                      ? team.videos
-                      : t('guests.admin.videosOf', { count: team.videos, limit: team.video_limit })}
-                  </Td>
-                  <Td tight className="text-center">
-                    <Switch
-                      checked={team.training_ok}
-                      label={t('guests.admin.trainingFor', { team: label(team) })}
-                      onChange={(training_ok) => save(team, { training_ok })}
-                    />
-                  </Td>
-                  <Td tight className="text-center">
-                    <Switch
-                      checked={team.enabled}
-                      label={t('guests.admin.onFor', { team: label(team) })}
-                      onChange={(enabled) => save(team, { enabled })}
-                    />
-                  </Td>
-                  <Td tight className="text-right">
-                    <span className="inline-flex flex-wrap justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        className="px-3"
-                        aria-label={t('guests.admin.editFor', { team: label(team) })}
-                        onClick={() => setLimiting(team)}
-                      >
-                        {t('guests.admin.edit')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="px-3"
-                        disabled={!team.enabled}
-                        aria-label={t('guests.admin.inviteCoachFor', { team: label(team) })}
-                        onClick={() => setInviting(team)}
-                      >
-                        {t('guests.admin.inviteCoach')}
-                      </Button>
-                      {team.enabled && (
-                        <ButtonLink
-                          to={`/teams/${team.id}`}
+                    </Td>
+                    <Td className="hidden whitespace-nowrap tabular-nums md:table-cell">
+                      {team.people} · {t('guests.admin.logins')} {team.accounts}
+                    </Td>
+                    <Td className="whitespace-nowrap tabular-nums">
+                      {team.video_limit == null
+                        ? team.videos
+                        : t('guests.admin.videosOf', { count: team.videos, limit: team.video_limit })}
+                    </Td>
+                    <Td tight className="text-center">
+                      <Switch
+                        checked={team.training_ok}
+                        label={t('guests.admin.trainingFor', { team: label(team) })}
+                        onChange={(training_ok) => save(team, { training_ok })}
+                      />
+                    </Td>
+                    <Td tight className="text-center">
+                      <Switch
+                        checked={team.enabled}
+                        label={t('guests.admin.onFor', { team: label(team) })}
+                        onChange={(enabled) => save(team, { enabled })}
+                      />
+                    </Td>
+                    <Td tight className="text-right">
+                      <span className="inline-flex flex-wrap justify-end gap-1">
+                        <Button
                           variant="ghost"
                           className="px-3"
-                          aria-label={t('guests.admin.teamPageFor', { team: label(team) })}
+                          aria-label={t('guests.admin.editFor', { team: label(team) })}
+                          onClick={() => setLimiting(team)}
                         >
-                          {t('guests.admin.teamPage')}
-                        </ButtonLink>
-                      )}
-                    </span>
-                  </Td>
-                </tr>
+                          {t('guests.admin.edit')}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          className="px-3"
+                          disabled={!team.enabled}
+                          aria-label={t('guests.admin.inviteCoachFor', { team: label(team) })}
+                          onClick={() => setInviting(team)}
+                        >
+                          {t('guests.admin.inviteCoach')}
+                        </Button>
+                        {team.enabled && (
+                          <ButtonLink
+                            to={`/teams/${team.id}`}
+                            variant="ghost"
+                            className="px-3"
+                            aria-label={t('guests.admin.teamPageFor', { team: label(team) })}
+                          >
+                            {t('guests.admin.teamPage')}
+                          </ButtonLink>
+                        )}
+                      </span>
+                    </Td>
+                  </tr>
+                  {earlier.map((row) => (
+                    <EarlierSeasonRow key={row.id} team={row} latest={team} />
+                  ))}
+                </Fragment>
               ))}
             </TBody>
           </Table>
@@ -185,6 +201,53 @@ export function GuestClubsSection() {
         {limiting && <LimitForm team={limiting} onDone={() => setLimiting(null)} />}
       </Modal>
     </section>
+  )
+}
+
+/** An earlier season of a guest team, under its newest: counts and its team page; the switches are the team's. */
+function EarlierSeasonRow({ team, latest }: { team: GuestTeam; latest: GuestTeam }) {
+  const { t } = useTranslation()
+  return (
+    <tr className="text-sm [&>td]:align-middle">
+      <Td>
+        <span className="flex flex-col pl-8">
+          <span>
+            <span className="text-muted">{t('guests.admin.earlierSeason')} </span>
+            <span className="font-semibold tabular-nums">{team.season}</span>
+          </span>
+          <span className="text-xs text-muted">
+            {[team.name !== latest.name ? team.name : null, team.league].filter(Boolean).join(' · ')}
+          </span>
+          {team.adults_declared_at && (
+            <span className="mt-1">
+              <Badge>{t('guests.admin.declared')}</Badge>
+            </span>
+          )}
+        </span>
+      </Td>
+      <Td className="hidden whitespace-nowrap tabular-nums md:table-cell">
+        {team.people} · {t('guests.admin.logins')} {team.accounts}
+      </Td>
+      <Td className="whitespace-nowrap tabular-nums">
+        {team.video_limit == null
+          ? team.videos
+          : t('guests.admin.videosOf', { count: team.videos, limit: team.video_limit })}
+      </Td>
+      <Td />
+      <Td />
+      <Td tight className="text-right">
+        {team.enabled && (
+          <ButtonLink
+            to={`/teams/${team.id}`}
+            variant="ghost"
+            className="px-3"
+            aria-label={t('guests.admin.teamPageFor', { team: label(team) })}
+          >
+            {t('guests.admin.teamPage')}
+          </ButtonLink>
+        )}
+      </Td>
+    </tr>
   )
 }
 

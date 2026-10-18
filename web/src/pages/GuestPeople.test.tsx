@@ -164,10 +164,88 @@ describe('a guest team page', () => {
     const fetch = stub(team({ adults_declared_at: null }), [GINA], {
       [`POST /api/teams/${ID}/adults`]: { body: { adults_declared_at: '2026-10-17T10:00:00Z' } },
     })
-    const banner = await screen.findByRole('region', { name: 'Before your first upload' })
+    const banner = await screen.findByRole('region', { name: 'Before the first upload of 2026/27' })
     expect(banner).toHaveTextContent('Everyone we film — our players, coaches and our opponents — is 18 or older')
     fireEvent.click(within(banner).getByRole('button', { name: 'I confirm' }))
-    await waitFor(() => expect(screen.queryByRole('region', { name: 'Before your first upload' })).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Before the first upload of 2026/27' })).not.toBeInTheDocument(),
+    )
     expect(requests(fetch, 'POST', `/api/teams/${ID}/adults`)).toHaveLength(1)
+  })
+})
+
+describe('a guest team\'s seasons', () => {
+  it('starts the next season with the people the coach picks', async () => {
+    const NEXT = 1000000009
+    const started = { team_id: NEXT, name: 'Herren 1', season: '2027/28', carried: 1, left: 1, disabled: 1 }
+    const fetch = vi.fn(
+      stubFetch({
+        [`/api/teams/${ID}`]: { body: team({ next_season: '2027/28', newest: true }) },
+        [`/api/teams/${ID}/games`]: { body: [] },
+        [`/api/teams/${ID}/videos`]: { body: [] },
+        [`/api/teams/${ID}/stats`]: { body: teamStats() },
+        [PEOPLE]: { body: [GINA, PAUL] },
+        '/api/video/config': { body: config },
+        [`POST /api/teams/${ID}/next-season`]: { status: 201, body: started },
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const { router } = renderRoute(<TeamPage />, { path: '/teams/:id', url: `/teams/${ID}` })
+
+    const section = await screen.findByRole('region', { name: 'Next season' })
+    fireEvent.click(within(section).getByRole('button', { name: 'Start 2027/28' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Start 2027/28 for Herren 2' })
+    expect(within(dialog).getByLabelText('Team')).toHaveValue('Herren 2')
+    expect(within(dialog).getByLabelText('League (optional)')).toHaveValue('3. Liga')
+    expect(within(dialog).getByLabelText('Season')).toHaveValue('2027/28')
+    // Everyone comes along by default; the coach starting it always.
+    const everyone = within(dialog).getByRole('checkbox', { name: 'Everyone' })
+    const paul = await within(dialog).findByRole('checkbox', { name: /7 · Paul Gast/ })
+    const gina = within(dialog).getByRole('checkbox', { name: /Gina Gast/ })
+    expect([everyone, paul, gina].map((box) => (box as HTMLInputElement).checked)).toEqual([true, true, true])
+    expect(gina).toBeDisabled()
+
+    fireEvent.click(paul)
+    expect(everyone).not.toBeChecked()
+    expect(dialog).toHaveTextContent('1 person not ticked stays on the 2026/27 roster but loses access to WiePlay.')
+    fireEvent.change(within(dialog).getByLabelText('Team'), { target: { value: 'Herren 1' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Start 2027/28' }))
+    await waitFor(() =>
+      expect(requests(fetch, 'POST', `/api/teams/${ID}/next-season`)).toEqual([
+        { name: 'Herren 1', league: '3. Liga', season: '2027/28', member_ids: [GINA.member_id] },
+      ]),
+    )
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/teams/${NEXT}`))
+  })
+
+  it('keeps an earlier season\'s roster: no adding, no links, no next season', async () => {
+    stub(team({ newest: false, next_season: null }), [GINA, PAUL])
+    const people = await screen.findByRole('table', { name: 'People' })
+    expect(screen.getByText(/This is an earlier season: its roster stays as it was/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add a person' })).not.toBeInTheDocument()
+    expect(within(people).queryByRole('button', { name: 'Make an invite link for Paul Gast' })).not.toBeInTheDocument()
+    // Taking someone off an earlier season (a request to be removed) still works.
+    expect(within(people).getByRole('button', { name: 'Remove Paul Gast from the team' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Next season' })).not.toBeInTheDocument()
+  })
+
+  it('takes people of earlier seasons along', async () => {
+    const pia = person({ member_id: 1000000004, name: 'Pia Gast', number: 9, role: 'player', account: true, me: false })
+    const fetch = stub(team({ newest: true }), [GINA, PAUL], {
+      [`${PEOPLE}/earlier`]: {
+        body: [{ member_id: pia.member_id, name: 'Pia Gast', number: 9, role: 'player', season: '2025/26' }],
+      },
+      [`POST ${PEOPLE}/earlier`]: { status: 201, body: [pia] },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'From earlier seasons' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Take people along into 2026/27' })
+    const take = within(dialog).getByRole('button', { name: 'Take along' })
+    expect(take).toBeDisabled()
+    const box = await within(dialog).findByRole('checkbox', { name: /9 · Pia Gast/ })
+    expect(dialog).toHaveTextContent('Player · last in 2025/26')
+    fireEvent.click(box)
+    fireEvent.click(take)
+    await waitFor(() => expect(requests(fetch, 'POST', `${PEOPLE}/earlier`)).toEqual([{ member_ids: [pia.member_id] }]))
+    expect(await screen.findByText('1 person is on the team again.')).toBeInTheDocument()
   })
 })

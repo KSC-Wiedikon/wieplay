@@ -767,3 +767,340 @@ def test_guests_see_no_worker_error_text() -> None:
     assert guests.error_for(kscw, raw) == raw
     assert guests.error_for(gast, raw) == guests.PROCESSING_FAILED
     assert guests.error_for(gast, None) is None
+
+
+# --- seasons ------------------------------------------------------------------------------------
+
+THIS_SEASON = guests.season_of(TODAY)
+LAST_SEASON = guests.previous_season_of(THIS_SEASON)
+
+
+def start(client: TestClient, team_id: int, **body: Any) -> Any:
+    return client.post(f"/api/teams/{team_id}/next-season", json=body)
+
+
+def roster(client: TestClient, team_id: int) -> list[tuple[int, str]]:
+    return [(p["member_id"], p["role"]) for p in client.get(f"/api/teams/{team_id}/people").json()]
+
+
+@pytest.fixture
+def lastyear(club: dict[str, TestClient], new_client: Any) -> dict[str, Any]:
+    """A guest team of last season, as on 1 June: its coach, two players with logins (all
+    logged in), and the adults confirmed for that season."""
+    admin = club["admin"]
+    body = {"club": "VBC Gast", "name": "Herren 2", "league": "3. Liga", "season": LAST_SEASON}
+    team = admin.post("/api/admin/guest-teams", json=body).json()
+    invited = admin.post(f"/api/admin/guest-teams/{team['id']}/coaches", json={"name": "Gina Gast"})
+    coach = new_client()
+    assert accept(coach, invited.json()["link"], "gina@example.org").status_code == 200
+    out: dict[str, Any] = {
+        "id": team["id"], "coach": coach, "coach_id": invited.json()["person"]["member_id"],
+    }  # fmt: skip
+    for key, name, number in (("paul", "Paul Gast", 7), ("pia", "Pia Gast", 9)):
+        people = f"/api/teams/{team['id']}/people"
+        person = coach.post(people, json={"name": name, "number": number}).json()
+        link = coach.post(f"{people}/{person['member_id']}/invite").json()["link"]
+        browser = new_client()
+        assert accept(browser, link, f"{key}@example.org").status_code == 200
+        out[key], out[f"{key}_id"] = browser, person["member_id"]
+    assert coach.post(f"/api/teams/{team['id']}/adults").status_code == 200
+    return out
+
+
+def test_a_coach_starts_the_next_season_with_the_people_they_pick(
+    lastyear: dict[str, Any], new_client: Any, db_engine: Engine
+) -> None:
+    coach, old = lastyear["coach"], lastyear["id"]
+    gina, paul, pia = lastyear["coach_id"], lastyear["paul_id"], lastyear["pia_id"]
+    before = coach.get(f"/api/teams/{old}").json()
+    assert (before["newest"], before["next_season"]) == (True, THIS_SEASON)
+
+    # Gina takes Paul along and leaves Pia behind; she comes along herself without a tick.
+    started = start(coach, old, name="Herren 1", league="2. Liga", member_ids=[paul])
+    assert started.status_code == 201, started.text
+    new = started.json()["team_id"]
+    assert started.json() == {
+        "team_id": new, "name": "Herren 1", "season": THIS_SEASON,
+        "carried": 2, "left": 1, "disabled": 1,
+    }  # fmt: skip
+    team = coach.get(f"/api/teams/{new}").json()
+    assert (team["name"], team["league"], team["season"], team["club"]) == (
+        "Herren 1", "2. Liga", THIS_SEASON, "VBC Gast",
+    )  # fmt: skip
+    assert team["lineage_id"] == before["lineage_id"] and team["adults_declared_at"] is None
+    assert (team["newest"], team["video_count"], team["video_limit"]) == (True, 0, 30)
+    assert team["next_season"] == guests.next_season_of(THIS_SEASON)
+    # The same people (member ids) in their roles; last season stays as it was.
+    assert roster(coach, new) == [(gina, "coach"), (paul, "player")]
+    assert roster(coach, old) == [(gina, "coach"), (paul, "player"), (pia, "player")]
+    earlier = coach.get(f"/api/teams/{old}").json()
+    assert (earlier["newest"], earlier["next_season"], earlier["season"]) == (
+        False, None, LAST_SEASON,
+    )  # fmt: skip
+    assert earlier["adults_declared_at"] is not None
+
+    # Coaches see every season, a player the seasons he was on: Paul both.
+    for who in (coach, lastyear["paul"]):
+        assert {t["id"] for t in who.get("/api/me").json()["teams"]} == {old, new}
+        seasons = who.get(f"/api/teams/{new}/seasons").json()
+        assert [(s["team_id"], s["season"]) for s in seasons] == [
+            (new, THIS_SEASON), (old, LAST_SEASON),
+        ]  # fmt: skip
+        assert who.get(f"/api/teams/{old}").status_code == 200
+    login = new_client().post(
+        "/api/auth/guest/login", json={"email": "paul@example.org", "password": PASSWORD}
+    )
+    assert login.status_code == 204
+
+    # Pia was left behind: on no current team, her login is disabled and her session ends.
+    assert lastyear["pia"].get("/api/me").status_code == 401
+    pia_login = {"email": "pia@example.org", "password": PASSWORD}
+    assert new_client().post("/api/auth/guest/login", json=pia_login).json() == {"detail": WRONG}
+    [(disabled,)] = sql(
+        db_engine, "SELECT disabled_at FROM guest_account WHERE member_id = :m", m=pia
+    )
+    assert disabled is not None
+
+    # Someone added this season sees this season only.
+    nina = coach.post(f"/api/teams/{new}/people", json={"name": "Nina Neu", "number": 11}).json()
+    link = coach.post(f"/api/teams/{new}/people/{nina['member_id']}/invite").json()["link"]
+    newcomer = new_client()
+    assert accept(newcomer, link, "nina@example.org").json() == {"next": f"/teams/{new}"}
+    assert [t["id"] for t in newcomer.get("/api/me").json()["teams"]] == [new]
+    assert newcomer.get(f"/api/teams/{old}").status_code == 404
+    assert [s["season"] for s in newcomer.get(f"/api/teams/{new}/seasons").json()] == [THIS_SEASON]
+
+    [(actor, lineage, details)] = audit_rows(db_engine, "guest_season_started")
+    assert actor == gina and lineage == before["lineage_id"]
+    assert (details["from_team_id"], details["team_id"], details["season"]) == (
+        old, new, THIS_SEASON,
+    )  # fmt: skip
+    assert details["carried"] == [gina, paul]
+    assert details["left"] == details["disabled"] == [pia]
+
+
+def test_who_starts_a_season_and_which(
+    lastyear: dict[str, Any], club: dict[str, TestClient]
+) -> None:
+    coach, old, admin = lastyear["coach"], lastyear["id"], club["admin"]
+    assert start(lastyear["paul"], old).status_code == 403  # a player
+    assert start(club["coach"], old).status_code == 404  # KSCW never sees a guest team
+    # KSCW teams roll over through the Wiedisync sync on 1 June.
+    assert start(club["coach"], H3).status_code == 404
+    assert start(admin, H3).status_code == 404
+
+    assert start(coach, old, season=LAST_SEASON).status_code == 409  # not later
+    too_far = guests.next_season_of(guests.next_season_of(THIS_SEASON))
+    assert start(coach, old, season=too_far).status_code == 409
+    assert start(coach, old, season="2026/28").status_code == 409
+    assert start(coach, old, member_ids=[101]).status_code == 422  # not on the team
+    # The same team twice is refused, as when an admin creates one.
+    twin = {"club": "vbc gast", "name": "herren 2", "season": THIS_SEASON}
+    assert admin.post("/api/admin/guest-teams", json=twin).status_code == 201
+    assert start(coach, old).status_code == 409
+
+    # Admins start it too; everyone comes along by default. Then it exists, once.
+    started = start(admin, old, name="Herren 1")
+    assert started.status_code == 201, started.text
+    assert (started.json()["carried"], started.json()["left"]) == (3, 0)
+    assert start(coach, old, name="Herren 1b").status_code == 409
+    assert lastyear["pia"].get(f"/api/teams/{started.json()['team_id']}").status_code == 200
+    # Admins see no "me" on a guest roster: nobody is added for them.
+    assert len(roster(coach, started.json()["team_id"])) == 3
+
+
+def test_people_left_behind_come_back_and_links_follow_the_season(
+    lastyear: dict[str, Any], new_client: Any, db_engine: Engine
+) -> None:
+    coach, old = lastyear["coach"], lastyear["id"]
+    paul, pia = lastyear["paul_id"], lastyear["pia_id"]
+    # Before the new season: a new player's link is open, and Pia has a new password link.
+    nina = coach.post(f"/api/teams/{old}/people", json={"name": "Nina Gast", "number": 11}).json()
+    nina_link = coach.post(f"/api/teams/{old}/people/{nina['member_id']}/invite").json()["link"]
+    pia_link = coach.post(f"/api/teams/{old}/people/{pia}/invite").json()["link"]
+    new = start(coach, old, member_ids=[paul, nina["member_id"]]).json()["team_id"]
+    # Nina's link leads to the new season; Pia's no longer works.
+    info = new_client().get(f"/api/auth/guest/invite/{token_of(nina_link)}").json()
+    assert (info["team_id"], info["season"]) == (new, THIS_SEASON)
+    assert new_client().get(f"/api/auth/guest/invite/{token_of(pia_link)}").status_code == 410
+    assert accept(new_client(), pia_link, None).status_code == 410
+
+    # People join the newest season only: last season's roster stays as it was.
+    assert coach.post(f"/api/teams/{old}/people", json={"name": "Late"}).status_code == 409
+    assert coach.post(f"/api/teams/{old}/people/{paul}/invite").status_code == 409
+    assert coach.get(f"/api/teams/{old}/people/earlier").json() == []
+
+    # Pia comes back from last season, in her role; her login works again.
+    earlier = coach.get(f"/api/teams/{new}/people/earlier").json()
+    assert earlier == [
+        {"member_id": pia, "name": "Pia Gast", "number": 9, "role": "player",
+         "season": LAST_SEASON},
+    ]  # fmt: skip
+    assert lastyear["paul"].get(f"/api/teams/{new}/people/earlier").status_code == 403
+    taken = {"member_ids": [pia]}
+    assert lastyear["paul"].post(f"/api/teams/{new}/people/earlier", json=taken).status_code == 403
+    on_it = {"member_ids": [paul]}
+    assert coach.post(f"/api/teams/{new}/people/earlier", json=on_it).status_code == 404
+    back = coach.post(f"/api/teams/{new}/people/earlier", json=taken)
+    assert back.status_code == 201, back.text
+    assert [(p["name"], p["role"], p["account"]) for p in back.json()] == [
+        ("Pia Gast", "player", True)
+    ]
+    browser = new_client()
+    login = {"email": "pia@example.org", "password": PASSWORD}
+    assert browser.post("/api/auth/guest/login", json=login).status_code == 204
+    assert {t["id"] for t in browser.get("/api/me").json()["teams"]} == {old, new}
+    assert [r[2]["member_ids"] for r in audit_rows(db_engine, "guest_people_taken_along")] == [
+        [pia]
+    ]
+
+    # Taken off this season: on no current team, Paul's login is disabled at once; his name
+    # stays on last season's roster until he is taken off that one too.
+    assert coach.delete(f"/api/teams/{new}/people/{paul}").status_code == 204
+    assert lastyear["paul"].get("/api/me").status_code == 401
+    assert paul in {member for member, _ in roster(coach, old)}
+    assert coach.delete(f"/api/teams/{old}/people/{paul}").status_code == 204
+    assert sql(db_engine, "SELECT id FROM wd_member WHERE id = :m", m=paul) == []
+
+
+def test_adults_and_the_video_limit_count_per_season(
+    lastyear: dict[str, Any], club: dict[str, TestClient]
+) -> None:
+    coach, old, admin = lastyear["coach"], lastyear["id"], club["admin"]
+    admin.put(f"/api/admin/guest-teams/{old}", json={"video_limit": 1})
+    spring = date(int(LAST_SEASON[:4]) + 1, 3, 1).isoformat()
+    assert create_guest_video(coach, old, recorded_on=spring).status_code == 201
+    assert create_guest_video(coach, old, recorded_on=spring).status_code == 409  # full
+    new = start(coach, old).json()["team_id"]
+
+    # A new season: a coach confirms the adults again before its first upload.
+    blocked = create_guest_video(coach, new)
+    assert blocked.status_code == 409
+    assert [b["code"] for b in blocked.json()["blockers"]] == ["adults_not_declared"]
+    assert lastyear["paul"].post(f"/api/teams/{new}/adults").status_code == 403
+    assert admin.post(f"/api/teams/{new}/adults").status_code == 403
+    assert coach.post(f"/api/teams/{new}/adults").status_code == 200
+    # Its own limit: last season's video does not count.
+    assert create_guest_video(coach, new).status_code == 201
+    assert create_guest_video(coach, new).status_code == 409
+    before, now = (coach.get(f"/api/teams/{t}").json() for t in (old, new))
+    assert (before["video_count"], now["video_count"]) == (1, 1)
+    assert before["adults_declared_at"] < now["adults_declared_at"]
+
+    # Admins see both seasons in the guest clubs' list, the newest marked.
+    listed = {t["id"]: t for t in admin.get("/api/admin/guest-teams").json()}
+    assert (listed[old]["newest"], listed[new]["newest"]) == (False, True)
+    assert listed[old]["lineage_id"] == listed[new]["lineage_id"]
+    assert (listed[old]["videos"], listed[new]["videos"]) == (1, 1)
+    assert (listed[old]["people"], listed[new]["people"]) == (3, 3)
+
+
+def test_the_sync_leaves_both_seasons_alone(
+    lastyear: dict[str, Any], club: dict[str, TestClient], db_engine: Engine
+) -> None:
+    admin = club["admin"]
+    assert start(lastyear["coach"], lastyear["id"], member_ids=[lastyear["paul_id"]]).status_code
+    before = guest_rows(db_engine)
+    assert len(before["wd_team"]) == 2 and len(before["wd_team_member"]) == 3 + 2
+    assert admin.post("/api/admin/sync").status_code == 200
+    assert admin.put(f"/api/admin/teams/{H3}", json={"enabled": False}).status_code == 200
+    assert admin.post("/api/admin/sync").status_code == 200
+    assert guest_rows(db_engine) == before
+
+
+def test_earlier_rosters_go_after_the_previous_season(
+    club: dict[str, TestClient], new_client: Any, app: FastAPI, db_engine: Engine
+) -> None:
+    from wieplay.core.retention import run_housekeeping
+
+    admin = club["admin"]
+    two_back = guests.previous_season_of(LAST_SEASON)
+    team = admin.post(
+        "/api/admin/guest-teams", json={"club": "VBC Gast", "name": "Herren 2", "season": two_back}
+    ).json()
+    invited = admin.post(f"/api/admin/guest-teams/{team['id']}/coaches", json={"name": "Gina"})
+    coach = new_client()
+    assert accept(coach, invited.json()["link"], "gina@example.org").status_code == 200
+    gina = invited.json()["person"]["member_id"]
+    people = f"/api/teams/{team['id']}/people"
+    ana = coach.post(people, json={"name": "Ana Alt"}).json()["member_id"]  # two seasons back
+    bea = coach.post(people, json={"name": "Bea Gast"}).json()["member_id"]  # until last season
+    mid = start(coach, team["id"], season=LAST_SEASON, member_ids=[bea]).json()["team_id"]
+    now = start(coach, mid, member_ids=[]).json()["team_id"]
+    # A team that paused since then keeps its people: a team's newest row is never touched.
+    paused = admin.post(
+        "/api/admin/guest-teams", json={"club": "VBC Pause", "name": "Damen 1", "season": two_back}
+    ).json()
+    sam = admin.post(f"/api/admin/guest-teams/{paused['id']}/coaches", json={"name": "Sam"})
+    sam_id = sam.json()["person"]["member_id"]
+
+    with app.state.sessionmaker() as db:
+        done = run_housekeeping(db)
+    assert done.guest_rosters == 3  # Gina, Ana and Bea two seasons back
+    rows = sql(
+        db_engine,
+        "SELECT team_id, member_id FROM wd_team_member WHERE team_id >= 1000000000 "
+        "ORDER BY team_id, member_id",
+    )
+    assert [tuple(r) for r in rows] == sorted(
+        [(mid, gina), (mid, bea), (now, gina), (paused["id"], sam_id)]
+    )
+    names = {r[0] for r in sql(db_engine, "SELECT id FROM wd_member WHERE id >= 1000000000")}
+    assert ana not in names  # on no roster any more: her name goes
+    assert names == {gina, bea, sam_id}
+    assert coach.get(f"/api/teams/{now}").status_code == 200
+    assert coach.get(f"/api/teams/{team['id']}").status_code == 200  # coaches: every season
+
+
+def test_the_migration_keeps_a_declaration_on_the_newest_row(db_engine: Engine) -> None:
+    """Migration 0018: the adults declaration moves from the lineage to its newest row."""
+    from alembic import command
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    from tests.conftest import BACKEND, TEST_DB
+
+    config = Config(str(BACKEND / "alembic.ini"))
+    config.attributes["database_url"] = TEST_DB
+    [revision] = [
+        r
+        for r in ScriptDirectory.from_config(config).walk_revisions()
+        if (r.doc or "").startswith("guest clubs' seasons")
+    ]
+    before = str(revision.down_revision)
+    lineage = uuid.uuid4()
+    declared = datetime(2026, 10, 17, 10, 0, tzinfo=UTC)
+    command.downgrade(config, before)
+    try:
+        sql(
+            db_engine,
+            "INSERT INTO team_lineage (id, sport, label, enabled, guest_club, "
+            "guest_adults_declared_at, guest_adults_declared_by) "
+            "VALUES (:id, 'volleyball', 'Herren 2', true, 'VBC Gast', :at, 1000000002)",
+            id=lineage,
+            at=declared,
+        )
+        sql(
+            db_engine,
+            "INSERT INTO wd_team (id, lineage_id, name, sport, season, guest) VALUES "
+            "(1000000001, :l, 'Herren 2', 'volleyball', '2025/26', true), "
+            "(1000000003, :l, 'Herren 2', 'volleyball', '2026/27', true)",
+            l=lineage,
+        )
+        command.upgrade(config, revision.revision)
+        rows = sql(
+            db_engine,
+            "SELECT id, guest_adults_declared_at, guest_adults_declared_by FROM wd_team "
+            "ORDER BY id",
+        )
+        assert [tuple(r) for r in rows] == [
+            (1000000001, None, None), (1000000003, declared, 1000000002),
+        ]  # fmt: skip
+        command.downgrade(config, before)
+        [back] = sql(
+            db_engine,
+            "SELECT guest_adults_declared_at, guest_adults_declared_by FROM team_lineage",
+        )
+        assert tuple(back) == (declared, 1000000002)
+    finally:
+        command.upgrade(config, "head")

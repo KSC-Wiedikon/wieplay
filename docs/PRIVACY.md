@@ -1,6 +1,7 @@
 # WiePlay: data protection
 
-**Draft, 15.10.2026, updated 17.10.2026** (guest clubs, §11), for review by the club's privacy contact before
+**Draft, 15.10.2026, updated 17.10.2026** (guest clubs, §11) **and 18.10.2026** (a guest
+club's next season, §8 and §11), for review by the club's privacy contact before
 WiePlay is used beyond the pilot teams. Not legal advice. It describes what WiePlay does today and
 what the plan adds later; design background in `docs/PLAN.md` §5 and §10.1.
 
@@ -80,9 +81,10 @@ Enforced in code, not only stated:
   nobody films a blocked match.
 - Teams with minors on the roster are switched off in WiePlay (DU23-1 since 15.10.2026),
   which also keeps their names out of WiePlay.
-- A guest club's team (§11) is not in Wiedisync: instead a coach of the team confirms once,
-  before the first upload, that everyone filmed (players, coaches and opponents) is 18 or older
-  (an adult league). Without that confirmation WiePlay refuses the team's videos.
+- A guest club's team (§11) is not in Wiedisync: instead a coach of the team confirms once a
+  season, before the season's first upload, that everyone filmed (players, coaches and
+  opponents) is 18 or older (an adult league). Without that confirmation WiePlay refuses the
+  team's videos.
 
 ## 6. Automatic analysis
 
@@ -149,9 +151,9 @@ R2, the NAS; encrypted before leaving the server).
 | Tags, rallies, scores, roster snapshots, comments | As long as the video |
 | Audit log | 12 months |
 | Sessions, login records | 30 days |
-| A guest club's login (email, password hash) | While its person is on a team; disabled when they leave it, deleted 30 days later |
+| A guest club's login (email, password hash) | While its person is on the team's current season; disabled when they leave it or are not taken into the next season, deleted 30 days later |
 | Invite links | Work 14 days; deleted 30 days after they expired |
-| Members' names and numbers | While their team uses WiePlay; removed when no WiePlay team lists them |
+| Members' names and numbers | While their team uses WiePlay; removed when no WiePlay team lists them. A guest club's earlier season keeps its roster for that season and the next one, as Wiedisync does for the club's own |
 
 A nightly job enforces this and logs what it deleted.
 
@@ -192,9 +194,9 @@ for their own matches (`docs/PLAN.md` §4.5; how an admin sets one up:
 - **KSC Wiedikon hosts it** with the same processors and rules as its own footage (§7): the
   Hetzner server and storage in Germany, the club's hardware in Switzerland, no third party in
   the browser, no public links, the same retention (§8).
-- **Adults only**: WiePlay has no birthdates of a guest club's people. Before the first upload a
-  coach of the guest team confirms: "Everyone we film — our players, coaches and our opponents —
-  is 18 or older (adult league)." Without it, WiePlay refuses its videos.
+- **Adults only**: WiePlay has no birthdates of a guest club's people. Before the first upload
+  of each season a coach of the guest team confirms: "Everyone we film — our players, coaches
+  and our opponents — is 18 or older (adult league)." Without it, WiePlay refuses its videos.
 - **Who sees it**: only the guest team's own people (players watch, tag and review; coaches
   also upload, download, delete and keep the roster) and KSC Wiedikon's admins (logged). KSC Wiedikon's members
   never see a guest team, and guest clubs never see KSC Wiedikon's teams, videos or people.
@@ -202,10 +204,17 @@ for their own matches (`docs/PLAN.md` §4.5; how an admin sets one up:
   people. Each link works once, for 14 days; WiePlay keeps only a hash of it and sends no email.
   A person taken off the team loses access at once and their name leaves WiePlay (their tags
   keep the shirt number); their login is deleted 30 days later.
+- **A new season**: the guest team's coaches start the next season themselves and pick who
+  comes along. Those taken along keep their login and see both seasons. Those not taken along
+  stay on the old season's roster (name and number, as in its videos' tags) but lose access at
+  once: their login is disabled and deleted 30 days later, unless a coach takes them along
+  later. An old season's roster is kept for that season and the next one, like the club's own
+  rosters from Wiedisync, and then removed, as its videos are (§8).
 - **Training**: the automatic analysis runs on a guest team's games like on the club's own
   (§6), but its reviewed games train WiePlay's shared models only if the guest club agreed to it.
   Without that agreement they never go into a training run.
-- **Limits**: a guest team has a number of videos per season (30 unless agreed otherwise).
+- **Limits**: a guest team has a number of videos per season (30 unless agreed otherwise); each
+  new season starts from zero.
 - **Deletion on request**: on the guest club's request KSC Wiedikon deletes its videos (with
   their originals and analysis signals), its people and their logins; the club or a person can
   also ask for a single video or part of it to be deleted, or a person to be removed from its

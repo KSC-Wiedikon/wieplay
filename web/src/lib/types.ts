@@ -36,8 +36,12 @@ export interface TeamDetail extends Team {
   /** A guest team's videos this season and its limit (null: no limit). */
   video_count?: number | null
   video_limit?: number | null
-  /** The coach confirmed that everyone filmed is 18 or older; null: not yet (no uploads). */
+  /** The coach confirmed for this season that everyone filmed is 18 or older; null: not yet (no uploads). */
   adults_declared_at?: string | null
+  /** A guest team: this row is its newest season (people join that one; earlier seasons keep their roster). */
+  newest?: boolean | null
+  /** A guest team's season its coaches and admins can start now; null when there is none yet. */
+  next_season?: string | null
 }
 
 /** A team helper (GET /api/teams/{id}/helpers): a WiePlay grant for every season of the team. */
@@ -1041,6 +1045,34 @@ export interface GuestPersonIn {
   role?: GuestRole
 }
 
+/** A person of the team's earlier seasons who is not on this one (GET /api/teams/{id}/people/earlier). */
+export interface EarlierPerson {
+  member_id: number
+  name: string
+  number: number | null
+  role: GuestRole
+  /** The latest earlier season they were on. */
+  season: string
+}
+
+/** Start a guest team's next season (POST /api/teams/{id}/next-season). Left out: carried over, everyone. */
+export interface NextSeasonIn {
+  name?: string
+  league?: string | null
+  season?: string
+  member_ids?: number[]
+}
+
+export interface NextSeasonOut {
+  team_id: number
+  name: string
+  season: string
+  carried: number
+  left: number
+  /** Of those left behind: logins disabled (on no current team). */
+  disabled: number
+}
+
 /** What an invite link is for (GET /api/auth/guest/invite/{token}). */
 export interface GuestInvite {
   club: string
@@ -1076,6 +1108,8 @@ export interface GuestTeam {
   people: number
   accounts: number
   adults_declared_at: string | null
+  /** The team's newest season: its row carries the switches; earlier seasons are listed under it. */
+  newest?: boolean
 }
 
 export interface GuestTeamCreate {

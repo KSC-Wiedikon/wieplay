@@ -8,6 +8,7 @@
 | Inbox entries that left the share, adult-check answers | 30 days |
 | A guest club's login (email, password hash) | 30 days after it was disabled (PLAN §4.5) |
 | Invite links | 30 days after they expired |
+| A guest team's earlier seasons' rosters | This season and the previous one, as Wiedisync's |
 
 Expired videos go the same way as a coach's delete: soft-deleted, NAS originals and analysis
 signals purged by the worker, bucket objects swept by the API (videos.sweep_deleted), inbox
@@ -23,7 +24,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import Delete, delete, select
 from sqlalchemy.orm import Session
 
-from wieplay.core import pipeline
+from wieplay.core import guests, pipeline
 from wieplay.core.models import (
     AdultCheck,
     AuditLog,
@@ -49,6 +50,7 @@ class Housekeeping:
     adult_checks: int
     guest_accounts: int = 0
     guest_invites: int = 0
+    guest_rosters: int = 0
     video_ids: tuple[uuid.UUID, ...] = ()  # the expired videos, so the API forgets them
 
     def counts(self) -> dict[str, int]:
@@ -103,6 +105,10 @@ def run_housekeeping(db: Session, now: datetime | None = None) -> Housekeeping:
             )
         ),
         adult_checks=purge(delete(AdultCheck).where(AdultCheck.on_date < today - SHORT_KEEP)),
+        # Earlier seasons of guest teams, as the sync does for KSCW: whoever is on no roster
+        # any more loses their login and their name. Before the logins' purge: the logins
+        # disabled here go 30 days later.
+        guest_rosters=guests.retire_old_rosters(db, today, now),
         # Taken off every team (or removed on request): the email goes 30 days later.
         guest_accounts=purge(
             delete(GuestAccount).where(GuestAccount.disabled_at < now - SHORT_KEEP)

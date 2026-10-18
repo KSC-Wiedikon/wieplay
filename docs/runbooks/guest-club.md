@@ -45,12 +45,28 @@ full admin (Admin → Teams → Guest clubs); nothing touches the database by ha
 - **Training yes or no changed**: the *Training OK* switch. Off: its games leave the next
   training run (the models trained before keep what they learned; retire a model if the club
   asks).
-- **Someone leaves the team**: a coach removes them under People. They lose access at once;
-  their name leaves WiePlay (tags keep the number); their login is deleted 30 days later.
-- **A new season**: not built yet (PLAN §4.5, *Not yet*). A team row takes the matches of its
-  own season only, and a new guest team would be a new team with new people, whose emails are
-  still taken by last season's logins. Build "next season" (same lineage, people carried over,
-  the adults confirmation asked again) before 1 June 2027.
+- **Someone leaves the team**: a coach removes them under People (on the newest season). They
+  lose access at once and their login is deleted 30 days later. Their name stays on earlier
+  seasons' rosters; to take it out of WiePlay (a request), remove them in every season too
+  (the season switch at the top of the team page).
+- **A new season** (PLAN §4.5): from 1 June a team row takes the matches of its own season
+  only, so the team needs its next season. Its coaches do it themselves; an admin can too, from
+  the team page (*Team page* in the team's row):
+  1. On the team page of the newest season, *Next season* → *Start 2027/28*. Name and league
+     are carried over and can be changed (promotion, a new name); the season is the next one.
+  2. Tick who comes along: everyone by default; the coach starting it always comes. They keep
+     their logins and see both seasons. Whoever is not ticked keeps their place on last
+     season's roster but loses access at once; their login is deleted after 30 days.
+  3. On the new season's page, a coach confirms again that everyone filmed is 18 or older
+     (uploads wait for it), and adds the new people as usual (*Add a person*, *Invite link*).
+     Someone forgotten comes back with *From earlier seasons* under People (their login works
+     again if it was disabled less than 30 days ago; otherwise make them a new invite link).
+  4. Last season stays as it was: its videos, tags and roster, reached with the season switch.
+     Its people and links are read-only there (removing still works). The video limit counts
+     the new season from zero; *Limit* and *Training OK* in the admins' list apply to every
+     season of the team.
+  Nothing else to do: earlier seasons' rosters go by themselves after the season after them,
+  with their videos (PLAN §4.5).
 
 ## Offboard a club (or delete on request)
 
@@ -61,11 +77,12 @@ on again to resume. Admins, too, see a switched-off team only in this list.
 **End and delete** (the agreement ends, or the club asks): with the team still switched on,
 
 1. open *Team page* and **remove its people** under People, the coaches last (an admin may
-   remove anyone). Their access ends at once, their names leave WiePlay (tags keep the number),
-   and their logins are disabled, then deleted after 30 days;
-2. **delete its videos** there (an admin may). The worker removes the originals on the NAS
-   (`raw/<season>/vb-guest-<club>-<team>/`) and the analysis signals with them; the bucket
-   objects are swept within hours;
+   remove anyone), in every season of the team (the season switch at the top). Their access
+   ends at once, their names leave WiePlay (tags keep the number), and their logins are
+   disabled, then deleted after 30 days;
+2. **delete its videos** there (an admin may), in every season. The worker removes the
+   originals on the NAS (`raw/<season>/vb-guest-<club>-<team>/`) and the analysis signals with
+   them; the bucket objects are swept within hours;
 3. **switch it off**.
 
 What stays: the team row and the club's name (no personal data), the audit log (12 months),

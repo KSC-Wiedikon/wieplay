@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import { keys } from './queryClient'
-import type { GuestPersonIn, GuestTeam, GuestTeamCreate, GuestTeamUpdate, Me, TeamDetail } from './types'
+import type { GuestPersonIn, GuestTeam, GuestTeamCreate, GuestTeamUpdate, Me, NextSeasonIn, TeamDetail } from './types'
 
 // Guest clubs (PLAN §4.5): other clubs' teams with their own logins, set up from invite links.
 
@@ -120,6 +120,37 @@ export function useDeclareAdults(teamId: number) {
     onSuccess: ({ adults_declared_at }) => {
       client.setQueryData<TeamDetail>(keys.team(teamId), (team) => (team ? { ...team, adults_declared_at } : team))
       void client.invalidateQueries({ queryKey: ['teams', teamId, 'filming'] })
+    },
+  })
+}
+
+// --- seasons: a guest team's coaches start its next season themselves ---------------------------
+
+/** People of the team's earlier seasons who are not on this one: its coaches take them along. */
+export function useEarlierPeople(teamId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: keys.earlierPeople(teamId),
+    queryFn: ({ signal }) => api.earlierPeople(teamId, signal),
+    enabled,
+  })
+}
+
+export function useTakeAlong(teamId: number) {
+  const refresh = usePeopleRefresh(teamId)
+  return useMutation({ mutationFn: (memberIds: number[]) => api.takeAlong(teamId, memberIds), onSuccess: refresh })
+}
+
+/** A new team row for the next season, with the people picked; everything that lists teams changes. */
+export function useStartNextSeason(teamId: number) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (body: NextSeasonIn) => api.startNextSeason(teamId, body),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: keys.me }),
+        client.invalidateQueries({ queryKey: keys.teams }),
+        client.invalidateQueries({ queryKey: keys.guestTeams }),
+      ])
     },
   })
 }

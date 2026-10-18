@@ -233,6 +233,9 @@ def allowed_all(who: Viewer, team: TeamRef) -> set[str]:
 
 GUEST_COACH = guest([{"team": GAST_NOW.id, "rel": ["coach"]}])
 GUEST_PLAYER = guest([{"team": GAST_NOW.id, "rel": ["player"]}])
+# The next season (a new row of the same lineage): people taken along are on both rows.
+CARRIED_PLAYER = guest([{"team": t.id, "rel": ["player"]} for t in (GAST_PREV, GAST_NOW)])
+CARRIED_COACH = guest([{"team": t.id, "rel": ["coach"]} for t in (GAST_PREV, GAST_NOW)])
 COACHES = {"see", "upload", "tag", "share", "export", "delete", "manage", "people", "run"}
 ADMIN_ON_GUESTS = COACHES - {"upload"}
 
@@ -246,6 +249,11 @@ GUEST_MATRIX = [
     (GUEST_PLAYER, GAST_NOW, {"see", "tag"}),  # players tag their own games (17.10.2026)
     (GUEST_PLAYER, GAST_PREV, set()),  # players: the seasons they were on
     (GUEST_PLAYER, H3_NOW, set()),
+    (CARRIED_PLAYER, GAST_PREV, {"see", "tag"}),  # both seasons he was on
+    (CARRIED_PLAYER, GAST_NOW, {"see", "tag"}),
+    (CARRIED_PLAYER, OTHER_GAST, set()),
+    (CARRIED_COACH, GAST_PREV, COACHES),  # last season's late uploads too
+    (CARRIED_COACH, GAST_NOW, COACHES),
     # A guest viewer with Wiedisync-looking roles or rows gets nothing from them.
     (guest([{"team": 92, "rel": ["coach"]}], roles=("admin",)), H3_NOW, set()),
     (guest([], roles=("admin",)), GAST_NOW, set()),
@@ -272,6 +280,7 @@ def test_guest_permission_matrix() -> None:
 def test_guests_see_only_their_own_teams() -> None:
     assert visible_team_ids(GUEST_COACH, ALL_TEAMS) == {GAST_NOW.id, GAST_PREV.id}
     assert visible_team_ids(GUEST_PLAYER, ALL_TEAMS) == {GAST_NOW.id}
+    assert visible_team_ids(CARRIED_PLAYER, ALL_TEAMS) == {GAST_NOW.id, GAST_PREV.id}
     assert visible_team_ids(viewer(sport_admin=("volleyball",)), ALL_TEAMS) == {92, 12, 80}
     admin = viewer(roles=("admin",))
     assert visible_team_ids(admin, ALL_TEAMS) == {92, 12, 80, 86, GAST_NOW.id, GAST_PREV.id,
