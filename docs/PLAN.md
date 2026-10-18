@@ -1965,7 +1965,45 @@ and links by what those allow:
    marks those ("Check") and folds them under "Cards to check"; a coach's merge or split
    clears the job's confidence.
 
-{{V2_RESULTS}}
+**Measured 18.10.2026** on three prod H3 games: the job's own stages on local copies of the
+1080p imports (`scripts/ml/players_eval.py`), with the inputs the API hands the job. No coach
+has tagged numbers on prod yet, so numbers and purity were checked by eye: per sure card 36
+pictures drawn in proportion to the time of its pieces, counting those that clearly show
+someone else.
+
+| | Legends (calibrated) | H1–H3 (no calibration) | VBC Swiss (no calibration) |
+|---|---|---|---|
+| Length; stretches tracked; rally windows | 2 h 12 min; 87 min; 183 | 1 h 43 min; 60 min; 128 | 2 h 37 min; 93 min; 203 |
+| Cards (ours / theirs), v1 → v2 | 449 (260 / 188) → 171 (72 / 98) | 141 (57 / 83) | 265 (133 / 131) |
+| Sure cards (ours / theirs) | 7 / 6: ours #12, #22, #1, #7, #10, #2, #8; theirs #12, #7, #15, #10, #1, #13 | none (all to check) | none (all to check) |
+| Players' footage on sure cards | 37 % | – | – |
+| Sure card's number = the person it mostly shows (by eye) | 12 of 12 checked (#13, 14 s, not checked) | – | – |
+| Pictures of someone else on a sure card (of 36) | 2–6, median 4 (~11 %): mostly the libero or a teammate crossing | – | – |
+| Readings of ours that are on the roster (18 of 99 numbers) | 98 % (3,590 readings in all) | 76 % (2,922; H1 is the club too, the teams mix) | 93 % (4,534) |
+| Readings on a card that agree with its number | 75 % | 69 % | 72 % |
+| Detection and tracking on the GPU; numbers and linking on the CPU | 7.3 min; 1.1 min | 6.9 min; 1.2 min | 11.8 min (a second run beside it); 1.8 min |
+
+The calibrated game gives what a coach needs: one sure card per regular, its number right,
+about one picture in nine of someone else (the coach splits it off); the far side of the net
+(numbers too small at 1080p), the liberos' changes and short appearances stay on cards to
+check. Without a calibration the sides of the net come from foot heights, the serving side
+per rally flips inside sets and the kits looked alike (both dark): whole stretches of one
+team landed on the other team's numbered cards (H1–H3 wear the same club kit), so every card
+is to be checked there; calibrating the court (§10.6) is what makes cards sure. What each
+step does (Legends, all cards / sure cards / readings that agree): v2 171 / 7+6 / 75 %;
+without the cuts where two met 140 / 8+7 / 71 % (fewer cards, more of them mixed); without
+numbers spreading along a chain 154 / 6+7 / 73 % (29 % of the footage on sure cards instead
+of 37 %); without the 20 s stitching pass 187 / 9+6 / 75 %; without "who is missing"
+241 / 9+11 / 77 % (70 more cards).
+The shirt-number reader on 80 crops of the Legends game judged by eye (28 with a readable
+number): 17 read right, none wrong, 2 doubtful readings of unreadable ones (v1's reader: 12).
+
+**Automatic run** (`WIEPLAY_PLAYERS_AUTO`): stays off, on demand. The GPU makes it cheap
+(~10 min a match), but only calibrated videos get sure cards (3 of the 22 prod videos had
+one on 18.10.2026), more than half of a match's player footage stays on cards to
+check even then, and there are no coach-tagged numbers yet to measure the attribution.
+Switch it on once the court job calibrates most videos itself and a coach-named game shows
+the attribution's agreement (`metrics.attribution.vs_coach`).
 
 ### 10.6 Court homography
 
@@ -2095,7 +2133,8 @@ and the dead time between them), YOLO26s 1280 px, CUDA:
 
 So **~8–13 min of GPU per match** (0.13–0.2 GPU-h), inside the 10–15 min this table
 planned for player detection and far below the Lenovo's 2 h. ONNX Runtime held ~0.5 GB of
-the card. GPU_E2E
+the card. A real job adds the rendition's download (1080p50, ~2.2 GB per hour of stretches,
+fetched while the previous stretch is decoded) and the uploads.
 
 ---
 
