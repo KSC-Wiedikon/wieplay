@@ -37,6 +37,10 @@ export interface PlayerCluster {
   /** The number reader's suggestion. */
   ocr_number: number | null
   ocr_confidence: number | null
+  /** Players v2: how sure WiePlay is that the card is one whole person (0..1); null for older runs. */
+  confidence?: number | null
+  /** The card asks to be checked (unsure, no number yet). Older servers: absent. */
+  uncertain?: boolean
   crops: [number, number][]
   detections: number
   seconds: number
@@ -75,8 +79,10 @@ export interface Players {
   video_id: string
   available: boolean
   can_edit: boolean
-  /** Start finding the players (~2 h of CPU): coaches and helpers. Older servers: absent. */
+  /** Start finding the players: coaches and helpers. Older servers: absent. */
   can_find?: boolean
+  /** What the search takes, in minutes (~120 on the club server, ~20 on the GPU). */
+  find_minutes?: number
   status: AnalysisStatus
   job: PlayersJob | null
   run: { id: string; created_at: string; stats: Record<string, unknown>; timing: Record<string, unknown> } | null
@@ -102,6 +108,16 @@ export interface PlayersSummary {
   suggested: number
   compared: number
   accuracy: number | null
+  /** Cards WiePlay is unsure of. Older servers: absent. */
+  uncertain?: number
+  find_minutes?: number
+}
+
+/** "2 hours", "20 min": how long finding the players takes (older servers: 2 hours). */
+export function useSearchTime(minutes: number | undefined): string {
+  const { t } = useTranslation()
+  const m = minutes ?? 120
+  return m >= 90 ? t('players.hours', { count: Math.round(m / 60) }) : t('players.minutes', { count: Math.max(1, Math.round(m)) })
 }
 
 export const playersKey = (videoId: string) => ['videos', videoId, 'players'] as const
@@ -145,19 +161,23 @@ export interface Grouped {
   others: PlayerCluster[]
   /** Seen less than this many seconds: shown folded (a substitute's moment, a stray track). */
   brief: PlayerCluster[]
+  /** Cards WiePlay is unsure of (players v2): shown folded, by team, after the teams. */
+  check: PlayerCluster[]
 }
 
 export const BRIEF_SECONDS = 15
 
 /** Cards by team, the most seen first; not-players and brief appearances apart. */
 export function groupClusters(clusters: readonly PlayerCluster[]): Grouped {
-  const out: Grouped = { us: [], them: [], others: [], brief: [] }
+  const out: Grouped = { us: [], them: [], others: [], brief: [], check: [] }
   const sorted = [...clusters].sort((a, b) => b.seconds - a.seconds || a.key - b.key)
   for (const c of sorted) {
     if (c.not_player) out.others.push(c)
     else if (c.seconds < BRIEF_SECONDS && c.number === null) out.brief.push(c)
+    else if (c.uncertain) out.check.push(c)
     else out[c.team].push(c)
   }
+  out.check.sort((a, b) => Number(a.team === 'them') - Number(b.team === 'them') || b.seconds - a.seconds)
   return out
 }
 

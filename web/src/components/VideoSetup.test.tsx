@@ -297,7 +297,7 @@ describe('VideoSetup', () => {
         },
       },
     })
-    const button = await screen.findByRole('button', { name: 'Find players (beta, takes ~2 h)' })
+    const button = await screen.findByRole('button', { name: 'Find players (beta, takes about 2 hours)' })
     expect(screen.getByText('Not looked for yet. Finding the players is a beta: it takes about 2 hours per match.')).toBeInTheDocument()
     fireEvent.click(button)
     await waitFor(() => expect(found).toEqual([`/api/videos/${ID}/players/find`]))

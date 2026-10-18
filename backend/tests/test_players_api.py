@@ -570,3 +570,113 @@ def test_ball_contacts_skip_bounces() -> None:
     assert ball.contact_near(15_900, 500) is None  # too far from the tag
     assert ball.contact_near(16_050, 100) is None  # the bounce at 16 s is the floor
     assert ball.at(10_000) == pytest.approx((0.4, 0.6))
+
+
+# --- players v2: the GPU worker without the NAS (PLAN §8.2) ------------------------------------
+
+
+def test_a_gpu_worker_reads_the_rendition_and_writes_to_the_bucket(
+    ready: Any, app: FastAPI, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
+) -> None:
+    trajectory(analyser, store)
+    job = claim(analyser, "players")
+    params, vid = job["params"], ready["id"]
+    assert params["rendition"] == "1080p"
+    found = analyser.post(f"/api/worker/jobs/{job['id']}/inputs").json()
+    rendition = found["rendition"]
+    assert rendition["init"] == f"media/{vid}/1080p/init.mp4"
+    assert rendition["segments"] == [
+        [f"media/{vid}/1080p/seg_00000.m4s", 0, 4000],
+        [f"media/{vid}/1080p/seg_00001.m4s", 4000, 4000],
+    ]
+    # Shirt numbers only (no names): readings of other numbers are misreads.
+    assert 7 in found["roster"]["us"] and all(isinstance(n, int) for n in found["roster"]["us"])
+
+    def sign(op: str, *keys: str) -> int:
+        r = analyser.post(f"/api/worker/jobs/{job['id']}/sign", json={"op": op, "keys": keys})
+        return r.status_code
+
+    assert sign("get", rendition["init"], rendition["segments"][1][0]) == 200
+    assert sign("get", f"media/{vid}/540p/seg_00000.m4s") == 403
+    assert sign("get", f"media/{vid}/1080p/../thumbs/sprite_0.jpg") == 403
+    assert sign("get", f"{params['prefix']}index.json.gz") == 403
+    assert sign("put", f"{params['prefix']}tracks.npz") == 200
+    assert sign("put", f"media/{vid}/1080p/seg_00000.m4s") == 403
+
+    result = players_result(job, store)
+    prefix = params["prefix"]
+    result["tracks_artifact"] = {"key": f"{prefix}tracks.npz", "sha256": "f" * 64, "bytes": 99}
+    del result["index"]["nas_path"], result["sheets"]["nas_dir"]
+    for c in result["clusters"]:
+        c["confidence"] = 0.3 if c["key"] == 1 else 0.9
+    bad = {**result, "tracks_artifact": {**result["tracks_artifact"], "key": f"{prefix}x.npz"}}
+    complete(analyser, job, bad, status=422)  # and the job failed with it
+    from pydantic import ValidationError
+
+    from wieplay.core.players import FileIn
+
+    with pytest.raises(ValidationError):  # on the NAS or in the bucket, not both
+        FileIn(nas_path="x/y.npz", key=f"{prefix}tracks.npz", sha256="f" * 64, bytes=1)
+    with pytest.raises(ValidationError):
+        FileIn(sha256="f" * 64, bytes=1)
+
+
+def test_bucket_results_are_stored_with_their_keys_and_the_cards_confidence(
+    ready: Any, app: FastAPI, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
+) -> None:
+    from wieplay.core.models import AnalysisArtifact
+
+    trajectory(analyser, store)
+    job = claim(analyser, "players")
+    prefix = job["params"]["prefix"]
+    result = players_result(job, store)
+    result["tracks_artifact"] = {"key": f"{prefix}tracks.npz", "sha256": "f" * 64, "bytes": 99}
+    del result["index"]["nas_path"], result["sheets"]["nas_dir"]
+    for c in result["clusters"]:
+        c["confidence"] = 0.3 if c["key"] == 1 else 0.9
+    complete(analyser, job, result)
+    with app.state.sessionmaker() as db:
+        arts = {a.kind: a for a in db.scalars(select(AnalysisArtifact))}
+    assert arts["player_tracks"].nas_path == f"s3:{prefix}tracks.npz"
+    assert arts["player_tracks"].stats["object_key"] == f"{prefix}tracks.npz"
+    assert arts["player_index"].nas_path == f"s3:{prefix}index.json.gz"
+    state = gallery(club["coach"], ready)
+    clusters = by_key(state)
+    assert clusters[1]["confidence"] == 0.3 and clusters[1]["uncertain"] is True
+    assert clusters[2]["uncertain"] is False and state["find_minutes"] == 120
+    summary = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()["players"]
+    assert summary["uncertain"] == 1
+    # Named or merged by the coach: no longer the job's guess.
+    r = club["coach"].patch(
+        f"/api/videos/{ready['id']}/players/clusters/{clusters[1]['id']}",
+        json={"number": 7, "not_player": False},
+    )
+    assert r.status_code == 200 and by_key(r.json())[1]["uncertain"] is False
+    r = club["coach"].post(
+        f"/api/videos/{ready['id']}/players/merge",
+        json={"into": clusters[3]["id"], "sources": [clusters[4]["id"]]},
+    )
+    assert r.status_code == 200 and by_key(r.json())[3]["confidence"] is None
+
+
+def test_a_gpu_worker_gives_a_job_back_without_losing_an_attempt(
+    ready: Any, app: FastAPI, analyser: TestClient, store: FakeStore
+) -> None:
+    from wieplay.core.models import Job
+
+    trajectory(analyser, store)
+    job = claim(analyser, "players")
+    r = analyser.post(
+        f"/api/worker/jobs/{job['id']}/fail",
+        json={"error": "GPU busy", "retryable": True, "retry_after_s": 1800, "given_back": True},
+    )
+    assert r.status_code == 204
+    with app.state.sessionmaker() as db:
+        row = db.get(Job, uuid.UUID(job["id"]))
+        assert row is not None
+        assert row.status == "queued" and row.attempts == 0 and row.not_before is not None
+    # Waiting until then; a restarted GPU worker frees its leases without taking a job.
+    r = analyser.post(
+        "/api/worker/claim", json={"caps": CAPS, "wait": False, "max": 0, "restarted": True}
+    )
+    assert r.status_code == 200 and r.json()["jobs"] == []

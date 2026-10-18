@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # (POST /api/videos/{id}/players/find) or an admin with `wieplay.cli players`. The
     # attribution of actions runs whenever a video has players.
     players_auto: bool = False
+    # What a coach is told the search takes (minutes): ~120 on the Lenovo's CPU, ~20 when
+    # the players job's caps (WIEPLAY_PLAYERS_CAPS) send it to the GPU worker (PLAN §8.2).
+    players_minutes: int = 120
     # Suggested actions (PLAN §10.4a) are written only once the action finder's held-out score
     # on games whose actions a coach reviewed passes the bars (auto); "on" writes them anyway
     # (testing), "off" never. Below the bars the finder still runs and measures itself.

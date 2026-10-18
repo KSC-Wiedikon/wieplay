@@ -24,6 +24,7 @@ from wieplay.worker import ffmpeg, importer
 from wieplay.worker import recap as recap_pictures
 from wieplay.worker.client import ApiClient, ClaimedJob
 from wieplay.worker.config import WorkerSettings
+from wieplay.worker.gpu_guard import GpuGuard
 
 log = logging.getLogger(__name__)
 CHUNK = 8 * 1024 * 1024
@@ -48,6 +49,8 @@ class Context:
     job: ClaimedJob
     cancel: threading.Event
     report: Callable[[float, str], None]
+    # A GPU worker's busy guard (gpu_guard.py): GPU jobs give way between frames.
+    gpu: GpuGuard | None = None
 
     @property
     def scratch(self) -> Path:

@@ -75,6 +75,10 @@ class ClusterOut(BaseModel):
     referee_guess: bool  # the job thought: a referee or line judge
     ocr_number: int | None  # the number reader's suggestion
     ocr_confidence: float | None
+    # Players v2: how sure the job is that this card is one whole person (None: an older
+    # run, or the coach merged or split it); `uncertain` asks the coach to check it.
+    confidence: float | None = None
+    uncertain: bool = False
     crops: list[list[int]]  # [page, cell] in the contact sheets
     detections: int
     seconds: float  # footage of this person, at the detection rate
@@ -124,8 +128,11 @@ class PlayersOut(BaseModel):
     video_id: uuid.UUID
     available: bool
     can_edit: bool
-    # Start finding the players (~2 h of CPU): coaches and helpers, not every player.
+    # Start finding the players (~2 h of CPU, ~20 min on the GPU worker): coaches and
+    # helpers, not every player.
     can_find: bool = False
+    # What the search takes, in minutes (settings.players_minutes).
+    find_minutes: int = 120
     status: str  # none | queued | running | done | failed
     job: JobStateOut | None
     run: RunOut | None
@@ -208,7 +215,12 @@ def refresh(db: Session, video: Video, store: ObjectStore | None) -> dict[str, A
 
 
 def players_out(
-    db: Session, video: Video, viewer: Viewer, access: TeamAccess, store: ObjectStore | None
+    db: Session,
+    video: Video,
+    viewer: Viewer,
+    access: TeamAccess,
+    store: ObjectStore | None,
+    minutes: int = 120,
 ) -> PlayersOut:
     summary = refresh(db, video, store)
     run = players.latest_run(db, video.id)
@@ -242,6 +254,7 @@ def players_out(
         available=video.sport in players.SPORTS,
         can_edit=can_edit,
         can_find=can_edit and can_run_analysis(viewer, access.ref, access.leads),
+        find_minutes=minutes,
         status=status,
         job=JobStateOut(
             id=job.id,
@@ -279,6 +292,13 @@ def players_out(
                 referee_guess=c.referee_guess,
                 ocr_number=c.ocr_number,
                 ocr_confidence=c.ocr_confidence,
+                confidence=c.confidence,
+                uncertain=(
+                    c.confidence is not None
+                    and c.confidence < players.UNCERTAIN
+                    and c.number is None
+                    and not c.not_player
+                ),
                 crops=c.crops,
                 detections=c.detections,
                 seconds=round(c.detections / fps, 1),
@@ -312,12 +332,16 @@ def _store(request: Request) -> ObjectStore | None:
     return store
 
 
+def _minutes(request: Request) -> int:
+    return int(getattr(request.app.state.settings, "players_minutes", 120))
+
+
 @router.get("/videos/{video_id}/players", response_model=PlayersOut)
 def get_players(video_id: uuid.UUID, request: Request, viewer: ViewerDep, db: DbDep) -> PlayersOut:
     video, access = _readable(db, viewer, video_id)
     if video.status == "ready" and video.sport in players.SPORTS:
         tagging.set_actor(db, viewer.member_id)
-    return players_out(db, video, viewer, access, _store(request))
+    return players_out(db, video, viewer, access, _store(request), _minutes(request))
 
 
 @router.get("/videos/{video_id}/players/sheets/{page}")
@@ -397,7 +421,7 @@ def find_players(video_id: uuid.UUID, request: Request, viewer: ViewerDep, db: D
     job = players.queue_players(db, video)
     audit(db, viewer.member_id, "players_requested", "video", str(video.id), job=str(job.id))
     db.commit()
-    return players_out(db, video, viewer, access, _store(request))
+    return players_out(db, video, viewer, access, _store(request), _minutes(request))
 
 
 @router.patch("/videos/{video_id}/players/clusters/{cluster_id}", response_model=PlayersOut)
@@ -424,7 +448,7 @@ def assign(
         cluster=str(row.id), number=body.number, not_player=body.not_player,
     )  # fmt: skip
     db.commit()
-    return players_out(db, video, viewer, access, _store(request))
+    return players_out(db, video, viewer, access, _store(request), _minutes(request))
 
 
 @router.post("/videos/{video_id}/players/merge", response_model=PlayersOut)
@@ -444,7 +468,7 @@ def merge(
         into=str(target.id), sources=[str(s.id) for s in sources],
     )  # fmt: skip
     db.commit()
-    return players_out(db, video, viewer, access, _store(request))
+    return players_out(db, video, viewer, access, _store(request), _minutes(request))
 
 
 @router.post("/videos/{video_id}/players/clusters/{cluster_id}/split", response_model=PlayersOut)
@@ -468,7 +492,7 @@ def split(
         cluster=str(row.id), new=str(new.id), tracks=len(body.tracks),
     )  # fmt: skip
     db.commit()
-    return players_out(db, video, viewer, access, _store(request))
+    return players_out(db, video, viewer, access, _store(request), _minutes(request))
 
 
 @router.post("/videos/{video_id}/players/swap-teams", response_model=PlayersOut)
@@ -480,7 +504,7 @@ def swap_teams(video_id: uuid.UUID, request: Request, viewer: ViewerDep, db: DbD
     _reattribute(db, video, _store(request))
     audit(db, viewer.member_id, "players_teams_swapped", "video", str(video.id))
     db.commit()
-    return players_out(db, video, viewer, access, _store(request))
+    return players_out(db, video, viewer, access, _store(request), _minutes(request))
 
 
 @router.post("/videos/{video_id}/players/apply", response_model=ApplyOut)
@@ -496,5 +520,6 @@ def apply(
     audit(db, viewer.member_id, "players_applied", "video", str(video.id), events=applied)
     db.commit()
     return ApplyOut(
-        applied=applied, players=players_out(db, video, viewer, access, _store(request))
+        applied=applied,
+        players=players_out(db, video, viewer, access, _store(request), _minutes(request)),
     )

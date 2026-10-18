@@ -24,7 +24,7 @@ import sys
 import zlib
 from array import array
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -55,7 +55,11 @@ HEAD_ROOM_SHARE = 0.15
 MIN_TRACK_DETECTIONS = 4  # 0.4 s at 10 fps
 MIN_CROP_PX = 40  # box height for a crop or an appearance sample
 OCCLUDED_IOU = 0.15  # a box overlapping another this much is no clean crop
-CROPS_PER_TRACK = 4
+CROPS_PER_TRACK = 4  # the gallery's best crops of a track
+# Crops kept per track for reading its number: the best of every CROP_BUCKET_FRAMES (2 s at
+# 10 fps), at most MAX_CROPS: a track followed through a set shows its back many times.
+MAX_CROPS = 16
+CROP_BUCKET_FRAMES = 20
 DESCRIPTOR_EVERY = 3  # every third detection of a track feeds its appearance
 CELL_W, CELL_H = 80, 160  # contact sheet cells
 SHEET_COLS, SHEET_ROWS = 10, 8
@@ -312,21 +316,59 @@ class Crop:
     quality: float
     frame: int
     jpeg: bytes  # the box at source resolution (capped), JPEG
+    height: int = 0  # the box's height in source pixels
 
 
 @dataclass
 class TrackData:
+    """What the collector keeps of one track while the frames stream by: per detection its
+    frame, side, foot height, box height, box and feet (aligned lists), the look every few
+    detections, and the best crops spread over its time."""
+
     track_id: int
     frames: list[int] = field(default_factory=list)
     sides: list[int] = field(default_factory=list)
-    feet: list[tuple[float, float]] = field(default_factory=list)  # court metres
     foot_v: list[float] = field(default_factory=list)
     heights_px: list[float] = field(default_factory=list)
+    boxes: list[tuple[float, float, float, float]] = field(default_factory=list)  # normalised
+    foot_at: list[tuple[float, float] | None] = field(default_factory=list)  # court metres
     descriptors: list[Arr] = field(default_factory=list)
-    crops: list[Crop] = field(default_factory=list)
+    desc_frames: list[int] = field(default_factory=list)
+    # The best crop of each stretch of `bucket` frames; past MAX_CROPS the stretches double,
+    # so the crops stay spread over the whole track.
+    slots: dict[int, Crop] = field(default_factory=dict)
+    bucket: int = CROP_BUCKET_FRAMES
     window: int = -1
     votes: dict[int, float] = field(default_factory=dict)
     reads: int = 0
+
+    @property
+    def feet(self) -> list[tuple[float, float]]:
+        return [f for f in self.foot_at if f is not None]
+
+    @property
+    def crops(self) -> list[Crop]:
+        return sorted(self.slots.values(), key=lambda c: -c.quality)
+
+    def keep_crop(self, crop: Crop) -> None:
+        key = crop.frame // self.bucket
+        held = self.slots.get(key)
+        if held is None or crop.quality > held.quality:
+            self.slots[key] = crop
+        while len(self.slots) > MAX_CROPS:
+            self.bucket *= 2
+            merged: dict[int, Crop] = {}
+            for c in self.slots.values():
+                k = c.frame // self.bucket
+                if k not in merged or c.quality > merged[k].quality:
+                    merged[k] = c
+            self.slots = merged
+
+    def wants_crop(self, frame: int, height: float) -> bool:
+        """Could a crop of this height at this frame be kept? (Checked before cutting and
+        encoding it.) A sharper crop scores at most ~3x its height."""
+        held = self.slots.get(frame // self.bucket)
+        return held is None or height * 3 > held.quality
 
 
 def encode_jpeg(img: Arr, quality: int = 90) -> bytes:
@@ -355,7 +397,10 @@ class Collector:
         self.frame_w, self.frame_h = frame_w, frame_h
         self.roi_px = roi_px
         self.times: list[int] = []  # ms of each analysed frame
-        self.windows: list[int] = []  # the rally window of each analysed frame
+        # The rally window of each analysed frame (-1: the dead time between two rallies of
+        # a stretch the tracker follows through) and its stretch (span).
+        self.windows: list[int] = []
+        self.spans: list[int] = []
         self.rows: list[tuple[int, int, float, float, float, float]] = []  # frame, track, box
         self.tracks: dict[int, TrackData] = {}
         self.detections = 0
@@ -368,12 +413,22 @@ class Collector:
         several, PLAN §10.6): its court mapping and the ROI the frames are cropped to."""
         self.geom, self.roi_px = geom, roi_px
 
-    def add(self, t_ms: int, window: int, roi_img: Arr, boxes: Arr, scores: Arr, ids: Arr) -> int:
+    def add(
+        self,
+        t_ms: int,
+        window: int,
+        roi_img: Arr,
+        boxes: Arr,
+        scores: Arr,
+        ids: Arr,
+        span: int = -1,
+    ) -> int:
         """One analysed frame: boxes in ROI pixels with their track ids. Returns the frame
         index."""
         frame = len(self.times)
         self.times.append(int(t_ms))
         self.windows.append(window)
+        self.spans.append(span)
         rx, ry, _, _ = self.roi_px
         fw, fh = self.frame_w, self.frame_h
         n = len(boxes)
@@ -399,32 +454,33 @@ class Collector:
             tr = self.tracks.get(tid)
             if tr is None:
                 tr = self.tracks[tid] = TrackData(tid, window=window)
+            if tr.window < 0 <= window:
+                tr.window = window
             tr.frames.append(frame)
             # Uncalibrated: the side is decided at the end, from the feet (finish_tracks).
             tr.sides.append(self.geom.side(foot, v2) if self.geom.calibrated else -1)
             tr.foot_v.append(v2)
-            if foot is not None:
-                tr.feet.append(foot)
+            tr.foot_at.append(foot)
+            tr.boxes.append((u1, v1, u2, v2))
             h_px = y2 - y1
             tr.heights_px.append(h_px)
             self.rows.append((frame, tid, u1, v1, u2, v2))
             if h_px < MIN_CROP_PX or crowded[i] > OCCLUDED_IOU:
                 continue
             take_desc = len(tr.frames) % DESCRIPTOR_EVERY == 1
-            worst = min((c.quality for c in tr.crops), default=0.0)
-            if not take_desc and len(tr.crops) >= CROPS_PER_TRACK and h_px < worst:
+            if not take_desc and not tr.wants_crop(frame, h_px):
                 continue
             crop = roi_img[int(y1) : math.ceil(y2), int(x1) : math.ceil(x2)]
             if crop.shape[0] < 8 or crop.shape[1] < 4:
                 continue
             if take_desc:
                 tr.descriptors.append(descriptor(crop))
-            grey = crop[..., 1]
-            quality = h_px * (1 + math.log1p(sharpness(grey)) / 4)
-            if len(tr.crops) < CROPS_PER_TRACK or quality > worst:
-                tr.crops.append(Crop(quality, frame, encode_jpeg(np.ascontiguousarray(crop))))
-                tr.crops.sort(key=lambda c: -c.quality)
-                del tr.crops[CROPS_PER_TRACK:]
+                tr.desc_frames.append(frame)
+            quality = h_px * (1 + math.log1p(sharpness(crop[..., 1])) / 4)
+            held = tr.slots.get(frame // tr.bucket)
+            if held is not None and quality <= held.quality:
+                continue
+            tr.keep_crop(Crop(quality, frame, encode_jpeg(np.ascontiguousarray(crop)), round(h_px)))
         return frame
 
 
@@ -448,160 +504,227 @@ class Track:
     foot: tuple[float, float] | None = None  # median, court metres
     crops: list[Crop] = field(default_factory=list)
     referee: bool = False
+    # Players v2 (identities.py): where and when it began and ended, its detections per
+    # rally window and side, and the pieces it was linked from (a chain of tracks).
+    t0_ms: int = 0
+    t1_ms: int = 0
+    first_box: tuple[float, float, float, float] | None = None
+    last_box: tuple[float, float, float, float] | None = None
+    first_foot: tuple[float, float] | None = None
+    last_foot: tuple[float, float] | None = None
+    window_sides: dict[tuple[int, int], int] = field(default_factory=dict)
+    members: list[Track] = field(default_factory=list)
+    segments: list[tuple[int, int]] = field(default_factory=list)  # (first, last) frames
+    confidence: float = 0.0
+    # The collected detections it was made from (data.frames[lo:hi]); its readings
+    # (frame, number, confidence) before the roster check.
+    data: TrackData | None = None
+    lo: int = 0
+    hi: int = 0
+    reads: list[tuple[int, int, float]] = field(default_factory=list)
+
+    @property
+    def rally_detections(self) -> int:
+        return sum(self.window_sides.values())
+
+    def spans(self) -> list[tuple[int, int]]:
+        return self.segments or [(self.first, self.last)]
+
+
+def _fallback(col: Collector) -> Geometry:
+    """Without a calibration: the foot height between the far and the near team."""
+    if col.split_v is None:
+        unsure = [
+            v
+            for tr in col.tracks.values()
+            for v, s in list(zip(tr.foot_v, tr.sides, strict=True))[:: max(1, len(tr.foot_v) // 8)]
+            if s < 0
+        ]
+        if unsure:
+            col.split_v = split_from_feet(unsure)
+    return Geometry(roi=(0.0, 0.0, 1.0, 1.0), split_v=col.split_v)
+
+
+def make_track(
+    tr: TrackData,
+    col: Collector,
+    fallback: Geometry,
+    lo: int = 0,
+    hi: int | None = None,
+    track_id: int | None = None,
+) -> Track:
+    """A track from the collected detections lo..hi of `tr` (all by default; a part when a
+    track is split where two people swapped)."""
+    hi = len(tr.frames) if hi is None else hi
+    frames = tr.frames[lo:hi]
+    raw_sides = tr.sides[lo:hi]
+    foot_v = tr.foot_v[lo:hi]
+    sides = [
+        sd if sd >= 0 else fallback.side(None, v) for sd, v in zip(raw_sides, foot_v, strict=True)
+    ]
+    known = [sd for sd in raw_sides if sd >= 0]
+    if known:
+        near = sum(1 for sd in known if sd == NEAR)
+        side = NEAR if near * 2 >= len(known) else FAR
+    else:
+        side = fallback.side(None, float(np.median(foot_v)))
+    window_sides: dict[tuple[int, int], int] = defaultdict(int)
+    first_window = -1
+    for f, sd in zip(frames, sides, strict=True):
+        w = col.windows[f] if f < len(col.windows) else -1
+        if w >= 0:
+            window_sides[(w, sd)] += 1
+            if first_window < 0:
+                first_window = w
+    if first_window < 0:
+        first_window = _nearest_window(col, frames[0], frames[-1])
+    foot_at = tr.foot_at[lo:hi]
+    feet = [f for f in foot_at if f is not None]
+    foot = None
+    referee = False
+    if feet:
+        arr = np.asarray(feet)
+        foot = (float(np.median(arr[:, 0])), float(np.median(arr[:, 1])))
+        xs = arr[:, 0]
+        off = (xs < -OFF_SIDE_M) | (xs > court.WIDTH_M + OFF_SIDE_M)
+        referee = float(off.mean()) >= OFF_COURT_SHARE
+    f0, f1 = frames[0], frames[-1]
+    descs = [d for d, f in zip(tr.descriptors, tr.desc_frames, strict=True) if f0 <= f <= f1]
+    return Track(
+        track_id=tr.track_id if track_id is None else track_id,
+        first=f0,
+        last=f1,
+        detections=len(frames),
+        side=side,
+        window=first_window if first_window >= 0 else tr.window,
+        descriptor=np.median(np.stack(descs), axis=0) if descs else None,
+        height_px=float(np.median(tr.heights_px[lo:hi])),
+        foot=foot,
+        crops=[c for c in tr.crops if f0 <= c.frame <= f1],
+        referee=referee,
+        t0_ms=int(col.times[f0]),
+        t1_ms=int(col.times[f1]),
+        first_box=tr.boxes[lo] if tr.boxes else None,
+        last_box=tr.boxes[hi - 1] if tr.boxes else None,
+        first_foot=foot_at[0] if foot_at else None,
+        last_foot=foot_at[-1] if foot_at else None,
+        window_sides=dict(window_sides),
+        data=tr,
+        lo=lo,
+        hi=hi,
+    )
+
+
+def _nearest_window(col: Collector, first: int, last: int, reach: int = 3000) -> int:
+    """A track seen only between two rallies: the rally window nearest it in time (its team
+    is that window's), -1 when none is within `reach` frames."""
+    n = len(col.windows)
+    for d in range(1, reach):
+        before, after = first - d, last + d
+        if after < n and col.windows[after] >= 0:
+            return col.windows[after]
+        if 0 <= before < n and col.windows[before] >= 0:
+            return col.windows[before]
+        if before < 0 and after >= n:
+            break
+    return -1
 
 
 def finish_tracks(col: Collector) -> list[Track]:
     """The tracks long enough to count, each with its side (by majority; without a
     calibration by its median foot height against the split between the two teams)."""
-    unsure = [
-        v
+    fallback = _fallback(col)
+    out = [
+        make_track(tr, col, fallback)
         for tr in col.tracks.values()
-        for v, s in list(zip(tr.foot_v, tr.sides, strict=True))[:: max(1, len(tr.foot_v) // 8)]
-        if s < 0
+        if len(tr.frames) >= MIN_TRACK_DETECTIONS
     ]
-    if unsure and col.split_v is None:
-        col.split_v = split_from_feet(unsure)
-    fallback = Geometry(roi=(0.0, 0.0, 1.0, 1.0), split_v=col.split_v)
-    out = []
-    for tr in col.tracks.values():
-        if len(tr.frames) < MIN_TRACK_DETECTIONS:
-            continue
-        known = [s for s in tr.sides if s >= 0]
-        if known:
-            near = sum(1 for s in known if s == NEAR)
-            side = NEAR if near * 2 >= len(known) else FAR
-        else:
-            side = fallback.side(None, float(np.median(tr.foot_v)))
-        foot = None
-        if tr.feet:
-            feet = np.asarray(tr.feet)
-            foot = (float(np.median(feet[:, 0])), float(np.median(feet[:, 1])))
-        desc = np.median(np.stack(tr.descriptors), axis=0) if tr.descriptors else None
-        referee = False
-        if tr.feet:
-            xs = np.asarray(tr.feet)[:, 0]
-            off = (xs < -OFF_SIDE_M) | (xs > court.WIDTH_M + OFF_SIDE_M)
-            referee = float(off.mean()) >= OFF_COURT_SHARE
-        out.append(
-            Track(
-                track_id=tr.track_id,
-                first=tr.frames[0],
-                last=tr.frames[-1],
-                detections=len(tr.frames),
-                side=side,
-                window=tr.window,
-                descriptor=desc,
-                height_px=float(np.median(tr.heights_px)),
-                foot=foot,
-                crops=list(tr.crops),
-                referee=referee,
-            )
-        )
     out.sort(key=lambda t: t.track_id)
     return out
 
 
-def read_numbers(tracks: Sequence[Track], reader: Any, per_track: int = CROPS_PER_TRACK) -> int:
-    """Shirt numbers from each track's best crops (torso part); returns the crops read."""
-    done = 0
+OCR_MIN_PX = 56  # a smaller person shows no readable number at 1080p
+
+
+def read_numbers(
+    tracks: Sequence[Track],
+    reader: Any,
+    per_track: int | Callable[[Track], int] = CROPS_PER_TRACK,
+    allowed: dict[str, set[int]] | None = None,
+    workers: int = 1,
+) -> int:
+    """Shirt numbers from each track's best crops (the whole person: the reader looks at the
+    torso); returns the crops read. Every reading is kept with its frame (`reads`, to find
+    where two people swapped); `allowed` (team → numbers, from the roster) leaves readings
+    no one on that team wears out of the votes (a track's team must be known then). With
+    `workers` > 1 the crops are read on that many threads (ONNX Runtime and Pillow let go of
+    the GIL)."""
+    jobs: list[tuple[Track, Crop]] = []
     for t in tracks:
         if t.referee:
             continue
-        for c in t.crops[:per_track]:
-            img = decode_jpeg(c.jpeg)
-            h = img.shape[0]
-            torso = np.ascontiguousarray(img[int(0.1 * h) : max(int(0.6 * h), 1)])
-            number, conf = reader.read(torso)
-            done += 1
-            if number is not None:
-                t.votes[number] = t.votes.get(number, 0.0) + conf
-        settle_number(t)
-    return done
+        budget = per_track(t) if callable(per_track) else per_track
+        crops = [c for c in t.crops if (c.height or c.quality) >= OCR_MIN_PX] or t.crops[:1]
+        jobs.extend((t, c) for c in crops[:budget])
+
+    def one(job: tuple[Track, Crop]) -> tuple[int | None, float]:
+        number, conf = reader.read_person(decode_jpeg(job[1].jpeg))
+        return number, float(conf)
+
+    if workers > 1 and len(jobs) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            found = list(pool.map(one, jobs))
+    else:
+        found = [one(j) for j in jobs]
+    for (t, c), (number, conf) in zip(jobs, found, strict=True):
+        if number is not None:
+            t.reads.append((c.frame, number, conf))
+    for t in tracks:
+        if not t.referee:
+            t.reads.sort()
+            vote(t, allowed)
+    return len(jobs)
+
+
+def vote(t: Track, allowed: dict[str, set[int]] | None = None) -> None:
+    """A track's number from its readings (those its team's roster allows)."""
+    ok = allowed.get(t.team) if allowed else None
+    t.votes = {}
+    for _, number, conf in t.reads:
+        if ok and number not in ok:
+            continue
+        t.votes[number] = t.votes.get(number, 0.0) + conf
+    settle_number(t)
+
+
+def fold_partials(votes: dict[int, float]) -> dict[int, float]:
+    """A single digit read where a two-digit number is read too is mostly that number with
+    a digit hidden (an arm, a fold): "2" and "12" → "12", when one two-digit number holds
+    the digit at its start or end and has at least half its votes."""
+    out = dict(votes)
+    for d, v in votes.items():
+        if d >= 10:
+            continue
+        hosts = [n for n in votes if n >= 10 and str(d) in (str(n)[0], str(n)[1])]
+        if len(hosts) == 1 and votes[hosts[0]] >= 0.5 * v:
+            out[hosts[0]] += v
+            del out[d]
+    return out
 
 
 def settle_number(t: Track) -> None:
     if not t.votes:
         t.number, t.number_conf = None, 0.0
         return
-    number, score = max(t.votes.items(), key=lambda kv: kv[1])
-    total = sum(t.votes.values())
+    votes = fold_partials(t.votes)
+    number, score = max(votes.items(), key=lambda kv: kv[1])
+    total = sum(votes.values())
     if score >= NUMBER_MIN_VOTES and score / total >= NUMBER_SHARE:
         t.number, t.number_conf = number, round(min(1.0, score / (score + 1.0)), 3)
     else:
         t.number, t.number_conf = None, 0.0
-
-
-def assign_teams(tracks: Sequence[Track], near_team: Sequence[str | None]) -> dict[str, Any]:
-    """Our team or theirs for each track: the side of the net it played on, and which team
-    was on that side in its rally window (`near_team[window]`: "us", "them" or None, from
-    the serve and the sets). Windows with no answer take the team whose shirts look like
-    the side's (kit colours learnt from the known windows, else from all windows, with
-    "near in the first window = us" as the start: the coach can swap)."""
-    groups: dict[tuple[int, int], list[Track]] = defaultdict(list)
-    for t in tracks:
-        if not t.referee:
-            groups[(t.window, t.side)].append(t)
-    windows = sorted({w for w, _ in groups})
-
-    def mean_desc(items: list[Track]) -> Arr | None:
-        ds = [t.descriptor for t in items if t.descriptor is not None]
-        return np.mean(np.stack(ds), axis=0) if ds else None
-
-    # near_is_us per window: True / False / None
-    known: dict[int, bool] = {}
-    for w in windows:
-        team = near_team[w] if 0 <= w < len(near_team) else None
-        if team in ("us", "them"):
-            known[w] = team == "us"
-    guess: dict[int, bool] = dict(known)
-    unknown = [w for w in windows if w not in known]
-    if unknown:
-        state = dict(known)
-        # The kits are learnt from the known windows; with none, from the first window
-        # (near = us) and then from every window as it is decided.
-        if not known:
-            state[windows[0]] = True
-        for _ in range(8):
-            decided = list(state)
-            us_d = [
-                d
-                for w in decided
-                if (d := mean_desc(groups[(w, NEAR if state[w] else FAR)])) is not None
-            ]
-            them_d = [
-                d
-                for w in decided
-                if (d := mean_desc(groups[(w, FAR if state[w] else NEAR)])) is not None
-            ]
-            if not us_d or not them_d:
-                break
-            us_p, them_p = np.mean(np.stack(us_d), axis=0), np.mean(np.stack(them_d), axis=0)
-            changed = False
-            for w in unknown:
-                if not known and w == windows[0]:
-                    continue  # the anchor
-                near, far = mean_desc(groups[(w, NEAR)]), mean_desc(groups[(w, FAR)])
-                keep = swap = 0.0
-                if near is not None:
-                    keep += distance(near, us_p)
-                    swap += distance(near, them_p)
-                if far is not None:
-                    keep += distance(far, them_p)
-                    swap += distance(far, us_p)
-                value = keep <= swap
-                if state.get(w) != value:
-                    state[w], changed = value, True
-            if not changed or known:
-                break  # with known windows the kits are fixed: one pass decides
-        guess = state
-    for t in tracks:
-        near_us = guess.get(t.window, True)
-        t.team = "us" if (t.side == NEAR) == near_us else "them"
-    return {
-        "windows": len(windows),
-        "known_windows": len(known),
-        "kit_guessed_windows": len(unknown),
-    }
 
 
 @dataclass
@@ -612,6 +735,7 @@ class Cluster:
     number: int | None = None  # the number reader's suggestion
     number_conf: float = 0.0
     referee: bool = False
+    confidence: float = 0.0  # one whole person? (identities.confidence)
 
     @property
     def detections(self) -> int:
@@ -619,7 +743,12 @@ class Cluster:
 
 
 def _overlap(a: Track, b: Track) -> bool:
-    return a.first <= b.last and b.first <= a.last
+    """Seen at the same time: two people. A chain of tracks is seen only in its pieces."""
+    if not (a.first <= b.last and b.first <= a.last):
+        return False
+    if not a.segments and not b.segments:
+        return True
+    return any(s0 <= e1 and s1 <= e0 for s0, e0 in a.spans() for s1, e1 in b.spans())
 
 
 def cluster_tracks(
@@ -697,7 +826,9 @@ def _agglomerate(groups: list[list[Track]], threshold: float) -> list[list[Track
                 blocked[i, j] = blocked[j, i] = True
             else:
                 ni, nj = _numbers(groups[i]), _numbers(groups[j])
-                if ni and nj and ni != nj:
+                # Colour never puts someone on a numbered card: teammates share the kit
+                # (players v2: numbers, the court and who is missing do; identities.py).
+                if ni or nj:
                     blocked[i, j] = blocked[j, i] = True
     alive = has.copy()
     inf = np.inf
@@ -735,6 +866,7 @@ def _cluster_number(c: Cluster) -> None:
             votes[number] += v
     if not votes:
         return
+    votes = defaultdict(float, fold_partials(dict(votes)))
     number, score = max(votes.items(), key=lambda kv: kv[1])
     total = sum(votes.values())
     if score >= NUMBER_MIN_VOTES and score / total >= NUMBER_SHARE:
@@ -827,9 +959,31 @@ def encode_index(col: Collector, tracks: Sequence[Track]) -> dict[str, Any]:
          "box": <uint16 x1 y1 x2 y2 per row, 1/65535 of the frame>}
 
     Arrays are little-endian, zlib, base64. Only rows of the tracks kept (players' tracks,
-    not referees')."""
-    keep = {t.track_id for t in tracks if not t.referee}
-    rows = sorted((r for r in col.rows if r[1] in keep), key=lambda r: (r[0], r[1]))
+    not referees'); the rows of a chain's pieces carry the chain's id."""
+    # A piece covers frames first..last of the tracker's track (data.track_id; a track cut
+    # where two people swapped has several pieces).
+    ranges: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
+    for t in tracks:
+        if t.referee:
+            continue
+        for m in t.members or [t]:
+            source = m.data.track_id if m.data is not None else m.track_id
+            ranges[source].append((m.first, m.last, t.track_id))
+
+    def owner(frame: int, source: int) -> int | None:
+        for first, last, chain in ranges.get(source, ()):
+            if first <= frame <= last:
+                return chain
+        return None
+
+    rows = sorted(
+        (
+            (r[0], tid, *r[2:])
+            for r in col.rows
+            if r[1] in ranges and (tid := owner(r[0], r[1])) is not None
+        ),
+        key=lambda r: (r[0], r[1]),
+    )
     n = len(col.times)
     start = np.zeros(n + 1, dtype=np.int64)
     for r in rows:

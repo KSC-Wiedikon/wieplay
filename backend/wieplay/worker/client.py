@@ -71,10 +71,11 @@ class ApiClient:
         wait: bool = True,
         restarted: bool = False,
         kinds: Sequence[str] | None = None,
+        max_jobs: int = 1,
     ) -> tuple[list[ClaimedJob], bool]:
         body: dict[str, Any] = {
             "caps": list(caps),
-            "max": 1,
+            "max": max_jobs,
             "version": self.version,
             "wait": wait,
             "restarted": restarted,
@@ -124,11 +125,19 @@ class ApiClient:
         self._post(f"/jobs/{job_id}/complete", result)
 
     def fail(
-        self, job_id: str, error: str, *, retryable: bool, retry_after_s: int | None = None
+        self,
+        job_id: str,
+        error: str,
+        *,
+        retryable: bool,
+        retry_after_s: int | None = None,
+        given_back: bool = False,
     ) -> None:
         body: dict[str, Any] = {"error": error[:4000], "retryable": retryable}
         if retry_after_s is not None:
             body["retry_after_s"] = retry_after_s
+        if given_back:
+            body["given_back"] = True
         self._post(f"/jobs/{job_id}/fail", body)
 
     def report_inbox(self, files: list[dict[str, Any]]) -> None:

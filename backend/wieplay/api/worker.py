@@ -49,7 +49,9 @@ WorkerDep = Annotated[Worker, Depends(current_worker)]
 
 class ClaimIn(BaseModel):
     caps: list[str] = Field(max_length=32)
-    max: int = Field(default=1, ge=1, le=4)
+    # 0: only "restarted" (a GPU worker that starts while the card is busy frees its old
+    # leases without taking a job).
+    max: int = Field(default=1, ge=0, le=4)
     version: str | None = Field(default=None, max_length=64)
     wait: bool = True
     # The worker's first claim since it started: it runs nothing, its old leases are free.
@@ -97,6 +99,9 @@ class FailIn(BaseModel):
     retryable: bool = True
     # Wait at least this long before the next attempt (at most 6 h).
     retry_after_s: int | None = Field(default=None, ge=0, le=6 * 3600)
+    # Not a failure: the worker gives the job back (a GPU worker whose card another process
+    # needs, PLAN §8.2); the attempt does not count.
+    given_back: bool = False
 
 
 class InboxEntry(BaseModel):
@@ -312,6 +317,11 @@ def complete(
 def fail(job_id: uuid.UUID, body: FailIn, worker: WorkerDep, db: DbDep) -> Response:
     job = _running(db, job_id, worker)
     delay = timedelta(seconds=body.retry_after_s) if body.retry_after_s else None
+    if body.given_back:
+        jobs.give_back(job, body.error, retry_after=delay)
+        log.info("job %s (%s) given back by %s: %s", job.id, job.kind, worker.name, body.error)
+        db.commit()
+        return Response(status_code=204)
     final = jobs.fail(job, body.error, retryable=body.retryable, retry_after=delay)
     if delay and job.kind == "import" and body.retryable:
         # YouTube's bot check: the other imports would meet it too, they wait as well.

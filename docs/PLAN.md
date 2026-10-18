@@ -529,6 +529,12 @@ segments, without audio unless a task needs it, with no names or IDs, deleted af
 - No face recognition, no face embeddings, no person re-identification across videos.
   Player attribution uses **jersey numbers and position on court only**. (Biometric data used
   for unique identification is sensitive personal data under the revDSG; avoid it entirely.)
+- Within one video, the players job links the pieces of one person by where and when they
+  were seen, the shirt number read on them, their team and the colour of their clothes
+  (head, shirt, shorts and legs regions as hue histograms: no face, no body shape, no
+  re-identification model). These colours exist **only in memory while that job runs**:
+  they are not stored, not compared with any other video, and gone when the job ends
+  (§10.5, players v2, 18.10.2026).
 - Detection is masked to the court polygon plus a margin, which also excludes spectators.
 - No third-party analytics and no third party in the browser: imported YouTube/Twitch videos
   are fetched by the worker and played from WiePlay's own storage.
@@ -815,6 +821,8 @@ player_cluster   id, video_id, model_run_id, key, team 'us'|'them', tracks jsonb
                  number NULL, member_id NULL, not_player, referee_guess, merged_into NULL,
                  source 'model'|'split', assigned_by, assigned_at
                  -- "a person in this video"; the coach's number is its only identity (§5.7)
+                 -- 0020 (18.10.2026, players v2): confidence NULL (0..1, one whole person?
+                 -- the gallery asks to check cards below 0.5; NULL once a coach merged or split)
 event_player     event_id, video_id, model_run_id, cluster_id, track_id, number, member_id,
                  method 'court'|'image', distance, confidence, contact_ms, applied_number,
                  event_version   -- who made the action as WiePlay sees it, beside the event
@@ -823,6 +831,8 @@ event_player     event_id, video_id, model_run_id, cluster_id, track_id, number,
 and the artifacts `player_tracks` (every box, `.npz` on the NAS), `player_index` (boxes per
 analysed frame for the API, JSON in the bucket and on the NAS) and `player_sheets` (the
 contact sheets of crops, JPEG in the bucket under `media/{video}/analysis/` and on the NAS).
+Written by the GPU worker (no NAS, §8.2), all three are in the bucket only, under the job's
+prefix (`tracks.npz` too), and `nas_path` holds `s3:<key>`.
 
 ### 6.10 People, access, privacy
 
@@ -1134,15 +1144,20 @@ tailnet; it is on no tailnet now. The path since then:
   security idea is unchanged: the worker routes are not reachable from the internet, only a
   machine with SSH access to the VPS can reach them, and the VPS has no access to the home
   network.
-- The Framework 16 GPU worker (§8.2) is not set up yet. It will need its own path to the API
-  (for example its own SSH tunnel), decided when it is set up.
+- The Framework 16 GPU worker (§8.2, since 18.10.2026) has its own path: a systemd user
+  unit on the laptop (`wieplay-gpu-tunnel.service`, `deploy/fw16/`) connects with a key of its
+  own to a VPS user that can do nothing but forward to the two API ports (`wieplay-tunnel`:
+  no shell, `restrict,port-forwarding,permitopen=…` in its authorized_keys) and publishes
+  them on the laptop's loopback (`127.0.0.1:18090` dev, `:18091` prod). It needs neither the
+  home network nor the Lenovo server, so the laptop works from anywhere; nothing listens
+  beyond its loopback. Runbook: [gpu-worker](runbooks/gpu-worker.md).
 
 ### 8.2 Workers
 
 | Worker | Caps | Notes |
 |---|---|---|
 | **Lenovo server** (`media`) | `ingest`, `inbox`, `transcode`, `thumbs`, `audio`, `analyse`, `cpu_analysis`, `analysis_copy`, `export`, `retention`, `nas` (+ `gpu_dispatch` once a provider backend exists). With `analyse` the worker runs a second, background lane for the analysis jobs (nice 15), so an hour of analysis never holds up an upload | Always on. Container limits (e.g. 6 CPUs, 8 GB) and `nice` so DNS and the other services on the box stay responsive. Mounts the NAS share. Reaches the API through `wieplay-api-tunnel.service` (§8.1). |
-| **Framework 16** (`gpu`) | `cuda`, `ml`, `nas` | Internal GPU worker, always on. **Busy guard**: stops claiming jobs while a training run or other GPU-heavy work uses the GPU (checked from free VRAM, plus a `wieplay-worker pause` switch); optionally only at night. ML jobs process the analysis copy in 5-minute chunks and checkpoint, so a pause or reboot loses at most one chunk. Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. A dev agent (`--env dev`) runs beside it, off by default. Not set up yet: it needs its own path to the API (§8.1). |
+| **Framework 16** (`fw16-prod`, `fw16-dev`) | `cuda`, `ml` | Internal GPU worker, **built 18.10.2026** (runbook: [gpu-worker](runbooks/gpu-worker.md)). Runs `wieplay.worker` natively (no Docker on the laptop) as systemd user units `wieplay-gpu-worker@prod` (at boot) and `@dev` (started by hand for tests, off otherwise), from `~/wieplay-gpu/<env>`: a release of the repo (`git archive` of the deployed commit) with its own venv and ONNX Runtime for CUDA; `scripts/deploy-gpu-worker.sh dev\|prod` from the Lenovo server. Takes the `players` job (`WIEPLAY_PLAYERS_CAPS=cuda,ml` in the API). **No NAS share** (the laptop's mounts need root): it reads the video's 1080p rendition from the bucket through signed URLs, a stretch at a time, and writes its files to the bucket. **Busy guard** (`worker/gpu_guard.py`): before every claim it waits while `~/wieplay-gpu/PAUSE` exists, the laptop is on battery, other processes hold more than 1 GB of GPU memory (the meeting scribe holds ~4 GB while it records or transcribes) or the card is more than 40 % busy, and logs why; during a job it checks the same every 10 s between frames, stops feeding the card while someone else needs it and gives the job back after 20 min (`given_back`: the attempt does not count). ONNX Runtime's memory on the card is capped (2 GB per model); a lock file keeps dev and prod from running a job at the same time; stopping the service gives the running job back at once. Low CPU and disk priority (`Nice=10`, `CPUWeight=40`, idle I/O). Laptop care: suspend disabled, battery charge limit ~80 % in firmware, good airflow when docked. Optionally only at night: not built (the guard covers the day). |
 
 ### 8.3 The GPU interface (backend-agnostic)
 
@@ -1166,7 +1181,7 @@ container entrypoint:  wieplay-ml run --spec spec.json   -> writes outputs, exit
 
 | Backend | How it runs the image | Use |
 |---|---|---|
-| `local-agent` | A GPU host runs `wieplay-worker` with `cuda` caps, **pulls** `ml_analyse` from the queue like any worker, and runs `wieplay-ml run` locally; inputs and outputs on the NAS | **Production now** (Framework 16) |
+| `local-agent` | A GPU host runs `wieplay-worker` with `cuda` caps, **pulls** `ml_analyse` from the queue like any worker, and runs `wieplay-ml run` locally; inputs and outputs on the NAS | **Production now** (Framework 16). As built 18.10.2026: the worker runs the job itself (the `players` job, no `wieplay-ml` image yet), inputs and outputs through signed URLs as a provider would (the laptop has no NAS share) |
 | `cloud-<provider>` | The Lenovo dispatcher claims the job and **pushes** it to a provider adapter that starts the image on a rented GPU; inputs and outputs are pre-signed object URLs | Later: an EU or Swiss provider (§8.6) |
 | `fake` | Returns canned outputs | CI |
 
@@ -1177,7 +1192,10 @@ long-ish signed URLs in the system: they point at a temporary object no user eve
 when the job ends.
 
 **Budget guard.** Every run records GPU, CPU and memory seconds and an estimated cost in
-`compute_usage` (electricity for `local-agent`). For a provider backend, the dispatcher checks
+`compute_usage` (electricity for `local-agent`). As built 18.10.2026 the ledger is the run's
+own record: each players run on the GPU keeps `timing.gpu_s` (its time on the card, pauses
+for other users excluded), `gpu_paused_s` and the providers in its `model_run`; the
+`compute_usage` table follows with the first paid backend. For a provider backend, the dispatcher checks
 the season's spend against the `budget` cap before submitting; when the cap would be exceeded,
 the job waits in `waiting_budget` and admins are told.
 
@@ -1194,7 +1212,7 @@ the job waits in `waiting_budget` and admins are told.
 | `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
 | `trajectory` (16.10.2026) | `analyse`, `nas` | The ball's path with contacts, the court finder's proposal (§10.4, §10.6). Background lane |
-| `players` (17.10.2026, beta) | `analyse`, `nas` (`WIEPLAY_PLAYERS_CAPS`, e.g. `gpu,nas` for a GPU worker) | People on the court in the rally windows (YOLO26s ONNX, ByteTrack), tracks → clusters, back crops, shirt-number suggestions (§10.5). On demand (`WIEPLAY_PLAYERS_AUTO` off by default; on: after each `court` job). Priority −12, background lane |
+| `players` (17.10.2026, beta; v2 18.10.2026) | `WIEPLAY_PLAYERS_CAPS`: `cuda`, `ml` (the GPU worker, on dev and prod since 18.10.2026), else `analyse`, `nas` (the Lenovo's background lane) | People on the court (YOLO26s ONNX, ByteTrack): on the GPU followed through each set, linked into the players of the video by shirt numbers, team and court position, a confidence per card, back crops (§10.5). On demand (`WIEPLAY_PLAYERS_AUTO`, §10.5). Priority −12 |
 | `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
 | `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
