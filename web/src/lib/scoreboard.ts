@@ -46,6 +46,34 @@ export interface BoardSegment {
   kind: 'start' | 'step' | 'jump' | 'set'
 }
 
+/** One set of the club scoreboard's log against the official result (docs/PLAN.md §10.10). */
+export interface ScoreLogSet {
+  no: number
+  /** [us, them] where the log ends the set, and the official score. */
+  final: number[] | null
+  official: number[] | null
+  agrees: boolean
+  points: number
+  matched: number
+  trusted: boolean
+}
+
+/** The club scoreboard's log of the game, as the newest scoring used it. */
+export interface ScoreLogState {
+  source: string
+  imported_at: string | null
+  /** Every set with an official score agrees and at least one is used. */
+  trusted: boolean
+  sets: ScoreLogSet[]
+  points: number
+  matched: number
+  matched_share: number
+  shifts: number
+  rallies_told: number
+  path_agrees: number
+  disagree_with_video: number
+}
+
 export interface ScoreboardState {
   video_id: string
   can_edit: boolean
@@ -54,6 +82,8 @@ export interface ScoreboardState {
   suggestion: ScoreboardSuggestion | null
   job: { status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'; progress: number | null; error: string | null } | null
   reading: { at: string; summary: Record<string, unknown>; segments: BoardSegment[] } | null
+  /** The club scoreboard's log, when WiePlay has one for the game: then no box is needed. */
+  log?: ScoreLogState | null
 }
 
 export interface SaveScoreboard {

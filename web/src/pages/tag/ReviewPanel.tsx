@@ -281,9 +281,26 @@ function RallyFacts({ rally }: { rally: Segment }) {
             : ''
       }`
     : t('tagging.review.unknown')
+  // The club scoreboard's log (docs/PLAN.md §10.10): the point pressed after the rally.
+  const logSays = rally.log_won_by ?? null
+  const fromLog = winner.suggested && logSays !== null && logSays === winner.value
   const wonText = winner.value
-    ? `${sideLabel(t, winner.value, names)}${winner.suggested ? suggestedDetail(t, [formatPercent(rally.score_confidence)]) : won === winner.value ? yours : ''}`
+    ? `${sideLabel(t, winner.value, names)}${
+        winner.suggested
+          ? suggestedDetail(t, [fromLog ? t('tagging.scoring.log.label') : formatPercent(rally.score_confidence)])
+          : won === winner.value
+            ? yours
+            : ''
+      }`
     : t('tagging.review.unknown')
+  const logScore = rally.log_score_us != null && rally.log_score_them != null ? `${rally.log_score_us}:${rally.log_score_them}` : null
+  const logText =
+    logSays === null
+      ? null
+      : logSays === 'none'
+        ? t('tagging.scoring.log.none')
+        : t(logScore ? 'tagging.scoring.log.pointScore' : 'tagging.scoring.log.point', { team: sideLabel(t, logSays, names), score: logScore })
+  const logDelay = rally.log_at_ms != null ? Math.round((rally.log_at_ms - rally.end_ms) / 100) / 10 : null
   const scoreText = score
     ? `${names ? `${names.us} ${score.text} ${names.them}` : score.text}${score.suggested ? suggestedDetail(t, []) : ''}`
     : '–'
@@ -303,6 +320,11 @@ function RallyFacts({ rally }: { rally: Segment }) {
           </div>
         ))}
       </dl>
+      {logText && (
+        <p data-log={logSays ?? undefined} className="text-sm text-muted tabular-nums" title={logDelay !== null ? t('tagging.scoring.log.title', { delay: logDelay }) : undefined}>
+          {logText}
+        </p>
+      )}
       {rally.score_conflict && (
         <p data-check="true" className="flex items-start gap-1.5 text-sm font-semibold text-danger">
           <AlertIcon className="mt-0.5 size-4 shrink-0" />

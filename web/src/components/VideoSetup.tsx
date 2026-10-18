@@ -256,7 +256,14 @@ function ScoreboardStep({ state, video, board, element }: { state: StepState; vi
   if (!board) return <Step title={t('setup.scoreboard.title')} state={state} />
   const job = board.job?.status
   const segments = board.reading?.segments.length ?? 0
-  const status = !board.region
+  const log = board.log ?? null
+  const logLine = log
+    ? t(log.trusted ? 'setup.scoreboard.fromLog' : 'setup.scoreboard.logUntrusted', {
+        trusted: log.sets.filter((s) => s.trusted).length,
+        sets: log.sets.length,
+      })
+    : null
+  const boxStatus = !board.region
     ? video.no_scoreboard
       ? t('setup.scoreboard.absent')
       : t('setup.scoreboard.none')
@@ -271,13 +278,20 @@ function ScoreboardStep({ state, video, board, element }: { state: StepState; vi
             ? t('scoreboard.read', { count: segments })
             : t('scoreboard.readNothing')
           : t('setup.scoreboard.waiting')
+  // With a trusted log, the box is optional: say where the score comes from first.
+  const status = logLine && (log?.trusted || !board.region) ? logLine : boxStatus
   return (
     <Step
       title={t('setup.scoreboard.title')}
       state={state}
-      status={<p role="status">{status}</p>}
+      status={
+        <>
+          <p role="status">{status}</p>
+          {logLine && status !== logLine && <p>{logLine}</p>}
+        </>
+      }
       actions={
-        board.can_edit ? (
+        board.can_edit && !(log?.trusted && !board.region) ? (
           <>
             <Button variant={state === 'todo' ? 'primary' : 'secondary'} onClick={() => setOpen(true)} aria-haspopup="dialog">
               {board.region ? t('setup.scoreboard.edit') : t('setup.scoreboard.open')}

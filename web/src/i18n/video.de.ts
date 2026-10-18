@@ -423,6 +423,14 @@ export const videoDe: Messages<typeof videoEn> = {
         coach: 'Passt nicht zu einem Punkt oder Aufschlag, den du gesetzt hast.',
         unsure: 'WiePlay ist hier nicht sicher.',
         board: 'Anzeigetafel und Aufschläge widersprechen sich hier.',
+        log: 'Das Protokoll der Club-Anzeigetafel sagt etwas anderes.',
+      },
+      log: {
+        label: 'Anzeigetafel-Protokoll',
+        point: 'Anzeigetafel-Protokoll: Punkt {{team}}',
+        pointScore: 'Anzeigetafel-Protokoll: Punkt {{team}} ({{score}})',
+        none: 'Anzeigetafel-Protokoll: kein Punkt',
+        title: 'Auf der Club-Anzeigetafel {{delay}} s nach dem Ende des Ballwechsels gedrückt',
       },
     },
     review: {

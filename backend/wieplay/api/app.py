@@ -32,6 +32,7 @@ from wieplay.api import (
     videos,
     worker,
 )
+from wieplay.core import scorelog
 from wieplay.core.config import Settings, get_settings
 from wieplay.core.db import make_engine, make_sessionmaker
 from wieplay.core.retention import run_housekeeping
@@ -173,7 +174,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 def _sync_once(sessionmaker: sessionmaker[Session], factory: Callable[[], BridgeClient]) -> None:
     with sessionmaker() as session, contextlib.suppress(BridgeError):  # recorded in sync_state
-        run_sync(session, factory())
+        client = factory()
+        run_sync(session, client)
+        # Videos with a game and no scoreboard log yet: tried once a day (PLAN §10.10).
+        try:
+            scorelog.import_missing(session, client)
+        except Exception:
+            session.rollback()
+            log.exception("score log sweep failed")
 
 
 HOUSEKEEPING_EVERY = timedelta(hours=24)

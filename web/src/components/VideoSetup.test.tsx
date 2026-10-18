@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CourtState } from '../lib/court'
 import type { PlayersSummary } from '../lib/players'
-import type { ScoreboardState } from '../lib/scoreboard'
+import type { ScoreboardState, ScoreLogState } from '../lib/scoreboard'
 import { analysisState, ballState, courtState as courtStepState, namesState, playersState, scoreboardState } from '../lib/setup'
 import type { Analysis, TeamNames, Video } from '../lib/types'
 import { courtState, savedCalibration } from '../test/court'
@@ -41,6 +41,21 @@ const board = (over: Partial<ScoreboardState> = {}): ScoreboardState => ({
   job: null,
   reading: null,
   ...over,
+})
+
+const scoreLog = (patch: Partial<ScoreLogState> = {}): ScoreLogState => ({
+  source: 'live_scores_revisions',
+  imported_at: '2026-10-18T10:00:00Z',
+  trusted: true,
+  sets: [1, 2, 3, 4].map((no) => ({ no, final: [25, 20], official: [25, 20], agrees: true, points: 45, matched: 40, trusted: true })),
+  points: 180,
+  matched: 160,
+  matched_share: 0.89,
+  shifts: 1,
+  rallies_told: 160,
+  path_agrees: 160,
+  disagree_with_video: 12,
+  ...patch,
 })
 
 const players = (patch: Partial<PlayersSummary> = {}): PlayersSummary => ({
@@ -128,6 +143,9 @@ describe('the states of the steps', () => {
     expect(scoreboardState(board({ region, job: { status: 'failed', progress: null, error: 'x' } }), false)).toBe('attention')
     expect(scoreboardState(board({ region, reading: { ...reading, segments: [] } }), false)).toBe('attention')
     expect(scoreboardState(board({ region, reading }), false)).toBe('done')
+    // The club scoreboard's log matching the official result: no box needed.
+    expect(scoreboardState(board({ log: scoreLog() }), false)).toBe('done')
+    expect(scoreboardState(board({ log: scoreLog({ trusted: false }) }), false)).toBe('todo')
 
     expect(playersState(players())).toBe('optional')
     expect(playersState(players({ status: 'running' }))).toBe('busy')
@@ -216,6 +234,14 @@ describe('VideoSetup', () => {
     const completed = await screen.findByRole('region', { name: 'Completed (5)' })
     expect(within(completed).getByText('No scoreboard in this video.')).toBeInTheDocument()
     expect(within(completed).getByRole('button', { name: 'Mark the scoreboard' })).toBeInTheDocument()
+  })
+
+  it("takes the score from the club scoreboard's log: done, no box asked for", async () => {
+    show({ scoreboard: board({ log: scoreLog() }) })
+    fireEvent.click(await screen.findByRole('button', { name: /^Setup/ }))
+    const completed = await screen.findByRole('region', { name: 'Completed (5)' })
+    expect(within(completed).getByText('Score from the club scoreboard’s log: 4 of 4 sets match the official result.')).toBeInTheDocument()
+    expect(within(completed).queryByRole('button', { name: 'Mark the scoreboard' })).not.toBeInTheDocument()
   })
 
   it('shows the reading’s progress and lets a failed one be read again', async () => {

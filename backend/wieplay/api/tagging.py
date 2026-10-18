@@ -109,6 +109,13 @@ class SegmentOut(BaseModel):
     # Points the model thinks were played right before this rally without one (counted).
     model_missed_us: int | None = None
     model_missed_them: int | None = None
+    # The club scoreboard's log (PLAN §10.10), in sets that end on the official score: who
+    # won by the point pressed after the rally (us | them | none: no point), the set's score
+    # after it as the board had it, when it was pressed (video ms).
+    log_won_by: str | None = None
+    log_score_us: int | None = None
+    log_score_them: int | None = None
+    log_at_ms: int | None = None
     # The score line: the coach's winners, else the model's (score_source "model").
     score_us_after: int | None
     score_them_after: int | None

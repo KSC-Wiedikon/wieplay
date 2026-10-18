@@ -632,6 +632,13 @@ class Segment(Base):
     score_confidence: Mapped[float | None] = mapped_column(Float)
     score_conflict: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     score_note: Mapped[str | None] = mapped_column(String(16))
+    # The club scoreboard's log (PLAN §10.10), where its set matches the official result: who
+    # won by the point pressed after the rally (us | them | none), the set's score after it,
+    # and when that point was pressed (video ms). Written by the scoring, never a coach's.
+    log_won_by: Mapped[str | None] = mapped_column(String(8))
+    log_score_us: Mapped[int | None] = mapped_column(Integer)
+    log_score_them: Mapped[int | None] = mapped_column(Integer)
+    log_at_ms: Mapped[int | None] = mapped_column(BigInteger)
     source: Mapped[str] = mapped_column(String(16), default="manual")
     import_system: Mapped[str | None] = mapped_column(String(32))
     import_ref: Mapped[str | None] = mapped_column(String(128))
@@ -928,7 +935,7 @@ class AnalysisTrack(Base):
     model_run_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("model_run.id", ondelete="CASCADE"), index=True
     )
-    kind: Mapped[str] = mapped_column(String(16))  # serve | activity
+    kind: Mapped[str] = mapped_column(String(16))  # serve | activity | scoreboard | score_log
     step_ms: Mapped[int] = mapped_column(Integer)
     finder: Mapped[str | None] = mapped_column(String(16))  # serve: v0 | v1
     source_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)  # serve v1: its training

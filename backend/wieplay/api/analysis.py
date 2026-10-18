@@ -138,6 +138,11 @@ class ScoringOut(BaseModel):
     # how many rallies it named, how often the score line follows it, its winners against the
     # coach's, its disagreements with the serves.
     board: dict[str, Any] | None = None
+    # The club scoreboard's log (PLAN §10.10), when the video has one: the shift(s) between
+    # the board's clock and the video's, how many presses found a rally, the check per set
+    # against the official score, how often the score line follows it, the coach's winners
+    # against it, how often the video alone disagreed.
+    log: dict[str, Any] | None = None
 
 
 class ActionsVsCoachOut(BaseModel):
@@ -345,6 +350,7 @@ def _scoring(db: DbDep, video: Video) -> ScoringOut | None:
         first_serve_ms=m.get("first_serve_ms"),
         vs_coach=ScoringVsCoachOut.model_validate(m["vs_coach"]) if m.get("vs_coach") else None,
         board=m.get("board"),
+        log=m.get("log"),
     )
 
 

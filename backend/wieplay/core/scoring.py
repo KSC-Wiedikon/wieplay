@@ -24,7 +24,9 @@ What it writes, always next to the coach's work and never in its place (PLAN §1
   "model", review "unreviewed"), replaced on every run unless a coach answered them;
 - a `model_run` (kind "score") with the metrics: per set the official score, the score line's
   and the evidence's final; flagged rallies; gaps; on the coach's rallies, how often the
-  model (scored blind to them) gets the serve side and the winner right.
+  model (scored blind to them) gets the serve side and the winner right;
+- per rally, what the club scoreboard's log says (`log_won_by`, `log_score_*`, `log_at_ms`;
+  PLAN §10.10, wieplay/core/scorelog.py), in the sets where the log ends on the official score.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from wieplay import __version__
@@ -205,9 +207,11 @@ def _propose_periods(
     run: ModelRun,
     rallies: Sequence[Segment],
     official: list[tuple[int, int]] | None,
+    log_spans: list[tuple[int, int, int]] | None = None,
 ) -> None:
-    """Replace the model's untouched sets with new ones from the long breaks and the official
-    number of points per set; a set a coach rejected is not proposed again."""
+    """Replace the model's untouched sets with new ones: where the club scoreboard's log says
+    which rally belongs to which set, from it; else from the long breaks and the official
+    number of points per set. A set a coach rejected is not proposed again."""
     db.execute(delete(Period).where(Period.video_id == video.id, tagging.untouched_model_sets()))
     rejected = [
         (p.start_ms, p.end_ms or p.start_ms + 1)
@@ -221,16 +225,21 @@ def _propose_periods(
     ]
     if not rallies:
         return
-    spans = sc.propose_sets(
-        [(r.start_ms, r.end_ms) for r in rallies],
-        [a + b for a, b in official] if official else None,
-        sure=[r.source != "model" or r.review in ("confirmed", "corrected") for r in rallies],
-    )
-    for no, span in enumerate(spans, start=1):
-        prev_end = rallies[span.first - 1].end_ms if span.first > 0 else 0
-        nxt = spans[no].first if no < len(spans) else None
-        start = max(prev_end, rallies[span.first].start_ms - SET_LEAD_MS)
-        end = rallies[span.last].end_ms + SET_TAIL_MS
+    spans: list[tuple[int, int, int, float]]
+    if log_spans:
+        spans = [(no, first, last, 0.95) for no, first, last in log_spans]
+    else:
+        found = sc.propose_sets(
+            [(r.start_ms, r.end_ms) for r in rallies],
+            [a + b for a, b in official] if official else None,
+            sure=[r.source != "model" or r.review in ("confirmed", "corrected") for r in rallies],
+        )
+        spans = [(no, x.first, x.last, x.confidence) for no, x in enumerate(found, start=1)]
+    for k, (no, first, last, confidence) in enumerate(spans):
+        prev_end = rallies[first - 1].end_ms if first > 0 else 0
+        nxt = spans[k + 1][1] if k + 1 < len(spans) else None
+        start = max(prev_end, rallies[first].start_ms - SET_LEAD_MS)
+        end = rallies[last].end_ms + SET_TAIL_MS
         if nxt is not None:
             end = min(end, rallies[nxt].start_ms - 1)
         if any(_overlap((start, end), r) >= OVERLAP for r in rejected):
@@ -244,7 +253,7 @@ def _propose_periods(
                 end_ms=end,
                 source="model",
                 review="unreviewed",
-                confidence=span.confidence,
+                confidence=confidence,
                 model_run_id=run.id,
                 version=1,
             )
@@ -317,6 +326,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         id=uuid.uuid4(),
         kind="score",
         video_id=video.id,
+        # Not the transaction's start: a video scored twice in one transaction (an analysis,
+        # then its score log) has its newest run last.
+        created_at=func.clock_timestamp(),
         model_name=MODEL_NAME,
         model_version=code_version(),
         params={
@@ -344,9 +356,16 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
             .order_by(Segment.start_ms, Segment.id)
         )
     )
+    # The club scoreboard's log (PLAN §10.10), lined up with these rallies.
+    from wieplay.core import scorelog
+
+    log_ev = scorelog.evidence_for(db, video, rallies)
+    if log_ev is not None:
+        run.params["score_log_run"] = str(log_ev.stored.track.model_run_id)
     periods = _live_periods(db, video)
     if not any(_coach_period(p) for p in periods):
-        _propose_periods(db, video, run, rallies, official)
+        log_spans = scorelog.set_spans(log_ev, rallies) if log_ev and log_ev.any_trusted else None
+        _propose_periods(db, video, run, rallies, official, log_spans)
         periods = _live_periods(db, video)
 
     calls = _serve_calls(db, video, rallies)
@@ -365,6 +384,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     scored = [p for p in periods if by_period.get(p.id)]
     set_ins = [_set_in(p, [obs[i] for i in by_period[p.id]], official) for p in scored]
+    # The club scoreboard's log: the strongest evidence after a coach's (PLAN §10.10).
+    if log_ev is not None and set_ins:
+        set_ins = scorelog.apply(log_ev, set_ins)
     # The scoreboard, when it was read: it wins over the serve evidence (PLAN §10.3, step 5).
     from wieplay.core import scoreboard as sboard
 
@@ -372,10 +394,14 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
     if board is not None:
         set_ins = sboard.orient(board, set_ins)
     match = sc.score_match(set_ins) if set_ins else sc.MatchOut([], 1.0)
-    board_metrics = None
+    board_metrics = log_metrics = None
     if board is not None:
         match, disagreements = sboard.flag_disagreements(set_ins, match)
         board_metrics = sboard.metrics(board, set_ins, match, disagreements)
+    if log_ev is not None and set_ins:
+        match, log_disagree = scorelog.flag_disagreements(set_ins, match)
+        log_metrics = scorelog.metrics(log_ev, set_ins, match, log_disagree)
+    scorelog.write(log_ev, rallies)
 
     # The rallies: clear, then write what the model found.
     by_key = {str(r.id): r for r in rallies}
@@ -452,6 +478,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         "vs_coach": _vs_coach(set_ins, match),
         "notes": dict(Counter(r.note for so in match.sets for r in so.rallies if r.note)),
         "board": board_metrics,
+        "log": log_metrics,
     }
     run.timing = {"wall_s": round(time.perf_counter() - started, 3), "rallies": len(rallies)}
     from wieplay.core import actions  # the suggested actions follow the new sides (PLAN §10.4a)

@@ -1,7 +1,9 @@
 """The scoreboard in the picture (PLAN §10.3, step 5).
 
 GET    /api/videos/{id}/scoreboard        the box (if any), what the hall's memory offers, the
-                                          reading job's state and what it found
+                                          reading job's state and what it found; the club
+                                          scoreboard's log of the game, when WiePlay has it
+                                          (PLAN §10.10: then no box is needed)
 PUT    /api/videos/{id}/scoreboard        save the box (whoever may tag) and read the board
 DELETE /api/videos/{id}/scoreboard        no board in this video: the box and its readings go,
                                           the scoring goes back to the serves (the video
@@ -24,7 +26,7 @@ from sqlalchemy import select
 
 from wieplay.api.deps import DbDep, ViewerDep, audit
 from wieplay.api.tagging import _readable
-from wieplay.core import analysis, scoring
+from wieplay.core import analysis, scorelog, scoring
 from wieplay.core import scoreboard as sb
 from wieplay.core.models import Job, Video
 from wieplay.core.permissions import can_tag
@@ -82,6 +84,32 @@ class JobOut(BaseModel):
     error: str | None
 
 
+class LogSetOut(BaseModel):
+    no: int
+    final: list[int] | None  # us, them: where the log ends the set
+    official: list[int] | None
+    agrees: bool
+    points: int  # presses of the set with a time
+    matched: int  # of those, the ones on a rally
+    trusted: bool
+
+
+class LogOut(BaseModel):
+    """The club scoreboard's log of the game (PLAN §10.10), as the newest scoring used it."""
+
+    source: str  # live_match_logs | live_scores_revisions
+    imported_at: datetime | None
+    trusted: bool  # every set with an official score agrees, at least one is used
+    sets: list[LogSetOut]
+    points: int
+    matched: int
+    matched_share: float
+    shifts: int  # distinct shifts between the board's clock and the video's
+    rallies_told: int
+    path_agrees: int
+    disagree_with_video: int
+
+
 class ScoreboardOut(BaseModel):
     video_id: uuid.UUID
     can_edit: bool
@@ -90,6 +118,7 @@ class ScoreboardOut(BaseModel):
     suggestion: SuggestionOut | None
     job: JobOut | None
     reading: ReadingOut | None
+    log: LogOut | None = None
 
 
 class SaveIn(BaseModel):
@@ -162,6 +191,36 @@ def _reading(db: DbDep, video: Video) -> ReadingOut | None:
     )
 
 
+def _log(db: DbDep, video: Video) -> LogOut | None:
+    m = scorelog.summary(db, video)
+    if not m:
+        return None
+    return LogOut(
+        source=str(m.get("source")),
+        imported_at=m.get("imported_at"),
+        trusted=bool(m.get("trusted")),
+        sets=[
+            LogSetOut(
+                no=int(no),
+                final=s.get("final"),
+                official=s.get("official"),
+                agrees=bool(s.get("agrees")),
+                points=int(s.get("points") or 0),
+                matched=int(s.get("matched") or 0),
+                trusted=bool(s.get("trusted")),
+            )
+            for no, s in sorted((m.get("sets") or {}).items(), key=lambda kv: int(kv[0]))
+        ],
+        points=int(m.get("points") or 0),
+        matched=int(m.get("matched") or 0),
+        matched_share=float(m.get("matched_share") or 0.0),
+        shifts=len({s.get("shift_ms") for s in m.get("stretches") or []}),
+        rallies_told=int(m.get("rallies_told") or 0),
+        path_agrees=int(m.get("path_agrees") or 0),
+        disagree_with_video=int(m.get("disagree_with_video") or 0),
+    )
+
+
 def _state(db: DbDep, viewer: ViewerDep, video_id: uuid.UUID) -> ScoreboardOut:
     video, access = _readable(db, viewer, video_id)
     row = sb.current(db, video.id)
@@ -182,6 +241,7 @@ def _state(db: DbDep, viewer: ViewerDep, video_id: uuid.UUID) -> ScoreboardOut:
         else None,
         job=_job_out(db, video),
         reading=_reading(db, video) if row is not None else None,
+        log=_log(db, video),
     )
 
 

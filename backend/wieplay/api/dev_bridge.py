@@ -34,6 +34,10 @@ class FixtureBridgeClient:
     def adult_check(self, team_id: int, on: date) -> Mapping[str, Any]:
         return dev_fixtures.adult_check(team_id, on)
 
+    def score_log(self, game_id: int) -> Mapping[str, Any]:
+        """No scoreboard logs in local development: every game has none."""
+        return {"version": 1, "game": {"id": game_id}, "source": None, "events": [], "sets": []}
+
 
 def make_dev_bridge(settings: Settings) -> tuple[APIRouter, str]:
     """Router for /api/dev-bridge and the public key it signs with."""
