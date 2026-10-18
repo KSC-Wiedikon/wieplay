@@ -186,6 +186,10 @@ export const guestsEn = {
           title: 'What WiePlay keeps',
           body: 'The videos of your team’s matches; names, shirt numbers and roles of the team’s people; tags of actions (skill, grade, zone, time); comments, clips and reels; logins and an audit log. No address, no phone number, no birthdate. Guest clubs: the email you log in with and your password, stored as a hash.',
         },
+        sheets: {
+          title: 'Scoresheet photos',
+          body: 'For a filmed match, a coach may add a photo of the official scoresheet, to type it in faster. Before the upload the coach blacks out the dates of birth on the phone or computer, so they never reach WiePlay; the names and shirt numbers on the sheet stay readable. The photo is stored without camera data (no place, no time) in the club’s storage at Hetzner in Germany. Only the team’s coaches, team managers and the club’s admins see it, and each view is logged. No program or outside service reads it. A coach can remove it at any time, and it is deleted with the video.',
+        },
         who: {
           title: 'Who sees it',
           body: 'Your team only: its players watch and tag, its coaches also upload, download and delete. KSC Wiedikon’s admins can see everything, and that is logged. Guest clubs and KSC Wiedikon’s teams never see each other’s videos or people.',
@@ -200,7 +204,7 @@ export const guestsEn = {
         },
         keep: {
           title: 'How long',
-          body: 'Videos for their season and the next one; exports 30 days; the audit log 12 months; sessions 30 days. A guest club’s login until its person leaves the team or is not taken along into the next season, then 30 days more.',
+          body: 'Videos, and the photos of their scoresheets, for their season and the next one; exports 30 days; the audit log 12 months; sessions 30 days. A guest club’s login until its person leaves the team or is not taken along into the next season, then 30 days more.',
         },
         rights: {
           title: 'Your rights',

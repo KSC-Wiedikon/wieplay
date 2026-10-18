@@ -1049,74 +1049,6 @@ wheels = [
 ]
 
 [[package]]
-name = "wieplay"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "boto3" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic-settings" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "pyyaml" },
-    { name = "sqlalchemy" },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "yt-dlp", extra = ["default"] },
-]
-
-[package.optional-dependencies]
-analysis = [
-    { name = "numpy" },
-    { name = "onnxruntime" },
-    { name = "opencv-python-headless" },
-    { name = "pillow" },
-    { name = "scikit-learn" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "boto3-stubs", extra = ["s3"] },
-    { name = "mypy" },
-    { name = "wieplay", extra = ["analysis"] },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.20.0" },
-    { name = "boto3", specifier = ">=1.43.114" },
-    { name = "fastapi", specifier = ">=0.143.1" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "numpy", marker = "extra == 'analysis'", specifier = ">=2.3" },
-    { name = "onnxruntime", marker = "extra == 'analysis'", specifier = ">=1.22" },
-    { name = "opencv-python-headless", marker = "extra == 'analysis'", specifier = "==4.14.0.94" },
-    { name = "pillow", marker = "extra == 'analysis'", specifier = ">=11.3" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
-    { name = "pydantic-settings", specifier = ">=2.16.0" },
-    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "scikit-learn", marker = "extra == 'analysis'", specifier = ">=1.7" },
-    { name = "sqlalchemy", specifier = ">=2.1.4" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
-    { name = "yt-dlp", extras = ["default"], specifier = "==2026.8.19" },
-]
-provides-extras = ["analysis"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "boto3-stubs", extras = ["s3"], specifier = ">=1.43.114" },
-    { name = "mypy", specifier = ">=2.4.0" },
-    { name = "wieplay", extras = ["analysis"] },
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "ruff", specifier = ">=0.17.0" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
-]
-
-[[package]]
 name = "numpy"
 version = "2.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2292,6 +2224,74 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2b/bf/3d7c33b8d5e7712a60e0149c017ed50394ec5e8cf72e5cb6a1ffaf11a42d/websockets-17.2-cp315-cp315t-win_amd64.whl", hash = "sha256:315551f4ccedbbf9fd4f7e8bf037a5948c976ade0e919ba5d8f581d465f6f725", size = 218169, upload-time = "2026-10-03T14:56:37.79Z" },
     { url = "https://files.pythonhosted.org/packages/27/57/ab34cc6460c5322e6932750fa5c6c64be89e6ee4e2707d13c4e9d3312b25/websockets-17.2-cp315-cp315t-win_arm64.whl", hash = "sha256:0a6220bdf8d5f11af71251a599092d89ac1d6bfac691c7f5951c5b07953947a0", size = 218089, upload-time = "2026-10-03T14:56:39.427Z" },
     { url = "https://files.pythonhosted.org/packages/8a/58/835cd51934d6780fa586f275b5d9901eead6d81569b4343b3767cdbaae4c/websockets-17.2-py3-none-any.whl", hash = "sha256:6aa59f0ef92e796b2db6f5f26550c4713c0e4036899fadf02f55e2ed4db0b7ae", size = 211883, upload-time = "2026-10-03T14:56:51.898Z" },
+]
+
+[[package]]
+name = "wieplay"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "boto3" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "pillow" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic-settings" },
+    { name = "pyjwt", extra = ["crypto"] },
+    { name = "pyyaml" },
+    { name = "sqlalchemy" },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "yt-dlp", extra = ["default"] },
+]
+
+[package.optional-dependencies]
+analysis = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "opencv-python-headless" },
+    { name = "scikit-learn" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "boto3-stubs", extra = ["s3"] },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "types-pyyaml" },
+    { name = "wieplay", extra = ["analysis"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.20.0" },
+    { name = "boto3", specifier = ">=1.43.114" },
+    { name = "fastapi", specifier = ">=0.143.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "numpy", marker = "extra == 'analysis'", specifier = ">=2.3" },
+    { name = "onnxruntime", marker = "extra == 'analysis'", specifier = ">=1.22" },
+    { name = "opencv-python-headless", marker = "extra == 'analysis'", specifier = "==4.14.0.94" },
+    { name = "pillow", specifier = ">=11.3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
+    { name = "pydantic-settings", specifier = ">=2.16.0" },
+    { name = "pyjwt", extras = ["crypto"], specifier = ">=2.15.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "scikit-learn", marker = "extra == 'analysis'", specifier = ">=1.7" },
+    { name = "sqlalchemy", specifier = ">=2.1.4" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+    { name = "yt-dlp", extras = ["default"], specifier = "==2026.8.19" },
+]
+provides-extras = ["analysis"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "boto3-stubs", extras = ["s3"], specifier = ">=1.43.114" },
+    { name = "mypy", specifier = ">=2.4.0" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.17.0" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
+    { name = "wieplay", extras = ["analysis"] },
 ]
 
 [[package]]

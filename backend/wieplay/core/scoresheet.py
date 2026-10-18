@@ -26,7 +26,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from wieplay.core.models import (
@@ -295,6 +295,10 @@ def save(db: Session, video: Video, body: SheetIn, actor: int, now: datetime) ->
             id=uuid.uuid4(), video_id=video.id, created_by=actor, version=0, source="typed"
         )
         db.add(row)
+    elif row.deleted_at is None and not row.sets:
+        # Photos only so far (SS3): nothing typed to overwrite; the typist entered the sheet.
+        row.created_by = actor
+        row.created_at = now
     elif row.deleted_at is None and row.version > body.base_version:
         if row.sets == sets and row.use_in_scoring == body.use_in_scoring:
             return row
@@ -313,6 +317,36 @@ def save(db: Session, video: Video, body: SheetIn, actor: int, now: datetime) ->
     if changed:
         row.updated_by = actor
         row.version = (row.version or 0) + 1
+    db.flush()
+    return row
+
+
+def typed(row: Scoresheet | None) -> bool:
+    """Something was typed in: a row with only photos (SS3) has no sets yet."""
+    return row is not None and bool(row.sets)
+
+
+def ensure_row(db: Session, video: Video, actor: int) -> Scoresheet:
+    """The video's sheet row, for a photo before anything is typed: a new row without sets, or
+    a removed one brought back empty (its typed sets stay in its revisions)."""
+    row = stored(db, video.id, deleted=True)
+    if row is None:
+        row = Scoresheet(
+            id=uuid.uuid4(),
+            video_id=video.id,
+            game_id=video.game_id,
+            created_by=actor,
+            updated_by=actor,
+            version=0,
+            source="typed",
+            sets=[],
+        )
+        db.add(row)
+    elif row.deleted_at is not None:
+        row.deleted_at = None
+        row.sets = []
+        row.updated_by = actor
+        row.version += 1
     db.flush()
     return row
 
@@ -613,6 +647,7 @@ def previous_lineup(db: Session, video: Video) -> list[int | None] | None:
             Video.recorded_on <= video.recorded_on,
             Video.status != "deleted",
             Scoresheet.deleted_at.is_(None),
+            func.jsonb_array_length(Scoresheet.sets) > 0,  # not a row with photos only
         )
         .order_by(Video.recorded_on.desc(), Video.created_at.desc())
         .limit(1)

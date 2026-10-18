@@ -1,8 +1,11 @@
 # Official scoresheets in WiePlay
 
-Researched and designed 18.10.2026 for `docs/PLAN.md` §10.3a. **Status: SS1 and SS2 built
+Researched and designed 18.10.2026 for `docs/PLAN.md` §10.3a. **Status: SS1, SS2 and SS3 built
 19.10.2026** (what was built, what differs from this design and the measurements: PLAN §10.3a);
-SS3–SS5 not yet.
+SS4–SS5 not yet. SS3 differs from §5.1 and §6.2 where the owner decided (18.10.2026): the coach
+blacks out the dates of birth (one prefilled box, moved by hand; names may stay), so the photo
+is seen by coaches, team managers, sport admins and admins only; JPEG, PNG or WebP up to 10 MB
+through the API (no HEIC or PDF: the browser's editor makes a JPEG of any photo it can show).
 
 **The owner's idea** (18.10.2026): "maybe also have the coaches upload the scoresheet? so at
 least we can check side-out etc for points matching. if you check the scoresheet instructions,

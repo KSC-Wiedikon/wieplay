@@ -160,6 +160,11 @@ function GuideContent() {
             <p>{g.sheet.intro}</p>
             <Steps steps={g.sheet.steps} />
             <KeyTable title={g.sheet.keysTitle} rows={g.sheet.keys} guide={g} />
+            <h3 id="sheet-photo" className="text-lg font-semibold">
+              {g.sheet.photoTitle}
+            </h3>
+            <p>{g.sheet.photoIntro}</p>
+            <Steps steps={g.sheet.photo} />
             <Tips tips={g.sheet.tips} />
           </GuideSection>
 

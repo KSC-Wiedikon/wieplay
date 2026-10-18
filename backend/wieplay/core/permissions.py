@@ -255,8 +255,23 @@ def can_manage_people(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> b
 def can_see_sheet(viewer: Viewer, team: TeamRef, teams: Iterable[TeamRef]) -> bool:
     """See a match's official scoresheet as it was typed in (PLAN §10.3a): whoever may watch
     the video (`teams`: every team row, for the lineages). It holds shirt numbers and scores
-    only; a photo of the paper sheet (SS3) gets a narrower rule of its own."""
+    only; a photo of the paper sheet has the narrower rule below."""
     return team.id in visible_team_ids(viewer, teams)
+
+
+def can_see_sheet_photo(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """See a photo of the paper scoresheet (PLAN §10.3a, SS3; owner's privacy OK 18.10.2026,
+    O14): narrower than the typed sheet, because the players' names stay readable on it (the
+    dates of birth are blacked out before the upload). The team's coaches and team managers
+    (any season), sport admins and admins; a guest team's own coaches. Not players, not
+    helpers: they see the typed numbers, never the picture."""
+    return _leads_team(viewer, team, leads)
+
+
+def can_edit_sheet_photo(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Add or remove a photo of the paper scoresheet: the same narrow rule as seeing one. A
+    scoresheet with photos is removed only by someone who may remove them (they go with it)."""
+    return can_see_sheet_photo(viewer, team, leads)
 
 
 def can_edit_sheet(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:

@@ -19,6 +19,9 @@ class FakeStore:
     uploads: dict[str, dict[str, object]] = field(default_factory=dict)
     signed: list[tuple[str, str, int]] = field(default_factory=list)  # (op, key, ttl)
     contents: dict[str, bytes] = field(default_factory=dict)  # objects put with put_object
+    types: dict[str, str] = field(default_factory=dict)  # content types of objects put with put
+    fail_writes: bool = False  # test switches: the bucket is unreachable
+    fail_deletes: bool = False
     _ids: itertools.count[int] = field(default_factory=lambda: itertools.count(1))
 
     def presign_get(self, key: str, ttl: int, download_name: str | None = None) -> str:
@@ -72,11 +75,23 @@ class FakeStore:
         self.objects[key] = len(data)
         self.contents[key] = data
 
+    def put(self, key: str, data: bytes, content_type: str) -> None:
+        if self.fail_writes:
+            from botocore.exceptions import EndpointConnectionError
+
+            raise EndpointConnectionError(endpoint_url="https://s3.test")
+        self.put_object(key, data)
+        self.types[key] = content_type
+
     def read(self, key: str, max_bytes: int) -> bytes | None:
         data = self.contents.get(key)
         return None if data is None else data[:max_bytes]
 
     def delete(self, keys: Iterable[str]) -> None:
+        if self.fail_deletes:
+            from botocore.exceptions import EndpointConnectionError
+
+            raise EndpointConnectionError(endpoint_url="https://s3.test")
         for key in keys:
             self.objects.pop(key, None)
             self.contents.pop(key, None)

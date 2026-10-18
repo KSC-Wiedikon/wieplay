@@ -1,7 +1,8 @@
 # WiePlay: data protection
 
-**Draft, 15.10.2026, updated 17.10.2026** (guest clubs, §11) **and 18.10.2026** (a guest
-club's next season, §8 and §11), for review by the club's privacy contact before
+**Draft, 15.10.2026, updated 17.10.2026** (guest clubs, §11), **18.10.2026** (a guest
+club's next season, §8 and §11) **and 19.10.2026** (official scoresheets and their photos, §6),
+for review by the club's privacy contact before
 WiePlay is used beyond the pilot teams. Not legal advice. It describes what WiePlay does today and
 what the plan adds later; design background in `docs/PLAN.md` §5 and §10.1.
 
@@ -39,9 +40,12 @@ All three go through the same checks (§5) and the same processing.
 | Everyone on court | Analysis signals derived from the video: ball positions, movement, sound levels and whistles (§6). No pictures, no sound, no names | WiePlay |
 | Everyone who logs in | Session (8 hours), audit log entries (logins, videos watched, uploads, imports, deletions, exports, permission changes) | WiePlay |
 | People of a guest club (§11) | As for the club's own players and coaches above; the email they log in with and their password (as a scrypt hash) | The guest club's coaches (names, numbers), the person (email, password) |
+| Both teams, the referees and the scorer of a filmed league match (§6) | The official scoresheet as typed: shirt numbers and scores only. Optionally a photo of the paper sheet: names and shirt numbers of both teams, the officials' names and signatures as written on it; **the dates of birth are blacked out on the coach's device before the upload** | The team's copy of the sheet, typed or photographed by a coach |
 
 **Not in WiePlay**: email (except a guest club's logins, §11), phone, address, birthdate. Whether everyone on a roster is 18 or
-older is answered by Wiedisync as yes or no with counts; birthdates never leave Wiedisync.
+older is answered by Wiedisync as yes or no with counts; birthdates never leave Wiedisync. The
+dates of birth on a paper scoresheet are blacked out before its photo leaves the coach's device
+(§6).
 
 ## 4. Why it is allowed
 
@@ -128,6 +132,24 @@ who served), and lines it up with the video's rallies to check the score line. *
 and scores only**: the log names no person, and Wiedisync sends nothing about who operated the
 board. Kept with the video's analysis (deleted with the video); seen like the score line.
 
+**Official scoresheets** (`docs/PLAN.md` §10.3a, since 19.10.2026): every league match has a
+paper scoresheet, and each team gets a copy. A coach (or anyone who tags the match) may type its
+numbers into WiePlay, so WiePlay knows the winner of every point. Typed are **shirt numbers and
+scores only**: no names, no dates of birth, no licence numbers.
+
+The team's coaches may also add a **photo of the paper sheet**, to type it in next to it (the
+owner's decision of 18.10.2026):
+
+| | |
+|---|---|
+| Purpose | Type the sheet next to a picture of it; later (not yet) read the numbers automatically on club hardware |
+| Dates of birth | Since 2022 the sheet lists every player's date of birth. **They are never stored**: before the upload the coach covers them with black boxes on the phone or computer (a step WiePlay requires); the picture is redrawn with the black burned in and only that picture is uploaded. The original photo never leaves the device |
+| What is stored | That picture as a JPEG: the score grids, and the names and shirt numbers of both teams, officials' names and signatures as on the sheet (the coach may black out more). **No camera data**: no place, no time, no device (WiePlay refuses a picture that still carries them and keeps only its pixels) |
+| Where | The WiePlay bucket at Hetzner in Germany only (`sheets/`); not in any other service, not on the NAS |
+| Who sees it | The team's coaches and team managers, sport admins and the club's admins; a guest team's own coaches. **Not players, not helpers** (they see the typed numbers). Through a link that works for 5 minutes, and **every view is logged** |
+| Reading | None yet: no OCR, no AI, no outside service. A later automatic reading runs on club hardware only |
+| Retention | As long as the video, deleted with it; a coach can remove a photo at any time (it is deleted from storage at once), and removing the typed sheet removes its photos |
+
 Later stages (players and ball tracking on a GPU) run on club hardware first. A move to a
 GPU provider in Switzerland or the EU needs a DPA and an updated privacy page; the provider
 would get only short, temporary, court-cropped copies of the rallies, with no names or IDs.
@@ -136,7 +158,7 @@ would get only short, temporary, court-cropped copies of the rallies, with no na
 
 | Where / who | What | Place | Note |
 |---|---|---|---|
-| Hetzner (server and object storage), the club's own account since 16.10.2026 | Database; playable video (renditions), thumbnails, exports, upload staging in the buckets | Germany (Nuremberg, nbg1) | Processor; DPA with Hetzner needed |
+| Hetzner (server and object storage), the club's own account since 16.10.2026 | Database; playable video (renditions), thumbnails, exports, upload staging, scoresheet photos in the buckets | Germany (Nuremberg, nbg1) | Processor; DPA with Hetzner needed |
 | NAS of the club's IT admin | Original camera files and imported files, the camera inbox, analysis signals and models | Switzerland, private home | Club-controlled hardware at a volunteer's home; access for the NAS administrators only; not copied offsite |
 | Cloudflare | Web pages and API answers pass through; **no video bytes** (those come straight from object storage) | Global network | Already the club's provider for Wiedisync |
 | Club hardware (Lenovo server; later a GPU laptop) | Converting videos, imports, automatic analysis | Switzerland, same home | No third party |
@@ -155,6 +177,7 @@ R2, the NAS; encrypted before leaving the server).
 | Rally models | Until the model is retired |
 | Upload staging | Until processed, at most 14 days |
 | Exports (watermarked MP4) | 30 days |
+| Typed scoresheets and their photos | As long as the video; a photo until a coach removes it, at the latest with the video |
 | Tags, rallies, scores, roster snapshots, comments | As long as the video |
 | Audit log | 12 months |
 | Sessions, login records | 30 days |
@@ -175,7 +198,9 @@ A nightly job enforces this and logs what it deleted.
   storage link it hands out works for 5 minutes and covers 4 seconds of video.
 - Exports are for coaches only and carry a burned-in watermark with the name and date.
 - Storage keys exist only on the server; the video worker gets single-use signed links.
-- Every change to tags is kept in a revision log; deletions are logged.
+- Every change to tags and to a typed scoresheet is kept in a revision log; deletions are
+  logged. Scoresheet photos are seen by the team's coaches and admins only, and every view is
+  logged.
 - Encrypted connections everywhere (HTTPS; an SSH tunnel between the club's server and the
   Hetzner server).
 

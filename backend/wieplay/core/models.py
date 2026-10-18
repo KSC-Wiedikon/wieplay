@@ -967,7 +967,8 @@ class Scoresheet(Base):
     """A match's official scoresheet as a coach typed it (one per video): per set the first
     server, both lineups and every service box, timeouts, substitutions and sanctions, by shirt
     number and score only (wieplay/core/scoresheet.py has the shape). Changes are kept by a
-    trigger (scoresheet_revision). A photo of the sheet comes later (SS3) in its own table."""
+    trigger (scoresheet_revision). Photos of the paper sheet (SS3) are `scoresheet_image` rows;
+    a row with photos and nothing typed yet has no sets (`exists` is false on the page)."""
 
     __tablename__ = "scoresheet"
 
@@ -1003,3 +1004,46 @@ class ScoresheetRevision(Base):
     action: Mapped[str] = mapped_column(String(16))
     before: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     after: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class ScoresheetImage(Base):
+    """A photo of the paper sheet (PLAN §10.3a, SS3; research note §5.1, §6.1), redacted on the
+    coach's device before the upload: the dates of birth (and whatever else the coach chose) are
+    burned black into the pixels, and the API stores only its own re-encoded JPEG, with no
+    EXIF, GPS or other metadata, at `sheets/<video>/<id>.jpg` in the private bucket. Seen,
+    added and removed by the team's coaches, team managers, sport admins and admins only
+    (`can_see_sheet_photo`); every view is in the audit log. Removed with the sheet or the
+    video; `purged_at`: the bucket object is gone."""
+
+    __tablename__ = "scoresheet_image"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    scoresheet_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scoresheet.id", ondelete="CASCADE"), index=True
+    )
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    page: Mapped[int] = mapped_column(Integer)  # the order on the page, 1-based
+    set_no: Mapped[int | None] = mapped_column(Integer)  # a photo of one set's panel, or None
+    object_key: Mapped[str] = mapped_column(Text, unique=True)
+    content_type: Mapped[str] = mapped_column(String(32), default="image/jpeg")
+    bytes: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(64))
+    # Re-encoded from the pixels by the API: no EXIF, GPS, XMP or comments survive.
+    exif_stripped: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # The coach confirmed the redaction (dates of birth blacked out), and what the editor did:
+    # {"boxes": n, "rotation": 0|90|180|270, "cropped": bool}.
+    redacted: Mapped[bool] = mapped_column(Boolean)
+    redaction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # SS4: the page's corners and the template it was matched to.
+    registration: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    uploaded_by: Mapped[int | None] = mapped_column(Integer)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[int | None] = mapped_column(Integer)
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

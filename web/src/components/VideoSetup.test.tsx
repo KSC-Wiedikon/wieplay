@@ -80,6 +80,8 @@ const sheet = (patch: Partial<Scoresheet> = {}): Scoresheet => ({
   roster: [],
   previous_lineup: null,
   no_scoresheet: false,
+  images: null,
+  can_add_images: false,
   checks: [],
   trusted: false,
   match: null,

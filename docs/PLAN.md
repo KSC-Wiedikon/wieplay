@@ -405,8 +405,13 @@ the team's **lineage** (§6.3) unless a season is named.
 | Tag, mark rallies, correct scores and model output | | ✓ | ✓ | ✓ | ✓⁴ |
 | Download / export MP4 (watermarked) | | | ✓ | ✓ | ✓⁴ |
 | Delete a video | | | ✓ | ✓ | ✓ |
+| See, add, remove a photo of the paper scoresheet⁷ | | | ✓ all seasons | ✓ | ✓ |
 | Grant analyst | | | ✓ | ✓ | ✓⁵ |
 | Enable a team for WiePlay | | | | | in Wiedisync |
+
+⁷ The typed scoresheet is seen by whoever watches the video and typed by whoever tags (§10.3a);
+  its photo is narrower because the players' names stay readable on it (owner, 18.10.2026,
+  O14): `can_see_sheet_photo`. A guest team's own coaches too; never players or helpers.
 
 ¹ A player a coach picks to help tag; WiePlay-local grant per team lineage. Called "helper" in the
   app (team page → Helpers; built 17.10.2026). Any active club member in the mirror can be
@@ -508,6 +513,7 @@ page (what, why, who sees it, how long, processors, contact, rights).
 | HLS renditions, thumbnails | Object storage `media/` | Recording season + 1 (a 2026/27 match until 31.05.2028). After the recording season, the 1080p rendition is dropped and 540p kept (§16 cost lever) |
 | Raw originals | NAS `wieplay/raw/` | Same as renditions; short labelled windows may stay in the ML dataset (§11) |
 | Exports | Object storage `exports/` | 30 days |
+| Scoresheet photos (dates of birth blacked out before upload, §10.3a) | Object storage `sheets/` | As the video (deleted with it, by its purge and sweep); a coach removes one at any time and the object goes at once; removed with the typed sheet too |
 | Tags, rallies, scores, rosters | Postgres | As long as the video; member link removed when a player withdraws or leaves and asks |
 | ML datasets, models | NAS | Until the model using them is retired; listed in a dataset manifest |
 | Audit log | Postgres | 12 months |
@@ -555,7 +561,8 @@ Records logins, video views (once per video per session), uploads, deletions, ex
 downloads, permission and consent changes (helpers added and removed: `helper_added`,
 `helper_removed`), admin "view as", GPU submissions (which video,
 which provider), retention deletions, scoresheets saved and removed (`scoresheet_saved`,
-`scoresheet_removed`; §10.3a). Coaches see the log for their team's videos; members can
+`scoresheet_removed`; §10.3a), and every scoresheet photo added, **viewed** and removed
+(`scoresheet_photo_uploaded`, `scoresheet_photo_viewed`, `scoresheet_photo_removed`). Coaches see the log for their team's videos; members can
 request their own entries.
 
 ### 5.9 Audio
@@ -1045,7 +1052,7 @@ match**, at about 0.2 CPU cores (the GPU does the work).
 | Hot | Hetzner Object Storage | HLS renditions, thumbnails, exports, staging, analysis copies | ≈ 0.5–0.6 TB |
 | Master | NAS `wieplay/raw/` | Original camera files (25–50 Mb/s) | ≈ 2–4 TB (NAS has ≈ 18 TB free) |
 | ML | NAS `wieplay/datasets/`, `wieplay/models/` | Labelled windows, Parquet tracks, weights | tens of GB |
-| Mirror | NAS `wieplay/bucket-mirror/` | Weekly `rclone sync` of the bucket | = hot |
+| Mirror | NAS `wieplay/bucket-mirror/` | Weekly `rclone sync` of the bucket (not set up yet; it must leave out `sheets/`: scoresheet photos live in the bucket only, §10.3a) | = hot |
 
 Raw originals are **not** copied offsite (2–4 TB/season; renditions are the fallback). The
 database is backed up with Wiedisync's existing pipeline (§15.2).
@@ -1925,7 +1932,7 @@ proposes the shot type.
 
 *Owner's idea, 18.10.2026. Research and design:
 [`research/scoresheets-2026-10.md`](research/scoresheets-2026-10.md). **SS1 (typed sheet) and
-SS2 (into the scoring) built 19.10.2026**; SS3 (photo) next, SS4–SS5 later.*
+SS2 (into the scoring) built 19.10.2026; SS3 (photo) built 19.10.2026**; SS4–SS5 later.*
 
 Coaches add the match's official scoresheet (Swiss Volley's paper Matchblatt, compulsory in
 H3's league; every team gets a carbon copy), so WiePlay knows every point in order:
@@ -2034,12 +2041,53 @@ H3's league; every team gets a carbon copy), so WiePlay knows every point in ord
   matches it. The sheet's 15 timeouts landed in the break where the log pressed its timeout in
   11 cases.
 
+**Built (SS3; migration `0024`; the owner's privacy OK of 18.10.2026, O14):**
+
+- **A photo of the paper sheet beside the form.** Coaches, team managers, sport admins and
+  admins of the team (a guest team's own coaches too) add one from the phone's camera or a file
+  on the sheet page; several per sheet (front and back, or one per set: "On the photo: set 2"
+  shows it while set 2 is typed). Wide screens (≥ 1280 px): the photo beside the form, as tall
+  as the window, zoom with the wheel, a pinch, a double click or the buttons, drag to pan;
+  narrower: a strip above the set tabs (hide, bigger, the same zoom). Players and helpers see
+  neither the photo nor that one exists (the sheet's GET has `images: null` for them).
+- **Redaction on the device, required.** The photo opens in an editor with one black box
+  already over the team lists (lower right of the Matchblatt, where the dates of birth stand);
+  the coach moves and sizes it, adds boxes, undoes, turns the photo a quarter either way and
+  crops it, then confirms "The dates of birth are blacked out". The browser draws the photo on a
+  canvas (at most 3200 px), burns the boxes black into the pixels, crops, and uploads only that
+  new JPEG (`web/src/lib/redact.ts`; the pixel work is plain functions, tested: the pixels under
+  a box are black, also after turning and cropping). The original never leaves the device, and
+  re-encoding drops the camera's EXIF and GPS.
+- **The server keeps pixels only** (`wieplay/core/sheet_photos.py`): the body through the API
+  (≤ 10 MB, JPEG/PNG/WebP, `redacted=true` required), decoded with Pillow (size checked from the
+  header first: 300 px to 40 MP), **refused if it still carries EXIF, GPS, XMP or IPTC** (it did
+  not come through the editor), and stored as its own JPEG made from the bare pixels (no ICC,
+  no comments; at most 4000 px) at `sheets/<video>/<id>.jpg` in the WiePlay bucket. Nothing in
+  git, logs or any other service. Table `scoresheet_image` (per research §6.1: page, set,
+  object key, bytes, width, height, sha256, `exif_stripped`, `redacted` and what the editor did,
+  `registration` for SS4, who and when, removed and purged). A photo before anything is typed
+  makes the sheet's row without sets (`exists` stays false until something is typed).
+- **Viewing**: `GET …/scoresheet/images/{id}` answers a 302 to a URL signed for 5 minutes (as
+  video media, §7.6; `private, no-store`, no referrer) and writes `scoresheet_photo_viewed`.
+- **Removal**: a coach removes a photo at any time: the row is marked and the object deleted at
+  once (the API's sweep retries until the bucket confirms). Removing the typed sheet removes its
+  photos too, so a sheet with photos is removed only by those who may remove photos. A deleted
+  or expired video takes its `sheets/<video>/` prefix with it (`pipeline.mark_deleted`, the
+  purge and `sweep_deleted`); retention follows the video (§5.5).
+- **No reading** in this phase: no OCR, no AI, no external service.
+- Privacy page and `docs/PRIVACY.md` say what is stored, who sees it, how long, and that the
+  dates of birth are blacked out before the upload; the guide's "Enter the scoresheet" has the
+  steps.
+
 **Not yet:** substitutions as events (`SUB`, research §4.4): they stay on the sheet and the
 page shows where each falls in the video; a "Sheet" column, point strip and `X`/`M` keys in
 the review (§4.5); the opponent's rotations on the stats tabs (they are on the sheet page);
 the sets' clock times as a hint; the sheet's labels for the serve model's training (§4.6);
-who is on court per rally for player tracking (computed, not used). SS3: a photo of the sheet
-beside the form, redacted on the phone (O14). SS4: reading it on club hardware. SS5: a local
+who is on court per rally for player tracking (computed, not used); finding the printed grid in
+the photo to place the boxes by itself (research §5.1: a box prefilled where the team lists
+usually are instead). SS4: reading the photo on club hardware (template registration into
+`scoresheet_image.registration`, cell crops, digit and mark classifiers on the Lenovo CPU,
+proposals into the form). SS5: a local
 vision model as a second opinion; the OpenVolley import into the same table.
 
 ### 10.4 Ball tracking
@@ -3008,4 +3056,4 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | O11 | Brand | ✓ **Done 15.10.2026**: assets in `docs/brand/`, icons generated, `mark-on-dark.svg` and the ball-only favicon approved (§13.3). |
 | O12 | Repo visibility | Private now; flip to public when you're happy, like Wiedisync. |
 | O13 ⚠ | Guest clubs (§4.5) on prod | Built 17.10.2026. Before inviting a real club: the club board's OK, a written agreement with each guest club (its footage, informing its people, adults only, training yes or no, deletion), and the privacy page text (`/privacy`, a draft) checked by the club's privacy contact. Runbook: `docs/runbooks/guest-club.md`. |
-| O14 | Scoresheet photos (§10.3a, planned) | Before the photo step: the club's privacy contact checks the redaction on the phone, who may see the picture, the retention and the privacy page paragraph (research note §5.1). |
+| O14 | Scoresheet photos (§10.3a) | ✓ **Resolved 18.10.2026 by the owner**: photos allowed, stored only in the WiePlay bucket (`sheets/<video>/`), the dates of birth blacked out on the device before the upload (never stored), no EXIF/GPS, seen by the team's coaches, team managers, sport admins and admins only (names stay readable), every view audited, removed with the sheet or the video and by a coach at any time, no automatic reading until SS4 (club hardware only). **Built 19.10.2026 (SS3, migration 0024).** |

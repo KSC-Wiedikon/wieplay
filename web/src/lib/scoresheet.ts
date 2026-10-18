@@ -14,6 +14,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiRequest } from './api'
 import { keys } from './queryClient'
+import type { SheetPhoto } from './sheetPhotos'
 import type { Side } from './types'
 
 export const BOXES = 8
@@ -534,6 +535,9 @@ export interface Scoresheet extends ChecksOut {
   roster: { number: number; setter: boolean; libero: boolean }[]
   previous_lineup: (number | null)[] | null
   no_scoresheet: boolean
+  /** Photos of the paper sheet (SS3): null for whoever may not see them (players, helpers). */
+  images: SheetPhoto[] | null
+  can_add_images: boolean
 }
 
 export interface SheetIn {

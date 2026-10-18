@@ -186,6 +186,10 @@ export const guestsDe: Messages<typeof guestsEn> = {
           title: 'Was WiePlay speichert',
           body: 'Die Videos der Spiele deines Teams; Namen, Trikotnummern und Rollen der Personen im Team; Tags von Aktionen (Element, Bewertung, Zone, Zeit); Kommentare, Clips und Reels; Logins und ein Protokoll. Keine Adresse, keine Telefonnummer, kein Geburtsdatum. Gastvereine: die E-Mail, mit der du dich anmeldest, und dein Passwort, gespeichert als Hash.',
         },
+        sheets: {
+          title: 'Fotos des Matchblatts',
+          body: 'Zu einem gefilmten Spiel kann ein Coach ein Foto des offiziellen Matchblatts hinzufügen, um es schneller abzutippen. Vor dem Hochladen schwärzt der Coach auf dem Handy oder Computer die Geburtsdaten, sie erreichen WiePlay also nie; Namen und Rückennummern auf dem Matchblatt bleiben lesbar. Das Foto wird ohne Kameradaten (kein Ort, keine Zeit) im Speicher des Vereins bei Hetzner in Deutschland abgelegt. Nur die Coaches und Teamverantwortlichen des Teams und die Admins des Vereins sehen es, und jedes Ansehen wird protokolliert. Kein Programm und kein externer Dienst liest es. Ein Coach kann es jederzeit entfernen, und es wird mit dem Video gelöscht.',
+        },
         who: {
           title: 'Wer es sieht',
           body: 'Nur dein Team: Seine Spieler/innen schauen und taggen, seine Coaches laden auch hoch, laden herunter und löschen. Die Admins des KSC Wiedikon sehen alles, und das wird protokolliert. Gastvereine und die Teams des KSC Wiedikon sehen nie die Videos oder Personen der anderen.',
@@ -200,7 +204,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
         },
         keep: {
           title: 'Wie lange',
-          body: 'Videos für ihre Saison und die nächste; Exporte 30 Tage; das Protokoll 12 Monate; Sitzungen 30 Tage. Das Login eines Gastvereins, bis seine Person das Team verlässt oder nicht in die nächste Saison mitgenommen wird, dann noch 30 Tage.',
+          body: 'Videos und die Fotos ihrer Matchblätter für ihre Saison und die nächste; Exporte 30 Tage; das Protokoll 12 Monate; Sitzungen 30 Tage. Das Login eines Gastvereins, bis seine Person das Team verlässt oder nicht in die nächste Saison mitgenommen wird, dann noch 30 Tage.',
         },
         rights: {
           title: 'Deine Rechte',

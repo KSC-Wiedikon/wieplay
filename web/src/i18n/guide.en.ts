@@ -31,7 +31,17 @@ export interface Guide {
     tips: string[]
   }
   regrade: { title: string; intro: string; steps: string[]; keysTitle: string; keys: GuideKey[] }
-  sheet: { title: string; intro: string; steps: string[]; keysTitle: string; keys: GuideKey[]; tips: string[] }
+  sheet: {
+    title: string
+    intro: string
+    steps: string[]
+    keysTitle: string
+    keys: GuideKey[]
+    photoTitle: string
+    photoIntro: string
+    photo: string[]
+    tips: string[]
+  }
   actions: { title: string; body: string; keys: GuideKey[] }
   rights: { title: string; canTitle: string; can: string[]; cannotTitle: string; cannot: string[]; privacy: string }
 }
@@ -186,8 +196,17 @@ export const guideEn: Guide = {
       { keys: ['↑', '↓'], text: 'The box above or below' },
       { keys: ['*'], text: 'Circle the final' },
     ],
+    photoTitle: 'A photo of the sheet (coaches)',
+    photoIntro:
+      'Coaches, team managers and admins can type next to a photo of the copy: it shows beside the form on a computer (zoom with the wheel, drag to move) and as a strip above the sets on a phone. Players and helpers never see it.',
+    photo: [
+      'On the scoresheet page choose “Take a photo” on a phone, or “Add a photo” on a computer.',
+      'Black out the dates of birth: one black box is already on the photo. Drag it over the dates of birth of both teams and pull its corners to size it. “Add a box” covers anything else; turn or crop the photo if you need to.',
+      'Tick “The dates of birth are blacked out” and upload. Only the picture you see leaves your device: the black is burned in, and the camera’s place and time are dropped. If you photographed one set per picture, say which set it shows: typing that set shows that photo.',
+      'Remove a photo with the bin at any time. It also goes when the scoresheet or the video is deleted.',
+    ],
     tips: [
-      'Names, dates of birth and licence numbers on the sheet stay on paper: WiePlay takes shirt numbers and scores only.',
+      'The typed sheet takes shirt numbers and scores only; names, dates of birth and licence numbers stay on paper (and on the photo the dates of birth are black).',
       'A set that doesn’t fit is kept and used only as a hint. A set you don’t trust can be switched off; the rest still counts.',
       'Your own winners always win over the sheet: where they differ, the rally is flagged so you can look again.',
     ],
@@ -214,7 +233,7 @@ export const guideEn: Guide = {
       'keep your own clips and reels, comment, and share clips and reels with the team',
     ],
     cannotTitle: 'You can’t',
-    cannot: ['download videos', 'delete videos', 'add other helpers'],
+    cannot: ['download videos', 'delete videos', 'add other helpers', 'see or add photos of the scoresheet'],
     privacy:
       'The videos stay in WiePlay: please don’t record or pass them on outside the club. A coach can end your access at any time; your tags and reviews stay.',
   },

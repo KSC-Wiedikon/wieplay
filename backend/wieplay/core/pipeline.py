@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from wieplay.core import imports, jobs
+from wieplay.core import imports, jobs, sheet_photos
 from wieplay.core.config import Settings
 from wieplay.core.media import (
     CODECS,
@@ -526,7 +526,15 @@ def mark_deleted(db: Session, video: Video, actor: int | None) -> list[str]:
     video.deleted_by = actor
     jobs.cancel_active(db, video.id, "video deleted")
     purge_raw(db, video)
-    return [f"media/{video.id}/", f"incoming/{video.id}/"]
+    # The scoresheet's photos go with the video (PLAN §10.3a, SS3).
+    sheet_photos.mark_video_deleted(db, video.id, actor, video.deleted_at)
+    return bucket_prefixes(video.id)
+
+
+def bucket_prefixes(video_id: uuid.UUID) -> list[str]:
+    """Everything a video has in the bucket: renditions and thumbnails, upload staging, the
+    scoresheet's photos."""
+    return [f"media/{video_id}/", f"incoming/{video_id}/", f"sheets/{video_id}/"]
 
 
 def refuse_after_ingest(db: Session, video: Video, reason: str) -> None:
