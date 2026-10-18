@@ -349,7 +349,7 @@ export const videoEn = {
         reject: 'Reject it: not a rally',
         serve: '{{us}} serves, {{them}} serves; the same key again takes the call back',
         won: '{{us}} won the rally, {{them}} won it; the same key again takes it back',
-        label: 'A break is a warm-up, set break, timeout, stoppage or other break',
+        label: 'A break is a warm-up, set break, timeout, stoppage or other break; on a rally: no rally, that break',
         start: 'Move the start 0.25 s earlier or later',
         end: 'Move the end 0.25 s earlier or later',
         frame: 'With the arrows: one frame instead of 0.25 s',

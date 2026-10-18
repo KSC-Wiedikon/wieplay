@@ -399,11 +399,35 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     press('1')
     expect(review.getState().notice).toMatchObject({ key: 'ralliesOnly', tone: 'error' })
     expect(store.getView().segments).toHaveLength(4)
-    // On a rally, the break labels say what they are for.
+  })
+
+  it('a break key on a rally: no rally but that break; a break already there takes the label', async () => {
+    const { review, press, segment, sent } = await setup(scored())
     review.select('s1')
     press('t')
-    expect(review.getState().notice).toMatchObject({ key: 'gapsOnly', tone: 'error' })
-    expect(segment('s1')?.kind).toBe('rally')
+    expect(segment('s1')).toBeUndefined() // rejected: the rally finder learns from it
+    expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'confirmed' })
+    expect(review.getState().notice).toMatchObject({ key: 'relabelled', params: { kind: 'timeout' } })
+    expect(await sent()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 's1', review: 'rejected', deleted: true }),
+        expect.objectContaining({ id: 'g', kind: 'timeout', review: 'confirmed' }),
+      ]),
+    )
+    press('u')
+    expect(segment('s1')).toMatchObject({ kind: 'rally', review: 'unreviewed' })
+    expect(segment('g')).toMatchObject({ review: 'unreviewed' })
+  })
+
+  it('a break key on a rally with no break around it makes one from the rally before to the rally after', async () => {
+    const { review, press, store, sent } = await setup()
+    review.select('s2')
+    press('b')
+    const made = store.getView().segments.find((s) => s.kind === 'set_break')
+    expect(made).toMatchObject({ start_ms: 18_000, end_ms: 50_000 }) // s1's end to s3's start
+    expect(store.getView().segments.find((s) => s.id === 's2')).toBeUndefined()
+    expect(await sent()).toEqual(expect.arrayContaining([expect.objectContaining({ id: 's2', review: 'rejected', deleted: true })]))
+    expect(review.getState().currentId).toBe('s4') // the next open suggestion
   })
 
   it('merges a rally with the next rally, past a break between them', async () => {

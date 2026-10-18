@@ -359,7 +359,7 @@ describe('TagPage, automatic scoring', () => {
     const dialog = screen.getByRole('dialog', { name: 'Keys' })
     expect(within(dialog).getByText('KSCW H3 serves, Smash 05 serves; the same key again takes the call back')).toBeInTheDocument()
     expect(within(dialog).getByText('KSCW H3 won the rally, Smash 05 won it; the same key again takes it back')).toBeInTheDocument()
-    expect(within(dialog).getByText('A break is a warm-up, set break, timeout, stoppage or other break')).toBeInTheDocument()
+    expect(within(dialog).getByText('A break is a warm-up, set break, timeout, stoppage or other break; on a rally: no rally, that break')).toBeInTheDocument()
   })
 })
 
