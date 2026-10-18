@@ -1,8 +1,9 @@
 name: ci
 
 on:
+  # A branch with a PR is checked by its pull_request run; pushes only check main (no double runs).
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
 
 permissions:
