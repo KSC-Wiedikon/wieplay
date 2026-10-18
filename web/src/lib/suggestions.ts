@@ -97,6 +97,45 @@ export function sureSuggestions(segments: readonly Segment[], min = ACCEPT_ALL_M
   return segments.filter((s) => isSuggestion(s) && s.confidence != null && s.confidence >= min).sort(byStart)
 }
 
+/**
+ * What the club scoreboard's log (PLAN §10.10) says about an open rally suggestion:
+ * - match: the log has a point for it and WiePlay's winner is the log's, nothing flagged;
+ * - none: the log says no point (a replay, or no rally);
+ * - disagree: the log names another winner, or the video alone was sure of another answer
+ *   (flagged "log"), or a coach's call contradicts it;
+ * - missed: a point the log has right next to it with no rally of its own (flagged: a rally
+ *   the finder missed, to add);
+ * - silent: the log says nothing (no press for it, or a set whose log is not trusted).
+ * The server sends `log_won_by` only in trusted sets (a log that ends on the official score).
+ */
+export type LogVerdict = 'match' | 'none' | 'disagree' | 'missed' | 'silent'
+
+export function logVerdict(rally: Pick<Segment, 'log_won_by' | 'won_by' | 'model_won_by' | 'score_conflict' | 'score_note'>): LogVerdict {
+  const says = rally.log_won_by ?? null
+  if (says === null) return 'silent'
+  if (says === 'none') return 'none'
+  if (effectiveWinner(rally).value !== says) return 'disagree'
+  if (!rally.score_conflict) return 'match'
+  return rally.score_note === 'missing_before' || rally.score_note === 'missing_after' ? 'missed' : 'disagree'
+}
+
+/** The video has a trusted scoreboard log: some rally has the log's answer. */
+export function hasTrustedLog(segments: readonly Segment[]): boolean {
+  return segments.some((s) => s.kind === 'rally' && s.log_won_by != null)
+}
+
+/** Open rally suggestions that match the scoreboard log ("accept all that match the log"). */
+export function logMatches(segments: readonly Segment[]): Segment[] {
+  return segments.filter((s) => isSuggestion(s) && logVerdict(s) === 'match').sort(byStart)
+}
+
+/** The open rally suggestions by what the log says about them. */
+export function logCounts(segments: readonly Segment[]): Record<LogVerdict, number> {
+  const counts: Record<LogVerdict, number> = { match: 0, none: 0, disagree: 0, missed: 0, silent: 0 }
+  for (const s of segments) if (isSuggestion(s)) counts[logVerdict(s)] += 1
+  return counts
+}
+
 export interface ReviewProgress {
   /** Answered: accepted, corrected or rejected. */
   done: number

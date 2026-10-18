@@ -9,6 +9,10 @@
 //   rally suggestion they say "no rally, a break": the rally is rejected and the dead time
 //   around it (from the rally before to the rally after) becomes that break
 //
+// Two shortcuts accept many suggestions in one undo step, after a confirmation: those WiePlay
+// is at least 90 % sure of, and those that match the club scoreboard's log (§10.10: the log
+// has a point for the rally, WiePlay the same winner, nothing flagged). The rest stays open.
+//
 // The gap labels of the automatic scoring (warm-up, set break, timeout, stoppage, after the
 // match) are in the list too, in time order with the rallies; they are accepted, rejected,
 // relabelled and moved like rallies, but not merged or split.
@@ -26,6 +30,8 @@ import {
   isGap,
   isModel,
   isProposal,
+  logCounts,
+  logMatches,
   LOOP_PRE_MS,
   nextOpen,
   reviewItems,
@@ -70,6 +76,7 @@ export type ReviewNoticeKey =
   | 'cannotSplit'
   | 'tooShort'
   | 'acceptedAll'
+  | 'acceptedLog'
   | 'done'
   | 'nothingSelected'
 
@@ -94,6 +101,8 @@ export interface ReviewState {
   rejectedBefore: number
   /** "Accept all remaining with confidence ≥ 90%" waits for its confirmation. */
   confirmAll: boolean
+  /** "Accept all that match the scoreboard log" waits for its confirmation. */
+  confirmLog: boolean
   notice: ReviewNotice | null
 }
 
@@ -133,6 +142,7 @@ export class ReviewController {
       seenGaps: modelIds(segments, EMPTY, 'gap'),
       rejectedBefore,
       confirmAll: false,
+      confirmLog: false,
       notice: null,
     }
   }
@@ -205,6 +215,11 @@ export class ReviewController {
     return sureSuggestions(this.store.getView().segments)
   }
 
+  /** The open rally proposals that match the club scoreboard's log (PLAN §10.10). */
+  logMatches(): Segment[] {
+    return logMatches(this.store.getView().segments)
+  }
+
   // Mode
 
   /** Review mode on: the first open suggestion in time order, unless one is on screen already. */
@@ -218,7 +233,7 @@ export class ReviewController {
   stop = (): void => {
     const leaving = this.state.active && this.changed
     this.changed = false
-    this.set({ active: false, confirmAll: false })
+    this.set({ active: false, confirmAll: false, confirmLog: false })
     if (leaving) this.onLeave()
   }
 
@@ -498,6 +513,35 @@ export class ReviewController {
     else if (!current) this.go(nextOpen(this.items(), this.state.pending, null))
   }
 
+  // Accept all that match the scoreboard log (PLAN §10.10)
+  //
+  // Accepting confirms the rally's start and end only. Who won stays WiePlay's suggestion,
+  // which already follows the log there (the scoring weighs the log just below a coach's
+  // call). A winner written here would be the coach's fact, shown as "your call", that the
+  // scoring and the training keep to; and it would no longer follow the log, which every
+  // scoring lines up with the rallies again (a rally added or moved later shifts presses).
+
+  askAcceptLog = (): void => {
+    if (this.logMatches().length > 0) this.set({ confirmLog: true })
+  }
+
+  cancelAcceptLog = (): void => this.set({ confirmLog: false })
+
+  confirmAcceptLog = (): void => {
+    const matches = this.logMatches()
+    this.set({ confirmLog: false })
+    if (matches.length === 0) return
+    const current = this.current()
+    this.commit(matches.map((s) => segmentChange(s, { review: 'confirmed' })))
+    // What is left for the coach, by what the log says (the matches are answered now).
+    const { none, disagree, missed, silent } = logCounts(this.store.getView().segments)
+    this.set({
+      notice: this.notify('acceptedLog', { count: matches.length, left: none + disagree + missed + silent, none, disagree, missed, silent }),
+    })
+    if (current && matches.some((s) => s.id === current.id)) this.advance(current)
+    else if (!current) this.go(nextOpen(this.items(), this.state.pending, null))
+  }
+
   // Keyboard
 
   onKeyDown = (event: KeyboardEvent): void => {
@@ -513,7 +557,7 @@ export class ReviewController {
   private handle(event: KeyboardEvent): boolean {
     const { key, shiftKey, altKey } = event
     const mod = event.ctrlKey || event.metaKey
-    if (this.state.confirmAll) return false
+    if (this.state.confirmAll || this.state.confirmLog) return false
 
     if (mod) {
       if (altKey) return false

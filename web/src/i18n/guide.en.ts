@@ -88,6 +88,7 @@ export const guideEn: Guide = {
     tips: [
       'Being close is enough: a quarter of a second either way does no harm. A missed or invented rally does.',
       '“Accept all remaining with confidence ≥ 90%” saves time once the sure ones look right; U undoes it in one step.',
+      'When the club scoreboard’s log of the game is there, “Accept all that match the scoreboard log” accepts every rally where the log has a point and WiePlay the same winner; who won stays WiePlay’s suggestion, which follows the log. Left for you: no point on the log, the log and WiePlay disagree, a rally WiePlay missed next to it, or the log says nothing. U undoes it in one step.',
       'Not sure? Leave it open and move on with ↓. Someone else can decide later.',
     ],
   },

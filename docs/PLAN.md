@@ -1130,13 +1130,24 @@ arrives through Cloudflare):
 
 | Endpoint | Does |
 |---|---|
-| `POST /api/worker/claim` `{caps, max}` | Atomically leases the highest-priority runnable job whose `required_caps` ⊆ the worker's caps and whose dependencies succeeded (`SELECT … FOR UPDATE SKIP LOCKED`). Lease 5 min. Long-polls up to 30 s. |
+| `POST /api/worker/claim` `{caps, max}` | Atomically leases the highest-priority runnable job whose `required_caps` ⊆ the worker's caps and whose dependencies succeeded (`SELECT … FOR UPDATE SKIP LOCKED`). Lease 5 min. Long-polls up to 25 s. |
 | `POST /api/worker/jobs/{id}/heartbeat` `{progress, message, checkpoint}` | Extends the lease, stores progress and a resumable checkpoint. |
 | `POST /api/worker/jobs/{id}/sign` `{op, keys}` | Signed PUT/GET URLs for the objects this job may touch. **Workers never hold storage credentials.** |
 | `POST /api/worker/jobs/{id}/complete` / `fail` | Finishes the job; the API writes derived rows in one transaction. |
 
 A reaper returns expired leases to the queue (`attempts+1`, back-off) or fails them after
 `max_attempts`. Each worker has its own token (hashed in `worker`), revocable from the admin page.
+
+**A claim whose worker has gone (fixed 18.10.2026).** The claim looks for a runnable job every
+second until one is there or 25 s are up, and stops when its worker has gone (a restart, a
+deploy, a dropped tunnel), so no job is leased to a worker that will never see it. That check
+never fired before 18.10.2026: the API's security-header middleware (Starlette's
+`@app.middleware("http")`) hid the disconnect from the route, so a replaced worker's last claim
+went on polling for up to 25 s. On dev, a training job queued right after a deploy was leased
+that way within 0.1 s, to nobody, and ran 6½ minutes later (the 5-minute lease, the reaper's
+minute, a minute's back-off, one attempt spent). The middleware is plain ASGI now; jobs leased
+just as the worker went away go straight back to the queue, the attempt not counted. A
+worker's first claim after it starts (`restarted`) still frees what its previous run held.
 
 **How workers reach the API (16.10.2026: SSH tunnel instead of the tailnet).** The VPS was on
 the owner's private tailnet and published the API on its tailnet address too
@@ -1614,7 +1625,8 @@ games), v0 keeps proposing, and a rerun never proposes again where a coach rejec
 - **Still to do**: telling our referee's pitch from the next court's in tournament halls, and
   a court mask against the neighbours' balls.
 - **Review UI**: rally strip with `Enter` accept, `←/→` nudge a boundary, `X` reject, `M`
-  merge, `S` split.
+  merge, `S` split; "accept all remaining with confidence ≥ 90 %" and, with a trusted
+  scoreboard log, "accept all that match the scoreboard log" (§10.10), each one undo step.
 - **Bar**: boundary F1 ≥ 0.9 at ±1 s on held-out matches before condensed mode is the default
   view for new videos.
 - **First run, 16.10.2026** (2. Liga, H3 vs Volero Legends, 132 min, YouTube 1080p60), in
@@ -2400,7 +2412,27 @@ With the serve side's rule 3 (§10.3, 18.10.2026) the serve read in the video ag
 servers the logs imply on 93 % (409) and 98 % (509) of the rallies.
 
 The flags left are specific now: a rally the finder missed (add it), one that was none
-(reject it), or one where the video's own evidence was confidently wrong. Not yet: the board's
+(reject it), or one where the video's own evidence was confidently wrong.
+
+**Accept all that match the log (built 18.10.2026).** With a trusted log the review offers
+"Accept all that match the scoreboard log (N)": after a confirmation, every open rally
+suggestion where the log has a point, WiePlay's winner is the log's and nothing is flagged
+becomes a confirmed rally, in one undo step, and a note says what is left and why. Accepting
+confirms the start and end only: who won stays WiePlay's suggestion, which follows the log
+there. Writing the log's answer as the coach's winner would pass the board's reading off as
+the coach's call (a fact the scoring and the training keep to) and freeze it, while every
+scoring lines the log up with the rallies again. Left for the coach: no point on the log
+(reject it), the log and WiePlay disagree (mostly the "log" flag: the video alone was sure of
+the other answer), a point next to it with no rally (a rally the finder missed: add it before
+the game is marked reviewed, or the training learns a real rally as dead time), and what the
+log says nothing about (no press, or a set it is not trusted for). On prod, 18.10.2026:
+
+| | Open rally suggestions | Accepted | No point | Disagree | Missed rally next to it | Log silent |
+|---|---|---|---|---|---|---|
+| Game 509, H3 – Voléro Legends | 161 | 114 | 15 | 11 | 18 | 3 |
+| Game 409, H1 – H3 | 135 | 102 | 11 | 6 | 11 | 5 |
+
+On the Legends game "≥ 90 %" would accept 52 (44 of them match the log). Not yet: the board's
 uploaded match logs (`live_match_logs`, empty on prod until the board is next used) are
 preferred automatically once there; OpenVolley as a third source (§10.8).
 

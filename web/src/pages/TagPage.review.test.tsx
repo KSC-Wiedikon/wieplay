@@ -217,6 +217,8 @@ describe('TagPage, suggestions', () => {
   it('accepts every suggestion that is at least 90% sure after a confirmation', async () => {
     const { server } = show(`/videos/${ID}/tag?mode=review`)
     await screen.findByRole('region', { name: 'Review suggestions' })
+    // No scoreboard log for this video: no "accept all that match the log".
+    expect(within(panel()).queryByRole('button', { name: /scoreboard log/ })).not.toBeInTheDocument()
     fireEvent.click(within(panel()).getByRole('button', { name: 'Accept all remaining with confidence ≥ 90% (2)' }))
     const dialog = screen.getByRole('alertdialog', { name: 'Accept 2 suggestions?' })
     // Keys belong to the dialog while it asks.
@@ -230,6 +232,48 @@ describe('TagPage, suggestions', () => {
     expect(server.sent().get(S1)).toMatchObject({ review: 'confirmed' })
     expect(server.sent().get(S4)).toMatchObject({ review: 'confirmed' })
     expect(server.sent().get(S2)).toBeUndefined()
+  })
+
+  it('accepts all that match the scoreboard log after a confirmation, and says what is left', async () => {
+    const S5 = '00000000-0000-4000-8000-0000000005a5'
+    const logged = bundle({
+      periods: [set1],
+      segments: [
+        suggestion(S1, 10_000, 0.95, { log_won_by: 'us', model_won_by: 'us', log_score_us: 1, log_score_them: 0 }),
+        suggestion(S2, 30_000, 0.62, { log_won_by: 'none', score_conflict: true, score_note: 'extra' }),
+        suggestion(S3, 50_000, 0.91, { review: 'confirmed', version: 2, log_won_by: 'us', model_won_by: 'us' }),
+        suggestion(S4, 70_000, 0.97, { log_won_by: 'them', model_won_by: 'them', score_conflict: true, score_note: 'log' }),
+        suggestion(S5, 90_000, 0.5, { log_won_by: 'them', model_won_by: 'them' }),
+      ],
+    })
+    const { server } = show(`/videos/${ID}/tag?mode=review`, logged)
+    await screen.findByRole('region', { name: 'Review suggestions' })
+    expect(within(panel()).getByText('Scoreboard log: point to Us (1:0)')).toBeInTheDocument()
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Accept all that match the scoreboard log (2)' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Accept 2 suggestions that match the scoreboard log?' })
+    expect(dialog).toHaveTextContent('Who won stays WiePlay’s suggestion, which follows the log.')
+    expect(dialog).toHaveTextContent('Left for you: 1 with no point on the log, 1 where the log and WiePlay disagree.')
+    // Keys belong to the dialog while it asks.
+    fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Cancel' }), { key: 'x' })
+    expect(server.current().segments).toHaveLength(5)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Accept 2' }))
+    expect(
+      within(panel()).getByText(
+        'Accepted 2 suggestions that match the scoreboard log. 2 left for you: 1 with no point on the log, 1 where the log and WiePlay disagree.',
+      ),
+    ).toBeInTheDocument()
+    // Nothing left that matches: the button goes; the one on screen was accepted, on to the next.
+    expect(within(panel()).queryByRole('button', { name: /match the scoreboard log/ })).not.toBeInTheDocument()
+    expect(within(panel()).getByRole('heading', { name: /Rally at 0:30\.0/ })).toBeInTheDocument()
+    await waitFor(() => expect(server.sent().get(S5)).toBeDefined(), { timeout: 3000 })
+    expect(server.sent().get(S1)).toMatchObject({ review: 'confirmed', won_by: null })
+    expect(server.sent().get(S5)).toMatchObject({ review: 'confirmed', won_by: null })
+    expect(server.sent().get(S2)).toBeUndefined()
+    expect(server.sent().get(S4)).toBeUndefined()
+    // One undo takes the whole batch back.
+    fireEvent.click(within(panel()).getByRole('button', { name: /Undo/ }))
+    expect(within(panel()).getByRole('button', { name: 'Accept all that match the scoreboard log (2)' })).toBeInTheDocument()
+    expect(within(panel()).getByRole('heading', { name: /Rally at 0:10\.0/ })).toBeInTheDocument()
   })
 
   it('reviews by touch on a narrow screen: big buttons, no tagging desk', async () => {

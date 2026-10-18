@@ -22,9 +22,12 @@ import {
   GAP_KINDS,
   isGap,
   isOpen,
+  logCounts,
+  logMatches,
   reviewItems,
   scoreAfter,
   sureSuggestions,
+  type LogVerdict,
 } from '../../lib/suggestions'
 import type { GapKind, Segment, Side } from '../../lib/types'
 import { useReview, useView, useWorkspace } from './context'
@@ -56,6 +59,16 @@ function Kbd({ children, hidden }: { children: ReactNode; hidden?: boolean }) {
   )
 }
 
+/** What the scoreboard log leaves for the coach, in this order. */
+const LOG_LEFT = ['none', 'disagree', 'missed', 'silent'] as const satisfies readonly Exclude<LogVerdict, 'match'>[]
+
+/** "15 with no point on the log, 11 where the log and WiePlay disagree, …" (the counts above 0). */
+function logLeftText(t: TFunction, counts: Partial<Record<LogVerdict, number | string>>): string {
+  return LOG_LEFT.filter((key) => Number(counts[key] ?? 0) > 0)
+    .map((key) => t(`tagging.review.logLeft.${key}`, { count: Number(counts[key]) }))
+    .join(', ')
+}
+
 /** The key of each break label (W B T D O). */
 const KEY_OF = Object.fromEntries(Object.entries(GAP_KEYS).map(([key, kind]) => [kind, key.toUpperCase()])) as Record<GapKind, string>
 
@@ -79,6 +92,11 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
       return p.field === 'end' ? t('tagging.review.notice.movedEnd', { time }) : t('tagging.review.notice.movedStart', { time })
     case 'acceptedAll':
       return t('tagging.review.notice.acceptedAll', { count: Number(p.count) })
+    case 'acceptedLog': {
+      const accepted = t('tagging.review.notice.acceptedLog', { count: Number(p.count) })
+      const list = logLeftText(t, p)
+      return list ? `${accepted} ${t('tagging.review.notice.acceptedLogLeft', { left: Number(p.left), list })}` : accepted
+    }
     case 'done':
       return t('tagging.review.doneTitle')
     default:
@@ -88,7 +106,8 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
 
 /**
  * The review of WiePlay's suggestions (PLAN §10.1): the suggestion on screen, its boundaries,
- * the answers as big buttons (tablets) with their keys, the progress, and "accept all sure ones".
+ * the answers as big buttons (tablets) with their keys, the progress, "accept all that match
+ * the scoreboard log" (with a trusted log) and "accept all sure ones".
  */
 export function ReviewPanel() {
   const { t } = useTranslation()
@@ -102,6 +121,9 @@ export function ReviewPanel() {
     [view.segments, state.seen, state.seenGaps, state.rejectedBefore],
   )
   const sure = useMemo(() => sureSuggestions(view.segments), [view.segments])
+  // Only with a trusted scoreboard log (PLAN §10.10): the server sends its answers only there.
+  const matches = useMemo(() => logMatches(view.segments), [view.segments])
+  const logLeft = useMemo(() => logLeftText(t, logCounts(view.segments)), [t, view.segments])
   const current = items.find((s) => s.id === state.currentId) ?? null
   const gap = current !== null && isGap(current.kind)
   const set = current ? periodAt(view.periods, current.start_ms) : null
@@ -222,12 +244,20 @@ export function ReviewPanel() {
         {state.notice ? noticeText(t, state.notice, taxonomy.sport, names) : t('tagging.review.hint')}
       </p>
 
-      {sure.length > 0 && (
-        <div className="border-t border-hairline pt-3">
-          <Button size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptAll)}>
-            <CheckIcon className="size-4" />
-            {t('tagging.review.acceptAll', { min, count: sure.length })}
-          </Button>
+      {(matches.length > 0 || sure.length > 0) && (
+        <div className="flex flex-col gap-2 border-t border-hairline pt-3">
+          {matches.length > 0 && (
+            <Button size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptLog)}>
+              <CheckIcon className="size-4" />
+              {t('tagging.review.acceptLog', { count: matches.length })}
+            </Button>
+          )}
+          {sure.length > 0 && (
+            <Button size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptAll)}>
+              <CheckIcon className="size-4" />
+              {t('tagging.review.acceptAll', { min, count: sure.length })}
+            </Button>
+          )}
         </div>
       )}
 
@@ -246,6 +276,16 @@ export function ReviewPanel() {
         onConfirm={review.confirmAcceptAll}
       >
         {t('tagging.review.acceptAllBody', { min })}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={state.confirmLog}
+        title={t('tagging.review.acceptLogTitle', { count: matches.length })}
+        confirmLabel={t('tagging.review.acceptLogConfirm', { count: matches.length })}
+        onCancel={review.cancelAcceptLog}
+        onConfirm={review.confirmAcceptLog}
+      >
+        {t('tagging.review.acceptLogBody')}
+        {logLeft && ` ${t('tagging.review.acceptLogLeft', { list: logLeft })}`}
       </ConfirmDialog>
     </section>
   )
