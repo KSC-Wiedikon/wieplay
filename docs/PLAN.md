@@ -1797,6 +1797,19 @@ rallies ≤ 5 %.
 wherever it speaks: a board reading that disagrees with it is not flagged. In most of our
 halls the LED board is hard to read from the camera anyway; there the log is the source.
 
+**The first referee's hand signals: spike, not built** (18.10.2026,
+[`research/referee-signals-2026-10.md`](research/referee-signals-2026-10.md)). The owner asked
+whether the model could read where the first referee points after each rally (the team to
+serve), and replays and cards. A pose model on a crop of the referee's stand finds the referee
+in every frame, but from behind the end line the arm points along the line of sight (13–14 px
+of a 100 px referee) and other gestures make the same shapes: over five H3 games 91.4 % right
+at 61 % coverage, three referees at ≥ 95 %, two at 79–85 %, against a bar of 95 % at 60 %.
+"Near" alone (the arm towards the camera) was right in 97.8 %, but for about 28 % of the rally
+ends. No replay or card occurred to measure. A camera on the side, the scoresheet (§10.3a) and
+the log answer it better. The spike also found near jump serves at the right edge of the
+picture that the serve evidence reads as far at ≥ 95 %, and that evidence agreeing with the
+log on only 82–88 % of the rallies where it is sure.
+
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
 
