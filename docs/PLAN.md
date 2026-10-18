@@ -2219,7 +2219,7 @@ uploads included): Legends 9.0 min, Uster 7.0 min, Volewa Wald 8.2 min. The coac
 ### 10.10 Score logs from the club scoreboard
 
 *Built 18.10.2026 (owner: "we (should) have old timestamps from point-hub, can we use them to
-double check the score?"). WiePlay PR #55, Wiedisync PR #14.*
+double check the score?"). WiePlay PR #57, Wiedisync PR #14.*
 
 The club's LED scoreboard (point-hub, the "LedBox") is operated at the scorer's table with a
 phone or tablet: +1 a few seconds after each rally. Wiedisync keeps what it showed: since

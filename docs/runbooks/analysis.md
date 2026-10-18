@@ -252,7 +252,9 @@ game's scoreboard log right after its analysis (one call), and the hourly sync a
 videos that have none (each at most once a day, 20 per sweep). It needs Wiedisync's bridge route
 `GET /kscw/wieplay/v1/score-log` (Wiedisync PR #14; dev since 18.10.2026, prod with the owner's
 next Wiedisync release). Until then, and for a game the board never showed, the answer is a
-quiet "no score log" (`unavailable` / `none`); nothing fails.
+quiet "no score log" (`unavailable` / `none`); nothing fails. Once the route is on Wiedisync
+prod, `score-log --all-ready` in the prod API container (`sudo docker exec wieplay-prod-api-1
+python -m wieplay.cli score-log --all-ready`) imports every game at once instead of over a day.
 
 ```bash
 python -m wieplay.cli score-log --video <id>            # import again, line up, score, print
