@@ -346,7 +346,7 @@ export const videoEn = {
       gradesTitle: 'Grades per skill',
       review: {
         accept: 'Accept the suggestion and go to the next one',
-        reject: 'Reject it: not a rally',
+        reject: 'Reject it: not a rally (dead time)',
         serve: '{{us}} serves, {{them}} serves; the same key again takes the call back',
         won: '{{us}} won the rally, {{them}} won it; the same key again takes it back',
         label: 'A break is a warm-up, set break, timeout, stoppage or other break; on a rally: no rally, that break',
@@ -458,7 +458,7 @@ export const videoEn = {
       next: 'Next suggestion',
       allKeys: 'All keys',
       leave: 'Back to tagging',
-      hint: 'The suggestion plays in a loop. Each answer moves on to the next one.',
+      hint: 'The suggestion plays in a loop. Each answer moves on to the next one. Reject (X) = not a rally (dead time); mark the game reviewed so WiePlay learns from it.',
       acceptAll: 'Accept all remaining with confidence ≥ {{min}} ({{count}})',
       acceptAllTitle_one: 'Accept {{count}} suggestion?',
       acceptAllTitle_other: 'Accept {{count}} suggestions?',

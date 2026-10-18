@@ -29,7 +29,7 @@ export const guideDe: Guide = {
       'Ein Vorschlag ist ein Ballwechsel, den WiePlay zu sehen glaubt, vom Aufschlag bis der Ball tot ist. Er läuft in einer Schleife ab einer Sekunde vor seinem Beginn. Du sagst, ob er stimmt.',
     steps: [
       'Schau die Schleife an. Ist es ein Ballwechsel, vom Aufschlag bis zum Ende des Spielzugs?',
-      'Stimmt: Enter. Kein Ballwechsel (Einspielen, Timeout, eine Wiederholung, Spieler laufen herum): X.',
+      'Stimmt: Enter. Kein Ballwechsel, nur tote Zeit (Einspielen, ein Timeout, eine Wiederholung, der Ball wird übers Netz zurückgeworfen, Spieler laufen herum): X. Jedes X zeigt WiePlay, wie tote Zeit aussieht, sobald das Spiel als geprüft markiert ist.',
       'Beginnt oder endet zu früh oder zu spät: den Beginn mit ← → verschieben, das Ende mit Shift + ← →, dann Enter.',
       'Zwei Ballwechsel in einem Vorschlag: S teilt ihn am Abspielpunkt. Ein Ballwechsel in zwei Teilen: M verbindet ihn mit dem nächsten.',
       'Sag, wer aufgeschlagen hat (1 wir, 2 sie) und wer den Ballwechsel gewonnen hat (3 wir, 4 sie), wenn WiePlay unsicher ist oder falsch liegt: Daraus ergibt sich der Spielstand.',
@@ -38,7 +38,7 @@ export const guideDe: Guide = {
     keysTitle: 'Tasten beim Prüfen',
     keys: [
       { keys: ['Enter'], text: 'Übernehmen: ein Ballwechsel, Beginn und Ende stimmen' },
-      { keys: ['X'], text: 'Ablehnen: kein Ballwechsel' },
+      { keys: ['X'], text: 'Ablehnen: kein Ballwechsel (tote Zeit)' },
       { keys: ['←', '→'], text: 'Beginn 0,25 s früher oder später (mit Alt: ein Bild)' },
       { keys: ['Shift + ←', 'Shift + →'], text: 'Ende 0,25 s früher oder später' },
       { keys: ['M'], text: 'Mit dem nächsten Vorschlag verbinden' },
@@ -60,7 +60,7 @@ export const guideDe: Guide = {
   done: {
     title: 'Ballwechsel als geprüft markieren',
     body: [
-      'Ist jeder Vorschlag beantwortet, bietet das Prüfen «Ballwechsel als geprüft markieren» an; die Videoseite hat denselben Schalter. Erst dann lernt WiePlay aus dem Spiel.',
+      'Ist jeder Vorschlag beantwortet, bietet das Prüfen «Ballwechsel als geprüft markieren» an; die Videoseite hat denselben Schalter. Erst dann lernt WiePlay aus dem Spiel: aus jedem Ballwechsel, den du behalten hast, und vor allem aus jedem Vorschlag, den du abgelehnt hast, damit es diese Art toter Zeit nicht mehr für einen Ballwechsel hält.',
       'Sind noch Vorschläge offen, fragt WiePlay zuerst. Später einen Fehler gefunden? Korrigier ihn einfach: Das Spiel bleibt als geprüft markiert.',
     ],
   },

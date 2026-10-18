@@ -418,6 +418,40 @@ def test_merged_and_rejected_proposals_in_training_and_reruns(
     assert [s["start_ms"] for s in segments(club["coach"], ready)] == [15_000]
 
 
+def test_training_gets_the_rejected_proposals_as_hard_negatives(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    """A proposal the coach rejected reaches the training as "not a rally" (a hard
+    negative); a merged proposal, a coach's own rally they deleted and the kept ones do
+    not."""
+    job = claim_kind(analyser, "analyse")
+    complete(
+        analyser,
+        job,
+        payload(job, [(10_000, 20_000), (25_000, 29_000), (40_000, 46_000), (46_500, 52_000)]),
+    )
+    by_start = {s["start_ms"]: s for s in segments(club["coach"], ready)}
+    a, b, c, d = (by_start[t] for t in (10_000, 25_000, 40_000, 46_500))
+    own = rally(60_000, 70_000)
+    change(club["coach"], ready, own)
+    change(
+        club["coach"],
+        ready,
+        edit(a, review="confirmed"),
+        edit(b, deleted=True),  # X: the ball thrown back over the net, not a rally
+        edit(c, end_ms=52_000, review="corrected"),
+        edit(d, deleted=True, review="merged", merged_into=c["id"]),
+        {**own, "base_version": 1, "deleted": True},  # the coach's own mistake
+    )
+    done = club["coach"].post(f"/api/videos/{ready['id']}/rallies-reviewed", json={})
+    assert done.status_code == 200, done.text
+    train = claim_kind(analyser, "train_rallies")
+    inputs = analyser.post(f"/api/worker/jobs/{train['id']}/inputs", json={}).json()
+    [entry] = inputs["train"]
+    assert entry["rallies"] == [[10_000, 20_000], [40_000, 52_000]]
+    assert entry["rejected"] == [[25_000, 29_000]]
+
+
 def test_rallies_reviewed_needs_every_proposal_answered_and_trains_once(
     app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
 ) -> None:

@@ -218,6 +218,10 @@ def test_train_rallies_handler(worker_settings: WorkerSettings) -> None:
         ],
         "others": [{"video_id": ids[2], "features": refs[2], "tracks": ["activity"]}],
     }  # fmt: skip
+    # A rejected proposal in the first game (dead time after its first rally); the second
+    # comes from an API that does not send them yet.
+    first_end = labels[0][0][1]
+    inputs["train"][0]["rejected"] = [[first_end + 4_000, first_end + 8_000]]
     job = {"id": "0123456789abcdef", "kind": "train_rallies",
            "params": {"out_dir": "models/rallies"}}  # fmt: skip
     result = HANDLERS["train_rallies"](context(worker_settings, FakeApi(inputs), job))
@@ -225,6 +229,9 @@ def test_train_rallies_handler(worker_settings: WorkerSettings) -> None:
     assert set(result["evaluation"]["videos"]) == {ids[0], ids[1]}
     assert result["evaluation"]["summary"]["v1"]["videos"] == 2
     assert [d["video_id"] for d in result["dataset"]] == ids[:2]
+    assert [d["rejected"] for d in result["dataset"]] == [1, 0]
+    assert result["timing"]["hard_negatives"] == 1
+    assert result["model"]["params"]["v1"]["hard_negative"] == rallies.V1Params().hard_negative
     model_path = root / result["artifact"]["nas_path"]
     model = rallies.RallyModel.load(model_path, result["artifact"]["sha256"])
     assert model.trained_on == ids[:2]

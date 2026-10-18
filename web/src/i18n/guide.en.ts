@@ -63,7 +63,7 @@ export const guideEn: Guide = {
       'A suggestion is a rally WiePlay thinks it saw, from the serve to the moment the ball is dead. It plays in a loop from a second before it starts. You say whether it is right.',
     steps: [
       'Watch the loop. Is it one rally, from the serve to the end of play?',
-      'Right: press Enter. Not a rally (warm-up, timeout, a replay, players walking): press X.',
+      'Right: press Enter. Not a rally, just dead time (warm-up, a timeout, a replay, the ball thrown back over the net, players walking): press X. Every X teaches WiePlay what dead time looks like, once the game is marked reviewed.',
       'Starts or ends too early or too late: move the start with ← →, the end with Shift + ← →, then Enter.',
       'Two rallies in one suggestion: S splits it at the playhead. One rally cut in two: M merges it with the next one.',
       'Say who served (1 us, 2 them) and who won the rally (3 us, 4 them) when WiePlay is unsure or wrong: the score line follows from it.',
@@ -72,7 +72,7 @@ export const guideEn: Guide = {
     keysTitle: 'Keys while reviewing',
     keys: [
       { keys: ['Enter'], text: 'Accept: a rally, and its start and end are right' },
-      { keys: ['X'], text: 'Reject: not a rally' },
+      { keys: ['X'], text: 'Reject: not a rally (dead time)' },
       { keys: ['←', '→'], text: 'Move the start 0.25 s earlier or later (with Alt: one frame)' },
       { keys: ['Shift + ←', 'Shift + →'], text: 'Move the end 0.25 s earlier or later' },
       { keys: ['M'], text: 'Merge with the next suggestion' },
@@ -94,7 +94,7 @@ export const guideEn: Guide = {
   done: {
     title: 'Mark the rallies reviewed',
     body: [
-      'When every suggestion is answered, the review offers “Mark rallies reviewed”; the video page has the same switch. Only then does WiePlay learn from the game.',
+      'When every suggestion is answered, the review offers “Mark rallies reviewed”; the video page has the same switch. Only then does WiePlay learn from the game: from every rally you kept and, most of all, from every suggestion you rejected, so it stops mistaking that kind of dead time for a rally.',
       'If suggestions are still open, WiePlay asks first. Found a mistake later? Just correct it: the game stays marked reviewed.',
     ],
   },

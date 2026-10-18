@@ -1551,6 +1551,22 @@ the recognition with each video". Runbook: [`runbooks/analysis.md`](runbooks/ana
    game nobody has done, and the next analyses use it. `python -m wieplay.cli rally-eval`
    prints the per-game scores.
 
+**How a rejection teaches the finder (18.10.2026).** The owner, reviewing the Legends game:
+"the ball gets thrown to the other court and it thinks it is a rally. How can we say it's
+just dead time and teach the model?" Reject it (`X`, or a break key, which rejects it and
+labels the dead time around it) and mark the game reviewed. The training
+labels every half-second of a reviewed game: inside a kept rally 1, everything else 0. A
+rejected proposal is dead time like the rest, but it is the dead time the finder mistook for
+play, so it weighs more: its half-seconds count 3× (`V1Params.hard_negative`, a *hard
+negative*), each game's weights still sum to the same (every game counts the same), and the
+part of a rejected proposal that a kept rally covers is a rally like any other. The API sends
+the rejected proposals of each reviewed game with its rallies (`rejected` next to `rallies`
+in the training inputs: model proposals with review `rejected`); a merged proposal is no
+negative (the rally it went into carries the label), nor a coach's own rally they deleted.
+The held-out scores stay unweighted (every rally and boundary counts once). The training's
+dataset manifest counts the rejections per game. Until v1 beats v0 (it needs two reviewed
+games), v0 keeps proposing, and a rerun never proposes again where a coach rejected.
+
 - **v0, rules (now)**: the ball in plausible tracks (stuck spots and parked balls removed)
   over 2 s, or less ball with more movement than usual; gaps up to 3 s bridged; edges from
   the raw half-second activity, opened 1 s before the ball shows (the toss: the tagging page
@@ -1564,8 +1580,25 @@ the recognition with each video". Runbook: [`runbooks/analysis.md`](runbooks/ana
   the CPU, seconds to train) answers "in a rally?" per half-second from ~40 features (ball
   seen, tracked, speed, height, track length; motion overall and per court band; loudness;
   whistle on, since, until, rate; the same over 2, 6 and 20 s and the 3 s before and after)
-  plus v0's own answer, smoothed with hysteresis into rallies of 2.5–120 s. Needs two
-  reviewed games (one to learn from, one to check on); each game weighs the same.
+  plus v0's own answer and the *whistle context* (18.10.2026): what the referee's last
+  whistle was (the ball's tracked share in the 3 s before it: ~0 before a serve whistle,
+  which follows dead time, more before the whistle that ends a rally) and the seconds since
+  the last serve whistle. A ball in the air after an end whistle with no serve whistle since
+  is the ball going back to the server. Short tones and, with a referee, whistles of another
+  pitch than the serve whistles' do not count. Smoothed with hysteresis into rallies of
+  2.5–120 s. Needs two reviewed games (one to learn from, one to check on); each game weighs
+  the same; rejected proposals weigh more inside their game (above).
+  Checked 18.10.2026 before any game was marked reviewed, on the one stretch a coach had
+  answered (the Legends game, 860–1675 s: 25 rallies, 1 rejection, which was exactly the ball
+  thrown back 5 s after an end whistle), held out in four parts: v1's boundary F1 0.688 →
+  0.806 with the whistle context (v0 0.761), rally F1 0.618 → 0.834; in two halves 0.813 →
+  0.838. The hard-negative weight changed nothing there (one rejection; 2× lost one
+  boundary, 3× and 5× none). Not a rule for v0: 5 of those 25 kept rallies also start after
+  a whistle that followed play with no serve whistle in 10 s (a serve whistle not heard),
+  and 692 of v0's 3,480 proposals on the 22 analysed games show that pattern, so it is
+  evidence for the learned finder to weigh, not a cut. The ball's path (§10.4) would add the
+  toss at the end line, but the trajectory job runs after the analysis has proposed its
+  rallies; the per-step ball height is in the features already.
 - **Gaps (built 16.10.2026, `wieplay/ml/gaps.py`)**: with the sets (§10.3), the stretch before
   the first serve is `warmup`, between sets `set_break`, after the match `other_dead`; a gap
   of 30 s or more inside a set is a `timeout` when it looks like one (40–100 s, the players
