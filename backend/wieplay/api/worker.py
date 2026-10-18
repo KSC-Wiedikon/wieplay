@@ -155,6 +155,14 @@ async def claim(
         leased = await asyncio.to_thread(
             jobs.claim, db, worker, body.caps, body.max, _lease(settings), kinds=body.kinds
         )
+        if leased and await request.is_disconnected():
+            # Gone while its jobs were leased: back to the queue at once, attempt not counted.
+            for job_id in [j.id for j in leased]:
+                if (job := jobs.owned_running(db, job_id, worker)) is not None:
+                    jobs.give_back(job, "the worker went away before it got the job")
+            db.commit()
+            log.info("worker %s left during its claim: %d job(s) back", worker.name, len(leased))
+            return ClaimOut(jobs=[], paused=False)
         if leased or asyncio.get_running_loop().time() >= deadline:
             return ClaimOut(jobs=[_job_out(j) for j in leased], paused=False)
         await asyncio.sleep(POLL_EVERY_SECONDS)

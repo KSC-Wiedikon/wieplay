@@ -1129,13 +1129,24 @@ arrives through Cloudflare):
 
 | Endpoint | Does |
 |---|---|
-| `POST /api/worker/claim` `{caps, max}` | Atomically leases the highest-priority runnable job whose `required_caps` ⊆ the worker's caps and whose dependencies succeeded (`SELECT … FOR UPDATE SKIP LOCKED`). Lease 5 min. Long-polls up to 30 s. |
+| `POST /api/worker/claim` `{caps, max}` | Atomically leases the highest-priority runnable job whose `required_caps` ⊆ the worker's caps and whose dependencies succeeded (`SELECT … FOR UPDATE SKIP LOCKED`). Lease 5 min. Long-polls up to 25 s. |
 | `POST /api/worker/jobs/{id}/heartbeat` `{progress, message, checkpoint}` | Extends the lease, stores progress and a resumable checkpoint. |
 | `POST /api/worker/jobs/{id}/sign` `{op, keys}` | Signed PUT/GET URLs for the objects this job may touch. **Workers never hold storage credentials.** |
 | `POST /api/worker/jobs/{id}/complete` / `fail` | Finishes the job; the API writes derived rows in one transaction. |
 
 A reaper returns expired leases to the queue (`attempts+1`, back-off) or fails them after
 `max_attempts`. Each worker has its own token (hashed in `worker`), revocable from the admin page.
+
+**A claim whose worker has gone (fixed 18.10.2026).** The claim looks for a runnable job every
+second until one is there or 25 s are up, and stops when its worker has gone (a restart, a
+deploy, a dropped tunnel), so no job is leased to a worker that will never see it. That check
+never fired before 18.10.2026: the API's security-header middleware (Starlette's
+`@app.middleware("http")`) hid the disconnect from the route, so a replaced worker's last claim
+went on polling for up to 25 s. On dev, a training job queued right after a deploy was leased
+that way within 0.1 s, to nobody, and ran 6½ minutes later (the 5-minute lease, the reaper's
+minute, a minute's back-off, one attempt spent). The middleware is plain ASGI now; jobs leased
+just as the worker went away go straight back to the queue, the attempt not counted. A
+worker's first claim after it starts (`restarted`) still frees what its previous run held.
 
 **How workers reach the API (16.10.2026: SSH tunnel instead of the tailnet).** The VPS was on
 the owner's private tailnet and published the API on its tailnet address too

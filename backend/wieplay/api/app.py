@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from wieplay import __version__
 from wieplay.api import (
@@ -54,6 +56,49 @@ def content_security_policy(storage_origin: str | None) -> str:
         "worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
         "font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     )
+
+
+class Guard:
+    """Cross-origin writes refused (CSRF: cookie-authenticated writes must come from our own
+    origin) and the security headers on every response.
+
+    Plain ASGI on purpose: Starlette's `@app.middleware("http")` hides a client that went away
+    from the route (`request.is_disconnected()` never turns true behind it), so a worker's
+    long poll for a job went on for its full 25 s after the worker had gone and could lease a
+    job to nobody: the job then waited for its lease to run out (PLAN §8.1).
+    """
+
+    def __init__(self, app: ASGIApp, *, public_origin: str, csp: str) -> None:
+        self.app = app
+        self.public_origin = public_origin
+        self.csp = csp
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        if request.method in UNSAFE_METHODS and request.url.path.startswith("/api/"):
+            origin = request.headers.get("origin")
+            if origin is not None and origin != self.public_origin:
+                refused = JSONResponse({"detail": "Cross-origin request refused"}, status_code=403)
+                await refused(scope, receive, self._with_headers(send))
+                return
+        await self.app(scope, receive, self._with_headers(send))
+
+    def _with_headers(self, send: Send) -> Send:
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                message.setdefault("headers", [])
+                headers = MutableHeaders(scope=message)
+                headers.setdefault("X-Content-Type-Options", "nosniff")
+                headers.setdefault("X-Frame-Options", "DENY")
+                headers.setdefault("Referrer-Policy", "same-origin")
+                if headers.get("content-type", "").startswith("text/html"):
+                    headers.setdefault("Content-Security-Policy", self.csp)
+            await send(message)
+
+        return send_with_headers
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -124,22 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(dev_router)
     app.state.settings = settings.model_copy(update={"bridge_public_keys": keys})
 
-    @app.middleware("http")
-    async def guard(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        # Cookie-authenticated writes must come from our own origin (CSRF).
-        if request.method in UNSAFE_METHODS and request.url.path.startswith("/api/"):
-            origin = request.headers.get("origin")
-            if origin is not None and origin != settings.public_origin:
-                return JSONResponse({"detail": "Cross-origin request refused"}, status_code=403)
-        response = await call_next(request)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "same-origin")
-        if response.headers.get("content-type", "").startswith("text/html"):
-            response.headers.setdefault("Content-Security-Policy", csp)
-        return response
+    app.add_middleware(Guard, public_origin=settings.public_origin, csp=csp)
 
     @app.exception_handler(videos.FilmingBlocked)
     async def filming_blocked(_: Request, exc: videos.FilmingBlocked) -> JSONResponse:
