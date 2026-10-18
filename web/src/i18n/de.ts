@@ -474,6 +474,14 @@ export const de: Messages<typeof en> = {
     reels: 'Reels',
     downloads: 'Downloads',
   },
+  game: {
+    title: 'Spiel',
+    several: 'Mehr als eine Kamera hat dieses Spiel gefilmt. Wähle ein Video.',
+    none: 'Noch kein Video von diesem Spiel',
+    noneHint: 'Die Videos eines Spiels sind für sein Team: Spieler, Coaches und Helfer. Sobald eines hochgeladen ist, öffnet dieser Link es.',
+    toTeam: 'Zu {{team}}',
+    upload: 'Video hochladen',
+  },
   notFound: {
     title: 'Seite nicht gefunden',
     body: 'Diese Seite gibt es nicht.',

@@ -322,6 +322,7 @@ export const statsDe: Messages<typeof statsEn> = {
     },
     search: {
       title: 'Statistik eingrenzen',
+      label: 'Statistik durchsuchen',
       hint: 'Jede Zahl zählt nur, was die Suche behält.',
       selected_one: '{{count}} Tag passt',
       selected_other: '{{count}} Tags passen',

@@ -32,6 +32,8 @@ interface SearchBarProps {
   sets?: readonly number[]
   /** Saved filters of this team; null: none here. */
   team: FilterTeam | null
+  /** Its name for screen readers where a page has two (default "Search"). */
+  label?: string
   className?: string
 }
 
@@ -40,7 +42,7 @@ interface SearchBarProps {
  * suggestions while typing, what it understood as chips (× takes one out), and the saved
  * filters of the person and the team.
  */
-export function SearchBar({ value, onChange, taxonomy, roster = [], sets, team, className }: SearchBarProps) {
+export function SearchBar({ value, onChange, taxonomy, roster = [], sets, team, label, className }: SearchBarProps) {
   const { t, i18n } = useTranslation()
   const id = useId()
   const names = useSideNames()
@@ -83,7 +85,7 @@ export function SearchBar({ value, onChange, taxonomy, roster = [], sets, team, 
       <div className="flex items-start gap-2">
         <div className="relative min-w-0 flex-1">
           <label htmlFor={`${id}-input`} className="sr-only">
-            {t('search.label')}
+            {label ?? t('search.label')}
           </label>
           <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted" />
           <TextInput

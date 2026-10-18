@@ -34,6 +34,11 @@ const routes: RouteObject[] = [
         lazy: () => import('./pages/UploadPage').then((m) => ({ Component: m.UploadPage })),
       },
       {
+        // Wiedisync's game cards link here (PLAN §4.4); a logged-out visitor logs in first.
+        path: 'games/:gameId',
+        lazy: () => import('./pages/GamePage').then((m) => ({ Component: m.GamePage })),
+      },
+      {
         path: 'videos/:id',
         lazy: () => import('./pages/VideoPage').then((m) => ({ Component: m.VideoPage })),
       },
