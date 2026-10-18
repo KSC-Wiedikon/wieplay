@@ -644,6 +644,8 @@ def chains_of(
 # A piece without a number takes its chain's number only this close (frames, 10 fps) to a
 # piece that read it: further on, a chain of far players has often passed someone on.
 PROPAGATE_FRAMES = 100
+# Nor to a piece that looks this different from the one that read it (the libero's shirt).
+LOOK_APART = 0.9  # as far as the stitching allows (StitchParams.max_look)
 
 
 def assign_numbers(chains: Sequence[Track]) -> list[Track]:
@@ -702,6 +704,13 @@ def assign_numbers(chains: Sequence[Track]) -> list[Track]:
                         break  # too long since the number was read: anyone by now
                     if own is not None and own != n:
                         break  # it reads another number itself, if not often enough
+                    src = members[kn[0]]
+                    if (
+                        m.descriptor is not None
+                        and src.descriptor is not None
+                        and distance(m.descriptor, src.descriptor) > LOOK_APART
+                    ):
+                        continue  # another kit (the libero who came on for them)
                     if n is not None and free(n, m):
                         held[n].append((m.first, m.last))
                         owner[id(m)] = n
