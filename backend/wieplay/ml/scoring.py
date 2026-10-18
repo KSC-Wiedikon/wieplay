@@ -88,6 +88,8 @@ C_PENALTY_RALLY = 4.0  # a penalty point (no rally, by the rules) lined up with 
 C_SHEET_HINT = 5.0
 FREE_EXTRA = 0.2  # a rally the sheet's "points cancelled" note announces
 SHEET_FALLBACK = 20.0  # a sheet that cannot be lined up (used as a hint instead)
+SHORT_GAP_MS = 8000
+SHORT_BONUS = 1.5  # "no point" that much cheaper (about the odds seen on game 509)
 
 
 def other(side: Side) -> Side:
@@ -613,6 +615,7 @@ class _SheetSet:
     told: list[tuple[int, int] | None]
     np_before: list[int]  # non-penalty points among the first i
     us_before: list[int]  # points won by us among the first i
+    short: list[float]  # how much cheaper "no point" is: a rally right after another
 
     @property
     def n(self) -> int:
@@ -662,7 +665,9 @@ class _SheetSet:
 
     def none(self, j: int, i: int) -> float:
         """Rally j is no point, after i of the sheet's points."""
-        return FREE_EXTRA if self.path.cancelled.get(i, 0) > 0 else self.rallies[j].extra
+        if self.path.cancelled.get(i, 0) > 0:
+            return FREE_EXTRA
+        return self.rallies[j].extra - self.short[j]
 
 
 def _sheet_setup(st: SetIn, side0: Court) -> _SheetSet:
@@ -680,7 +685,21 @@ def _sheet_setup(st: SetIn, side0: Court) -> _SheetSet:
         np_before.append(np_before[-1] + (0 if pen else 1))
         us_before.append(us_before[-1] + (w == "us"))
     rallies = [_prepare(r) for r in st.rallies]
-    return _SheetSet(st, path, rallies, side, k_max, base, told, np_before, us_before)
+    # A serve comes at least ~8 s after the previous rally's end: a proposal followed that soon
+    # by the next is often the first part of a rally the finder cut in two (the point is the
+    # part with the rally's end), or a replay.
+    rs = st.rallies
+    short = [
+        SHORT_BONUS
+        if j + 1 < len(rs)
+        and r.proposal is not None
+        and r.won_fact is None
+        and r.serve_fact is None
+        and rs[j + 1].start_ms - r.end_ms < SHORT_GAP_MS
+        else 0.0
+        for j, r in enumerate(rs)
+    ]
+    return _SheetSet(st, path, rallies, side, k_max, base, told, np_before, us_before, short)
 
 
 def _sheet_forward(
@@ -818,7 +837,9 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
             continue
         point_rally[i] = r.key
         server, won = path.servers[i], path.winners[i]
-        conf = _confidence({0: by["us"], 1: by["them"]}, 0 if won == "us" else 1)
+        # How sure: this winner against the other and against no point at all (a rally the
+        # finder cut in two leaves two candidates for one point: check it).
+        conf = _confidence({0: by["us"], 1: by["them"], -1: by["none"]}, 0 if won == "us" else 1)
         serve_p = None
         if r.p_near is not None:
             p_us = r.p_near if side_now == "near" else 1.0 - r.p_near
