@@ -117,6 +117,7 @@ export const de: Messages<typeof en> = {
     noUpcoming: 'Keine Spiele in den nächsten 21 Tagen.',
     highlights: 'Meine Highlights',
     highlightsHint: 'Deine getaggten Szenen dieser Saison, laufend ergänzt, während getaggt wird.',
+    seasonOf: 'Saison von {{team}}',
     highlightsWatch: 'Meine Highlights anschauen',
     helping: {
       title: 'Du hilfst diesem Team',

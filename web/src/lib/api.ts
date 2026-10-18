@@ -5,6 +5,7 @@ import type {
   ChangesIn,
   ChangesOut,
   CoachInvited,
+  EarlierPerson,
   EventRevision,
   FilmingCheck,
   Game,
@@ -21,6 +22,8 @@ import type {
   InviteLink,
   Job,
   Me,
+  NextSeasonIn,
+  NextSeasonOut,
   PartUrl,
   Policy,
   PolicyUpdate,
@@ -231,6 +234,12 @@ export const api = {
     apiRequest<InviteLink>(`/api/teams/${id}/people/${memberId}/invite`, { method: 'POST' }),
   declareAdults: (id: number) =>
     apiRequest<{ adults_declared_at: string }>(`/api/teams/${id}/adults`, { method: 'POST' }),
+  earlierPeople: (id: number, signal?: AbortSignal) =>
+    apiRequest<EarlierPerson[]>(`/api/teams/${id}/people/earlier`, { signal }),
+  takeAlong: (id: number, memberIds: number[]) =>
+    apiRequest<GuestPerson[]>(`/api/teams/${id}/people/earlier`, { method: 'POST', body: { member_ids: memberIds } }),
+  startNextSeason: (id: number, body: NextSeasonIn) =>
+    apiRequest<NextSeasonOut>(`/api/teams/${id}/next-season`, { method: 'POST', body }),
   guestTeams: (signal?: AbortSignal) => apiRequest<GuestTeam[]>('/api/admin/guest-teams', { signal }),
   createGuestTeam: (body: GuestTeamCreate) =>
     apiRequest<GuestTeam>('/api/admin/guest-teams', { method: 'POST', body }),

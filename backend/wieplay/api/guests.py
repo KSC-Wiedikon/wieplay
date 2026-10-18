@@ -5,7 +5,9 @@
 /api/auth/guest/invite/{token}   what a link is for (GET), set up the account from it (POST)
 /api/teams/{id}/people           a guest team's roster: its coaches add, edit and remove
                                  people and make invite links; its players read it
-/api/teams/{id}/adults           the coach's "everyone we film is 18 or older"
+/api/teams/{id}/people/earlier   people of earlier seasons: its coaches take them along
+/api/teams/{id}/next-season      its coaches start the next season (a new team row)
+/api/teams/{id}/adults           the coach's "everyone we film is 18 or older", per season
 /api/admin/guest-teams           admins: create guest teams, limits, training OK, on/off,
                                  the first coach's invite
 
@@ -271,6 +273,37 @@ class AdultsOut(BaseModel):
     adults_declared_at: datetime
 
 
+class EarlierPersonOut(BaseModel):
+    member_id: int
+    name: str
+    number: int | None
+    role: Literal["player", "coach"]
+    season: str  # the latest earlier season they were on
+
+
+class TakeAlongIn(BaseModel):
+    member_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class NextSeasonIn(BaseModel):
+    """Left out: carried from this season (name, league), the season after it, everyone."""
+
+    name: Name | None = None
+    league: Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)] | None = None
+    season: str | None = Field(default=None, max_length=7)
+    member_ids: list[int] | None = Field(default=None, max_length=200)
+
+
+class NextSeasonOut(BaseModel):
+    team_id: int
+    name: str
+    season: str
+    carried: int
+    left: int
+    # Of those left behind: logins disabled (on no current team).
+    disabled: int
+
+
 def _guest_team(db: DbDep, viewer: Viewer, team_id: int) -> TeamAccess:
     access = visible_team(db, viewer, team_id)
     if not access.team.guest:
@@ -319,6 +352,89 @@ def list_people(team_id: int, viewer: ViewerDep, db: DbDep) -> list[PersonOut]:
     access = _guest_team(db, viewer, team_id)
     full = can_manage_people(viewer, access.ref, access.leads)
     return [_person_out(p, viewer, full) for p in guests.people(db, access.team)]
+
+
+@router.get("/teams/{team_id}/people/earlier", response_model=list[EarlierPersonOut])
+def list_earlier_people(team_id: int, viewer: ViewerDep, db: DbDep) -> list[EarlierPersonOut]:
+    """People of the team's earlier seasons who are not on this season's roster (its newest),
+    for its coaches and admins to take along."""
+    access = _managing(db, viewer, team_id)
+    if not guests.is_newest(db, access.team):
+        return []
+    return [
+        EarlierPersonOut(
+            member_id=p.member_id,
+            name=p.name,
+            number=p.number,
+            role=_role(p.roles),
+            season=p.season,
+        )
+        for p in guests.earlier_people(db, access.team)
+    ]
+
+
+@router.post("/teams/{team_id}/people/earlier", response_model=list[PersonOut], status_code=201)
+def take_along(team_id: int, body: TakeAlongIn, viewer: ViewerDep, db: DbDep) -> list[PersonOut]:
+    """Take people of earlier seasons along into this one (the newest), in their roles. A login
+    disabled when they left works again."""
+    access = _managing(db, viewer, team_id)
+    try:
+        added = guests.take_along(db, access.team, body.member_ids)
+    except guests.NotOnTeam as exc:
+        db.rollback()
+        raise HTTPException(404, str(exc)) from None
+    except guests.GuestError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    audit(db, viewer.member_id, "guest_people_taken_along", "wd_team", str(team_id),
+          member_ids=added)  # fmt: skip
+    db.commit()
+    people = {p.member_id: p for p in guests.people(db, access.team)}
+    return [_person_out(people[m], viewer, True) for m in added]
+
+
+@router.post("/teams/{team_id}/next-season", response_model=NextSeasonOut, status_code=201)
+def start_next_season(
+    team_id: int, body: NextSeasonIn, viewer: ViewerDep, db: DbDep
+) -> NextSeasonOut:
+    """The team's next season (PLAN §4.5): a new team row in the same lineage with the people
+    the coach takes along, who keep their logins. The adults declaration is asked again; this
+    season stays as it is. Its coaches and admins."""
+    access = _managing(db, viewer, team_id)
+    team = access.team
+    today = club_today()
+    try:
+        started = guests.start_next_season(
+            db,
+            team,
+            name=body.name or team.name,
+            league=team.league if "league" not in body.model_fields_set else body.league or None,
+            season=body.season or guests.default_next_season(team, today),
+            member_ids=body.member_ids,
+            actor=viewer.member_id,
+            today=today,
+        )
+    except guests.NotOnTeam as exc:
+        db.rollback()
+        raise HTTPException(422, str(exc)) from None
+    except guests.GuestError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from None
+    new = started.team
+    audit(db, viewer.member_id, "guest_season_started", "team_lineage", str(new.lineage_id),
+          from_team_id=team.id, team_id=new.id, season=new.season, name=new.name,
+          carried=list(started.carried), left=list(started.left),
+          disabled=list(started.disabled))  # fmt: skip
+    db.commit()
+    permission_cache.clear()  # those left behind lose their playback now too
+    return NextSeasonOut(
+        team_id=new.id,
+        name=new.name,
+        season=new.season,
+        carried=len(started.carried),
+        left=len(started.left),
+        disabled=len(started.disabled),
+    )
 
 
 @router.post("/teams/{team_id}/people", response_model=PersonOut, status_code=201)
@@ -391,6 +507,8 @@ def invite_person(
         token, expires_at = guests.new_invite(db, access.team, member_id, viewer.member_id)
     except guests.NotOnTeam:
         raise HTTPException(404, "No such person on this team") from None
+    except guests.EarlierSeason as exc:
+        raise HTTPException(409, str(exc)) from None
     audit(db, viewer.member_id, "guest_invite_created", "wd_team", str(team_id),
           member_id=member_id)  # fmt: skip
     db.commit()
@@ -400,19 +518,19 @@ def invite_person(
 @router.post("/teams/{team_id}/adults", response_model=AdultsOut)
 def declare_adults(team_id: int, viewer: ViewerDep, db: DbDep) -> AdultsOut:
     """The coach confirms that everyone the team films (its players, coaches and opponents)
-    is 18 or older: an adult league. Uploads need it (PLAN §5.3). The guest club's own coaches
-    only: it is their statement."""
+    is 18 or older: an adult league. Uploads need it (PLAN §5.3), once per season (team row).
+    The guest club's own coaches only: it is their statement."""
     access = _guest_team(db, viewer, team_id)
     if not (viewer.guest and access.team.lineage_id in access.leads):
         raise HTTPException(403, "Only the team's coaches confirm this")
-    lineage = access.team.lineage
-    if lineage.guest_adults_declared_at is None:
-        guests.declare_adults(db, lineage, viewer.member_id)
-        audit(db, viewer.member_id, "guest_adults_declared", "team_lineage", str(lineage.id),
-              team_id=team_id)  # fmt: skip
+    team = access.team
+    if team.guest_adults_declared_at is None:
+        guests.declare_adults(db, team, viewer.member_id)
+        audit(db, viewer.member_id, "guest_adults_declared", "wd_team", str(team_id),
+              team_id=team_id, season=team.season)  # fmt: skip
         db.commit()
-    assert lineage.guest_adults_declared_at is not None
-    return AdultsOut(adults_declared_at=lineage.guest_adults_declared_at)
+    assert team.guest_adults_declared_at is not None
+    return AdultsOut(adults_declared_at=team.guest_adults_declared_at)
 
 
 # --- admins: the guest clubs ------------------------------------------------------------------
@@ -433,6 +551,9 @@ class GuestTeamOut(BaseModel):
     people: int
     accounts: int
     adults_declared_at: datetime | None
+    # The team's newest season: its row carries the lineage's switches in the admins' list;
+    # earlier seasons are listed under it.
+    newest: bool = True
 
 
 class GuestTeamIn(BaseModel):
@@ -462,7 +583,7 @@ class CoachInvitedOut(BaseModel):
     expires_at: datetime
 
 
-def _guest_team_out(db: DbDep, team: WdTeam) -> GuestTeamOut:
+def _guest_team_out(db: DbDep, team: WdTeam, newest: bool | None = None) -> GuestTeamOut:
     lineage = team.lineage
     member_ids = set(
         db.scalars(select(WdTeamMember.member_id).where(WdTeamMember.team_id == team.id))
@@ -490,7 +611,8 @@ def _guest_team_out(db: DbDep, team: WdTeam) -> GuestTeamOut:
         videos=guests.video_count(db, team.id),
         people=len(member_ids),
         accounts=int(accounts or 0),
-        adults_declared_at=lineage.guest_adults_declared_at,
+        adults_declared_at=team.guest_adults_declared_at,
+        newest=guests.is_newest(db, team) if newest is None else newest,
     )
 
 
@@ -503,7 +625,12 @@ def _admin_guest_team(db: DbDep, team_id: int) -> WdTeam:
 
 @router.get("/admin/guest-teams", response_model=list[GuestTeamOut])
 def list_guest_teams(_: AdminDep, db: DbDep) -> list[GuestTeamOut]:
-    return [_guest_team_out(db, t) for t in guests.guest_teams(db)]
+    """Every season of every guest team: club and name, newest season first."""
+    rows = guests.guest_teams(db)
+    newest: dict[uuid.UUID, int] = {}
+    for team in sorted(rows, key=lambda t: (t.season, t.id)):
+        newest[team.lineage_id] = team.id
+    return [_guest_team_out(db, t, newest[t.lineage_id] == t.id) for t in rows]
 
 
 @router.post("/admin/guest-teams", response_model=GuestTeamOut, status_code=201)

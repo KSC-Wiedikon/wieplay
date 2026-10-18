@@ -1,10 +1,11 @@
 import { lazy, Suspense, useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { SportBadge } from '../components/Badge'
 import { ButtonLink } from '../components/Button'
 import { ChevronRightIcon, PlayIcon } from '../components/icons'
 import { Card } from '../components/Card'
+import { Select } from '../components/Field'
 import { LoadError, Message } from '../components/Message'
 import { PageHeader, SectionHeader } from '../components/PageHeader'
 import { PageSpinner, Spinner } from '../components/Spinner'
@@ -12,10 +13,11 @@ import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { ForbiddenError, NotFoundError } from '../lib/api'
 import { formatDate, formatTime, todayIso } from '../lib/format'
 import { opponentOf, scoreOf, setsOf, splitGames } from '../lib/games'
-import { useTeam, useTeamGames } from '../lib/queries'
+import { seasonOf } from '../lib/guests'
+import { useTeam, useTeamGames, useTeamSeasons } from '../lib/queries'
 import { sportOf, useSportAccent } from '../lib/sport'
 import type { Game } from '../lib/types'
-import { AdultsBanner, PeopleSection } from './GuestSections'
+import { AdultsBanner, NextSeasonSection, PeopleSection } from './GuestSections'
 import { HelpersSection, HelpingSection } from './HelpersSection'
 import { NotFoundPage } from './NotFoundPage'
 import { FilmingSection, VideosSection } from './TeamSections'
@@ -46,6 +48,8 @@ function TeamView({ teamId }: { teamId: number }) {
   const { name, league, season, sport } = team.data
   // A guest club's team (PLAN §4.5) has no Wiedisync games: nothing to plan filming for.
   const guest = team.data.guest === true
+  // Its coaches start the next season themselves: first thing on the page once this one is over.
+  const seasonOver = seasonOf(today) > season
 
   return (
     <div className="flex flex-col gap-8 sm:gap-10">
@@ -63,10 +67,12 @@ function TeamView({ teamId }: { teamId: number }) {
         }
         title={name}
         subtitle={[team.data.club, league, season].filter(Boolean).join(' · ')}
+        actions={<SeasonSwitch teamId={teamId} name={name} />}
       />
 
       {/* A helper is here to review and tag: the guide comes first. */}
       {team.data.helper && <HelpingSection />}
+      {seasonOver && <NextSeasonSection team={team.data} />}
       <AdultsBanner team={team.data} />
       <VideosSection team={team.data} />
       {team.data.rel.includes('player') && <HighlightsSection teamId={teamId} />}
@@ -91,9 +97,32 @@ function TeamView({ teamId }: { teamId: number }) {
         </div>
       )}
 
+      {guest && !seasonOver && <NextSeasonSection team={team.data} />}
       {guest && <PeopleSection team={team.data} />}
       {team.data.can_grant && <HelpersSection team={team.data} />}
     </div>
+  )
+}
+
+/** The team's seasons the viewer can see (a guest team's too): each season is its own team row. */
+function SeasonSwitch({ teamId, name }: { teamId: number; name: string }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const seasons = useTeamSeasons(teamId)
+  if (!seasons.data || seasons.data.length < 2) return null
+  return (
+    <Select
+      inline
+      aria-label={t('team.seasonOf', { team: name })}
+      value={teamId}
+      onChange={(e) => void navigate(`/teams/${e.target.value}`)}
+    >
+      {seasons.data.map((s) => (
+        <option key={s.team_id} value={s.team_id}>
+          {s.name === name ? s.season : `${s.season} · ${s.name}`}
+        </option>
+      ))}
+    </Select>
   )
 }
 

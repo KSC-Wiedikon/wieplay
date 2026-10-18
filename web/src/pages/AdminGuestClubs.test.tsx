@@ -52,6 +52,30 @@ describe('Admin → Teams → Guest clubs', () => {
     )
   })
 
+  it('lists the earlier seasons of a guest team under its newest', async () => {
+    const earlier: GuestTeam = { ...GAST, id: 1000000000, name: 'Herren 3', season: '2025/26', videos: 12, people: 8 }
+    const other: GuestTeam = { ...GAST, id: 1000000005, lineage_id: 'other', club: 'BTV Aarau', name: 'Damen 1' }
+    vi.stubGlobal('fetch', vi.fn(stubFetch({ '/api/admin/guest-teams': { body: [GAST, other, earlier] } })))
+    renderRoute(<GuestClubsSection />)
+    const table = await screen.findByRole('table', { name: 'Guest clubs' })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('BTV Aarau · Damen 1'),
+      expect.stringContaining('VBC Gast · Herren 2'),
+      expect.stringContaining('Earlier season 2025/26'),
+    ])
+    const old = rows[2] as HTMLElement
+    expect(old).toHaveTextContent('Herren 3')
+    expect(old).toHaveTextContent('12 of 30')
+    // The switches are the team's: on its newest season only.
+    expect(within(old).queryByRole('switch')).not.toBeInTheDocument()
+    expect(within(old).queryByRole('button', { name: /Invite a coach/ })).not.toBeInTheDocument()
+    expect(within(old).getByRole('link', { name: /Open the team page of VBC Gast Herren 3 2025\/26/ })).toHaveAttribute(
+      'href',
+      `/teams/${earlier.id}`,
+    )
+  })
+
   it('creates a guest team and makes its coach’s invite link at once', async () => {
     const link = 'http://localhost:5173/join/xyz'
     const fetch = vi.fn(

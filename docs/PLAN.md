@@ -308,9 +308,10 @@ Wiedisync callback, for 14 days (guests cannot renew silently). Every failure an
 email or password" (unknown emails cost a dummy hash too); 10 wrong in a row lock the account
 for 15 minutes. Passwords: stdlib scrypt (n 2^15, r 8, p 1, 16-byte salt), at most 4 hashes at
 once. Guest sessions are rebuilt from the database on every request: a person taken off the
-roster, a disabled account or a switched-off team ends access at once. A person on no team any
-more has their login disabled (housekeeping deletes it 30 days later) and their name row
-removed, as the sync does for a KSCW member who leaves (tags keep the shirt number).
+roster, a disabled account or a switched-off team ends access at once. A person on no current
+team (the newest season of their team, below) has their login disabled (housekeeping deletes it
+30 days later); on no team row at all, their name row is removed too, as the sync does for a
+KSCW member who leaves (tags keep the shirt number).
 
 **Data.** A guest team is a lineage with `guest_club` and a `wd_team` row with `guest = true`;
 its people are `wd_member` / `wd_team_member` rows like KSCW members, with ids from
@@ -329,16 +330,49 @@ guest people), no NAS inbox and no link imports (the allow-list holds KSCW's cha
 and scoreboard suggestions from other videos stay on their side, exports are watermarked
 "<club> intern", a guest team's originals get their own NAS folder (`vb-guest-<club>-<team>`).
 
-**Limits and training.** A video limit per team row (30 by default; `guest_video_limit`),
-counting every video not deleted; the team page shows "12 of 30 videos". Training runs
-(`train_rallies`, `train_actions`) leave out a guest team's games unless
-`guest_training_ok` (the club agreed); its games still get the models' suggestions.
+**Limits and training.** A video limit per team row, so per season (30 by default;
+`guest_video_limit` on the lineage), counting every video not deleted; the team page shows "12
+of 30 videos". Training runs (`train_rallies`, `train_actions`) leave out a guest team's games
+unless `guest_training_ok` (the club agreed); its games still get the models' suggestions.
+
+**The next season** (built 18.10.2026). A guest team row is one season of its lineage, as a
+KSCW row is, and takes the matches of its own season only; Wiedisync's 1 June rollover never
+reaches it, so the team's coaches and admins start the next season themselves: *Start 2027/28*
+on the team page of its newest season (low-key during the season, the first thing on the page
+once it is over; `POST /api/teams/{id}/next-season`).
+
+- WiePlay makes the next season's row in the same lineage: name, league and sport carried
+  (name and league editable), the season after this one by default (this season if the team
+  skipped one; at the latest the season after the current one). One at a time: a lock on the
+  lineage, and only from the newest row.
+- The coach ticks who comes along, everyone by default; the coach who starts it always comes.
+  They go onto the new row in their roles with the **same member ids**, so their logins and
+  sessions keep working, their open invite links move to the new season, and they see both
+  seasons (players the seasons they were on, coaches every season of the lineage).
+- The **adults declaration is asked again** for the new season: it lives on the team row since
+  migration `0018` (the existing ones stayed on each team's newest row). The video limit counts
+  the new row from zero.
+- **The old season stays as it is**: its videos, tags, stats and roster. People join (added,
+  invite and password links) on the newest season only; editing and removing work on every
+  season (a request to be removed from an earlier one). The team page has a season switch for
+  every team with more than one season the viewer can see (KSCW teams too); the start page
+  groups the seasons as for KSCW teams.
+- **Who is not taken along** stays on the old season's roster (as a KSCW member stays on last
+  season's Wiedisync roster) but is on no current team: their login is disabled at once
+  (sessions end, open links stop working) and deleted 30 days later. A coach can take them
+  along later (People → *From earlier seasons*): back in their role, and their login works
+  again while it exists. Taking someone off the newest season does the same; taking them off
+  every season removes their name from WiePlay.
+- Earlier seasons' rosters are kept for this season and the previous one, as the sync keeps
+  KSCW's: the nightly housekeeping clears older ones (their videos expired with them, §5.5),
+  never a lineage's newest row, so a team that paused keeps its people. Whoever is then on no
+  row loses their name and their login.
+- Admin → Teams → Guest clubs lists every season of a guest team: the newest with the team's
+  switches (training OK, on/off, limit, the coach invite), the earlier ones below it with their
+  counts and team page.
 
 **Not yet.** Helpers on guest teams, link imports from a guest club's own channel, basketball
-guest teams, emails, and **the next season** (needed before 1 June 2027): a team row takes the
-matches of its own season only, so a guest team needs a new season's row in the same lineage
-with its people carried over (their logins keep working) and the adults confirmation asked
-again; today an admin can only create a new guest team, whose people would need new emails.
+guest teams, emails.
 
 ---
 
@@ -374,7 +408,8 @@ the team's **lineage** (§6.3) unless a season is named.
 ⁴ Owner, 16.10.2026: admins do the first tagging, so they tag, share and export too.
 ⁵ Since 17.10.2026: admins, too, add and remove a team's helpers.
 ⁶ Guest clubs (§4.5): a guest club's coaches and players have the coach and player columns on
-  their own guest team only, plus the team's People (roster and invite links, coaches only).
+  their own guest team only, plus the team's People (roster and invite links) and its next
+  season (coaches only).
   Guest teams have no helpers, no sport admins (Wiedisync's are KSCW's) and no NAS inbox or link
   imports. KSCW members never see a guest team; only full admins see both sides.
 
@@ -410,9 +445,10 @@ Enforced in code, not just stated:
    confirmation. Opponents appear by jersey number only, their data stays team-internal, and
    footage is deleted or trimmed on request. Recorded in `docs/PRIVACY.md`.
 6. **Guest clubs** (§4.5): WiePlay has no birthdates of a guest club's people and never asks
-   Wiedisync about a guest team. Instead a coach of the guest team declares once, before the
-   first upload: "Everyone we film — our players, coaches and our opponents — is 18 or older
-   (adult league). I confirm." (`team_lineage.guest_adults_declared_at/_by`). The same gate
+   Wiedisync about a guest team. Instead a coach of the guest team declares once a season,
+   before the season's first upload: "Everyone we film — our players, coaches and our opponents
+   — is 18 or older (adult league). I confirm." (`wd_team.guest_adults_declared_at/_by`, per
+   season row since 18.10.2026; on the lineage before, migration `0018`). The same gate
    (`core/filming.py`) passes a guest team on that declaration and blocks it without one
    (`adults_not_declared`); the team policy still applies. Uploads, the camera's own date and
    the batch import all go through it; guest teams have no NAS inbox and no link imports.
@@ -560,6 +596,8 @@ wd_team          id int PK (= teams.id), lineage_id → team_lineage, name, spor
                  ('volleyball'|'basketball'), season '2026/27', league, team_key, listed, synced_at
                  -- every listed team (metadata only); personal data only for enabled lineages
                  guest bool -- a guest club's team (§4.5): id from guest_id_seq, never synced
+                 guest_adults_declared_at, guest_adults_declared_by -- its coach's adults
+                 declaration for this season (§5.3)
 wd_team_member   (team_id, member_id, rel, is_guest)  rel ∈ player|coach|team_responsible|captain
 wd_game          id int PK (= games.id), team_id, date, time, home_name, away_name,
                  our_side 'home'|'away', league, hall_name, home_score, away_score,
@@ -583,8 +621,10 @@ can fix a wrong match. **Whether a team uses WiePlay is a flag on its lineage**
 season's team row. Sport is always part of the key: "H1" exists in both sports.
 
 A guest club's team (§4.5) is a lineage of its own, never matched by the sync: `guest_club`
-(the club's name; NULL = a KSCW team), `guest_training_ok`, `guest_video_limit`,
-`guest_adults_declared_at/_by` (migration `0016`, 17.10.2026).
+(the club's name; NULL = a KSCW team), `guest_training_ok`, `guest_video_limit` (migration
+`0016`, 17.10.2026). Its coaches start each next season themselves (§4.5, 18.10.2026): a new
+team row in the same lineage with the people they take along; the adults declaration is per
+season on that row (`wd_team.guest_adults_declared_at/_by`, migration `0018`).
 
 ### 6.4 Videos
 

@@ -141,7 +141,7 @@ def check_filming(
         blockers.append(Blocker("policy_matches", detail=policy.reason))
 
     if team.guest:
-        declared = team.lineage.guest_adults_declared_at
+        declared = team.guest_adults_declared_at  # per season (PLAN §4.5)
         if declared is None:
             blockers.append(Blocker("adults_not_declared"))
         return FilmingCheck(not blockers, tuple(blockers), declared)

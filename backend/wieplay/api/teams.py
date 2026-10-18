@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, contains_eager
 from wieplay.api.access import team_refs
 from wieplay.api.deps import DbDep, ViewerDep
 from wieplay.core import guests
+from wieplay.core.filming import club_today
 from wieplay.core.models import TeamLineage, WdGame, WdTeam
 from wieplay.core.permissions import (
     TeamRef,
@@ -64,8 +65,12 @@ class TeamDetailOut(TeamOut):
     # A guest team's videos this season and its limit ("12 of 30 videos").
     video_count: int | None = None
     video_limit: int | None = None
-    # The coach's "everyone we film is 18 or older" (PLAN §5.3); None: not yet.
+    # The coach's "everyone we film is 18 or older" for this season (PLAN §5.3); None: not yet.
     adults_declared_at: datetime | None = None
+    # A guest team: whether this row is its newest season (people join that one; earlier
+    # seasons keep their roster), and the season its coaches and admins can start next.
+    newest: bool | None = None
+    next_season: str | None = None
 
 
 class MemberOut(BaseModel):
@@ -181,7 +186,10 @@ def get_team(team_id: int, viewer: ViewerDep, db: DbDep) -> TeamDetailOut:
         out.can_manage_people = can_manage_people(viewer, ref, leads)
         out.video_count = guests.video_count(db, team.id)
         out.video_limit = team.lineage.guest_video_limit
-        out.adults_declared_at = team.lineage.guest_adults_declared_at
+        out.adults_declared_at = team.guest_adults_declared_at
+        out.newest = guests.is_newest(db, team)
+        if out.newest and out.can_manage_people:
+            out.next_season = guests.next_season_for(team, club_today())
     return out
 
 

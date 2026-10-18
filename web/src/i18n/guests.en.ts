@@ -1,5 +1,6 @@
 // Guest clubs (PLAN §4.5): the login page's guest form, invite links, a guest team's people,
-// the adults declaration, the video limit, Admin → Teams → Guest clubs, the privacy notice.
+// the next season, the adults declaration, the video limit, Admin → Teams → Guest clubs, the
+// privacy notice.
 
 export const guestsEn = {
   guests: {
@@ -88,15 +89,47 @@ export const guestsEn = {
       copyFailed: "Couldn't copy. Select the link and copy it.",
       done: 'Done',
       linkFailed: "Couldn't make the link: {{detail}}",
+      earlier: 'This is an earlier season: its roster stays as it was. People join the team, and get their links, in its newest season.',
+      fromEarlier: 'From earlier seasons',
+      fromEarlierTitle: 'Take people along into {{season}}',
+      fromEarlierHint: 'People of {{team}} in earlier seasons who are not on {{season}}. They come back in their role, and a login they had works again.',
+      lastIn: 'last in {{season}}',
+      takeAlong: 'Take along',
+      takingAlong: 'Taking along…',
+      takenAlong_one: '{{count}} person is on the team again.',
+      takenAlong_other: '{{count}} people are on the team again.',
+      takeAlongFailed: "Couldn't take them along: {{detail}}",
+    },
+    // A guest team's next season (PLAN §4.5): its coaches start it themselves.
+    season: {
+      title: 'Next season',
+      hint: 'Start {{season}} when {{current}} ends: the team and the people you pick come along and keep their logins. {{current}} stays as it is.',
+      over: '{{current}} is over. Start {{season}} to upload its matches: the team and the people you pick come along and keep their logins.',
+      start: 'Start {{season}}',
+      formTitle: 'Start {{season}} for {{team}}',
+      name: 'Team',
+      league: 'League (optional)',
+      season: 'Season',
+      seasonHint: 'Uploads go to the season of the match day; a season starts on 1 June.',
+      people: 'Who comes along',
+      peopleHint: 'They keep their logins and see both seasons.',
+      all: 'Everyone',
+      you: '(you: you come along)',
+      leftNote_one: '{{count}} person not ticked stays on the {{current}} roster but loses access to WiePlay. Their login is deleted after 30 days, unless you take them along later.',
+      leftNote_other: '{{count}} people not ticked stay on the {{current}} roster but lose access to WiePlay. Their logins are deleted after 30 days, unless you take them along later.',
+      adultsNote: 'Before the first upload of {{season}}, a coach confirms again that everyone filmed is 18 or older.',
+      starting: 'Starting…',
+      started: '{{season}} has started. Confirm the adults before its first upload.',
+      failed: "Couldn't start the season: {{detail}}",
     },
     adults: {
-      title: 'Before your first upload',
+      title: 'Before the first upload of {{season}}',
       body: 'Everyone we film — our players, coaches and our opponents — is 18 or older (adult league). I confirm.',
-      why: 'WiePlay films adults only. Uploads open once a coach of the team confirms this.',
+      why: 'WiePlay films adults only. A coach of the team confirms this once a season; uploads open after that.',
       confirm: 'I confirm',
       confirming: 'Saving…',
       failed: "Couldn't save. Try again.",
-      waiting: "A coach of the team hasn't confirmed yet that everyone filmed is 18 or older.",
+      waiting: "A coach of the team hasn't confirmed yet for {{season}} that everyone filmed is 18 or older.",
     },
     quota: '{{count}} of {{limit}} videos this season',
     quotaFull: 'The team has used all its videos for this season. Delete one, or ask a KSCW admin for more.',
@@ -141,6 +174,7 @@ export const guestsEn = {
       teamPage: 'Team page',
       teamPageFor: 'Open the team page of {{team}} (people, new password links)',
       saveFailed: "Couldn't save {{team}}. Try again.",
+      earlierSeason: 'Earlier season',
     },
     privacy: {
       title: 'Privacy',
@@ -162,11 +196,11 @@ export const guestsEn = {
         },
         guests: {
           title: 'Guest clubs',
-          body: 'A guest club is responsible for its own footage and for informing its people. It confirms that everyone filmed is 18 or older. Its games train WiePlay’s shared models only with the club’s OK. Logins exist only by invite from the team’s coach. On request, KSC Wiedikon deletes a guest club’s videos and logins.',
+          body: 'A guest club is responsible for its own footage and for informing its people. It confirms every season that everyone filmed is 18 or older. Its games train WiePlay’s shared models only with the club’s OK. Logins exist only by invite from the team’s coach, and carry over to the next season for the people the coach takes along. On request, KSC Wiedikon deletes a guest club’s videos and logins.',
         },
         keep: {
           title: 'How long',
-          body: 'Videos for their season and the next one; exports 30 days; the audit log 12 months; sessions 30 days. A guest club’s login until its person leaves the team, then 30 days more.',
+          body: 'Videos for their season and the next one; exports 30 days; the audit log 12 months; sessions 30 days. A guest club’s login until its person leaves the team or is not taken along into the next season, then 30 days more.',
         },
         rights: {
           title: 'Your rights',

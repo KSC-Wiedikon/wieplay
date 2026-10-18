@@ -50,10 +50,6 @@ class TeamLineage(Base):
     guest_training_ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # At most this many videos (not deleted) per team row, i.e. per season.
     guest_video_limit: Mapped[int | None] = mapped_column(Integer)
-    # "Everyone we film is 18 or older": the guest coach's declaration replaces Wiedisync's
-    # adult check for a guest team (PLAN §5.3).
-    guest_adults_declared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    guest_adults_declared_by: Mapped[int | None] = mapped_column(Integer)
 
     teams: Mapped[list[WdTeam]] = relationship(back_populates="lineage")
 
@@ -74,6 +70,10 @@ class WdTeam(Base):
     listed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     guest: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # "Everyone we film is 18 or older": a guest coach's declaration for this season's team
+    # replaces Wiedisync's adult check (PLAN §5.3); asked again every season.
+    guest_adults_declared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    guest_adults_declared_by: Mapped[int | None] = mapped_column(Integer)
 
     lineage: Mapped[TeamLineage] = relationship(back_populates="teams")
 
