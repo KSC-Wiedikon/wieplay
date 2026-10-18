@@ -58,6 +58,7 @@ HEAD_ROOM_SHARE = 0.15
 
 MIN_TRACK_DETECTIONS = 4  # 0.4 s at 10 fps
 MIN_CROP_PX = 40  # box height for a crop or an appearance sample
+PERSON_SHAPE = 1.4  # a crop's box is at least this many times as tall as wide
 OCCLUDED_IOU = 0.15  # a box overlapping another this much is no clean crop
 CROPS_PER_TRACK = 4  # the gallery's best crops of a track
 # Crops kept per track for reading its number: the best of every CROP_BUCKET_FRAMES (2 s at
@@ -470,6 +471,10 @@ class Collector:
             tr.heights_px.append(h_px)
             self.rows.append((frame, tid, u1, v1, u2, v2))
             if h_px < MIN_CROP_PX or crowded[i] > OCCLUDED_IOU:
+                continue
+            # No picture of someone cut by the picture's edge or not standing (a head and
+            # shoulders right in front of the camera is a face, not a player's back).
+            if y1 <= 1 or y2 >= roi_img.shape[0] - 2 or h_px < PERSON_SHAPE * (x2 - x1):
                 continue
             take_desc = len(tr.frames) % DESCRIPTOR_EVERY == 1
             if not take_desc and not tr.wants_crop(frame, h_px):

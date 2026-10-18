@@ -525,3 +525,10 @@ def test_someone_standing_still_through_the_rallies_is_not_playing() -> None:
                 np.array([1, 2]), span=0)  # fmt: skip
     tracks = {t.track_id: identities.as_chain([t]) for t in pl.finish_tracks(col)}
     assert identities.still(tracks[1], col) and not identities.still(tracks[2], col)
+
+
+def test_a_flipped_serving_side_inside_a_set_is_smoothed_and_set_changes_kept() -> None:
+    near = ["us"] * 6 + ["them"] + ["us"] * 6 + ["them"] * 8
+    sides = identities.smooth_sides(near)
+    assert sides[6] == "us" and sides[:13] == ["us"] * 13 and sides[-5:] == ["them"] * 5
+    assert identities.smooth_sides([None, "us", None]) == ["us", "us", "us"]

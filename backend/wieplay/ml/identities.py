@@ -110,6 +110,23 @@ class Teams:
         return team
 
 
+SIDES_WINDOW = 9  # rallies: a set keeps its sides, the serving side read per rally does not
+
+
+def smooth_sides(near_team: Sequence[str | None], width: int = SIDES_WINDOW) -> list[str | None]:
+    """The team at the camera's end per rally window, by the majority of the windows around
+    it: the serving side is read per rally (the model's, often) and flips now and then
+    inside a set, where the sides never change (the switch between sets survives: the
+    majority changes there)."""
+    out: list[str | None] = []
+    half = width // 2
+    for i, team in enumerate(near_team):
+        around = [t for t in near_team[max(0, i - half) : i + half + 1] if t in ("us", "them")]
+        us, them = around.count("us"), around.count("them")
+        out.append("us" if us > them else "them" if them > us else team)
+    return out
+
+
 def assign_teams(tracks: Sequence[Track], near_team: Sequence[str | None]) -> Teams:
     """Our team or theirs for each track, from its detections in the rally windows: the
     side of the net and which team was on that side then (`near_team[window]`: "us", "them"

@@ -492,7 +492,9 @@ def identify(
     """Tracks → teams → numbers → chains → people (identities.py), then the gallery's
     sheets and the API's index."""
     tracks = pl.finish_tracks(col)
-    teams = identities.assign_teams(tracks, [w["near_team"] for w in windows])
+    near = [w["near_team"] for w in windows]
+    sides = identities.smooth_sides(near)
+    teams = identities.assign_teams(tracks, sides)
     allowed = {team: set(nums) for team, nums in roster.items() if nums}
     ocr_read = 0
     if reader is not None:
@@ -518,6 +520,7 @@ def identify(
         "tracks": len(tracks),
         "swaps_cut": cuts,
         "encounter_cuts": met,
+        "sides_smoothed": sum(1 for a, b in zip(near, sides, strict=True) if a != b),
         "standing_still": standing,
         "absorbed": absorbed,
         "chains": len(chains),
