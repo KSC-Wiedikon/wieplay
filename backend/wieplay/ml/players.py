@@ -47,8 +47,10 @@ OFF_SIDE_M = 0.3
 OFF_COURT_SHARE = 0.7
 # Without a calibration: the floor below this share of the frame's height.
 FALLBACK_TOP = 0.3
-# Feet this close to the net (metres) do not vote for a track's side of the net.
-NET_UNSURE_M = 1.0
+# Feet this close to the net (metres) do not vote for a track's side of the net: a jumping
+# blocker's feet are in the air, and the box's bottom maps metres past the net (our libero's
+# card held the other team's #10 that way, the Legends game, 18.10.2026).
+NET_UNSURE_M = 2.5
 # Head room above the far end line in the ROI (a jumping blocker's hands): with the camera
 # known, points at this height; else this share of the frame above the court's top.
 HEAD_ROOM_M = 2.8
@@ -578,8 +580,7 @@ def make_track(
         if w >= 0:
             if first_window < 0:
                 first_window = w
-            # Feet within a metre of the net say little about the side: a blocker's map
-            # past it, through the camera's error that far away.
+            # Feet near the net say little about the side (NET_UNSURE_M).
             if ft is not None and abs(ft[1] - court.NET_Y) < NET_UNSURE_M:
                 continue
             window_sides[(w, sd)] += 1

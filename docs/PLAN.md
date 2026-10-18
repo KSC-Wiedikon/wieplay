@@ -1864,12 +1864,13 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 - **Built 17.10.2026** (`players` job, `wieplay/ml/{people,bytetrack,players}.py`, migration
   `0011`): see "Players in a video" below.
 
-**Players in a video (17.10.2026, beta).** Off by default (`WIEPLAY_PLAYERS_AUTO=false`): ~2 h
-of the Lenovo's CPU per match and many more cards than players (§10.9), so a coach finds them
-on demand ("Find players" on the video page, `POST /api/videos/{id}/players/find`) or an admin
-with `wieplay.cli players --video ID | --all-ready`; switched on, the job follows the court job
-(§10.6). The attribution runs whenever a video has players. On the Lenovo's background
-lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, §8.3):
+**Players in a video (17.10.2026, beta; v2 18.10.2026, below).** Off by default
+(`WIEPLAY_PLAYERS_AUTO=false`): a coach finds them on demand ("Find players" on the video
+page, `POST /api/videos/{id}/players/find`) or an admin with `wieplay.cli players --video ID |
+--all-ready`; switched on, the job follows the court job (§10.6). The attribution runs
+whenever a video has players. As built first, on the Lenovo's background lane (CPU, ~2 h a
+match and many more cards than players, §10.9); since 18.10.2026 on the GPU worker
+(§8.2) as players v2, which changes steps 1, 2, 3 and 4 (next paragraphs):
 
 1. **Detection and tracking**: the rally windows (±1 s, joined when < 2 s apart) are decoded
    per camera file at 10 fps, cropped to the court's ROI (the mask: side lines ± 1.75 m, end
@@ -1912,6 +1913,49 @@ lane (CPU; a GPU worker can take it with other caps and ONNX Runtime providers, 
    Recomputed on every gallery change and, for new or changed tags, on the next read.
    Metrics: "% of actions identified" and the agreement with the coach's numbers, in the
    players run's `metrics.attribution` and `GET /api/videos/{id}/analysis` (`players`).
+
+**Players v2 (18.10.2026, on the GPU worker; `wieplay/ml/identities.py`).** v1 tracked each
+rally window on its own and grouped the short tracks by colour, which teammates share: ~450
+cards a match. v2 keeps every rule of §5.7 (one video, numbers and the court, no faces, no
+re-identification model; the colours of a person exist only in memory while the job runs)
+and links by what those allow:
+
+1. **Stretches**: rallies less than 40 s apart are one stretch the tracker follows, the dead
+   time between them included (a set is one to three stretches; timeouts and set breaks
+   cut). 10 fps, YOLO26s at 1280 px on the GPU, the decoding and letterboxing on a thread of
+   their own. The tracker is v1's (a looser one made longer tracks but swapped people more).
+2. **Cuts**: a track is cut where it met another (boxes overlapping, IoU ≥ 0.3 for two
+   frames: the tracker may have swapped the two people there) and where the shirt number
+   read on it changes.
+3. **Shirt numbers** (on the CPU, 4 threads, 13 ms a crop): the text detector on the torso
+   first; where it finds nothing, the glyphs that stand out from the shirt's colour, read as
+   one group (the detector misses most single digits on a back); a single digit read where
+   a two-digit number containing it is read too counts for that number; our team's
+   readings must be on the roster (the job gets the numbers, no names). On 80 crops of the
+   Legends game judged by eye, 28 with a readable number: 17 read right, none wrong, 2
+   doubtful readings on unreadable ones (v1's reader: 12 right).
+4. **Teams**: per detection, the side of the net (feet within a metre of the net do not
+   vote) and which team played on that side in that rally; a track seen only between
+   rallies takes the nearest rally's; the kits check each rally window's recorded sides
+   and swap them only where both sides clearly wear the other team's shirts.
+5. **Stitching**: a track that ends and one of the same team that starts within 4 s, close
+   enough for a player's speed, alike, with no other number, are one person (minimum-cost
+   matching; the same number lowers the cost, a track cut where it met another prefers its
+   own continuation unless the numbers say otherwise); then up to 20 s where nobody else of
+   the team could be them.
+6. **People**: every piece that reads a number claims it, the surest first; a piece seen
+   while a surer reading of the same number is on court loses it. A number spreads along a
+   chain only up to 10 s from where it was read. Pieces with the same number are one card;
+   colour joins only pieces without a number, never onto a numbered card; a card without a
+   number joins the one numbered teammate who is missing while it is seen and was seen just
+   before or after it ("who is missing", 15 s).
+7. **Confidence** per card (`player_cluster.confidence`, migration `0020`): its number read
+   at least once every two minutes it is on court, and only that number; a card without a
+   number, or with the number of a bigger card of its team, is to be checked. The gallery
+   marks those ("Check") and folds them under "Cards to check"; a coach's merge or split
+   clears the job's confidence.
+
+{{V2_RESULTS}}
 
 ### 10.6 Court homography
 

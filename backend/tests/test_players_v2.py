@@ -485,3 +485,30 @@ def test_a_second_card_with_a_number_is_to_be_checked() -> None:
     small.number_conf = 0.9
     identities.set_confidence([small, big], FPS)
     assert big.confidence > identities.UNCERTAIN > small.confidence
+
+
+def test_feet_at_the_net_do_not_vote_and_between_rallies_takes_the_nearest_rally() -> None:
+    from wieplay.core import court
+
+    geom = pl.Geometry(roi=(0.0, 0.0, 1.0, 1.0))
+    col = pl.Collector(geom, 1000, 500, (0, 0, 1000, 500))
+    tr = pl.TrackData(1)
+    col.windows = [-1] * 10 + [0] * 10 + [-1] * 10
+    col.times = [100 * k for k in range(30)]
+    col.tracks = {1: tr}
+    for k in range(10, 20):  # in the rally: four steps near the net, six well before it
+        y = court.NET_Y - (0.4 if k < 14 else 3.0)
+        tr.frames.append(k)
+        tr.sides.append(pl.NEAR)
+        tr.foot_v.append(0.8)
+        tr.heights_px.append(100.0)
+        tr.boxes.append((0.4, 0.5, 0.45, 0.8))
+        tr.foot_at.append((4.0, y))
+    t = pl.make_track(tr, col, pl._fallback(col))
+    assert t.window_sides == {(0, pl.NEAR): 6}
+    walker = pl.TrackData(2, frames=[25, 26, 27, 28], sides=[pl.FAR] * 4, foot_v=[0.3] * 4)
+    walker.heights_px = [50.0] * 4
+    walker.boxes = [(0.1, 0.1, 0.12, 0.3)] * 4
+    walker.foot_at = [None] * 4
+    w = pl.make_track(walker, col, pl._fallback(col))
+    assert w.window == 0 and w.window_sides == {}

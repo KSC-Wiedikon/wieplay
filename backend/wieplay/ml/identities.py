@@ -4,25 +4,29 @@ Tracks break: a player hidden behind the net or a teammate for a moment, a huddl
 point, a stretch beside the court. Players v1 grouped every short track by colour, and
 teammates wear the same kit: ~450 cards a match for ~25 people. v2 links by what the rules
 allow (PLAN §5.7: shirt numbers and the court, nothing across videos), within the one
-video and in memory only:
+video and in memory only, in this order (wieplay/worker/players.py `identify`):
 
-1. **teams** (`assign_teams`): the side of the net in each rally window and which team
-   played there (the serve, the set), else the kits' colours learnt from the known windows;
-   a track that lives through several windows votes with each of its detections;
+1. **teams** (`assign_teams`): per detection, the side of the net (feet near the net do not
+   vote) and which team played there in that rally window (the serve, the set); windows
+   with no answer take the kits' colours, and the kits correct a window only where both
+   sides clearly wear the other team's shirts;
 2. **numbers**: read on each track's crops (players.read_numbers); ours must be on the
    roster;
-3. **chains** (`stitch`): within a stretch the tracker followed (a GPU worker follows a
-   whole set, the dead time between rallies included), a track that ends and another of
-   the same team that starts shortly after, close by on the court (in the picture without
-   a calibration), alike and with no other number, are one person: a minimum-cost matching
-   of track ends to track starts;
-4. a chain carrying two numbers is cut where the number changes (`split_conflicts`: two
-   people swapped in a huddle);
-5. **people** (players.cluster_tracks on the chains): per team, chains with the same number
-   are one, chains seen at the same time or with different numbers never, the rest by
-   average linkage on the look until too different;
-6. a **confidence** per person (`confidence`): a number read often and only that one, and
-   time on court; low ones are marked for the coach.
+3. **cuts**: a track is cut where its readings change from one number to another
+   (`split_swaps`) and after each meeting with another track (`split_encounters`): the
+   tracker may have swapped two people there;
+4. **chains** (`chains_of`): a track that ends and another of the same team that starts
+   shortly after, close by on the court (in the picture without a calibration), alike and
+   with no other number, are one person: a minimum-cost matching of track ends to track
+   starts (the same number and the tracker's own continuation make a link cheaper); then
+   longer gaps where nobody else could be them; a chain reading two numbers is cut;
+5. **numbers to people** (`assign_numbers`): pieces claim the numbers they read, the
+   surest first; a number spreads along its chain only briefly;
+6. **cards** (players.cluster_tracks): pieces with the same number are one card; colour
+   joins only pieces without a number; `absorb` gives a card without a number to the one
+   numbered teammate missing while it is seen;
+7. a **confidence** per card (`set_confidence`): its number read often enough for its time
+   on court, and no bigger card with the same number; the rest is to be checked.
 
 The look of a person is the colour of the head, shirt, shorts and legs regions (players.py
 `descriptor`): no face, no re-identification model. It exists only in memory while the job
@@ -672,10 +676,13 @@ def assign_numbers(chains: Sequence[Track]) -> list[Track]:
 
                 options = sorted(numbered, key=nearness)
                 owner[id(m)] = None
+                own = _likely_number(m)
                 for kn in options:
                     n = kn[1]
                     if nearness(kn)[0] > PROPAGATE_FRAMES:
                         break  # too long since the number was read: anyone by now
+                    if own is not None and own != n:
+                        break  # it reads another number itself, if not often enough
                     if n is not None and free(n, m):
                         held[n].append((m.first, m.last))
                         owner[id(m)] = n
