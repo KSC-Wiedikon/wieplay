@@ -365,3 +365,40 @@ export function CircleCheckIcon(props: IconProps) {
     </Icon>
   )
 }
+
+/** A magnifying glass: the search bar. */
+export function SearchIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </Icon>
+  )
+}
+
+/** A bookmark: saved filters. */
+export function BookmarkIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 3h12v18l-6-4-6 4Z" />
+    </Icon>
+  )
+}
+
+/** A dial with a needle: grading again (the regrade queue). */
+export function GaugeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 17a8 8 0 1 1 16 0" />
+      <path d="m12 17 4-5" />
+    </Icon>
+  )
+}
+
+export function ChevronLeftIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m15 18-6-6 6-6" />
+    </Icon>
+  )
+}

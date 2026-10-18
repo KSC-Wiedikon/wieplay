@@ -1,7 +1,7 @@
 import '../i18n/pages'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router'
+import { useParams, useSearchParams } from 'react-router'
 import { ButtonLink } from '../components/Button'
 import { LoadError, Message } from '../components/Message'
 import { PageSpinner } from '../components/Spinner'
@@ -18,7 +18,8 @@ function wideScreen(): boolean {
 
 /**
  * /videos/:id/tag — the tagging workspace (PLAN §9.1), desktop only; `?mode=review` opens the
- * review of WiePlay's suggestions (PLAN §10.1), which smaller screens get on their own.
+ * review of WiePlay's suggestions (PLAN §10.1) and `?mode=regrade` the regrade queue (PLAN §9.7),
+ * which smaller screens get on their own.
  */
 export function TagPage() {
   const { t } = useTranslation()
@@ -32,6 +33,8 @@ function TagLoader({ videoId }: { videoId: string }) {
   // Decided once, when the page opens: a narrower window later (or a screenshot tool resizing
   // the page for a moment) must not close a running session.
   const [desktop] = useState(wideScreen)
+  const [params] = useSearchParams()
+  const regrade = params.get('mode') === 'regrade'
   const video = useVideo(videoId)
   const ready = video.data?.status === 'ready'
   // For the checks below only (who may tag, vocabulary, anything to review); the workspace
@@ -62,8 +65,9 @@ function TagLoader({ videoId }: { videoId: string }) {
   const bundle = tagging.data
   if (!bundle.taxonomy) return <Message action={back}>{t('tagging.noTaxonomy')}</Message>
   if (!bundle.can_tag) return <Message action={back}>{t('tagging.forbidden')}</Message>
-  // Tagging is a keyboard task; reviewing WiePlay's suggestions works by touch too (tablets).
+  // Tagging is a keyboard task; reviewing WiePlay's suggestions and regrading work by touch too.
   if (!desktop) {
+    if (regrade) return <Workspace video={video.data} taxonomy={bundle.taxonomy} narrow />
     if (!bundle.segments.some((s) => s.source === 'model')) return phone
     return <Workspace video={video.data} taxonomy={bundle.taxonomy} narrow />
   }

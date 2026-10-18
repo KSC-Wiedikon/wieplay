@@ -16,9 +16,11 @@ import {
   statTags,
   tagWindow,
   useVideoStats,
+  useVideoZones,
   videoCsvUrl,
+  zoneTags,
+  CSV_PART,
   type BoxScore,
-  type CsvPart,
   type RallyFilter,
   type RotationLine,
   type SetFilter,
@@ -39,13 +41,13 @@ import { SetterStats } from './SetterStats'
 import { Spinner } from './Spinner'
 import { StatsLegend, StatsTable, TeamTable, type CellTarget, type TeamKey, type TeamTableRow } from './StatsTable'
 import { TabPanel, Tabs } from './Tabs'
+import { ZoneStats } from './ZoneStats'
 
 /** The section's id, for "See the stats" links. */
 export const VIDEO_STATS_ID = 'video-stats'
 
-/** The stats' tabs (Balltime-style): players, rotations, setter. */
-export type StatsTab = 'players' | 'rotations' | 'setter'
-const CSV_PART: Record<StatsTab, CsvPart> = { players: 'box', rotations: 'rotations', setter: 'setter' }
+/** The stats' tabs (Balltime-style): players, rotations, setter, zones. */
+export type StatsTab = keyof typeof CSV_PART
 
 interface VideoStatsProps {
   video: Video
@@ -183,6 +185,9 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; ta
     const plays = line.plays
     return { kind: 'play', onPlay: () => onPlay(rotationTags(tagging, plays, column).map(tagPlay)) }
   }
+  // Zone maps load when their tab opens.
+  const zones = useVideoZones(video.id, tab === 'zones')
+
   const setterTarget = (filter: SetFilter): CellTarget | null => {
     const plays = data.match.setter?.plays
     if (!tagging || !plays) return null
@@ -220,6 +225,7 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; ta
             { value: 'players', label: t('stats.tabs.players') },
             { value: 'rotations', label: t('stats.tabs.rotations') },
             { value: 'setter', label: t('stats.tabs.setter') },
+            { value: 'zones', label: t('stats.tabs.zones') },
           ]}
           onChange={(value) => {
             onTab(value)
@@ -306,6 +312,20 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; ta
           />
         )}
         {tab === 'setter' && <SetterStats setter={box.setter} target={setterTarget} hint={t('stats.setter.hint')} scope={scopeName} selected={selected} onSelect={setSelected} />}
+        {tab === 'zones' && (
+          <ZoneStats
+            zones={zones.data}
+            pending={zones.isPending}
+            error={zones.isError}
+            onRetry={() => void zones.refetch()}
+            setNo={scope}
+            target={(row, _skill, end, cell, code) =>
+              tagging ? { kind: 'play', onPlay: () => onPlay(zoneTags(tagging, row.filter, code, end, cell.zone, scope).map(tagPlay)) } : null
+            }
+            selected={selected}
+            onSelect={setSelected}
+          />
+        )}
       </TabPanel>
     </div>
   )

@@ -294,3 +294,68 @@ def test_guests_neither_use_the_inbox_nor_import_links() -> None:
     assert can_use_inbox(viewer(teams=[{"team": 92, "rel": ["coach"]}]), ALL_TEAMS)
     assert not can_import_link(GAST_NOW)
     assert can_import_link(H3_NOW)
+
+
+# Saved filters (PLAN §9.7): everyone keeps their own; sharing with the team follows the reels.
+from wieplay.core.permissions import (  # noqa: E402
+    can_edit_filter,
+    can_remove_filter,
+    can_see_filter,
+    can_share_filter,
+)
+
+H3_COACH = viewer(teams=[{"team": 92, "rel": ["coach"]}])
+H3_PLAYER = viewer(teams=[{"team": 92, "rel": ["player"]}])
+OWNER, SOMEONE = 1, 2  # the viewers above are member 1
+
+FILTER_SHARE_MATRIX = [
+    # (who, team, may share a filter with it)
+    (H3_COACH, H3_NOW, True),
+    (H3_COACH, H3_PREV, True),  # any season of the team
+    (H3_HELPER, H3_NOW, True),  # helpers share clips, reels and filters
+    (H3_PLAYER, H3_NOW, False),  # players keep theirs to themselves
+    (viewer(sport_admin=("volleyball",)), H3_NOW, True),
+    (viewer(roles=("admin",)), H3_NOW, True),
+    (viewer(roles=("admin",)), OFF_TEAM, False),
+    (D1_PLAYER, H3_NOW, False),
+    (GUEST_COACH, GAST_NOW, True),
+    (GUEST_PLAYER, GAST_NOW, False),
+    (GUEST_COACH, H3_NOW, False),  # the guest wall
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), GAST_NOW, False),
+]
+
+
+def test_who_shares_filters_with_the_team() -> None:
+    for who, team, expected in FILTER_SHARE_MATRIX:
+        leads = lead_lineages(who, ALL_TEAMS)
+        assert can_share_filter(who, team, leads) is expected, (who, team)
+
+
+FILTER_REMOVE_MATRIX = [
+    # (who, owner, shared with (a row of the team) or None, may delete)
+    (H3_PLAYER, OWNER, None, True),  # their own private filter
+    (H3_PLAYER, SOMEONE, None, False),
+    (H3_COACH, SOMEONE, None, False),  # nobody else's private filter, not even a coach's
+    (H3_COACH, SOMEONE, H3_NOW, True),  # the team's shared one: its coach
+    (H3_HELPER, SOMEONE, H3_NOW, False),  # helpers share, but don't tidy up other people's
+    (H3_PLAYER, SOMEONE, H3_NOW, False),
+    (viewer(roles=("admin",)), SOMEONE, H3_NOW, True),
+    (viewer(sport_admin=("volleyball",)), SOMEONE, H3_NOW, True),
+    (viewer(sport_admin=("basketball",)), SOMEONE, H3_NOW, False),
+    (GUEST_COACH, SOMEONE, GAST_NOW, True),
+    (GUEST_COACH, SOMEONE, H3_NOW, False),
+]
+
+
+def test_who_deletes_and_edits_saved_filters() -> None:
+    for who, owner, team, expected in FILTER_REMOVE_MATRIX:
+        leads = lead_lineages(who, ALL_TEAMS)
+        assert can_remove_filter(who, owner, team, leads) is expected, (who, owner, team)
+    assert can_edit_filter(H3_PLAYER, OWNER) and not can_edit_filter(H3_COACH, SOMEONE)
+
+
+def test_who_sees_saved_filters() -> None:
+    assert can_see_filter(H3_PLAYER, OWNER, shared=False, sees_team=False)
+    assert not can_see_filter(H3_PLAYER, SOMEONE, shared=False, sees_team=True)
+    assert can_see_filter(H3_PLAYER, SOMEONE, shared=True, sees_team=True)
+    assert not can_see_filter(D1_PLAYER, SOMEONE, shared=True, sees_team=False)

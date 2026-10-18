@@ -1,23 +1,27 @@
 """Playlists made of time ranges (PLAN §6.8, §7.7).
 
 A smart reel is a saved query over tags ("member 101, attacks graded #, 2026/27"),
-evaluated when it is opened, so it grows as tagging continues. A condensed match is the
+evaluated when it is opened, so it grows as tagging continues. Its query may carry a search
+(wieplay/core/search.py: set, rotation, zones, outcome, who won the rally…), read per match
+like the stats read it. A condensed match is the
 same idea over rally segments. Nothing is rendered to watch them; exports render.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import Row, or_, select
 from sqlalchemy.orm import Session
 
-from wieplay.core import tagging
+from wieplay.core import stats_input, tagging
 from wieplay.core.models import Event, Segment, Video, WdTeam
+from wieplay.core.search import TagSearch, select_match
 from wieplay.core.taxonomy import SPORTS_WITH_TAXONOMY, load
 
 PRE_ROLL_MS = 2000  # the serve toss
@@ -35,6 +39,10 @@ class ReelQuery(BaseModel):
     codes: list[str] = Field(default_factory=list, max_length=10)
     # None stands for a tag without a grade (the stats' "in play" and "touches" count those).
     grades: list[str | None] = Field(default_factory=list, max_length=7)
+    # A search on top (PLAN §9.7, wieplay/core/search.py): set, rotation, zones, outcome…
+    search: TagSearch | None = None
+    # The words it was typed as ("set 3, rotation 2, reception -"), shown again in the builder.
+    text: str | None = Field(default=None, max_length=300)
     limit: int = Field(default=200, ge=1, le=500)
 
 
@@ -107,9 +115,21 @@ def evaluate(db: Session, visible_team_ids: set[int], query: ReelQuery) -> list[
         stmt = stmt.where(
             or_(grade.in_(named), grade.is_(None)) if None in query.grades else grade.in_(named)
         )
-    stmt = stmt.order_by(Video.recorded_on, Video.created_at, Event.t_ms).limit(query.limit)
+    search = query.search if query.search is not None and not query.search.is_empty() else None
+    stmt = stmt.order_by(Video.recorded_on, Video.created_at, Event.t_ms)
+    if search is not None:
+        # The simple terms narrow the query; the rest is checked per match below.
+        if search.sides:
+            stmt = stmt.where(Event.side.in_(search.sides))
+        if search.codes:
+            stmt = stmt.where(Event.code.in_(search.codes))
+    else:
+        stmt = stmt.limit(query.limit)
+    rows: Sequence[Row[Event, Video]] = db.execute(stmt).all()
+    if search is not None:
+        rows = _searched(db, rows, search)[: query.limit]
     pieces = []
-    for event, video in db.execute(stmt).all():
+    for event, video in rows:
         start, end = window(event)
         pieces.append(
             clamp(
@@ -130,6 +150,27 @@ def evaluate(db: Session, visible_team_ids: set[int], query: ReelQuery) -> list[
             )
         )
     return pieces
+
+
+def _searched(
+    db: Session, rows: Sequence[Row[Event, Video]], search: TagSearch
+) -> list[Row[Event, Video]]:
+    """The rows whose tags the search keeps, in their order: each match's rallies and sets
+    give the tags their set, rotation, winner and server (the stats' reading)."""
+    video_ids = list(dict.fromkeys(video.id for _, video in rows))
+    tags = stats_input.load_tags(db, video_ids)
+    rallies = stats_input.load_rallies(db, video_ids)
+    sets = stats_input.load_sets(db, video_ids)
+    kept: set[uuid.UUID] = set()
+    for video_id in video_ids:
+        sport = next(video.sport for _, video in rows if video.id == video_id)
+        if sport not in SPORTS_WITH_TAXONOMY:
+            continue
+        match = tags.get(video_id, [])
+        selection = select_match(search, load(sport), match, rallies.get(video_id, []),
+                                 sets.get(video_id, []))  # fmt: skip
+        kept.update(t.id for i, t in enumerate(match) if i in selection.tags and t.id)
+    return [row for row in rows if row[0].id in kept]
 
 
 def merge(pieces: list[Piece]) -> list[Piece]:

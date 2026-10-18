@@ -10,7 +10,7 @@ import { guideEn, type Guide, type GuideKey } from '../i18n/guide.en'
 import { useIsGuest } from '../lib/guests'
 import { NotFoundPage } from './NotFoundPage'
 
-/** The guide for team helpers (PLAN §5.1 "analyst"): reviewing suggestions, tagging, why it matters. */
+/** The guide for team helpers (PLAN §5.1 "analyst"): reviewing suggestions, tagging, grading, why it matters. */
 export function GuidePage() {
   // KSCW's helpers' guide: guest clubs have no helpers.
   if (useIsGuest()) return <NotFoundPage />
@@ -26,6 +26,7 @@ function GuideContent() {
     ['review', g.review.title],
     ['done', g.done.title],
     ['tag', g.tag.title],
+    ['regrade', g.regrade.title],
     ['actions', g.actions.title],
     ['rights', g.rights.title],
   ]
@@ -146,6 +147,12 @@ function GuideContent() {
             </div>
             <KeyTable title={g.tag.keysTitle} rows={g.tag.keys} guide={g} />
             <Tips tips={g.tag.tips} />
+          </GuideSection>
+
+          <GuideSection id="regrade" title={g.regrade.title}>
+            <p>{g.regrade.intro}</p>
+            <Steps steps={g.regrade.steps} />
+            <KeyTable title={g.regrade.keysTitle} rows={g.regrade.keys} guide={g} />
           </GuideSection>
 
           <GuideSection id="actions" title={g.actions.title}>

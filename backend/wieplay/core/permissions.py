@@ -1,5 +1,6 @@
 """Who may see what (PLAN §5.1): team visibility, WiePlay administration (M0), videos (M1),
-tagging and sharing (M2, M3), team helpers (analysts), guest clubs (PLAN §4.5).
+tagging and sharing (M2, M3), team helpers (analysts), guest clubs (PLAN §4.5), saved filters
+(PLAN §9.7).
 
 Guest clubs are walled off both ways: a guest sees only the guest team rows they are on,
 and KSCW members (players, coaches, sport admins, helpers) never see a guest team. Only
@@ -194,6 +195,35 @@ def can_share_with_team(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) ->
     """Share a clip or reel with the team (§5.1): coaches, team managers, sport admins,
     admins and helpers. Players tag (since 17.10.2026) but keep their reels to themselves."""
     return _leads_team(viewer, team, leads) or is_analyst(viewer, team)
+
+
+def can_share_filter(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Share a saved filter (a search kept by name, PLAN §9.7) with the team: the same people
+    who share clips and reels with it (coaches, team managers, sport admins, admins, helpers).
+    Everyone else keeps their filters to themselves."""
+    return can_share_with_team(viewer, team, leads)
+
+
+def can_see_filter(viewer: Viewer, owner: int, shared: bool, sees_team: bool) -> bool:
+    """Use a saved filter: its owner; one shared with a team also everyone who sees that team
+    in some season (`sees_team`, from visible_team_ids: the guest wall holds)."""
+    return viewer.member_id == owner or (shared and sees_team)
+
+
+def can_edit_filter(viewer: Viewer, owner: int) -> bool:
+    """Rename a saved filter, change its words or who sees it: its owner only."""
+    return viewer.member_id == owner
+
+
+def can_remove_filter(
+    viewer: Viewer, owner: int, team: TeamRef | None, leads: set[uuid.UUID]
+) -> bool:
+    """Delete a saved filter: its owner; one shared with a team also the team's coaches, team
+    managers, sport admins and admins (`team`: a row of the team it is shared with, None for a
+    private filter), as for the team's shared clips and reels."""
+    if viewer.member_id == owner:
+        return True
+    return team is not None and is_team_manager(viewer, team, leads)
 
 
 def can_run_analysis(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:

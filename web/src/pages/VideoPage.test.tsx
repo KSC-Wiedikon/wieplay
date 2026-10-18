@@ -575,10 +575,11 @@ describe('VideoPage', () => {
     })
     const stats = videoStats({ tags: 2, rallies: 2, match: box, sets: [{ ...box, no: 1, score_us: 1, score_them: 1 }] })
 
-    function showStats(patch: { tagging?: Tagging; stats?: unknown; video?: Partial<Video> } = {}) {
+    function showStats(patch: { tagging?: Tagging; stats?: unknown; video?: Partial<Video>; routes?: Record<string, { body?: unknown }> } = {}) {
       return show(video(patch.video ?? {}), 200, {
         [`/api/videos/${ID}/tagging`]: { body: patch.tagging ?? tagging },
         [`/api/videos/${ID}/stats`]: { body: patch.stats ?? stats },
+        ...patch.routes,
       })
     }
 
@@ -625,6 +626,73 @@ describe('VideoPage', () => {
       section.scrollIntoView = scroll
       fireEvent.click(screen.getByRole('button', { name: 'Back to the stats' }))
       expect(scroll).toHaveBeenCalled()
+    })
+
+    it('draws where serves and attacks went per zone; a zone plays its tags', async () => {
+      const zoneKill = { ...kill, attributes: { grade: '#', zone_from: 4, zone_to: 1 } }
+      const zoneError = { ...error, attributes: { grade: '=', zone_from: 4 } }
+      const cells = [{ zone: 4, ta: 2, points: 1, errors: 1, blocked: 0, in_play: 0, point_pct: 0.5, eff: 0 }]
+      const row = (kind: 'player' | 'team', patch: object = {}) => ({
+        kind,
+        side: 'us',
+        number: null,
+        member_id: null,
+        name: null,
+        filter: { side: 'us' },
+        zones: { serve_from: [], serve_to: [], attack_from: cells, attack_to: [{ ...cells[0], zone: 1, ta: 1, errors: 0, eff: 1, point_pct: 1 }, { zone: null, ta: 1, points: 0, errors: 1, blocked: 0, in_play: 0, point_pct: 0, eff: -1 }] },
+        ...patch,
+      })
+      const zones = {
+        codes: { serve: 'S', attack: 'A' },
+        scopes: [{ set_no: null, rows: [row('player', { number: 7, member_id: 107, name: 'Luca Brunner', filter: { side: 'us', number: 7 } }), row('team')] }, { set_no: 1, rows: [row('team')] }],
+      }
+      showStats({ tagging: { ...tagging, events: [zoneKill, zoneError] }, routes: { [`/api/videos/${ID}/stats/zones`]: { body: zones } } })
+      fireEvent.click(await screen.findByRole('tab', { name: 'Zones' }))
+      expect(screen.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/videos/${ID}/stats.csv?lang=en&part=zones`)
+      // Serves first: none with a zone here.
+      expect(await screen.findByText('No serves with this zone tagged yet. Add zones when tagging (7S#15: from 1 to 5) to see where.')).toBeInTheDocument()
+      // (The Tendencies below have their own Serves and Attacks.)
+      const section = within(document.getElementById('video-stats') as HTMLElement)
+      fireEvent.click(section.getByRole('button', { name: 'Attacks' }))
+      // Attacks: where they started, by default.
+      expect(section.getByRole('button', { name: 'Where they started' })).toHaveAttribute('aria-pressed', 'true')
+      const court = screen.getByTestId('zone-court')
+      expect(court).toHaveAccessibleName('Zone map: Attacks of Team')
+      const four = within(court).getByRole('button', { name: 'Play Zone 4: 2 attacks, 1 kills, 1 errors, 0 blocked, hitting 0.0%: 2' })
+      fireEvent.click(four)
+      const player = document.querySelector('video') as HTMLVideoElement
+      expect(player.currentTime).toBe(12)
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+      // The table holds the numbers; a player of their own.
+      fireEvent.change(screen.getByRole('combobox', { name: 'Who' }), { target: { value: 'player:107' } })
+      expect(screen.getByRole('table', { name: 'Zones of #7 Luca Brunner' })).toBeInTheDocument()
+      fireEvent.click(section.getByRole('button', { name: 'Where they went' }))
+      expect(screen.getByRole('table', { name: 'Without this zone' })).toBeInTheDocument()
+      fireEvent.click(section.getByRole('button', { name: 'How well' }))
+      expect(within(screen.getByTestId('zone-court')).getByText('+100%')).toBeInTheDocument()
+    })
+
+    it('narrows the rally list with the search bar and saved filters', async () => {
+      const saved = [{ id: 'f1', title: 'Lost ones', query: 'lost', visibility: 'team', lineage_id: team.lineage_id, owner: 9, owner_name: 'Jo Trainer', mine: false, can_edit: false, can_delete: false, created_at: '', updated_at: '' }]
+      showStats({ routes: { '/api/filters?team_id=92': { body: saved } } })
+      const rallies = await screen.findByRole('table', { name: 'Rallies' })
+      expect(within(rallies).getAllByRole('row')).toHaveLength(3)
+      const search = screen.getByRole('combobox', { name: 'Search' })
+      fireEvent.change(search, { target: { value: 'won' } })
+      expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row')).toHaveLength(2)
+      // A chip's × takes its term out.
+      fireEvent.click(screen.getByRole('button', { name: 'Remove “Rallies won”' }))
+      expect(search).toHaveValue('')
+      fireEvent.change(search, { target: { value: '#7 attack = what' } })
+      expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row')).toHaveLength(2)
+      expect(screen.getByText('Not understood: what')).toBeInTheDocument()
+      // A saved filter of the team.
+      fireEvent.click(screen.getByRole('button', { name: 'Saved filters' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Use “Lost ones”' }))
+      expect(search).toHaveValue('lost')
+      expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row')).toHaveLength(2)
+      fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+      expect(search).toHaveValue('')
     })
 
     it('narrows the box score to a set; team numbers play their rallies', async () => {
@@ -981,10 +1049,11 @@ describe('VideoPage', () => {
       const players = await screen.findByRole('tab', { name: 'Players' })
       expect(players).toHaveAttribute('aria-selected', 'true')
       expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', players.id)
+      // From the first tab, left wraps round to the last one (Zones).
       fireEvent.keyDown(players, { key: 'ArrowLeft' })
-      expect(screen.getByRole('tab', { name: 'Setter' })).toHaveAttribute('aria-selected', 'true')
-      expect(screen.getByRole('tab', { name: 'Setter' })).toHaveFocus()
-      fireEvent.keyDown(screen.getByRole('tab', { name: 'Setter' }), { key: 'Home' })
+      expect(screen.getByRole('tab', { name: 'Zones' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('tab', { name: 'Zones' })).toHaveFocus()
+      fireEvent.keyDown(screen.getByRole('tab', { name: 'Zones' }), { key: 'Home' })
       expect(players).toHaveAttribute('aria-selected', 'true')
     })
   })

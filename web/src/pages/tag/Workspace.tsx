@@ -2,7 +2,7 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Link, useSearchParams } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { AnalysisStatus } from '../../components/AnalysisStatus'
 import { PlayersStep } from '../../components/PlayersStep'
 import { Button, ButtonLink } from '../../components/Button'
@@ -29,13 +29,13 @@ import { Playhead, usePlayhead } from '../../lib/playhead'
 import { keys } from '../../lib/queryClient'
 import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
 import { actionItems, factTags, suggestedCount } from '../../lib/actions'
-import { allProgress, reviewProgress, suggestionCount } from '../../lib/suggestions'
+import { allProgress, LOOP_POST_MS, LOOP_PRE_MS, reviewProgress, suggestionCount } from '../../lib/suggestions'
 import { SideNamesContext, sideNamesOf, useSideNames } from '../../lib/sides'
 import { TaggingStore } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import { useCondensedPlayback } from '../../lib/useCondensedPlayback'
 import { useLoopPlayback } from '../../lib/useLoopPlayback'
-import { WorkspaceContext, useActionReview, useReview, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
+import { WorkspaceContext, useActionReview, useRegrade, useReview, useSync, useUi, useView, useWorkspace, type WorkspaceParts } from './context'
 import { ActionReviewController } from './actionReview'
 import { ActionReviewPanel } from './ActionReviewPanel'
 import { Cheatsheet } from './Cheatsheet'
@@ -43,6 +43,8 @@ import { TagController } from './controller'
 import { EntryPanel } from './EntryPanel'
 import { EventTable } from './EventTable'
 import { RallyList } from './RallyList'
+import { RegradeController } from './regrade'
+import { RegradePanel } from './RegradePanel'
 import { ReviewController } from './review'
 import { ReviewPanel } from './ReviewPanel'
 import { RosterPanel } from './RosterPanel'
@@ -197,6 +199,15 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
   const [actions] = useState(
     () => new ActionReviewController(store, playhead, controller, { rejectedBefore: actionsRejectedBefore, onLeave: () => review.stop() }),
   )
+  const [regrade] = useState(() => new RegradeController(store, playhead, controller))
+  // Esc on the regrade setup: back to tagging (a phone has nothing else here: the video page).
+  const navigate = useNavigate()
+  useEffect(() => {
+    regrade.setLeave(() => {
+      if (narrow) void navigate(`/videos/${video.id}`)
+      else regrade.stop()
+    })
+  }, [narrow, navigate, video.id, regrade])
   const [element, setElement] = useState<HTMLVideoElement | null>(null)
   const reload = useCallback(() => {
     api
@@ -205,13 +216,14 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
       .catch(() => {})
   }, [store, video.id])
   const parts = useMemo<WorkspaceParts>(
-    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, narrow, reload }),
-    [video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, narrow, reload],
+    () => ({ video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, regrade, narrow, reload }),
+    [video, bundle, taxonomy, store, outbox, playhead, controller, review, actions, regrade, narrow, reload],
   )
   const { t } = useTranslation()
   // "KSCW H3", "Volero" wherever the workspace would say us and them.
   const names = useMemo(() => sideNamesOf(video, t), [video, t])
   const reviewing = useSyncedReview(review)
+  const regrading = useSyncedRegrade(regrade)
 
   useEffect(() => {
     playhead.attach(element)
@@ -229,28 +241,47 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
     [review, actions],
   )
 
-  // One keyboard at a time: the review's keys while reviewing (its actions queue's when that is
-  // on), the tagging keys otherwise.
+  // One keyboard at a time: the regrade queue's while regrading, the review's while reviewing
+  // (its actions queue's when that is on), the tagging keys otherwise.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!review.getState().active) controller.onKeyDown(event)
+      if (regrade.getState().active) regrade.onKeyDown(event)
+      else if (!review.getState().active) controller.onKeyDown(event)
       else if (actions.getState().active) actions.onKeyDown(event)
       else review.onKeyDown(event)
     }
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [controller, review, actions])
+  }, [controller, review, actions, regrade])
 
-  // ?mode=review (the video page's "Review suggestions") opens the review; a narrow screen has only it.
-  const wantsReview = narrow || params.get('mode') === 'review'
+  // ?mode=review (the video page's "Review suggestions") opens the review, ?mode=regrade the
+  // regrade queue; a narrow screen has only those two.
+  const wantsRegrade = params.get('mode') === 'regrade'
+  const wantsReview = !wantsRegrade && (narrow || params.get('mode') === 'review')
   const wantsActions = params.get('queue') === 'actions'
   const started = useRef(false)
   useEffect(() => {
     if (started.current) return
     started.current = true
+    if (wantsRegrade) regrade.start()
     if (wantsReview) review.start()
     if (wantsReview && wantsActions) actions.start()
-  }, [review, actions, wantsReview, wantsActions])
+  }, [review, actions, regrade, wantsReview, wantsActions, wantsRegrade])
+  // Regrading and reviewing take turns.
+  useEffect(
+    () =>
+      regrade.subscribe(() => {
+        if (regrade.getState().active && review.getState().active) review.stop()
+      }),
+    [regrade, review],
+  )
+  useEffect(
+    () =>
+      review.subscribe(() => {
+        if (review.getState().active && regrade.getState().active) regrade.stop()
+      }),
+    [regrade, review],
+  )
   const actionQueue = useSyncedActions(actions)
   // The queue stays in the address too.
   useEffect(() => {
@@ -266,18 +297,19 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
     )
   }, [actionQueue, params, setParams])
   // The mode stays in the address, so a reload comes back to it.
+  const mode = regrading ? 'regrade' : reviewing ? 'review' : null
   useEffect(() => {
-    if (narrow || reviewing === (params.get('mode') === 'review')) return
+    if (narrow || mode === params.get('mode')) return
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev)
-        if (reviewing) next.set('mode', 'review')
+        if (mode) next.set('mode', mode)
         else next.delete('mode')
         return next
       },
       { replace: true },
     )
-  }, [narrow, reviewing, params, setParams])
+  }, [narrow, mode, params, setParams])
 
   // An analysis that finishes while the page is open brings its suggestions in.
   const analysis = useAnalysis(video.id, taxonomy.sport !== 'basketball')
@@ -339,6 +371,17 @@ function useSyncedActions(actions: ActionReviewController): boolean {
   return active
 }
 
+/** Whether the regrade queue is on, as React state. */
+function useSyncedRegrade(regrade: RegradeController): boolean {
+  const [active, setActive] = useState(() => regrade.getState().active)
+  useEffect(() => {
+    const update = () => setActive(regrade.getState().active)
+    update()
+    return regrade.subscribe(update)
+  }, [regrade])
+  return active
+}
+
 /** Whether the review is on, as React state. */
 function useSyncedReview(review: ReviewController): boolean {
   const [active, setActive] = useState(() => review.getState().active)
@@ -364,18 +407,24 @@ function DeskLayout({
   const sync = useSync()
   const review = useReview()
   const actionReview = useActionReview()
-  const reviewing = review.active
+  const regradeState = useRegrade()
+  const regrading = regradeState.active
+  const reviewing = review.active && !regrading
   const reviewingActions = reviewing && actionReview.active
+  const { regrade } = useWorkspace()
 
   const rallies = useMemo(() => ralliesOf(view.segments), [view.segments])
   const trajectories = useTrajectories(video.id, controller.playsRallies)
   const windows = useMemo(() => playWindows(rallies, { duration_ms: video.duration_ms }), [rallies, video.duration_ms])
-  // While reviewing, the suggestion on screen plays in a loop instead.
-  useCondensedPlayback(element, windows, ui.skip && !reviewing)
+  // While reviewing or regrading, the moment on screen plays in a loop instead.
+  useCondensedPlayback(element, windows, ui.skip && !reviewing && !regrading)
   const current = reviewing && !reviewingActions ? (view.segments.find((s) => s.id === review.currentId) ?? null) : null
   // An action loops around its contact: 1 s before it to 0.5 s after it.
   const action = reviewingActions ? (view.events.find((e) => e.id === actionReview.currentId) ?? null) : null
-  useLoopPlayback(element, current?.start_ms ?? action?.t_ms ?? null, current?.end_ms ?? action?.t_ms ?? null)
+  // A tag being regraded loops over its clip window (useLoopPlayback adds 1 s before, 0.5 s after).
+  const regraded = regrading && regradeState.running ? regrade.window() : null
+  const loop = current ?? (action ? { start_ms: action.t_ms, end_ms: action.t_ms } : null) ?? (regraded ? { start_ms: regraded.start_ms + LOOP_PRE_MS, end_ms: Math.max(regraded.start_ms + LOOP_PRE_MS, regraded.end_ms - LOOP_POST_MS) } : null)
+  useLoopPlayback(element, loop?.start_ms ?? null, loop?.end_ms ?? null)
 
   // The analysis card counts rally proposals ("rallies reviewed" waits for those only); the
   // review goes through the breaks WiePlay labelled too.
@@ -408,7 +457,11 @@ function DeskLayout({
 
   return (
     <div className="flex flex-col gap-4">
-      <title>{`${t(reviewing ? 'tagging.review.title' : 'tagging.pageTitle', { title: video.title })}${reviewing ? ` · ${video.title}` : ''} · WiePlay`}</title>
+      <title>
+        {regrading
+          ? `${t('regrade.pageTitle', { title: video.title })} · WiePlay`
+          : `${t(reviewing ? 'tagging.review.title' : 'tagging.pageTitle', { title: video.title })}${reviewing ? ` · ${video.title}` : ''} · WiePlay`}
+      </title>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h1 className="text-xl font-bold wrap-break-word">{video.title}</h1>
@@ -421,15 +474,15 @@ function DeskLayout({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {canReview && !narrow && <ModeSwitch open={progress.total - progress.done + openActions} />}
+          {controller.playsRallies && !narrow && <ModeSwitch review={canReview} open={progress.total - progress.done + openActions} />}
           <SyncStatus />
           <ButtonLink to={`/videos/${video.id}`}>{t('tagging.back')}</ButtonLink>
         </div>
       </header>
       <SyncNotes />
-      {narrow && <p className="text-sm text-muted">{t('tagging.review.phoneHint')}</p>}
+      {narrow && !regrading && <p className="text-sm text-muted">{t('tagging.review.phoneHint')}</p>}
       {/* While reviewing, the suggestion comes first; the analysis and "rallies reviewed" go below. */}
-      {!reviewing && status}
+      {!reviewing && !regrading && status}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         {/* The video stays short enough to keep the sets bar and the timeline on screen. */}
@@ -444,7 +497,11 @@ function DeskLayout({
           <Transport tools={<TrajectoryToggle state={trajectories} />} />
         </div>
         {/* About 22rem until the video reaches its height limit; then the panel takes the rest. */}
-        {reviewing ? (
+        {regrading ? (
+          <div className={cx('flex flex-col gap-2', !narrow && 'min-w-80 flex-[1_0_22rem]')}>
+            <RegradePanel />
+          </div>
+        ) : reviewing ? (
           <div className={cx('flex flex-col gap-2', !narrow && 'min-w-80 flex-[1_0_22rem]')}>
             {(actionCount > 0 || gate) && <QueueSwitch rallies={progress.total - progress.done} actions={openActions} />}
             {reviewingActions ? <ActionReviewPanel /> : <ReviewPanel />}
@@ -457,10 +514,11 @@ function DeskLayout({
           </aside>
         )}
       </div>
-      {!reviewing && <SetsBar />}
+      {!reviewing && !regrading && <SetsBar />}
       <Timeline />
-      {!reviewing && ui.segmentId && <SegmentPanel key={ui.segmentId} id={ui.segmentId} />}
-      {reviewingActions ? <EventTable /> : reviewing ? <RallyList mode="review" /> : <Lists rallies={rallies.length} />}
+      {!reviewing && !regrading && ui.segmentId && <SegmentPanel key={ui.segmentId} id={ui.segmentId} />}
+      {/* A phone regrading keeps to the queue: the tag list is too wide for it. */}
+      {regrading ? !narrow && <EventTable /> : reviewingActions ? <EventTable /> : reviewing ? <RallyList mode="review" /> : <Lists rallies={rallies.length} />}
       {reviewing && status}
       {/* After the rallies: who played (docs/PLAN.md §10.5). */}
       {reviewing && status && <PlayersStep video={video} canEdit={video.can_tag} />}
@@ -470,22 +528,35 @@ function DeskLayout({
   )
 }
 
-/** Tag or review: the review goes through WiePlay's suggestions one by one. */
-function ModeSwitch({ open }: { open: number }) {
+/**
+ * Tag, review or regrade: the review goes through WiePlay's suggestions one by one (once there
+ * are any), the regrade queue through the tags of one skill to grade them (PLAN §9.7).
+ */
+function ModeSwitch({ review: canReview, open }: { review: boolean; open: number }) {
   const { t } = useTranslation()
-  const { review } = useWorkspace()
+  const { review, regrade } = useWorkspace()
   const state = useReview()
+  const regrading = useRegrade().active
+  const value = regrading ? 'regrade' : state.active ? 'review' : 'tag'
   return (
     <Segmented
       label={t('tagging.mode.label')}
-      value={state.active ? 'review' : 'tag'}
+      value={value}
       options={[
         { value: 'tag', label: t('tagging.mode.tag') },
-        { value: 'review', label: open > 0 ? t('tagging.mode.reviewCount', { count: open }) : t('tagging.mode.review') },
+        ...(canReview || state.active
+          ? [{ value: 'review' as const, label: open > 0 ? t('tagging.mode.reviewCount', { count: open }) : t('tagging.mode.review') }]
+          : []),
+        { value: 'regrade', label: t('regrade.mode') },
       ]}
-      onChange={(value, event) => {
-        if (value === 'review') review.start()
-        else review.stop()
+      onChange={(next, event) => {
+        if (next === 'regrade') {
+          regrade.start()
+        } else {
+          regrade.stop()
+          if (next === 'review') review.start()
+          else review.stop()
+        }
         // A pointer click must not leave Enter on this button: Enter answers the review.
         if (event.detail > 0) event.currentTarget.blur()
       }}
@@ -574,10 +645,11 @@ function WorkspaceClipDialog() {
 
 function Transport({ tools }: { tools?: ReactNode }) {
   const { t } = useTranslation()
-  const { controller, playhead, video, review: reviewer, narrow } = useWorkspace()
+  const { controller, playhead, video, review: reviewer, regrade, narrow } = useWorkspace()
   const ui = useUi()
   const view = useView()
-  const reviewing = useReview().active
+  const regrading = useRegrade().active
+  const reviewing = useReview().active || regrading
   const playing = usePlayhead(playhead, (s) => s.playing)
   const rate = usePlayhead(playhead, (s) => s.rate)
   const tenths = usePlayhead(playhead, (s) => Math.floor(s.t_ms / 100))
@@ -609,10 +681,10 @@ function Transport({ tools }: { tools?: ReactNode }) {
       )}
       {tools}
       <div className="ml-auto flex items-center gap-1">
-        <Button variant="ghost" size="icon" disabled={!view.canUndo} onClick={reviewing ? reviewer.undo : controller.undo} aria-label={t('tagging.transport.undo')} title={t('tagging.transport.undo')}>
+        <Button variant="ghost" size="icon" disabled={!view.canUndo} onClick={regrading ? regrade.undo : reviewing ? reviewer.undo : controller.undo} aria-label={t('tagging.transport.undo')} title={t('tagging.transport.undo')}>
           <UndoIcon />
         </Button>
-        <Button variant="ghost" size="icon" disabled={!view.canRedo} onClick={reviewing ? reviewer.redo : controller.redo} aria-label={t('tagging.transport.redo')} title={t('tagging.transport.redo')}>
+        <Button variant="ghost" size="icon" disabled={!view.canRedo} onClick={regrading ? regrade.redo : reviewing ? reviewer.redo : controller.redo} aria-label={t('tagging.transport.redo')} title={t('tagging.transport.redo')}>
           <RedoIcon />
         </Button>
         {/* Phones and tablets review by touch: no keys to list. */}

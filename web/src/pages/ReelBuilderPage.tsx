@@ -9,6 +9,7 @@ import { ChevronDownIcon, ChevronUpIcon, PlusIcon, TrashIcon } from '../componen
 import { LoadError, Message } from '../components/Message'
 import { PageHeader } from '../components/PageHeader'
 import { ReelPlayer } from '../components/ReelPlayer'
+import { SearchBar } from '../components/SearchBar'
 import { PageSpinner, Spinner } from '../components/Spinner'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { ApiError } from '../lib/api'
@@ -30,6 +31,7 @@ import {
 import { useMe, useTeam, useTeams, useTeamSeasons } from '../lib/queries'
 import { reelTimeline } from '../lib/reelPlayer'
 import { compareTeams } from '../lib/teams'
+import { compactSearch, isEmptySearch, parseSearch } from '../lib/search'
 import { NO_GRADE } from '../lib/stats'
 import { useToast } from '../lib/toast'
 import type { Clip, Piece, Reel, ReelIn, ReelQuery, Side, Taxonomy, Visibility } from '../lib/types'
@@ -83,6 +85,8 @@ export function ReelBuilderPage() {
         codes: list('codes'),
         grades: list('grades').map((g) => (g === NO_GRADE ? null : g)),
         side: side === 'us' || side === 'them' ? side : null,
+        // The words of a search ("set 3 from 4"): from a filtered season number or a zone.
+        text: (params.get('q') ?? '').slice(0, 300),
       }}
     />
   )
@@ -97,6 +101,8 @@ interface Initial {
   /** null: tags without a grade. */
   grades: (string | null)[]
   side: Side | null
+  /** The search bar's words (src/lib/search.ts). */
+  text: string
 }
 
 function SmartEdit({ reel }: { reel: Reel }) {
@@ -113,6 +119,7 @@ function SmartEdit({ reel }: { reel: Reel }) {
         codes: query.codes ?? [],
         grades: query.grades ?? [],
         side: query.side ?? null,
+        text: query.text ?? '',
       }}
     />
   )
@@ -163,7 +170,10 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
   const [side, setSide] = useState<Side | null>(initial.side)
   const [codes, setCodes] = useState<string[]>(initial.codes)
   const [grades, setGrades] = useState<(string | null)[]>(initial.grades)
+  const [text, setText] = useState(initial.text)
   const taxonomy = useTaxonomy(detail?.sport ?? null)
+  const parsed = useMemo(() => parseSearch(text, taxonomy.data ?? null), [text, taxonomy.data])
+  const searching = !isEmptySearch(parsed.search)
   const { people } = useTeamPeople(detail)
   const meId = me.data?.member.id
   const meName = me.data?.member.name ?? ''
@@ -186,6 +196,8 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
         ...(member !== null ? { member_id: member } : side ? { side } : {}),
         ...(codes.length > 0 ? { codes } : {}),
         ...(grades.length > 0 ? { grades } : {}),
+        // A search on top (PLAN §9.7): what it names, and the words to show again.
+        ...(searching ? { search: compactSearch(parsed.search), text: text.trim() } : {}),
         limit: LIMIT,
       }
     : null
@@ -199,6 +211,7 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
     player?.name ?? detail?.name,
     codes.map((c) => skillLabel(t, taxonomy.data ? skillByCode(taxonomy.data, c) : null, c)).join(', '),
     grades.map((g) => (g === null ? t('reels.builder.noGrade') : skill ? `${g} ${gradeLabel(t, skill, g)}` : g)).join(', '),
+    searching ? text.trim() : null,
     effectiveSeason,
   ]
     .filter(Boolean)
@@ -276,6 +289,17 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
               </Field>
             )}
           </div>
+          {detail.sport === 'volleyball' && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-semibold">{t('search.label')}</span>
+              <SearchBar
+                value={text}
+                onChange={setText}
+                taxonomy={taxonomy.data ?? null}
+                team={{ id: detail.id, canShare: detail.can_share, label: `${detail.name} ${detail.season}` }}
+              />
+            </div>
+          )}
           {taxonomy.data && (
             <>
               <Chips

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import uuid
 from typing import Any
 
@@ -197,3 +198,145 @@ def test_who_may_read_season_stats(club: dict[str, TestClient], as_: Any) -> Non
     assert as_("player-h3").get(f"/api/teams/{H3}/stats").json()["videos"] == 0
     assert club["coach"].get(f"/api/teams/{HERREN1}/stats").status_code == 409  # basketball
     assert club["coach"].get(f"/api/teams/{HERREN1}/stats.csv").status_code == 409
+
+
+# --- the search (PLAN §9.7) and the zone maps -------------------------------------------------
+
+
+def find(client: TestClient, url: str, **search: Any) -> Any:
+    out = client.get(url, params={"search": json.dumps(search)})
+    assert out.status_code == 200, out.text
+    return out.json()
+
+
+def test_stats_with_a_search(ready: dict[str, Any], club: dict[str, TestClient], as_: Any) -> None:
+    tag_a_set(club["coach"], ready["id"])
+    url = f"/api/videos/{ready['id']}/stats"
+    coach = club["coach"]
+    assert coach.get(url).json()["selected"] is None
+    # "#7": our #7's two serves and the attack into the block, in rallies 1, 2 and 3.
+    seven = find(coach, url, players=[{"side": "us", "number": 7}])
+    assert (seven["tags"], seven["selected"]) == (8, 3)
+    assert [r["number"] for r in seven["match"]["players"]] == [7]
+    assert seven["match"]["summary"]["rallies"] == 3
+    assert seven["match"]["opponent"]["values"]["serve_ta"] is None
+    # "side-out" (they served): rally 3 and the four tags in it; we lost it.
+    side_out = find(coach, url, serving=["them"])
+    assert side_out["selected"] == 4
+    summary = side_out["match"]["summary"]
+    assert (summary["rallies"], summary["lost"], summary["side_out_of"]) == (1, 1, 1)
+    # "lost": rallies 2 and 3; "won, attack #": the kill of rally 1.
+    assert find(coach, url, won_by=["them"])["match"]["summary"]["rallies"] == 2
+    kill = find(coach, url, won_by=["us"], codes=["A"], grades=["#"])
+    assert kill["selected"] == 1 and [r["number"] for r in kill["match"]["players"]] == [3]
+    # An empty search is no search; a broken one is refused.
+    assert find(coach, url)["selected"] is None
+    assert coach.get(url, params={"search": "{nope"}).status_code == 422
+    assert coach.get(url, params={"search": '{"rotations": [9]}'}).status_code == 422
+    csv_out = coach.get(f"{url}.csv", params={"search": json.dumps({"codes": ["A"]})})
+    rows = list(csv.reader(io.StringIO(csv_out.content.decode("utf-8-sig"))))
+    head = rows[0]
+    players = [dict(zip(head, r, strict=True)) for r in rows[1:] if r[0] == "Match"]
+    assert {line["Number"] for line in players if line["Number"]} == {"3", "7"}
+
+    # The season: the same search over every match.
+    season = find(as_("player-h3"), f"/api/teams/{H3}/stats", codes=["A"])
+    assert (season["tagged"], season["selected"]) == (1, 2)
+    assert season["season_box"]["team"]["values"]["att_ta"] == 2
+    assert season["season_box"]["team"]["values"]["serve_ta"] is None
+
+
+def zoned(code: str, t_ms: int, grade: str | None, zone_from: int | None, zone_to: int | None,
+          **more: Any) -> dict[str, Any]:  # fmt: skip
+    out = tag(code, t_ms, grade, **more)
+    out["attributes"] = {k: v for k, v in (("grade", grade), ("zone_from", zone_from),
+                                            ("zone_to", zone_to)) if v is not None}  # fmt: skip
+    return out
+
+
+def test_zone_maps(ready: dict[str, Any], club: dict[str, TestClient], as_: Any) -> None:
+    coach = club["coach"]
+    period = {"id": str(uuid.uuid4()), "no": 1, "start_ms": 0, "first_serve": "us"}
+    rallies = [segment(1_000, 9_000, "us"), segment(11_000, 14_000, "them")]
+    events = [
+        zoned("S", 1_200, "#", 1, 5),  # our #7 ace into zone 5
+        zoned("S", 11_200, "=", 1, 5),  # an error aimed at zone 5
+        zoned("A", 12_500, "#", 4, 1, side="them", number=10),  # their #10 kills from 4 to 1
+        zoned("A", 13_000, None, None, None, number=3),  # no zones
+    ]
+    out = coach.post(
+        f"/api/videos/{ready['id']}/changes",
+        json={"periods": [period], "segments": rallies, "events": events},
+    )
+    assert out.status_code == 200, out.text
+
+    body = as_("player-h3").get(f"/api/videos/{ready['id']}/stats/zones").json()
+    assert body["codes"] == {"serve": "S", "attack": "A"}
+    match, first = body["scopes"]
+    assert (match["set_no"], first["set_no"]) == (None, 1)
+    rows = {(r["kind"], r["number"]): r for r in match["rows"]}
+    assert set(rows) == {("player", 3), ("player", 7), ("team", None), ("opponent", None)}
+    seven = rows[("player", 7)]
+    assert seven["filter"] == {"side": "us", "number": 7}
+    (five,) = seven["zones"]["serve_to"]
+    assert (five["zone"], five["ta"], five["points"], five["errors"], five["eff"]) == (
+        5,
+        2,
+        1,
+        1,
+        0.0,
+    )
+    assert seven["zones"]["attack_from"] == [] and [
+        c["zone"] for c in seven["zones"]["serve_from"]
+    ] == [1]
+    assert [c["zone"] for c in rows[("player", 3)]["zones"]["attack_from"]] == [None]
+    them = rows[("opponent", None)]["zones"]
+    assert [(c["zone"], c["points"], c["point_pct"]) for c in them["attack_from"]] == [(4, 1, 1.0)]
+    assert them["attack_to"][0]["zone"] == 1
+    # A search narrows the maps too: their attacks only.
+    narrow = find(coach, f"/api/videos/{ready['id']}/stats/zones", sides=["them"])
+    assert [(r["kind"], r["number"]) for r in narrow["scopes"][0]["rows"]] == [("opponent", None)]
+
+    season = coach.get(f"/api/teams/{H3}/stats/zones").json()
+    (scope,) = season["scopes"]
+    member = next(r for r in scope["rows"] if r["number"] == 7)
+    assert member["filter"] == {"side": "us", "member_id": 101}
+    assert member["zones"]["serve_to"][0]["ta"] == 2
+
+    csv_out = coach.get(f"/api/videos/{ready['id']}/stats.csv", params={"part": "zones"})
+    assert 'filename="wieplay-zones-' in csv_out.headers["content-disposition"]
+    rows_csv = list(csv.reader(io.StringIO(csv_out.content.decode("utf-8-sig"))))
+    head = rows_csv[0]
+    lines = [dict(zip(head, r, strict=True)) for r in rows_csv[1:]]
+    ace = next(
+        x for x in lines if x["Number"] == "7" and x["Zones"] == "To" and x["Set"] == "Match"
+    )
+    assert (ace["Player"], ace["Zone"], ace["Attempts"], ace["Efficiency %"]) == (
+        "Alex Muster",
+        "5",
+        "2",
+        "0.0",
+    )
+    assert any(x["Player"] == ready["names"]["them"] for x in lines)  # the opponent by its name
+    season_csv = coach.get(f"/api/teams/{H3}/stats.csv", params={"part": "zones", "lang": "de"})
+    assert next(csv.reader(io.StringIO(season_csv.content.decode("utf-8-sig"))))[3:6] == [
+        "Aktion", "Zonen", "Zone",
+    ]  # fmt: skip
+    assert as_("basketball-player").get(f"/api/videos/{ready['id']}/stats/zones").status_code == 404
+    assert as_("basketball-player").get(f"/api/teams/{H3}/stats/zones").status_code == 404
+
+    # A smart reel with a search: where serves went, which rallies were lost.
+    lineage = coach.get(f"/api/teams/{H3}").json()["lineage_id"]
+    base = {"lineage_id": lineage}
+    to_five = coach.post(
+        "/api/reels/preview", json={**base, "search": {"codes": ["S"], "zones_to": [5]}}
+    )
+    assert [(p["code"], p["grade"]) for p in to_five.json()] == [("S", "#"), ("S", "=")]
+    lost = coach.post(
+        "/api/reels/preview", json={**base, "search": {"won_by": ["them"], "sets": [1]}}
+    )
+    assert [p["code"] for p in lost.json()] == ["S", "A", "A"]
+    kills = coach.post(
+        "/api/reels/preview", json={**base, "search": {"outcomes": ["point"]}, "limit": 1}
+    )
+    assert [(p["code"], p["grade"]) for p in kills.json()] == [("S", "#")]

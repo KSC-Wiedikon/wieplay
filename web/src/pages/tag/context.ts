@@ -5,6 +5,7 @@ import type { TaggingStore, TaggingView } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
 import type { ActionReviewController, ActionReviewState } from './actionReview'
 import type { TagController, UiState } from './controller'
+import type { RegradeController, RegradeState } from './regrade'
 import type { ReviewController, ReviewState } from './review'
 
 export interface WorkspaceParts {
@@ -18,7 +19,9 @@ export interface WorkspaceParts {
   review: ReviewController
   /** The actions queue of the review (suggested actions, PLAN §10.4a). */
   actions: ActionReviewController
-  /** A narrow screen (tablet, phone): only the review of suggestions, by touch. */
+  /** The regrade queue (PLAN §9.7). */
+  regrade: RegradeController
+  /** A narrow screen (tablet, phone): the review of suggestions or the regrade queue, by touch. */
   narrow: boolean
   /** Reloads the server's data under the queued changes (after the server changed rallies itself). */
   reload: () => void
@@ -56,4 +59,9 @@ export function useReview(): ReviewState {
 export function useActionReview(): ActionReviewState {
   const { actions } = useWorkspace()
   return useSyncExternalStore(actions.subscribe, actions.getState)
+}
+
+export function useRegrade(): RegradeState {
+  const { regrade } = useWorkspace()
+  return useSyncExternalStore(regrade.subscribe, regrade.getState)
 }

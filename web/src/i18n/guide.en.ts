@@ -30,6 +30,7 @@ export interface Guide {
     keys: GuideKey[]
     tips: string[]
   }
+  regrade: { title: string; intro: string; steps: string[]; keysTitle: string; keys: GuideKey[] }
   actions: { title: string; body: string; keys: GuideKey[] }
   rights: { title: string; canTitle: string; can: string[]; cannotTitle: string; cannot: string[]; privacy: string }
 }
@@ -139,7 +140,28 @@ export const guideEn: Guide = {
     ],
     tips: [
       'A number nobody wears in this game is marked, but saved: fix the roster later if a shirt was different.',
-      'A grade can wait: 7A is a fine tag; the grade can be added when you watch again.',
+      'A grade can wait: 7A is a fine tag; the regrade queue adds the grades in a second pass.',
+    ],
+  },
+  regrade: {
+    title: 'Grade in a second pass',
+    intro:
+      'Tagging live is easier without grades. Afterwards the regrade queue goes through the tags of one skill, plays each moment and takes the grade with one key, on a tablet or phone with a tap.',
+    steps: [
+      'On the video page choose “Regrade”, or switch the mode to “Regrade” while tagging.',
+      'Pick the skill (attacks first: they make the most useful numbers), “Ungraded only” or “All of them”, and if you like one player or one set. Then Start.',
+      'Each tag plays in a loop. Give the grade: 1 to 6 in the order of the grades table (# + ! - / =); the buttons say what each grade means for the skill. 0 takes the grade away.',
+      'The next tag comes by itself. S or Enter skips one, ← → go back and forth, U undoes the last grade.',
+    ],
+    keysTitle: 'Keys while regrading',
+    keys: [
+      { keys: ['1', '2', '3', '4', '5', '6'], text: 'The grade: # + ! - / =' },
+      { keys: ['0'], text: 'No grade' },
+      { keys: ['S', 'Enter'], text: 'Skip the tag' },
+      { keys: ['←', '→'], text: 'Previous or next tag' },
+      { keys: ['U'], text: 'Undo the last grade' },
+      { keys: ['Space'], text: 'Play or pause' },
+      { keys: ['Esc'], text: 'Back to the choice of the pass' },
     ],
   },
   actions: {

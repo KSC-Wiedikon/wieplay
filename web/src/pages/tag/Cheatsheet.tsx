@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Modal } from '../../components/Modal'
 import { gradeLabel, sideLabel, skillLabel } from '../../lib/labels'
 import { useSideNames } from '../../lib/sides'
-import { useActionReview, useReview, useUi, useWorkspace } from './context'
+import { useActionReview, useRegrade, useReview, useUi, useWorkspace } from './context'
 import { GuideLink } from './GuideLink'
 
 function Keys({ keys }: { keys: string[] }) {
@@ -48,6 +48,7 @@ export function Cheatsheet() {
   const ui = useUi()
   const reviewing = useReview().active
   const reviewingActions = useActionReview().active && reviewing
+  const regrading = useRegrade().active
   const basketball = taxonomy.sport === 'basketball'
   const examples = examplesFor(t, basketball)
   const names = useSideNames()
@@ -117,6 +118,19 @@ export function Cheatsheet() {
             ] as [string[], string][],
           },
           {
+            title: t('regrade.keys.group'),
+            rows: [
+              [['1', '2', '3', '4', '5', '6'], t('regrade.keys.grade')],
+              [['#', '+', '!', '-', '/', '='], t('regrade.keys.symbols')],
+              [['0'], t('regrade.keys.clear')],
+              [['S', 'Enter'], t('regrade.keys.skip')],
+              [['←', '→', '↑', '↓'], t('regrade.keys.move')],
+              [['U'], t('regrade.keys.undo')],
+              [['Space'], t('regrade.keys.space')],
+              [['Esc'], t('regrade.keys.leave')],
+            ] as [string[], string][],
+          },
+          {
             title: t('actions.keys.group'),
             rows: [
               [['Enter'], t('actions.keys.accept')],
@@ -149,9 +163,9 @@ export function Cheatsheet() {
     },
   ]
 
-  // While reviewing, its keys come first (the actions queue's when that is on).
-  const review = reviewingActions ? t('actions.keys.group') : t('tagging.keys.groups.review')
-  const groups = reviewing ? [...all.filter((g) => g.title === review), ...all.filter((g) => g.title !== review)] : all
+  // While reviewing or regrading, its keys come first (the actions queue's when that is on).
+  const review = regrading ? t('regrade.keys.group') : reviewingActions ? t('actions.keys.group') : t('tagging.keys.groups.review')
+  const groups = reviewing || regrading ? [...all.filter((g) => g.title === review), ...all.filter((g) => g.title !== review)] : all
 
   return (
     <Modal open={ui.cheatsheet} title={t('tagging.keys.title')} onClose={() => controller.toggleCheatsheet(false)} size="xl">

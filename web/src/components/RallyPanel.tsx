@@ -16,6 +16,7 @@ import { ApiError } from '../lib/api'
 import { formatClock, sideLabel } from '../lib/labels'
 import { usePlayhead, type Playhead } from '../lib/playhead'
 import { ralliesOf } from '../lib/rallies'
+import { isEmptySearch, parseSearch, searchContext, searchRallies } from '../lib/search'
 import { fullNameOf, useSideNames } from '../lib/sides'
 import { readStorage, writeStorage } from '../lib/storage'
 import { effectiveWinner, scoreAfter } from '../lib/suggestions'
@@ -28,6 +29,7 @@ import { Button } from './Button'
 import { Card } from './Card'
 import { UndoIcon } from './icons'
 import { ScoreHead, SuggestedValue } from './ScoringMarks'
+import { SearchBar, type FilterTeam } from './SearchBar'
 import { Switch } from './Switch'
 import { Table, TBody, Td, Th, THead, Tr } from './Table'
 import { TagFilters } from './TagFilters'
@@ -46,6 +48,8 @@ interface RallyPanelProps {
   action?: ReactNode
   /** Coaches set who won a rally here (the video's id): a fact the score line follows. */
   editVideoId?: string | null
+  /** The team saved filters belong to (the search bar's); null: no saved filters. */
+  filterTeam?: FilterTeam | null
 }
 
 /** The last winner set here, to take back. */
@@ -57,7 +61,7 @@ interface LastCall {
 }
 
 /** Condensed playback (PLAN §9.5) for everyone who can watch: rallies only, a rally list, filters. */
-export function RallyPanel({ tagging, duration_ms, element, playhead, suspended = false, action, editVideoId = null }: RallyPanelProps) {
+export function RallyPanel({ tagging, duration_ms, element, playhead, suspended = false, action, editVideoId = null, filterTeam = null }: RallyPanelProps) {
   const { t } = useTranslation()
   const id = useId()
   const names = useSideNames()
@@ -66,12 +70,19 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
   const [last, setLast] = useState<LastCall | null>(null)
   const [skip, setSkip] = useState(() => readStorage(SKIP_KEY) !== 'off')
   const [filter, setFilter] = useState<TagFilter>(NO_FILTER)
+  // The search bar (PLAN §9.7): "#3 attack #", "set 3, rotation 2, reception -".
+  const [text, setText] = useState('')
+  const volleyball = tagging.sport === 'volleyball'
+  const parsed = useMemo(() => parseSearch(text, tagging.taxonomy), [text, tagging.taxonomy])
 
   const rallies = useMemo(() => ralliesOf(tagging.segments), [tagging.segments])
-  const shown = useMemo(
-    () => filterRallies(rallies, tagging.events, tagging.periods, filter),
-    [rallies, tagging.events, tagging.periods, filter],
-  )
+  const shown = useMemo(() => {
+    const filtered = filterRallies(rallies, tagging.events, tagging.periods, filter)
+    if (isEmptySearch(parsed.search)) return filtered
+    const ctx = searchContext(tagging.events, tagging.segments, tagging.periods)
+    return searchRallies(filtered, tagging.events, parsed.search, ctx, tagging.taxonomy)
+  }, [rallies, tagging, filter, parsed])
+  const setNumbers = useMemo(() => tagging.periods.map((p) => p.no).sort((a, b) => a - b), [tagging.periods])
   const duration = duration_ms ?? rallies.at(-1)?.end_ms ?? null
   const windows = useMemo(() => playWindows(shown, { duration_ms: duration }), [shown, duration])
   useCondensedPlayback(element, windows, skip && !suspended)
@@ -135,6 +146,13 @@ export function RallyPanel({ tagging, duration_ms, element, playhead, suspended 
         tags={tagging.events}
         periods={tagging.periods}
         roster={tagging.roster}
+        search={
+          volleyball ? (
+            <SearchBar value={text} onChange={setText} taxonomy={tagging.taxonomy} roster={tagging.roster} sets={setNumbers} team={filterTeam} />
+          ) : undefined
+        }
+        searching={text.trim() !== ''}
+        onClear={() => setText('')}
       />
       {duration !== null && (
         <RallyStrip

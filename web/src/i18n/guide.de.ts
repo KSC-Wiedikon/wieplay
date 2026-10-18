@@ -106,7 +106,28 @@ export const guideDe: Guide = {
     ],
     tips: [
       'Eine Nummer, die in diesem Spiel niemand trägt, wird markiert, aber gespeichert: Korrigier die Aufstellung später, wenn ein Trikot anders war.',
-      'Die Bewertung kann warten: 7A ist ein guter Tag; die Bewertung kommt beim nächsten Anschauen dazu.',
+      'Die Bewertung kann warten: 7A ist ein guter Tag; «Nachbewerten» ergänzt die Bewertungen in einem zweiten Durchgang.',
+    ],
+  },
+  regrade: {
+    title: 'In einem zweiten Durchgang bewerten',
+    intro:
+      'Live taggt es sich leichter ohne Bewertung. Danach geht «Nachbewerten» die Tags einer Aktion durch, spielt jeden Moment ab und nimmt die Bewertung mit einer Taste, auf dem Tablet oder Handy mit einem Tippen.',
+    steps: [
+      'Wähl auf der Videoseite «Nachbewerten», oder stell beim Taggen den Modus auf «Nachbewerten».',
+      'Wähl die Aktion (zuerst die Angriffe: Sie geben die nützlichsten Zahlen), «Nur unbewertete» oder «Alle», und wenn du willst einen Spieler oder einen Satz. Dann Starten.',
+      'Jeder Tag läuft in einer Schleife. Gib die Bewertung: 1 bis 6 in der Reihenfolge der Bewertungstabelle (# + ! - / =); die Knöpfe sagen, was jede Bewertung für die Aktion heisst. 0 nimmt die Bewertung weg.',
+      'Der nächste Tag kommt von selbst. S oder Enter überspringt einen, ← → blättern, U macht die letzte Bewertung rückgängig.',
+    ],
+    keysTitle: 'Tasten beim Nachbewerten',
+    keys: [
+      { keys: ['1', '2', '3', '4', '5', '6'], text: 'Die Bewertung: # + ! - / =' },
+      { keys: ['0'], text: 'Keine Bewertung' },
+      { keys: ['S', 'Enter'], text: 'Tag überspringen' },
+      { keys: ['←', '→'], text: 'Vorheriger oder nächster Tag' },
+      { keys: ['U'], text: 'Letzte Bewertung rückgängig machen' },
+      { keys: ['Space'], text: 'Abspielen oder anhalten' },
+      { keys: ['Esc'], text: 'Zurück zur Auswahl des Durchgangs' },
     ],
   },
   actions: {

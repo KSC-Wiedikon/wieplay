@@ -21,6 +21,7 @@ describe('GuidePage', () => {
       '#review',
       '#done',
       '#tag',
+      '#regrade',
       '#actions',
       '#rights',
     ])
@@ -51,6 +52,13 @@ describe('GuidePage', () => {
     for (const entry of ['7A#', 'a12S=', 'aS']) expect(within(tag).getByText(entry)).toBeInTheDocument()
     expect(within(within(tag).getByRole('table', { name: 'Skills' })).getAllByRole('row')).toHaveLength(8)
     expect(within(within(tag).getByRole('table', { name: 'Grades' })).getAllByRole('row')).toHaveLength(7)
+
+    const regrade = screen.getByRole('region', { name: 'Grade in a second pass' })
+    const regradeKeys = within(regrade).getByRole('table', { name: 'Keys while regrading' })
+    const keyRows = within(regradeKeys).getAllByRole('row').map((row) => row.textContent)
+    for (const expected of ['123456The grade', '0No grade', 'SEnterSkip', 'UUndo']) {
+      expect(keyRows.some((text) => text?.startsWith(expected))).toBe(true)
+    }
 
     const rights = screen.getByRole('region', { name: 'What helpers can and can’t do' })
     expect(within(rights).getByText('download videos')).toBeInTheDocument()
