@@ -321,6 +321,7 @@ export const statsEn = {
     },
     search: {
       title: 'Narrow the stats',
+      label: 'Search the stats',
       hint: 'Every number counts only what the search keeps.',
       selected_one: '{{count}} tag matches',
       selected_other: '{{count}} tags match',

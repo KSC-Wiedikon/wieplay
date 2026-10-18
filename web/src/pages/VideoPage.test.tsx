@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Analysis, Tagging, TeamDetail, Video } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
 import { boxScore, rotationColumns, rotationLine, setterLine, setterStats, statRow, teamLine, videoStats } from '../test/stats'
+import { parseSearch, searchParam } from '../lib/search'
 import { bundle, period, rally, tag } from '../test/tagging'
 import { VideoPage } from './VideoPage'
 
@@ -628,6 +629,18 @@ describe('VideoPage', () => {
       expect(scroll).toHaveBeenCalled()
     })
 
+    it('narrows the match with the search bar: the numbers count and play only what it keeps', async () => {
+      const searched = `?search=${encodeURIComponent(searchParam(parseSearch('attack #', tagging.taxonomy).search) ?? '')}`
+      showStats({ routes: { [`/api/videos/${ID}/stats${searched}`]: { body: { ...stats, selected: 1 } } } })
+      await screen.findByRole('table', { name: 'Box score' })
+      fireEvent.change(screen.getByRole('combobox', { name: 'Search the stats' }), { target: { value: 'attack #' } })
+      expect(await screen.findByText(/1 tag matches/)).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/videos/${ID}/stats.csv?lang=en${searched.replace('?', '&')}`)
+      fireEvent.click(screen.getByRole('button', { name: 'Play #7 Luca Brunner, Attacks: 2' }))
+      expect(screen.getByText('Playing #7 Luca Brunner · Attack · # Kill · 0:15')).toBeInTheDocument()
+      expect(screen.queryByText('1 of 2')).not.toBeInTheDocument() // the error is not kept
+    })
+
     it('draws where serves and attacks went per zone; a zone plays its tags', async () => {
       const zoneKill = { ...kill, attributes: { grade: '#', zone_from: 4, zone_to: 1 } }
       const zoneError = { ...error, attributes: { grade: '=', zone_from: 4 } }
@@ -687,7 +700,8 @@ describe('VideoPage', () => {
       expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row')).toHaveLength(2)
       expect(screen.getByText('Not understood: what')).toBeInTheDocument()
       // A saved filter of the team.
-      fireEvent.click(screen.getByRole('button', { name: 'Saved filters' }))
+      // The rally list's (the stats below have a search bar of their own).
+      fireEvent.click(screen.getAllByRole('button', { name: 'Saved filters' })[0] as HTMLElement)
       fireEvent.click(await screen.findByRole('button', { name: 'Use “Lost ones”' }))
       expect(search).toHaveValue('lost')
       expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row')).toHaveLength(2)

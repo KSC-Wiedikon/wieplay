@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
 import { Link } from 'react-router'
 import { formatClock, pieceLabel, playerLabel, playerName } from '../lib/labels'
+import { useTaxonomy } from '../lib/library'
+import { isEmptySearch, parseSearch, searchContext, searchParam, searchRallies, searchTags, type TagSearch } from '../lib/search'
 import { useSideNames } from '../lib/sides'
 import { ralliesOf } from '../lib/rallies'
 import {
@@ -30,13 +32,14 @@ import {
   type StatRow,
   type VideoStats as Stats,
 } from '../lib/stats'
-import type { Segment, Tag, Tagging, Video } from '../lib/types'
+import type { Segment, Tag, Tagging, Taxonomy, Video } from '../lib/types'
 import { buttonClasses } from './buttonStyles'
 import { ActionGateNote } from './ActionGateNote'
 import { ChartIcon, DownloadIcon, SparkleIcon } from './icons'
 import { EmptyState, LoadError } from './Message'
 import { SectionHeader } from './PageHeader'
 import { RotationStats } from './RotationStats'
+import { SearchBar } from './SearchBar'
 import { SetterStats } from './SetterStats'
 import { Spinner } from './Spinner'
 import { StatsLegend, StatsTable, TeamTable, type CellTarget, type TeamKey, type TeamTableRow } from './StatsTable'
@@ -60,20 +63,34 @@ interface VideoStatsProps {
 export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
   const { t, i18n } = useTranslation()
   const id = useId()
-  const stats = useVideoStats(video.id, true)
+  // The search bar (PLAN §9.7): every number counts only what it keeps, and plays only that.
+  const [text, setText] = useState('')
+  const fallback = useTaxonomy(tagging?.taxonomy ? null : video.sport).data ?? null
+  const taxonomy = tagging?.taxonomy ?? fallback
+  const parsed = useMemo(() => parseSearch(text, taxonomy), [text, taxonomy])
+  const search = searchParam(parsed.search)
+  const stats = useVideoStats(video.id, true, search)
   const tagged = (stats.data?.tags ?? 0) > 0
+  const nothing = search !== null && stats.data?.selected === 0
   const lang = i18n.language === 'de' ? 'de' : 'en'
   const [tab, setTab] = useState<StatsTab>('players')
+  const setNumbers = useMemo(() => (tagging?.periods ?? []).map((p) => p.no).sort((a, b) => a - b), [tagging])
 
   return (
     <section id={VIDEO_STATS_ID} aria-labelledby={`${id}-title`} className="flex scroll-mt-4 flex-col gap-3">
       <SectionHeader
         id={`${id}-title`}
         title={t('stats.title')}
-        hint={tagged ? t('stats.hintVideo') : undefined}
+        hint={
+          tagged
+            ? [t('stats.hintVideo'), search !== null && stats.data?.selected != null ? t('stats.search.selected', { count: stats.data.selected }) : null]
+                .filter(Boolean)
+                .join(' · ')
+            : undefined
+        }
         action={
           tagged ? (
-            <a href={videoCsvUrl(video.id, lang, CSV_PART[tab])} download className={buttonClasses({ variant: 'secondary' })}>
+            <a href={videoCsvUrl(video.id, lang, CSV_PART[tab], search)} download className={buttonClasses({ variant: 'secondary' })}>
               <DownloadIcon className="size-4" />
               {t('stats.csv')}
             </a>
@@ -90,7 +107,22 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
           {tagging?.can_tag ? t('stats.empty.tagger') : t('stats.empty.body')}
         </EmptyState>
       ) : (
-        <Numbers data={stats.data} video={video} tagging={tagging} onPlay={onPlay} tab={tab} onTab={setTab} />
+        <div className="flex flex-col gap-4">
+          <SearchBar
+            value={text}
+            onChange={setText}
+            taxonomy={taxonomy}
+            roster={tagging?.roster ?? []}
+            sets={setNumbers}
+            label={t('stats.search.label')}
+            team={{ id: video.team_id, canShare: video.can_share, label: `${video.team_name} ${video.team_season}` }}
+          />
+          {nothing ? (
+            <p className="text-sm text-muted">{t('search.none')}</p>
+          ) : (
+            <Numbers data={stats.data} video={video} tagging={tagging} onPlay={onPlay} tab={tab} onTab={setTab} filter={parsed.search} search={search} taxonomy={taxonomy} />
+          )}
+        </div>
       )}
     </section>
   )
@@ -107,7 +139,17 @@ export function SuggestedHint({ count }: { count: number }) {
   )
 }
 
-function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; tab: StatsTab; onTab: (tab: StatsTab) => void } & VideoStatsProps) {
+interface NumbersProps {
+  data: Stats
+  tab: StatsTab
+  onTab: (tab: StatsTab) => void
+  /** The search's terms (empty: none) and its ?search= form for the zone maps. */
+  filter: TagSearch
+  search: string | null
+  taxonomy: Taxonomy | null
+}
+
+function Numbers({ data, video, tagging, onPlay, tab, onTab, filter, search, taxonomy }: NumbersProps & VideoStatsProps) {
   const { t } = useTranslation()
   const sides = useSideNames()
   const tabsId = useId()
@@ -121,6 +163,10 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; ta
   const rallyNumbers = useMemo(() => new Map(ralliesOf(tagging?.segments ?? []).map((r, i) => [r.id, i + 1])), [tagging])
   const periodOf = useMemo(() => new Map((tagging?.periods ?? []).map((p) => [p.no, p.id])), [tagging])
   const events = useMemo(() => new Map((tagging?.events ?? []).map((e) => [e.id, e])), [tagging])
+  // A number's moments with a search: only the tags and rallies the search keeps (as counted).
+  const ctx = useMemo(() => (tagging && !isEmptySearch(filter) ? searchContext(tagging.events, tagging.segments, tagging.periods) : null), [tagging, filter])
+  const keepTags = (tags: Tag[]): Tag[] => (ctx ? searchTags(tags, filter, ctx, taxonomy) : tags)
+  const keepRallies = (rallies: Segment[]): Segment[] => (ctx && tagging ? searchRallies(rallies, tagging.events, filter, ctx, taxonomy) : rallies)
   // Shirt numbers' names for the rotation charts: the roster snapshot's, else the box score's.
   const names = useMemo(() => {
     const out = new Map(data.match.players.flatMap((p) => (p.number !== null && p.name ? [[p.number, p.name] as const] : [])))
@@ -164,29 +210,29 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; ta
 
   const playTags = (row: StatRow, column: StatColumn): CellTarget | null => {
     if (!tagging) return null
-    return { kind: 'play', onPlay: () => onPlay(statTags(tagging, row.filter, column, scope).map(tagPlay)) }
+    return { kind: 'play', onPlay: () => onPlay(keepTags(statTags(tagging, row.filter, column, scope)).map(tagPlay)) }
   }
 
   const playRallies = (row: TeamTableRow, key: TeamKey): CellTarget | null => {
     const filter: RallyFilter | undefined = data.team_filters[key.replace(/_pct$/, '_won')]
     const periodId = row.key === 'match' ? null : periodOf.get(Number(row.key.slice(3)))
     if (!tagging || !filter || periodId === undefined) return null
-    return { kind: 'play', onPlay: () => onPlay(statRallies(tagging.segments, filter, periodId).map(rallyPlay)) }
+    return { kind: 'play', onPlay: () => onPlay(keepRallies(statRallies(tagging.segments, filter, periodId)).map(rallyPlay)) }
   }
 
   const rotationTeam = (line: RotationLine, key: TeamKey): CellTarget | null => {
     const filter: RallyFilter | undefined = data.team_filters[key.replace(/_pct$/, '_won')]
     if (!tagging || !filter || !line.plays?.length) return null
     const plays = line.plays
-    return { kind: 'play', onPlay: () => onPlay(rotationRallies(tagging.segments, plays, filter).map(rallyPlay)) }
+    return { kind: 'play', onPlay: () => onPlay(keepRallies(rotationRallies(tagging.segments, plays, filter)).map(rallyPlay)) }
   }
   const rotationSkill = (line: RotationLine, column: StatColumn): CellTarget | null => {
     if (!tagging || !line.plays?.length) return null
     const plays = line.plays
-    return { kind: 'play', onPlay: () => onPlay(rotationTags(tagging, plays, column).map(tagPlay)) }
+    return { kind: 'play', onPlay: () => onPlay(keepTags(rotationTags(tagging, plays, column)).map(tagPlay)) }
   }
   // Zone maps load when their tab opens.
-  const zones = useVideoZones(video.id, tab === 'zones')
+  const zones = useVideoZones(video.id, tab === 'zones', search)
 
   const setterTarget = (filter: SetFilter): CellTarget | null => {
     const plays = data.match.setter?.plays
@@ -320,7 +366,7 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab }: { data: Stats; ta
             onRetry={() => void zones.refetch()}
             setNo={scope}
             target={(row, _skill, end, cell, code) =>
-              tagging ? { kind: 'play', onPlay: () => onPlay(zoneTags(tagging, row.filter, code, end, cell.zone, scope).map(tagPlay)) } : null
+              tagging ? { kind: 'play', onPlay: () => onPlay(keepTags(zoneTags(tagging, row.filter, code, end, cell.zone, scope)).map(tagPlay)) } : null
             }
             selected={selected}
             onSelect={setSelected}
