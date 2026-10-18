@@ -887,14 +887,20 @@ def confidence(c: Cluster, fps: float) -> float:
     return round(min(1.0, max(0.0, score)), 3)
 
 
-def set_confidence(clusters: Sequence[Cluster], fps: float) -> None:
+def set_confidence(clusters: Sequence[Cluster], fps: float, sure: bool = True) -> None:
     """Each card's confidence; a card suggesting the number of a bigger card of its team
     (seen at the same time, or the two would be one card) is to be checked whatever its
-    readings say: at least one of the two is wrong."""
+    readings say: at least one of the two is wrong. `sure` False (no court calibration):
+    every card is to be checked."""
     held: set[tuple[str, int]] = set()
     for c in sorted(clusters, key=lambda c: -c.detections):
         c.confidence = confidence(c, fps)
-        if c.referee or c.number is None:
+        if c.referee:
+            continue
+        if not sure:
+            c.confidence = round(min(c.confidence, UNCERTAIN - 0.01) * 0.6, 3)
+            continue
+        if c.number is None:
             continue
         if (c.team, c.number) in held:
             c.confidence = round(min(c.confidence, UNCERTAIN - 0.01) * 0.6, 3)

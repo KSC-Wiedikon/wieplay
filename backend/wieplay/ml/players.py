@@ -210,6 +210,13 @@ class Setups:
             self._cache[key] = geometry(calib, self.aspect)
         return self._cache[key]
 
+    @property
+    def calibrated(self) -> bool:
+        """The court is known for at least part of the video."""
+        if self._single is not None:
+            return self._single.calibrated
+        return any(s.get("homography") for s in self.setups)
+
     def as_dict(self) -> dict[str, Any]:
         if self._single is not None:
             return self._single.as_dict()

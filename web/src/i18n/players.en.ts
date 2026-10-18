@@ -67,7 +67,7 @@ export const playersEn = {
     refereeGuess: 'Looks like a referee or the bench',
     toCheck: 'Cards to check ({{count}})',
     toCheckHint:
-      'WiePlay is not sure each of these is one whole person: often a player on the far side, whose number is too small to read, or two teammates on one card. Look at the pictures, then name, split or merge them.',
+      'WiePlay is not sure each of these is one whole person: often a player on the far side, whose number is too small to read, or two teammates on one card; without a calibrated court, every card is here. Look at the pictures, then name, split or merge them.',
     uncertain: 'Check',
     uncertainHint: 'WiePlay is not sure this card is one whole person: look at the pictures, then split, merge or name it.',
     hours_one: '{{count}} hour',

@@ -149,7 +149,19 @@ def identify(out: Path, gpu: bool) -> None:
     inputs = cached["inputs"]
     roster = {"us": [int(n) for n in (inputs.get("roster") or {}).get("us", [])]}
     started = time.perf_counter()
-    found = job.identify(cached["col"], cached["windows"], reader, roster, job.DETECT_FPS)
+    setups = pl.Setups(
+        inputs.get("setups") or [],
+        inputs.get("calibration"),
+        int(inputs["width"]) / int(inputs["height"]),
+    )
+    found = job.identify(
+        cached["col"],
+        cached["windows"],
+        reader,
+        roster,
+        job.DETECT_FPS,
+        calibrated=setups.calibrated,
+    )
     found.stats["identify_s"] = round(time.perf_counter() - started, 1)
     sheets = out / "sheets"
     sheets.mkdir(exist_ok=True)

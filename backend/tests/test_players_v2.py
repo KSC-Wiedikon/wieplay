@@ -532,3 +532,13 @@ def test_a_flipped_serving_side_inside_a_set_is_smoothed_and_set_changes_kept() 
     sides = identities.smooth_sides(near)
     assert sides[6] == "us" and sides[:13] == ["us"] * 13 and sides[-5:] == ["them"] * 5
     assert identities.smooth_sides([None, "us", None]) == ["us", "us", "us"]
+
+
+def test_without_a_calibration_every_card_is_to_be_checked() -> None:
+    sure = cluster(1, piece(1, 0, 300, number=12, votes=8.0), number=12)
+    sure.number_conf = 0.9
+    identities.set_confidence([sure], FPS, sure=False)
+    assert sure.confidence < identities.UNCERTAIN
+    assert pl.Setups([], None, 16 / 9).calibrated is False
+    one = [{"from_ms": 0, "homography": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]}]
+    assert pl.Setups(one, None, 1.0).calibrated is True

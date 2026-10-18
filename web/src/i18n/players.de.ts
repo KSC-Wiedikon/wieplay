@@ -68,7 +68,7 @@ export const playersDe: typeof playersEn = {
     refereeGuess: 'Sieht aus wie Schiedsrichter oder Bank',
     toCheck: 'Karten zum Prüfen ({{count}})',
     toCheckHint:
-      'WiePlay ist nicht sicher, ob jede dieser Karten genau eine Person zeigt: oft ein Spieler auf der fernen Seite, dessen Nummer zu klein ist, oder zwei Mitspieler auf einer Karte. Schau die Bilder an, dann benennen, teilen oder zusammenführen.',
+      'WiePlay ist nicht sicher, ob jede dieser Karten genau eine Person zeigt: oft ein Spieler auf der fernen Seite, dessen Nummer zu klein ist, oder zwei Mitspieler auf einer Karte; ohne kalibriertes Feld stehen alle Karten hier. Schau die Bilder an, dann benennen, teilen oder zusammenführen.',
     uncertain: 'Prüfen',
     uncertainHint: 'WiePlay ist nicht sicher, ob diese Karte genau eine Person zeigt: schau die Bilder an, dann teilen, zusammenführen oder benennen.',
     hours_one: '{{count}} Stunde',

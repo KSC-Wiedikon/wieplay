@@ -488,9 +488,12 @@ def identify(
     roster: dict[str, list[int]],
     fps: float,
     stitch: identities.StitchParams | None = None,
+    calibrated: bool = True,
 ) -> Identified:
     """Tracks → teams → numbers → chains → people (identities.py), then the gallery's
-    sheets and the API's index."""
+    sheets and the API's index. Without a court calibration every card is to be checked:
+    the sides of the net come from foot heights then, and on two uncalibrated games
+    (18.10.2026) whole stretches of one team landed on the other's cards."""
     tracks = pl.finish_tracks(col)
     near = [w["near_team"] for w in windows]
     sides = identities.smooth_sides(near)
@@ -511,12 +514,13 @@ def identify(
     kept = identities.assign_numbers([c for c in chains if identities.in_play(c)])
     clusters = pl.cluster_tracks(kept)
     absorbed = identities.absorb(clusters)
-    identities.set_confidence(clusters, fps)
+    identities.set_confidence(clusters, fps, sure=calibrated)
     sheets = pl.contact_sheets(clusters)
     index = pl.encode_index(col, kept)
     players = [c for c in clusters if not c.referee]
     stats = {
         "version": VERSION,
+        "calibrated": calibrated,
         "tracks": len(tracks),
         "swaps_cut": cuts,
         "encounter_cuts": met,
@@ -648,7 +652,7 @@ def run(ctx: Context) -> dict[str, Any]:
     except (OSError, ValueError, RuntimeError) as exc:  # no OCR weights: the coach types
         log.warning("no shirt-number reader: %s", exc)
     roster = {k: [int(n) for n in v] for k, v in (found.get("roster") or {}).items()}
-    out = identify(detected.col, windows, reader, roster, fps)
+    out = identify(detected.col, windows, reader, roster, fps, calibrated=setups.calibrated)
     timing["identify_s"] = round(time.perf_counter() - t, 1)
     if ctx.gpu is not None:
         timing["gpu_paused_s"] = round(ctx.gpu.paused_s, 1)
