@@ -17,13 +17,16 @@ Distance and direction are measured from the centre in both axes (picture height
 serve taken at the right edge of the picture shows at the far court's height, so its height
 alone (rule 1, until 18.10.2026: distance above or below the band only) read it as far. A track
 that starts slower than SLOW (a ball held, carried to the end line, rolled or bounced) is
-passed over for the next one.
+passed over for the next one. A camera at the side of the court (the ball crossing the picture
+more than it moves up and down) gives no serve evidence: near and far mean nothing there.
 
 The rule (`p_near_v0`, version RULE) is a logistic function of those two numbers, its weights
-fitted on the rallies whose server the club scoreboard's log implies (PLAN §10.10) and checked
-on held-out games and halls. v1 is a classifier over the same features and the rule's answer,
-trained on the serves the coaches tagged or called (their serving team and the set's sides),
-used only when it beats the rule on held-out games (leave one game out, like the rally finder).
+fitted on the rallies whose server the club scoreboard's log implies (PLAN §10.10) and on serves
+labelled by eye, measured on held-out games and halls. The scoring evens each match's readings
+out (about as many near serves as far ones, wieplay/ml/scoring.py `balance`). v1 is a
+classifier over the same features and the rule's answer, trained on the serves the coaches
+tagged or called (their serving team and the set's sides), used only when it beats the rule on
+held-out games (leave one game out, like the rally finder).
 
 Both are evaluated for every half-second of the video ("a rally starting here"), so the API
 can look up the serve of any rally, also one a coach moved or added: the **serve track**. The
@@ -48,9 +51,10 @@ from wieplay.ml.features import GRID_COLS, HEIGHT, WIDTH, Arr, Signals, Tracks, 
 
 MODEL_FORMAT = 1
 # The rule's version: 1 read the height alone (until 18.10.2026), 2 the distance and direction
-# from the far court's centre. Kept with every serve track, so a training recomputes the tracks
-# an older rule made.
-RULE = 2
+# from the far court's centre, 3 the same with its weights fitted on six halls and nothing from
+# a camera at the side. Kept with every serve track, so a training recomputes the tracks an
+# older rule made.
+RULE = 3
 STEP_S = tracks.SERVE_STEP_MS / 1000
 LEAD_S = 0.5  # the serve's ball track starts at most this long before the rally's start
 WINDOW_S = 5.0  # ... and at most this long after it
@@ -60,12 +64,18 @@ ASPECT = WIDTH / HEIGHT  # distances in picture heights, x scaled to them
 # A track slower than this over its first EARLY_S (picture widths per second: 1.7 px a frame
 # at 512 px and 30 fps) is a ball held, carried, rolled or bounced: the next one is the serve.
 SLOW = 0.1
-# The rule: logit P(near) = R_FIRST * r_first + R_SPEED * r_speed + R_BIAS, fitted on the
-# 258 rallies of the two games with a trusted score log (scripts/ml/serve_eval.py); checked
-# leaving one game out and on three other halls labelled by eye (PLAN §10.3).
-R_FIRST = 8.6
-R_SPEED = -4.3
-R_BIAS = -3.6
+# The rule: logit P(near) = R_FIRST * r_first + R_SPEED * r_speed + R_BIAS, fitted on 392
+# rallies of six halls: two games with a trusted score log, four labelled by eye
+# (scripts/ml/serve_eval.py); measured leaving one game out and on two more halls (PLAN §10.3).
+# The scoring evens out each match's side (wieplay/ml/scoring.py `balance`).
+R_FIRST = 9.13
+R_SPEED = -6.66
+R_BIAS = -2.65
+# A camera at the side of the court sees the ball cross the picture: its mean sideways motion
+# over its mean up-and-down motion is above this (1.06-1.10 in two such videos, 0.61-0.81 in
+# twenty from behind an end line). Near and far mean nothing there: no serve evidence.
+SIDE_VIEW = 0.95
+MIN_MOVES = 1000  # frame-to-frame moves of a tracked ball needed to tell
 
 FEATURES = [
     "y_first",  # where the ball first shows, relative to the band (0: in it; + lower)
@@ -102,6 +112,12 @@ class Evidence:
     loud: Arr  # dB over the median
     fps: float
     centre_x: float = 0.5  # the ball's median position across the picture (0..1)
+    sideways: float = 0.0  # the ball's mean sideways over mean up-and-down motion
+
+    @property
+    def side_view(self) -> bool:
+        """The camera stands at the side of the court, not behind an end line."""
+        return self.sideways > SIDE_VIEW
 
 
 def evidence(sig: Signals, trk: Tracks | None = None) -> Evidence:
@@ -111,6 +127,13 @@ def evidence(sig: Signals, trk: Tracks | None = None) -> Evidence:
     x = sig.ball_x.astype(np.float32) / WIDTH
     band = float(np.median(y[idx])) if len(idx) else 0.45
     centre_x = float(np.median(x[idx])) if len(idx) else 0.5
+    step = np.flatnonzero(np.diff(idx) == 1)  # consecutive tracked frames
+    sideways = 0.0
+    if len(step) >= MIN_MOVES:
+        a, b = idx[step], idx[step + 1]
+        dx = float(np.abs(x[b] - x[a]).mean()) * ASPECT
+        dy = float(np.abs(y[b] - y[a]).mean())
+        sideways = dx / max(dy, 1e-9)
     motion = sig.motion.astype(np.float32)
     if motion.size:
         near = motion[:, -1, :].mean(1)
@@ -137,6 +160,7 @@ def evidence(sig: Signals, trk: Tracks | None = None) -> Evidence:
         loud=loud,
         fps=sig.fps,
         centre_x=centre_x,
+        sideways=sideways,
     )
 
 
@@ -318,6 +342,8 @@ class ServeVideo:
         X = features_at(self.ev, [s / 1000 for s, _ in self.serves])
         y = np.array([near for _, near in self.serves], dtype=np.int8)
         ok = ~np.isnan(X[:, FEATURES.index("r_first")])
+        if self.ev.side_view:  # near and far mean nothing from the side
+            ok[:] = False
         return X[ok], y[ok]
 
 
@@ -398,9 +424,12 @@ def cross_validate(videos: Sequence[ServeVideo], threads: int = 4) -> dict[str, 
 
 
 def serve_track(sig: Signals, model: ServeModel | None = None, ev: Evidence | None = None) -> bytes:
-    """P(near serve) for a rally starting at every half-second, one byte each (255: none)."""
+    """P(near serve) for a rally starting at every half-second, one byte each (255: none;
+    all of them for a camera at the side)."""
     ev = ev or evidence(sig)
     n = max(1, int(np.ceil(sig.duration_s / STEP_S)))
+    if ev.side_view:
+        return tracks.quantise([None] * n)
     X = features_at(ev, np.arange(n) * STEP_S)
     p = model.p_near(X) if model is not None else p_near_v0(X)
     return tracks.quantise(p.tolist())
