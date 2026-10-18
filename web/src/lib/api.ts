@@ -9,6 +9,7 @@ import type {
   EventRevision,
   FilmingCheck,
   Game,
+  GameVideos,
   GuestInvite,
   GuestPerson,
   GuestPersonIn,
@@ -258,6 +259,9 @@ export const api = {
   teamVideos: (teamId: number, signal?: AbortSignal) =>
     apiRequest<Video[]>(`/api/teams/${teamId}/videos`, { signal }),
   video: (id: string, signal?: AbortSignal) => apiRequest<Video>(`/api/videos/${id}`, { signal }),
+  // A Wiedisync game's videos (its game cards link to /games/:id)
+  gameVideos: (gameId: number, signal?: AbortSignal) =>
+    apiRequest<GameVideos>(`/api/games/${gameId}/videos`, { signal }),
   createVideo: (teamId: number, body: VideoCreate) =>
     apiRequest<Video>(`/api/teams/${teamId}/videos`, { method: 'POST', body }),
   deleteVideo: (id: string) => apiRequest<undefined>(`/api/videos/${id}`, { method: 'DELETE' }),

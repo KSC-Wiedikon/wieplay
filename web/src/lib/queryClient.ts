@@ -18,6 +18,7 @@ export const keys = {
   helperCandidates: (id: number, q: string) => ['teams', id, 'helpers', 'candidates', q] as const,
   videoConfig: ['video-config'] as const,
   video: (id: string) => ['videos', id] as const,
+  gameVideos: (gameId: number) => ['games', gameId, 'videos'] as const,
   tagging: (id: string) => ['videos', id, 'tagging'] as const,
   analysis: (id: string) => ['videos', id, 'analysis'] as const,
   rosterCandidates: (id: string) => ['videos', id, 'roster-candidates'] as const,

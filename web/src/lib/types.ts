@@ -98,6 +98,23 @@ export interface Game {
   sets: [number, number][] | null
 }
 
+/** What a link from a Wiedisync game card opens (`/games/:id`, PLAN §4.4). */
+export interface GameVideos {
+  /** Null for a game the viewer may not see or WiePlay does not know: the same answer. */
+  game: LinkedGame | null
+  /** The game's videos the viewer may watch, in upload order (one per camera). */
+  videos: Video[]
+}
+
+export interface LinkedGame {
+  id: number
+  date: string | null
+  time: string | null
+  home_name: string | null
+  away_name: string | null
+  team: { id: number; name: string; season: string; sport: SportName; can_upload: boolean }
+}
+
 export interface AdminTeam {
   id: number
   name: string

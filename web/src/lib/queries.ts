@@ -128,6 +128,11 @@ export function useTeamVideos(teamId: number) {
   return useQuery(teamVideosQuery(teamId))
 }
 
+/** A Wiedisync game's videos, for the links from its game cards. */
+export function useGameVideos(gameId: number) {
+  return useQuery({ queryKey: keys.gameVideos(gameId), queryFn: ({ signal }) => api.gameVideos(gameId, signal) })
+}
+
 /** Refreshes every 5 s while the video is importing, queued or processing. */
 export function useVideo(id: string) {
   return useQuery({

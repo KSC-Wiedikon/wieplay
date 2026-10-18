@@ -463,6 +463,14 @@ export const en = {
     reels: 'Reels',
     downloads: 'Downloads',
   },
+  game: {
+    title: 'Game',
+    several: 'More than one camera filmed this game. Pick a video.',
+    none: 'No video of this game yet',
+    noneHint: "A game's videos are for its team: the players, coaches and helpers. Once one is uploaded, this link opens it.",
+    toTeam: 'Go to {{team}}',
+    upload: 'Upload the video',
+  },
   notFound: {
     title: 'Page not found',
     body: "This page doesn't exist.",
