@@ -47,7 +47,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from wieplay import __version__
-from wieplay.core import tagging
+from wieplay.core import sheet_notes, tagging
 from wieplay.core.models import AnalysisTrack, Event, ModelRun, Period, Segment, Video, WdGame
 from wieplay.ml import gaps
 from wieplay.ml import scoring as sc
@@ -541,6 +541,21 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         "log": log_metrics,
         "sheet": sheet_metrics,
     }
+    if sheet is not None:
+        # The sheet's timeouts, substitutions and sanctions checked at their breaks, and the
+        # serves' players from its servers (PLAN §10.3a, §10.5).
+        from wieplay.core import lineups
+        from wieplay.core import players as found_players
+
+        db.flush()
+        court = lineups.for_video(db, video)
+        if court is not None and run.metrics.get("sheet") is not None:
+            notes = lineups.notes(db, video, court)
+            run.metrics = {
+                **run.metrics,
+                "sheet": {**run.metrics["sheet"], "notes": sheet_notes.summary(notes)},
+            }
+        found_players.attribute_serves(db, video)
     run.timing = {"wall_s": round(time.perf_counter() - started, 3), "rallies": len(rallies)}
     from wieplay.core import actions  # the suggested actions follow the new sides (PLAN §10.4a)
 

@@ -58,7 +58,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from wieplay.core import analysis, calibration, court, jobs, tagging
+from wieplay.core import analysis, calibration, court, jobs, lineups, tagging
 from wieplay.core.db import Base
 from wieplay.core.models import (
     AnalysisArtifact,
@@ -302,7 +302,12 @@ def near_team(seg: Segment, period: Period | None) -> str | None:
     return None
 
 
-def rallies_with_sides(db: Session, video: Video) -> list[dict[str, Any]]:
+def rallies_with_sides(
+    db: Session, video: Video, sheet: lineups.VideoLineups | None = None
+) -> list[dict[str, Any]]:
+    """The rallies the job looks at, with the team at the camera's end in each and, where the
+    official scoresheet was lined up with it, what the sheet says (`sheet`: who served, both
+    teams' six by zone; wieplay/core/lineups.py)."""
     periods = list(
         db.scalars(
             select(Period)
@@ -327,9 +332,15 @@ def rallies_with_sides(db: Session, video: Video) -> list[dict[str, Any]]:
         period = periods[k] if k >= 0 else None
         if period is not None and period.end_ms is not None and seg.start_ms > period.end_ms:
             period = None
-        out.append(
-            {"start_ms": seg.start_ms, "end_ms": seg.end_ms, "near_team": near_team(seg, period)}
-        )
+        item: dict[str, Any] = {
+            "start_ms": seg.start_ms,
+            "end_ms": seg.end_ms,
+            "near_team": near_team(seg, period),
+        }
+        found = sheet.of(seg.id) if sheet is not None else None
+        if found is not None:
+            item["sheet"] = lineups.job_entry(found)
+        out.append(item)
     return out
 
 
@@ -426,14 +437,19 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     video = db.get(Video, job.video_id) if job.video_id else None
     if video is None:
         raise ValueError("job has no video")
-    return {
-        "rallies": rallies_with_sides(db, video),
+    sheet = lineups.for_video(db, video)
+    out = {
+        "rallies": rallies_with_sides(db, video, sheet),
         # Older workers read `calibration` only; newer ones pick the setup of each window.
         "calibration": calibration_for(db, video),
         "setups": setups_for(db, video),
         "rendition": rendition_segments(video),
         "roster": roster_for_job(db, video),
     }
+    if sheet is not None:
+        # The official scoresheet (PLAN §10.5): its liberos, middles and numbers, by number.
+        out["sheet"] = lineups.job_extra(sheet)
+    return out
 
 
 # --- results from the worker ----------------------------------------------------------------
@@ -1123,6 +1139,107 @@ def _model_owned(ev: Event) -> bool:
     return ev.source == "model" and ev.review == "unreviewed" and ev.deleted_at is None
 
 
+# The official scoresheet's server for a serve (PLAN §10.3a, §10.5): as sure as this, so a
+# model's serve gets the number written (it is a suggestion the coach reviews with the serve).
+SHEET_CONFIDENCE = 0.95
+
+
+def sheet_servers(
+    db: Session, video: Video, sheet: lineups.VideoLineups | None
+) -> dict[uuid.UUID, tuple[int, str]]:
+    """The serves (code S) in rallies the sheet was lined up with, whose team served then:
+    event id → (the sheet's server, a reference "set.point")."""
+    if sheet is None or not sheet.by_rally:
+        return {}
+    rows = db.execute(
+        select(Event.id, Event.side, Event.segment_id, Event.t_ms).where(
+            Event.video_id == video.id, Event.code == "S", Event.deleted_at.is_(None)
+        )
+    ).all()
+    spans = db.execute(
+        select(Segment.start_ms, Segment.end_ms, Segment.id)
+        .where(Segment.video_id == video.id, Segment.id.in_(list(sheet.by_rally)))
+        .order_by(Segment.start_ms)
+    ).all()
+    starts = [int(s) for s, _, _ in spans]
+    out: dict[uuid.UUID, tuple[int, str]] = {}
+    for event_id, side, segment_id, t_ms in rows:
+        if segment_id is None:  # not linked yet: the rally it falls in (a serve's toss before)
+            k = bisect.bisect_right(starts, int(t_ms) + tagging.SERVE_SLACK_MS) - 1
+            if k >= 0 and spans[k][1] >= t_ms:
+                segment_id = spans[k][2]
+        found = sheet.of(segment_id) if segment_id is not None else None
+        if found is None or found.server is None or found.serving != side:
+            continue
+        out[event_id] = (found.server, f"{found.set_no}.{found.point + 1}")
+    return out
+
+
+def _sheet_pick(
+    ep: EventPlayer,
+    ev: Event,
+    server: tuple[int, str],
+    rows: Sequence[PlayerCluster],
+    roster: dict[int, int | None],
+    run: ModelRun | None,
+) -> None:
+    """A serve's player from the sheet: its server (and the card with that number, if any)."""
+    number, ref = server
+    card = next(
+        (c for c in rows if c.team == ev.side and c.number == number and not c.not_player), None
+    )
+    ep.model_run_id = run.id if run is not None else None
+    ep.cluster_id = card.id if card is not None else None
+    ep.track_id = None
+    ep.number = number
+    ep.member_id = roster.get(number) if ev.side == "us" else None
+    ep.method = "sheet"
+    ep.distance = None
+    ep.confidence = SHEET_CONFIDENCE
+    ep.contact_ms = None
+    _write_into_model_event(ev, ep, f"sheet:{ref}")
+
+
+def attribute_serves(db: Session, video: Video) -> int:
+    """Only the serves, from the sheet (no players run needed): after a scoring lined the
+    sheet up anew. Returns how many serves were attributed."""
+    sheet = lineups.for_video(db, video)
+    servers = sheet_servers(db, video, sheet)
+    existing = {
+        ep.event_id: ep
+        for ep in db.scalars(select(EventPlayer).where(EventPlayer.video_id == video.id))
+    }
+    run = latest_run(db, video.id)
+    rows = _current_clusters(db, video.id) if servers else []
+    roster = roster_numbers(db, video) if servers else {}
+    done = 0
+    events = db.scalars(
+        select(Event).where(
+            Event.video_id == video.id, Event.code == "S", Event.deleted_at.is_(None)
+        )
+    )
+    for ev in events:
+        ep = existing.get(ev.id)
+        server = servers.get(ev.id)
+        if server is None:
+            if ep is not None and ep.method == "sheet":
+                # The sheet no longer says it (moved, removed): take back what it wrote.
+                ep.number = ep.member_id = ep.cluster_id = None
+                ep.confidence = None
+                ep.method = None
+                _write_into_model_event(ev, ep, None)
+                ep.event_version = ev.version
+            continue
+        if ep is None:
+            ep = EventPlayer(event_id=ev.id, video_id=video.id, event_version=ev.version)
+            db.add(ep)
+        _sheet_pick(ep, ev, server, rows, roster, run)
+        ep.event_version = ev.version
+        done += 1
+    db.flush()
+    return done
+
+
 def attribute(
     db: Session,
     video: Video,
@@ -1131,13 +1248,19 @@ def attribute(
     only_stale: bool = False,
 ) -> dict[str, Any] | None:
     """Attribute the video's actions (all, or only new and changed ones) and refresh the
-    metrics. None when there is no players run (or its index cannot be read)."""
+    metrics; a serve the official scoresheet names the server of gets that number. None when
+    there is no players run (or its index cannot be read): then the serves only."""
     run = latest_run(db, video.id)
     if run is None:
+        attribute_serves(db, video)
         return None
     index = load_index(db, run, read)
     if index is None:
+        attribute_serves(db, video)
         return None
+    sheet = lineups.for_video(db, video)
+    servers = sheet_servers(db, video, sheet)
+    roster = roster_numbers(db, video) if servers else {}
     ball = load_ball(db, video.id, read)
     geometries = Geometries(calibration_row(db, video))
     rows = _current_clusters(db, video.id)
@@ -1159,10 +1282,15 @@ def attribute(
             and (ep.model_run_id == run.id)
         ):
             continue
-        pick, cluster, contact = attribute_event(ev, index, ball, mapping, geometries.at)
         if ep is None:
             ep = EventPlayer(event_id=ev.id, video_id=video.id, event_version=ev.version)
             db.add(ep)
+        if ev.id in servers:
+            _sheet_pick(ep, ev, servers[ev.id], rows, roster, run)
+            ep.event_version = ev.version
+            done += 1
+            continue
+        pick, cluster, contact = attribute_event(ev, index, ball, mapping, geometries.at)
         number = cluster.number if cluster is not None and pick is not None else None
         ep.model_run_id = run.id
         ep.cluster_id = cluster.id if cluster is not None else None
@@ -1173,7 +1301,8 @@ def attribute(
         ep.distance = pick.distance if pick else None
         ep.confidence = pick.confidence if pick else None
         ep.contact_ms = contact
-        _write_into_model_event(ev, ep, run)
+        ref = f"{str(run.id)[:8]}:{ep.track_id}"
+        _write_into_model_event(ev, ep, ref)
         ep.event_version = ev.version
         done += 1
     db.flush()
@@ -1182,16 +1311,17 @@ def attribute(
     return metrics
 
 
-def _write_into_model_event(ev: Event, ep: EventPlayer, run: ModelRun) -> None:
+def _write_into_model_event(ev: Event, ep: EventPlayer, ref: str | None) -> None:
     """Fill (or take back) the player of a model's unanswered action; never touch a number
-    a person set (one that is not the number WiePlay wrote)."""
+    a person set (one that is not the number WiePlay wrote). `ref`: where it came from (the
+    run and track, or "sheet:set.point")."""
     if not _model_owned(ev):
         return
     ours = ev.number is None or (ep.applied_number is not None and ev.number == ep.applied_number)
     if not ours:
         return
     want = ep.number if (ep.confidence or 0) >= APPLY_CONFIDENCE else None
-    ref = f"{str(run.id)[:8]}:{ep.track_id}" if want is not None else None
+    ref = ref if want is not None else None
     if ev.number == want and ev.track_ref == ref:
         ep.applied_number = want
         return
@@ -1203,10 +1333,27 @@ def _write_into_model_event(ev: Event, ep: EventPlayer, run: ModelRun) -> None:
 
 
 def stale(db: Session, video_id: uuid.UUID) -> bool:
-    """Actions that are new or changed since they were attributed (cheap: one query)."""
+    """Actions that are new or changed since they were attributed (cheap: one query); without
+    a players run, serves (the sheet names their server) not attributed yet."""
     run = latest_run(db, video_id)
     if run is None:
-        return False
+        from wieplay.core import scoresheet
+
+        if scoresheet.stored(db, video_id) is None:
+            return False
+        return bool(
+            db.scalar(
+                select(func.count())
+                .select_from(Event)
+                .outerjoin(EventPlayer, EventPlayer.event_id == Event.id)
+                .where(
+                    Event.video_id == video_id,
+                    Event.code == "S",
+                    Event.deleted_at.is_(None),
+                    (EventPlayer.event_id.is_(None)) | (EventPlayer.event_version != Event.version),
+                )
+            )
+        )
     count = db.scalar(
         select(func.count())
         .select_from(Event)
@@ -1247,7 +1394,10 @@ def apply_suggestions(
             continue  # already carries it as a suggestion
         ev.number = ep.number
         ev.member_id = ep.member_id
-        ev.track_ref = f"{str(ep.model_run_id)[:8]}:{ep.track_id}" if ep.model_run_id else None
+        if ep.method == "sheet":
+            ev.track_ref = "sheet"
+        else:
+            ev.track_ref = f"{str(ep.model_run_id)[:8]}:{ep.track_id}" if ep.model_run_id else None
         ev.updated_by = actor
         ev.version = (ev.version or 0) + 1
         ep.event_version = ev.version

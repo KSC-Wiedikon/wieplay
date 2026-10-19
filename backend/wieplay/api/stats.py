@@ -33,7 +33,7 @@ from wieplay.api.access import visible_team
 from wieplay.api.analysis import ActionGateOut, gate_out
 from wieplay.api.deps import DbDep, SettingsDep, ViewerDep
 from wieplay.api.tagging import _readable
-from wieplay.core import guests, names, stats, stats_input
+from wieplay.core import guests, lineups, names, stats, stats_input
 from wieplay.core.config import Settings
 from wieplay.core.models import (
     Event,
@@ -180,6 +180,34 @@ class SetOut(BoxOut):
     start_lineup: list[int | None] | None = None
 
 
+class SheetPlayerOut(BaseModel):
+    """One shirt number's numbers from the official scoresheet (PLAN §10.3a, §9.7): its
+    serves, the points won on them, its longest run on one service turn, aces and errors
+    (from the serve tags of the rallies lined up with the sheet), points on court and the
+    plus/minus, also per rotation (ours by the setter's zone when known)."""
+
+    side: str
+    number: int
+    member_id: int | None = None
+    name: str | None = None
+    served: int
+    won_on_serve: int
+    won_on_serve_pct: float | None
+    longest_run: int
+    aces: int
+    errors: int
+    tagged: int
+    on_court: int
+    plus_minus: int
+    by_rotation: list[int]
+
+
+class SheetPlayersOut(BaseModel):
+    sets: list[int]  # the sets the sheet was used for
+    by_setter: bool  # our rotations are the setter's zone (P1-P6); else 1 = the starting six
+    players: list[SheetPlayerOut]
+
+
 class VideoStatsOut(BaseModel):
     video_id: uuid.UUID
     team_id: int
@@ -200,6 +228,8 @@ class VideoStatsOut(BaseModel):
     actions_gate: ActionGateOut | None = None
     # With ?search=: the tags it kept (`tags` stays the match's count); null without one.
     selected: int | None = None
+    # From the official scoresheet, per player; null without a sheet lined up with the video.
+    sheet_players: SheetPlayersOut | None = None
 
 
 class MatchOut(BaseModel):
@@ -573,6 +603,23 @@ def video_stats(
         suggested=_suggested(db, [video.id]),
         actions_gate=gate_out(db, settings),
         selected=result.tags if query is not None else None,
+        sheet_players=_sheet_players(db, video),
+    )
+
+
+def _sheet_players(db: Session, video: Video) -> SheetPlayersOut | None:
+    found = lineups.for_video(db, video)
+    if found is None:
+        return None
+    roster = _roster(db, video)
+    rows = []
+    for side, number, line in lineups.player_stats(db, video, found):
+        member, name = roster.get(number, (None, None)) if side == "us" else (None, None)
+        rows.append(
+            SheetPlayerOut(side=side, number=number, member_id=member, name=name, **line.as_json())
+        )
+    return SheetPlayersOut(
+        sets=sorted(found.sets), by_setter=lineups.by_setter(db, video, found), players=rows
     )
 
 
