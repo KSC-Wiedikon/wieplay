@@ -2,7 +2,7 @@ import '../i18n/pages'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
-import { scoreNoteText } from '../lib/labels'
+import { firstReasonText } from '../lib/labels'
 import { useSideNames } from '../lib/sides'
 import type { Segment } from '../lib/types'
 import { AlertIcon } from './icons'
@@ -23,11 +23,21 @@ export function SuggestedValue({ suggested, children, className }: { suggested: 
   )
 }
 
-/** "Check": the automatic score disagrees with something at this rally; the reason on hover. */
-export function CheckMark({ rally, className }: { rally: Pick<Segment, 'score_conflict' | 'score_note'>; className?: string }) {
+/**
+ * "Check": the automatic score is not sure of this rally or disagrees with something here
+ * (docs/PLAN.md §10.3); the first reason on hover.
+ */
+export function CheckMark({
+  rally,
+  className,
+}: {
+  rally: Pick<Segment, 'score_conflict' | 'score_note' | 'score_reasons'>
+  className?: string
+}) {
   const { t } = useTranslation()
+  const names = useSideNames()
   if (!rally.score_conflict) return null
-  const reason = scoreNoteText(t, rally.score_note)
+  const reason = firstReasonText(t, rally, names)
   return (
     <span data-check="true" title={reason} className={cx('inline-flex items-center gap-1 text-xs font-semibold whitespace-nowrap text-danger', className)}>
       <AlertIcon className="size-3.5" />

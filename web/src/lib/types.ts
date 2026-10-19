@@ -450,7 +450,47 @@ export type CourtSide = 'near' | 'far'
  * for the last rally of a set, after it), it looks like no point at all (a replay), the serve
  * evidence or a coach's fact disagrees with the score, or the model is unsure.
  */
-export type ScoreNote = 'missing_before' | 'missing_after' | 'extra' | 'serve' | 'coach' | 'unsure' | 'board' | 'log' | 'sheet'
+export type ScoreNote =
+  | 'missing_before'
+  | 'missing_after'
+  | 'extra'
+  | 'serve'
+  | 'coach'
+  | 'unsure'
+  | 'board'
+  | 'log'
+  | 'sheet'
+  // The joint decode's reasons (docs/PLAN.md §10.1, §10.3): why a rally needs the coach.
+  | 'video'
+  | 'sheet_box'
+  | 'sheet_log'
+  | 'log_none'
+  | 'log_score'
+  | 'note'
+  | 'sides'
+  | 'no_set'
+
+/**
+ * Why the joint decode asks the coach about a rally, with what the text names: who a source
+ * says won (`team`), a score (`score`, `here`: the decoded score there), the sheet's box as read
+ * (`values`), what the video disagrees with (`vs`), a timeout, substitution or card (`kind`,
+ * `side`, `sanction`) and what does not fit (`issue`).
+ */
+export interface ScoreReason {
+  code: ScoreNote
+  team?: Side
+  score?: [number, number]
+  here?: [number, number]
+  values?: number[]
+  vs?: 'sheet' | 'log' | 'board' | 'score'
+  kind?: 'timeout' | 'sub' | 'sub_back' | 'sanction'
+  side?: Side
+  sanction?: string
+  issue?: 'off_path' | 'short' | 'log' | 'penalty_rally'
+  log?: Side | 'none'
+  sheet?: Side
+  p?: number
+}
 
 export interface TaxonomySkill {
   /** One letter for volleyball (S R E A B D F); one or two characters for basketball (S2 S3 FT RO … F). */
@@ -564,6 +604,10 @@ export interface Segment {
   /** "Check": the score alignment disagrees with something here; score_note says what. */
   score_conflict?: boolean
   score_note?: ScoreNote | null
+  /** The joint decode is sure of this rally (no coach needed); false: "Needs you"; null: not scored. */
+  score_sure?: boolean | null
+  /** Why it needs the coach, the first reason first. */
+  score_reasons?: ScoreReason[] | null
   /** Model: points it thinks were played right before this rally without one (counted in the score line). */
   model_missed_us?: number | null
   model_missed_them?: number | null

@@ -152,8 +152,15 @@ def test_the_board_wins_over_unsure_serves_and_flags_disagreements(
     a = wrong[3]
     wrong[3] = bd.Segment(a.first_ms, a.last_ms, a.left - 1, a.right + 1, a.set_no, 0.9, "step")
     complete(analyser, job, result(job, wrong))
-    flagged = [s for s in tagging(coach, video)["segments"] if s.get("score_note") == "board"]
-    assert flagged and all(s["score_conflict"] for s in flagged)
+    flagged = [
+        s
+        for s in tagging(coach, video)["segments"]
+        if any(
+            r["code"] == "board" or (r["code"] == "video" and r.get("vs") == "board")
+            for r in s.get("score_reasons") or []
+        )
+    ]
+    assert flagged and all(s["score_conflict"] and s["score_sure"] is False for s in flagged)
 
     # No scoreboard after all: the box, its reading and its effect go.
     assert coach.delete(url).status_code == 204

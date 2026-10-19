@@ -1,7 +1,8 @@
 """Who served each rally, who won it and the score (PLAN §10.3). Plain Python: the API runs it.
 
 Volleyball is rally scoring: **the team that wins a rally serves the next one.** So the score
-follows from who served each rally, plus the rules and the official result:
+follows from who served each rally, plus the rules and the official result. One joint decode per
+set weighs every source of evidence there is (PLAN §10.3, "One decode, every source"):
 
 1. **Serve evidence** per rally: P(the server stood at the near end line), from the ball at the
    serve (wieplay/ml/serve.py, computed on the worker and stored as a track per video), evened
@@ -11,22 +12,27 @@ follows from who served each rally, plus the rules and the official result:
    new toss. A coach's "we serve first" / "we start on the near side" for a set wins.
 3. **Winner of rally i = serving team of rally i+1**; the last rally of a set goes to whoever
    reaches the set-winning score.
-4. **Alignment with the official set score**: a dynamic programme over (score, next server)
-   finds the cheapest consistent sequence: a rally can be no point (a replay, a proposal that
-   is not a rally), points can be missing (a rally the finder missed), a serve can be misread.
-   Each choice has a cost; a coach's serve or winner costs a lot to contradict.
-5. Max-marginals (the cheapest path with the other answer) give each rally's confidence; a
-   rally is flagged ("check") when the path contradicts its evidence or a coach, a point is
-   missing next to it, it looks like no point, or the answer is unsure.
-6. **The scoreboard**, when it was read (wieplay/ml/board.py): +1 for one team between two
-   rallies names the winner of the first, no change says it was no point. Contradicting it
-   costs more than a misread serve and a missed rally together (the board wins over the serve
-   evidence), less than a coach's fact; a path that still disagrees is flagged ("board").
-7. **The club scoreboard's log** (wieplay/ml/scorelog.py, PLAN §10.10), in the sets where its
+4. **The official set score** is a hard end point: a dynamic programme over (score, next server)
+   finds the consistent sequences: a rally can be no point (a replay, a proposal that is not a
+   rally), points can be missing (a rally the finder missed), a serve can be misread. Each
+   choice has a cost (a negative log-probability, roughly); a coach's serve or winner costs a lot
+   to contradict.
+5. **The scoreboard**, when it was read (wieplay/ml/board.py): +1 for one team between two
+   rallies names the winner of the first, no change says it was no point.
+6. **The club scoreboard's log** (wieplay/ml/scorelog.py, PLAN §10.10), in the sets where its
    final is the official one: the point pressed after a rally names its winner, a rally with no
    press between two that have one is no point, presses with no rally of their own are points
-   the finder missed (how many and for whom). The strongest evidence after a coach's: more
-   than the board, less than a coach's fact; a path that disagrees is flagged ("log").
+   the finder missed (how many and for whom).
+7. **The official scoresheet** (PLAN §10.3a): a typed or confirmed set is its exact sequence of
+   points, which the rallies are lined up with (`SheetPath`); a set read from the photo and not
+   confirmed (SS4) is soft evidence (`BoxCells`): each service box the reader's probabilities,
+   so the state carries the side-outs so far (which box a side-out writes) and every path pays
+   for the boxes it implies. Its timeouts, substitutions and sanctions are "score at this break"
+   evidence (`BreakNote`), its penalty points come without a rally.
+8. **Forward-backward** over the same lattice gives each rally's posterior: who won (or no
+   point), who served, a point missing before it, and its answer with its score line. `judge`
+   then says which rallies are **sure** (the posterior at least SURE and no source that speaks
+   about the rally disagrees) and why the others need the coach (`Reason`).
 
 Sets: a coach's sets when there are any, else proposed from the long breaks and the official
 number of points per set (`propose_sets`).
@@ -37,7 +43,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Literal
+from typing import Any, Literal
 
 Side = Literal["us", "them"]
 Court = Literal["near", "far"]
@@ -53,6 +59,7 @@ Note = Literal[
     "unsure",
 ]
 BoardSays = Literal["us", "them", "none"]
+Value = int | str | None  # a service box as read: a number, "X", or blank
 
 SIDES: tuple[Side, Side] = ("us", "them")
 COURTS: tuple[Court, Court] = ("near", "far")
@@ -73,6 +80,7 @@ SERVE_DISAGREES = 0.25  # the path's server has at most this probability from th
 C_BOARD = 9.0  # contradicting the scoreboard (times how sure its reading is)
 C_LOG = 11.0  # contradicting the club scoreboard's log (times how sure the alignment is)
 C_LOG_MISS = 3.0  # per point a gap's missed points differ from the log's
+C_LOG_SCORE = 6.0  # the score after a rally other than the log's (times how sure its press is)
 MAX_MISS_LOG = 4  # missed points between two rallies when the log saw them
 # Each match's serve readings are evened out: sides change after every set and each team serves
 # about as often as it scores, so about half the serves of a match are near ones (40-60 %). A
@@ -90,6 +98,35 @@ FREE_EXTRA = 0.2  # a rally the sheet's "points cancelled" note announces
 SHEET_FALLBACK = 20.0  # a sheet that cannot be lined up (used as a hint instead)
 SHORT_GAP_MS = 8000
 SHORT_BONUS = 1.5  # "no point" that much cheaper (about the odds seen on game 509)
+# A sheet read from its photo and not confirmed (SS4): each box costs W_READ x -log p(value) of
+# the reader's calibrated probability (P_FLOOR for a value it did not list). Measured on the two
+# real sheets (scripts/ml/fused_eval.py, 19.10.2026): weaker than a typed sheet and the log,
+# stronger than the serve evidence.
+W_READ = 0.3
+P_FLOOR = 1e-4
+C_TYPED = 8.0  # a box a person typed into a draft, read otherwise
+FINAL_MISSING = 2.5  # the winner's final not written (won on reception)
+MAX_SIDE_OUTS = 127
+# Timeouts and substitutions are "score at this break" evidence: a timeout needs a long break (30 s
+# and the walk back), a substitution one long enough to swap; in log-odds, times W_NOTE.
+W_NOTE = 0.5
+TIMEOUT_MIN_S = 30.0
+SUB_MIN_S = 12.0
+NOTE_LLR = {"timeout": (1.6, -1.2), "sub": (0.3, -1.0)}  # (a long enough break, a short one)
+# "Sure" (judge): the decoded answer and its score line at least this probable, and no source that
+# speaks about the rally disagrees. Calibrated so that sure rallies had no error on the evaluation
+# games (scripts/ml/fused_eval.py, PLAN §10.3).
+SURE = 0.97
+SOURCE_SURE = 0.9  # a serve reading this sure of the other team disagrees
+MISSED_NEAR = 0.3  # a point without a rally this probable next to a rally: check it
+BOX_SURE = 0.9  # a read box whose decoded value is less probable is unclear
+BOX_DISAGREES = 0.9  # the reader this sure of another value than the decoded one disagrees
+# The posteriors are computed with every cost divided by this: the costs are log-probabilities
+# only roughly (a missed rally next to a replay, a rally cut in two: the cheapest path is often
+# far ahead of the true one), so the plain posteriors were sure of wrong answers. Calibrated on the
+# evaluation games so that sure rallies had no error (scripts/ml/fused_eval.py). The cheapest path
+# (the score line) does not change with it.
+TEMPERATURE = 2.0
 
 
 def other(side: Side) -> Side:
@@ -159,6 +196,9 @@ class RallyObs:
     log: BoardSays | None = None
     log_p: float = 0.0
     log_missed: tuple[int, int] | None = None
+    # The set's score after this rally as the log had it (us, them): the score line too, not only
+    # who won (a log that starts late, a missed rally before it, leave the winners and shift it).
+    log_score: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +220,45 @@ class SheetPath:
             out[(a, b)] = w
             a, b = a + (w == "us"), b + (w == "them")
         return out
+
+
+Pos = tuple[int, int]  # a service box: (position 1-6, box 1-8)
+
+
+@dataclass(frozen=True)
+class BoxCells:
+    """A scoresheet set read from its photo and not confirmed (PLAN §10.3a, SS4), as evidence:
+    per team and service box (position, box) the reader's likeliest values with their calibrated
+    probabilities (wieplay/ml/sheet_read.py); the boxes a person typed into the draft (`fixed`:
+    certain; None: a box emptied); what the marks say about who served first (the receiving
+    team's X, the S/R crosses) as a cost per first server. A box's value is the serving team's
+    score when it lost the serve (the scorer's rule), so a path through the set implies every box:
+    each costs W_READ x -log p(that value), the boxes it leaves blank -log p(blank)."""
+
+    boxes: Mapping[Side, Mapping[Pos, tuple[tuple[Value, float], ...]]]
+    fixed: Mapping[Side, Mapping[Pos, int | None]] = field(default_factory=dict)
+    deciding: bool = False
+    first_cost: Mapping[Side, float] = field(default_factory=dict)
+    weight: float = W_READ
+
+
+NoteKind = Literal["timeout", "sub", "sub_back", "sanction"]
+
+
+@dataclass(frozen=True)
+class BreakNote:
+    """A timeout, substitution (or a return) or sanction on the sheet, with the score written
+    with it (us, them): it happened in the break where the set stood at that score."""
+
+    kind: NoteKind
+    side: Side
+    score: tuple[int, int]
+    sanction: str | None = None  # W, P, E, D, DW, DP
+    index: int = 0  # in the set's timeouts, substitutions or sanctions
+
+    @property
+    def points(self) -> int:
+        return self.score[0] + self.score[1]
 
 
 @dataclass(frozen=True)
@@ -207,9 +286,26 @@ class SetIn:
     deciding: bool = False
     log_missed_after: tuple[int, int] | None = None  # the log's points after the last rally
     # The official scoresheet (PLAN §10.3a): a consistent set's points in order, which the
-    # rallies are lined up with; for a doubtful set, the winner it gives at a score (a hint).
+    # rallies are lined up with; for a doubtful set, the winner it gives at a score (a hint); a
+    # set read from the photo and not confirmed: its boxes as soft evidence.
     sheet: SheetPath | None = None
     sheet_hint: Mapping[tuple[int, int], Side] | None = None
+    cells: BoxCells | None = None
+    # Its timeouts, substitutions and sanctions ("score at this break"); penalty points (the
+    # score before it → the team it went to) for a set that is not lined up as a path.
+    notes: tuple[BreakNote, ...] = ()
+    penalties: Mapping[tuple[int, int], Side] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Reason:
+    """Why a rally needs the coach: a code (the review's text) and what the text names."""
+
+    code: str
+    params: Mapping[str, Any] = field(default_factory=dict)
+
+    def as_json(self) -> dict[str, Any]:
+        return {"code": self.code, **self.params}
 
 
 @dataclass(frozen=True)
@@ -226,6 +322,22 @@ class RallyOut:
     note: Note | None
     missed: tuple[int, int] = (0, 0)  # points (us, them) without a rally right before it
     sheet_point: int | None = None  # the sheet's point it was lined up with (1-based)
+    # Posteriors over every path the evidence allows (forward-backward): who won (or no point),
+    # that we served, a point without a rally right before it; this answer with its score line.
+    p_us: float = 0.0
+    p_them: float = 0.0
+    p_none: float = 0.0
+    p_serve_us: float = 0.5
+    p_missed: float = 0.0
+    p_answer: float = 0.0
+    # A set read from the photo: the service box of this rally's turn (team, position, box), its
+    # decoded value and how probable that value is.
+    box: tuple[Side, int, int] | None = None
+    box_value: int | None = None
+    box_p: float | None = None
+    # judge(): sure needs no coach; else the reasons.
+    sure: bool = False
+    reasons: tuple[Reason, ...] = ()
 
 
 @dataclass
@@ -240,29 +352,66 @@ class SetOut:
     extra: int
     feasible: bool = True
     missed_after: tuple[int, int] = (0, 0)  # points without a rally after the last one
-    # The scoresheet: "path" (lined up with it), "hint" (its winners as a soft cost), None.
-    sheet: Literal["path", "hint"] | None = None
+    # The scoresheet: "path" (lined up with it), "hint" (its winners as a soft cost), "read"
+    # (its boxes read from the photo, soft), None.
+    sheet: Literal["path", "hint", "read"] | None = None
     point_rally: list[str | None] = field(default_factory=list)  # per sheet point, its rally
     penalties: int = 0  # the sheet's penalty points (points without a rally, by the rules)
+    p_missed_after: float = 0.0
+    # A set read from the photo: per box (team, position, box) its decoded value (None: blank)
+    # and that value's posterior.
+    boxes: dict[tuple[Side, int, int], tuple[int | None, float]] = field(default_factory=dict)
+    # How sure the choice of our side and the first server is (score_match).
+    sides_share: float = 1.0
 
     @property
     def flagged(self) -> int:
         return sum(1 for r in self.rallies if r.note is not None)
 
 
+# --- sums of probabilities in cost space ---------------------------------------------------------
+
+
+def _soft_add(acc: dict[int, list[float]], key: int, cost: float) -> None:
+    """Accumulate exp(-cost) into acc[key] = [the least cost, the sum relative to it]."""
+    e = acc.get(key)
+    if e is None:
+        acc[key] = [cost, 1.0]
+    elif cost >= e[0]:
+        e[1] += math.exp(e[0] - cost)
+    else:
+        e[1] = e[1] * math.exp(cost - e[0]) + 1.0
+        e[0] = cost
+
+
+def _soft_done(acc: Mapping[int, list[float]]) -> dict[int, float]:
+    return {k: m - math.log(s) for k, (m, s) in acc.items()}
+
+
+def _softmin(costs: Sequence[float]) -> float:
+    finite = [c for c in costs if math.isfinite(c)]
+    if not finite:
+        return math.inf
+    lo = min(finite)
+    return lo - math.log(sum(math.exp(lo - c) for c in finite))
+
+
 # --- the dynamic programme --------------------------------------------------------------------
 
-# A state is (us, them, next server: 0 us / 1 them), packed into one int.
+# A state is (us, them, next server: 0 us / 1 them, side-outs so far), packed into one int. The
+# side-outs (which service box the next side-out writes) are counted only for a set read from the
+# photo; otherwise always 0.
 
 
-def _pack(a: int, b: int, s: int) -> int:
-    return (a * 128 + b) * 2 + s
+def _pack(a: int, b: int, s: int, t: int = 0) -> int:
+    return ((a * 128 + b) * 2 + s) * 128 + t
 
 
-def _unpack(k: int) -> tuple[int, int, int]:
-    ab, s = divmod(k, 2)
+def _unpack(k: int) -> tuple[int, int, int, int]:
+    rest, t = divmod(k, 128)
+    ab, s = divmod(rest, 2)
     a, b = divmod(ab, 128)
-    return a, b, s
+    return a, b, s, t
 
 
 def _side_of(s: int) -> Side:
@@ -289,6 +438,23 @@ class _Rally:
     won_fact: int
     # The scoreboard and the log: the cost of a point for us / for them (no point: in extra).
     won: tuple[float, float] = (0.0, 0.0)
+    # The log's part of the costs (a point for us, for them, no point): not tempered in the
+    # posteriors (TEMPERATURE), like a coach's fact.
+    hard: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # The score after it by the log, and what another score costs.
+    log_score: tuple[int, int] | None = None
+    log_score_cost: float = 0.0
+
+    def score_cost(self, score: tuple[int, int]) -> float:
+        if self.log_score is None or score == self.log_score:
+            return 0.0
+        return self.log_score_cost
+
+
+def _tempered(cost: float, hard: float) -> float:
+    """An edge's cost in the posteriors: its hard part (the log, a coach's fact) as it is, the
+    rest divided by TEMPERATURE."""
+    return hard + (cost - hard) / TEMPERATURE
 
 
 def _prepare(r: RallyObs) -> _Rally:
@@ -304,6 +470,7 @@ def _prepare(r: RallyObs) -> _Rally:
         rows.append((base - math.log(2.0 * p_us), base - math.log(2.0 * (1.0 - p_us))))
     fact = {"us": 0, "them": 1, None: -1}
     costs = [0.0, 0.0, 0.0]  # a point for us, for them, no point
+    hard = [0.0, 0.0, 0.0]
     # A coach's winner silences the log on that rally: the log ranks below a coach's fact.
     log_p = 0.0 if r.won_fact is not None else r.log_p
     for says, p, weight in ((r.board, r.board_p, C_BOARD), (r.log, log_p, C_LOG)):
@@ -312,40 +479,75 @@ def _prepare(r: RallyObs) -> _Rally:
         for k, answer in enumerate(("us", "them", "none")):
             if says != answer:
                 costs[k] += weight * p
+                if weight == C_LOG:
+                    hard[k] += weight * p
     return _Rally(
         -math.log(p_extra) + costs[2],
         (rows[0], rows[1]),
         fact[r.serve_fact],
         fact[r.won_fact],
         (costs[0], costs[1]),
+        (hard[0], hard[1], hard[2]),
+        r.log_score if log_p > 0 and r.log in ("us", "them") else None,
+        C_LOG_SCORE * log_p,
     )
 
 
 Layer = dict[int, float]
 Back = dict[int, tuple[int, int]]
+SideOut = tuple[int, int, int]  # (the team that lost the serve 0/1, its turn, its score)
+Score = tuple[int, int]
+# (next state, cost, answer, side-outs on the way, scores passed, the cost's hard part)
+Edge = tuple[int, float, int, tuple[SideOut, ...], tuple[Score, ...], float]
 
 
 class _Structure:
-    """Which states follow which (cached): depends on the score cap and the set's rules only,
-    so the four hypotheses of a set share it."""
+    """Which states follow which (cached): depends on the score cap, the set's rules and whether
+    side-outs are counted only, so the hypotheses of a set share it."""
 
-    def __init__(self, cap: tuple[int, int], rules: SetRules) -> None:
+    def __init__(self, cap: tuple[int, int], rules: SetRules, count: bool = False) -> None:
         self.cap = cap
         self.rules = rules
-        self._miss: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        self.count = count
+        self._miss: dict[tuple[int, int], list[Edge]] = {}
         self._step: dict[int, tuple[bool, int, int, int, int, int]] = {}
 
-    def miss(self, state: int, k_max: int) -> list[tuple[int, int]]:
-        """(next state, missed points) for 0..k_max points without a rally."""
+    def miss(self, state: int, k_max: int) -> list[Edge]:
+        """(next state, 0, missed points, the side-outs on the way, the scores passed) for 0..k_max
+        points without a rally (the cost is filled in by the set)."""
         key = (state, k_max)
         found = self._miss.get(key)
         if found is not None:
             return found
-        a, b, _ = _unpack(state)
-        out = [(state, 0)]
+        a, b, s, t = _unpack(state)
+        out: list[Edge] = [(state, 0.0, 0, (), (), 0.0)]
         over = self.rules.over
         ca, cb = self.cap
-        if not over(a, b):
+        if self.count:
+            frontier: list[tuple[int, int, int, int, tuple[SideOut, ...], tuple[Score, ...]]]
+            frontier = [(a, b, s, t, (), ())]
+            for k in range(1, k_max + 1):
+                grown = []
+                for fa, fb, fs, ft, so, passed in frontier:
+                    if over(fa, fb):
+                        continue
+                    for w in (0, 1):
+                        na, nb = fa + (w == 0), fb + (w == 1)
+                        if na > ca or nb > cb:
+                            continue
+                        nso, nt = so, ft
+                        if w != fs:
+                            nso = (*so, (fs, ft // 2, fa if fs == 0 else fb))
+                            nt = ft + 1
+                        if nt > MAX_SIDE_OUTS:
+                            continue
+                        grown.append((na, nb, w, nt, nso, (*passed, (na, nb))))
+                out.extend(
+                    (_pack(na, nb, ns, nt), 0.0, k, nso, passed, 0.0)
+                    for na, nb, ns, nt, nso, passed in grown
+                )
+                frontier = grown
+        elif not over(a, b):
             for k in range(1, k_max + 1):
                 for du in range(k + 1):
                     dt = k - du
@@ -354,9 +556,9 @@ class _Structure:
                         continue
                     # The score before the last missed point must still be playing.
                     if du and not over(na - 1, nb):
-                        out.append((_pack(na, nb, 0), k))
+                        out.append((_pack(na, nb, 0), 0.0, k, (), ((na, nb),), 0.0))
                     if dt and not over(na, nb - 1):
-                        out.append((_pack(na, nb, 1), k))
+                        out.append((_pack(na, nb, 1), 0.0, k, (), ((na, nb),), 0.0))
         self._miss[key] = out
         return out
 
@@ -366,15 +568,87 @@ class _Structure:
         found = self._step.get(state)
         if found is not None:
             return found
-        a, b, s = _unpack(state)
+        a, b, s, t = _unpack(state)
         rules = self.rules
         over = rules.over(a, b)
-        up = _pack(a + 1, b, 0) if a + 1 <= self.cap[0] else -1
-        tp = _pack(a, b + 1, 1) if b + 1 <= self.cap[1] else -1
+        tu = t + (s == 1) if self.count else 0
+        tt = t + (s == 0) if self.count else 0
+        up = _pack(a + 1, b, 0, tu) if a + 1 <= self.cap[0] and tu <= MAX_SIDE_OUTS else -1
+        tp = _pack(a, b + 1, 1, tt) if b + 1 <= self.cap[1] and tt <= MAX_SIDE_OUTS else -1
         switched = int(rules.switch_at is not None and max(a, b) >= rules.switch_at)
         out = (over, up, tp, switched, s, a + b)
         self._step[state] = out
         return out
+
+
+@dataclass
+class _Cells:
+    """A read set's boxes for one first server: per team (0 us, 1 them) and turn, the cost of
+    each listed value relative to the box left blank, of any other value, and where the box is."""
+
+    rel: tuple[list[dict[int, float]], list[dict[int, float]]]
+    floor: tuple[list[float], list[float]]
+    pos: tuple[list[Pos], list[Pos]]
+    base: float  # every box blank, plus what the marks say about the first server
+
+    def box(self, team: int, turn: int, value: int) -> float:
+        rel = self.rel[team]
+        if turn >= len(rel):
+            return math.inf
+        return rel[turn].get(value, self.floor[team][turn])
+
+    def side_outs(self, found: Sequence[SideOut]) -> float:
+        return sum(self.box(team, turn, value) for team, turn, value in found)
+
+
+def _turn_cells(first: bool, deciding: bool) -> list[Pos]:
+    """(position 1-6, box) of a team's service turns in order (wieplay/ml/sheet.py `cells`)."""
+    boxes = 6 if deciding else 8
+    start = 0 if first else 1
+    return [(k % 6 + 1, k // 6 + 1) for k in range(start, 6 * boxes)]
+
+
+def _cells_for(cells: BoxCells, first: Side) -> _Cells:
+    w = cells.weight
+    rel: tuple[list[dict[int, float]], list[dict[int, float]]] = ([], [])
+    floor: tuple[list[float], list[float]] = ([], [])
+    pos: tuple[list[Pos], list[Pos]] = ([], [])
+    base = cells.first_cost.get(first, 0.0)
+    for team, side in enumerate(SIDES):
+        read = cells.boxes.get(side) or {}
+        fixed = cells.fixed.get(side) or {}
+        for p in _turn_cells(side == first, cells.deciding):
+            pos[team].append(p)
+            if p in fixed:
+                typed = fixed[p]
+                blank = 0.0 if typed is None else C_TYPED
+                values = {} if typed is None else {typed: -blank}
+                rel[team].append(values)
+                floor[team].append(C_TYPED - blank)
+                base += blank
+                continue
+            alts = read.get(p, ())
+            probs: dict[Value, float] = {}
+            for v, pr in alts:
+                probs[v] = max(probs.get(v, 0.0), pr)
+            blank = w * -math.log(max(probs.get(None, P_FLOOR), P_FLOOR))
+            values = {
+                v: w * -math.log(max(pr, P_FLOOR)) - blank
+                for v, pr in probs.items()
+                if isinstance(v, int)
+            }
+            rel[team].append(values)
+            floor[team].append(w * -math.log(P_FLOOR) - blank)
+            base += blank
+    return _Cells(rel, floor, pos, base)
+
+
+def _note_cost(note: BreakNote, gap_s: float) -> float:
+    llr = NOTE_LLR.get("sub" if note.kind == "sub_back" else note.kind)
+    if llr is None:
+        return 0.0
+    need = TIMEOUT_MIN_S if note.kind == "timeout" else SUB_MIN_S
+    return -W_NOTE * (llr[0] if gap_s >= need else llr[1])
 
 
 @dataclass
@@ -390,12 +664,24 @@ class _Set:
     miss_costs: list[list[float]]  # cost of k missed points before each rally (and at the end)
     # The log's missed points (us, them) per gap, when it saw them: who won them.
     miss_pref: list[tuple[int, int] | None] = field(default_factory=list)
+    cells: _Cells | None = None
+    gaps_s: list[float] = field(default_factory=list)  # gap j before rally j; [n] after the last
+    notes: dict[tuple[int, int], list[BreakNote]] = field(default_factory=dict)
+    penalties: dict[tuple[int, int], int] = field(default_factory=dict)
+
+    def start(self) -> int:
+        return _pack(self.st.start_us, self.st.start_them, 0 if self.first == "us" else 1)
 
     def terminal(self, state: int) -> float:
-        a, b, _ = _unpack(state)
+        a, b, s, t = _unpack(state)
         if self.st.official is not None:
-            return 0.0 if (a, b) == self.st.official else math.inf
-        return 0.0 if self.st.rules.over(a, b) else C_UNFINISHED
+            end = 0.0 if (a, b) == self.st.official else math.inf
+        else:
+            end = 0.0 if self.st.rules.over(a, b) else C_UNFINISHED
+        if self.cells is not None and math.isfinite(end):
+            # The team serving next writes its final in the box of its turn (or forgets it).
+            end += min(self.cells.box(s, t // 2, a if s == 0 else b), FINAL_MISSING)
+        return end
 
     def side_index(self, state: int) -> int:
         """0 when our side is near during a point at this score, else 1."""
@@ -409,38 +695,86 @@ class _Set:
         told = self.st.sheet_hint
         if not told:
             return 0.0, 0.0
-        a, b, _ = _unpack(state)
+        a, b, _, _ = _unpack(state)
         winner = told.get((a, b))
         if winner is None:
             return 0.0, 0.0
         return (0.0, C_SHEET_HINT) if winner == "us" else (C_SHEET_HINT, 0.0)
 
-    def rally_edges(self, state: int, r: _Rally) -> list[tuple[int, float, int]]:
+    def note_cost(self, score: tuple[int, int], gap_s: float) -> float:
+        found = self.notes.get(score)
+        return sum(_note_cost(n, gap_s) for n in found) if found else 0.0
+
+    def rally_edges(self, state: int, j: int) -> list[Edge]:
+        r = self.rallies[j]
         over, up, tp, switched, s, _ = self.struct.step(state)
-        out = [(state, r.extra, -1)]
+        out: list[Edge] = [(state, r.extra, -1, (), (), r.hard[2])]
         if over:
             return out
+        a, b, _, t = _unpack(state)
         side = (0 if self.side0 == "near" else 1) ^ switched
         base = r.point[side][s] + (C_FACT if r.serve_fact >= 0 and r.serve_fact != s else 0.0)
         hu, ht = self.hint(state)
-        if up >= 0:
-            out.append((up, base + (C_FACT if r.won_fact == 1 else 0.0) + r.won[0] + hu, s * 2))
-        if tp >= 0:
-            out.append((tp, base + (C_FACT if r.won_fact == 0 else 0.0) + r.won[1] + ht, s * 2 + 1))
+        penalty = self.penalties.get((a, b))
+        after = self.gaps_s[j + 1] if j + 1 < len(self.gaps_s) else 0.0
+        for w, nxt, h in ((0, up, hu), (1, tp, ht)):
+            if nxt < 0:
+                continue
+            facts = (C_FACT if r.won_fact == 1 - w else 0.0) + (
+                C_FACT if r.serve_fact >= 0 and r.serve_fact != s else 0.0
+            )
+            cost = base + (C_FACT if r.won_fact == 1 - w else 0.0) + r.won[w] + h
+            so: tuple[SideOut, ...] = ()
+            if self.cells is not None and w != s:
+                so = ((s, t // 2, a if s == 0 else b),)
+                cost += self.cells.box(*so[0])
+            if penalty is not None and penalty == w:
+                cost += C_PENALTY_RALLY  # the sheet's penalty point has no rally
+            score = (a + (w == 0), b + (w == 1))
+            if self.notes:
+                cost += self.note_cost(score, after)
+            said = r.score_cost(score)
+            cost += said
+            if math.isfinite(cost):
+                out.append((nxt, cost, s * 2 + w, so, (score,), r.hard[w] + facts + said))
         return out
 
-    def miss_edges(self, state: int, i: int) -> list[tuple[int, float, int]]:
-        costs, pref = self.miss_costs[i], self.miss_pref[i]
-        return [
-            (nxt, costs[k] + (_pref_cost(pref, state, nxt) if pref else 0.0), k)
-            for nxt, k in self.struct.miss(state, self.k_max[i])
-        ]
+    def gap_edges(self, state: int, j: int) -> list[Edge]:
+        costs, pref = self.miss_costs[j], self.miss_pref[j]
+        starts: list[tuple[int, float, tuple[SideOut, ...]]] = [(state, 0.0, ())]
+        if self.penalties:
+            a, b, s, t = _unpack(state)
+            to = self.penalties.get((a, b))
+            if to is not None and not self.struct.rules.over(a, b):
+                _, up, tp, _, _, _ = self.struct.step(state)
+                nxt = up if to == 0 else tp
+                if nxt >= 0:
+                    so: tuple[SideOut, ...] = ()
+                    c = 0.0
+                    if self.cells is not None and to != s:
+                        so = ((s, t // 2, a if s == 0 else b),)
+                        c = self.cells.box(*so[0])
+                    # At this score the next point is the penalty, by the sheet: no other start.
+                    starts = [(nxt, c, so)]
+        out: list[Edge] = []
+        gap_s = self.gaps_s[j] if j < len(self.gaps_s) else 0.0
+        for s0, c0, so0 in starts:
+            for nxt, _, k, so, passed, _ in self.struct.miss(s0, self.k_max[j]):
+                said = _pref_cost(pref, s0, nxt) if pref else 0.0
+                cost = c0 + costs[k] + said
+                if so and self.cells is not None:
+                    cost += self.cells.side_outs(so)
+                if self.notes and passed:
+                    cost += sum(self.note_cost(sc_, gap_s) for sc_ in passed)
+                if math.isfinite(cost):
+                    out.append((nxt, cost, k, so0 + so, passed, said))
+        return out
 
 
 def _pref_cost(pref: tuple[int, int], state: int, nxt: int) -> float:
     """Missed points won by other teams than the log says: per point off."""
-    a0, b0, _ = _unpack(state)
-    a1, b1, _ = _unpack(nxt)
+    a0, b0, _, _ = _unpack(state)
+    a1, b1, _, _ = _unpack(nxt)
     return C_LOG_MISS * 0.5 * (abs(a1 - a0 - pref[0]) + abs(b1 - b0 - pref[1]))
 
 
@@ -464,63 +798,55 @@ def _keep(layer: Layer, s: _Set, remaining: int) -> Layer:
     return {k: layer[k] for k, v in scored.items() if v <= best + BEAM}
 
 
-def _forward(s: _Set, backs: list[Back] | None) -> list[Layer]:
+@dataclass
+class _Pass:
+    """The forward pass: per layer the cheapest cost of each state (min) and the cost of all paths
+    to it (sum, in cost space); back pointers. Layer 2i holds the states before gap i, 2i+1 those
+    right before rally i, 2i+2 those after it; the last one the states after the final gap."""
+
+    mins: list[Layer]
+    sums: list[Layer]
+    backs: list[Back]
+
+
+def _forward(s: _Set, sums: bool = True) -> _Pass:
     n = len(s.rallies)
     inf = math.inf
-    start = _pack(s.st.start_us, s.st.start_them, 0 if s.first == "us" else 1)
-    layers: list[Layer] = [{start: 0.0}]
-    step, miss = s.struct.step, s.struct.miss
-    near0 = 0 if s.side0 == "near" else 1
-    hinted = bool(s.st.sheet_hint)
+    start = s.start()
+    mins: list[Layer] = [{start: 0.0}]
+    soft: list[Layer] = [{start: 0.0}]
+    backs: list[Back] = []
     for i in range(n + 1):
-        g: Layer = {}
-        bm: Back = {}
-        costs, k_max, pref = s.miss_costs[i], s.k_max[i], s.miss_pref[i]
-        for state, cost in layers[-1].items():
-            for nxt, k in miss(state, k_max):
-                total = cost + costs[k] + (_pref_cost(pref, state, nxt) if pref else 0.0)
-                if total < g.get(nxt, inf):
-                    g[nxt] = total
-                    bm[nxt] = (state, k)
-        if backs is not None:
+        for kind in ("gap", "rally"):
+            if kind == "rally" and i == n:
+                break
+            src_min, src_sum = mins[-1], soft[-1]
+            nxt_min: Layer = {}
+            acc: dict[int, list[float]] = {}
+            bm: Back = {}
+            for state, cost in src_min.items():
+                c_sum = src_sum.get(state, cost)
+                edges = s.gap_edges(state, i) if kind == "gap" else s.rally_edges(state, i)
+                for nxt, c, opt, _, _, hard in edges:
+                    total = cost + c
+                    if total < nxt_min.get(nxt, inf):
+                        nxt_min[nxt] = total
+                        bm[nxt] = (state, opt)
+                    if sums:
+                        _soft_add(acc, nxt, c_sum + _tempered(c, hard))
             backs.append(bm)
-        if i == n:  # after the last rally: missed points at the end of the set
-            layers.append(g)
-            break
-        g = _keep(g, s, n - i)
-        r = s.rallies[i]
-        f: Layer = {}
-        br: Back = {}
-        for state, cost in g.items():
-            over, up, tp, switched, srv, _ = step(state)
-            total = cost + r.extra
-            if total < f.get(state, inf):
-                f[state] = total
-                br[state] = (state, -1)
-            if over:
-                continue
-            base = cost + r.point[near0 ^ switched][srv]
-            if r.serve_fact >= 0 and r.serve_fact != srv:
-                base += C_FACT
-            hu, ht = s.hint(state) if hinted else (0.0, 0.0)
-            if up >= 0:
-                total = base + (C_FACT if r.won_fact == 1 else 0.0) + r.won[0] + hu
-                if total < f.get(up, inf):
-                    f[up] = total
-                    br[up] = (state, srv * 2)
-            if tp >= 0:
-                total = base + (C_FACT if r.won_fact == 0 else 0.0) + r.won[1] + ht
-                if total < f.get(tp, inf):
-                    f[tp] = total
-                    br[tp] = (state, srv * 2 + 1)
-        f = _keep(f, s, n - i - 1)
-        layers += [g, f]
-        if backs is not None:
-            backs.append(br)
-    return layers
+            remaining = n - i if kind == "gap" else n - i - 1
+            kept = nxt_min if kind == "gap" and i == n else _keep(nxt_min, s, remaining)
+            mins.append(kept)
+            if sums:
+                done = _soft_done(acc)
+                soft.append({k: done[k] for k in kept})
+            else:
+                soft.append(kept)
+    return _Pass(mins, soft, backs)
 
 
-_STRUCTURES: dict[tuple[tuple[int, int], SetRules], _Structure] = {}
+_STRUCTURES: dict[tuple[tuple[int, int], SetRules, bool], _Structure] = {}
 
 
 def _gap_model(st: SetIn) -> tuple[list[int], list[list[float]], list[tuple[int, int] | None]]:
@@ -564,17 +890,34 @@ def _gap_model(st: SetIn) -> tuple[list[int], list[list[float]], list[tuple[int,
     return k_max, costs, told
 
 
+def _gaps_s(st: SetIn) -> list[float]:
+    """Each gap's length in seconds: before the set's first rally and after its last one, long
+    (the set's break)."""
+    rs = st.rallies
+    inner = [max(0.0, (rs[i].start_ms - rs[i - 1].end_ms) / 1000) for i in range(1, len(rs))]
+    return [120.0, *inner, 120.0]
+
+
+def _notes_by_score(st: SetIn) -> dict[tuple[int, int], list[BreakNote]]:
+    out: dict[tuple[int, int], list[BreakNote]] = {}
+    for n in st.notes:
+        if n.kind in ("timeout", "sub", "sub_back"):
+            out.setdefault(n.score, []).append(n)
+    return out
+
+
 def _setup(st: SetIn, side0: Court, first: Side) -> _Set:
     if st.official is not None:
         cap = (max(st.official[0], st.start_us), max(st.official[1], st.start_them))
     else:
         cap = (st.rules.target + 20, st.rules.target + 20)
-    key = (cap, st.rules)
+    count = st.cells is not None
+    key = (cap, st.rules, count)
     struct = _STRUCTURES.get(key)
     if struct is None:
         if len(_STRUCTURES) > 64:
             _STRUCTURES.clear()
-        struct = _STRUCTURES[key] = _Structure(cap, st.rules)
+        struct = _STRUCTURES[key] = _Structure(cap, st.rules, count)
     k_max, costs, told = _gap_model(st)
     # The log: how many points it saw in a gap (and whose) without a rally of their own.
     pref: list[tuple[int, int] | None] = [None] * len(costs)
@@ -590,7 +933,22 @@ def _setup(st: SetIn, side0: Court, first: Side) -> _Set:
         ]
         pref[i] = said if k_log else None
     rallies = [_prepare(r) for r in st.rallies]
-    return _Set(st, side0, first, struct, rallies, k_max, costs, pref)
+    cells = _cells_for(st.cells, first) if st.cells is not None else None
+    penalties = {score: 0 if w == "us" else 1 for score, w in st.penalties.items()}
+    return _Set(
+        st,
+        side0,
+        first,
+        struct,
+        rallies,
+        k_max,
+        costs,
+        pref,
+        cells,
+        _gaps_s(st),
+        _notes_by_score(st),
+        penalties,
+    )
 
 
 # --- the scoresheet: its points lined up with the rallies --------------------------------------
@@ -616,10 +974,18 @@ class _SheetSet:
     np_before: list[int]  # non-penalty points among the first i
     us_before: list[int]  # points won by us among the first i
     short: list[float]  # how much cheaper "no point" is: a rally right after another
+    gaps_s: list[float] = field(default_factory=list)
+    # The sheet's timeouts and substitutions by the number of points played before them.
+    notes: dict[int, list[BreakNote]] = field(default_factory=dict)
+    scores: list[tuple[int, int]] = field(default_factory=list)  # after 0, 1, ... points
 
     @property
     def n(self) -> int:
         return len(self.path.winners)
+
+    def note_cost(self, q: int, gap_s: float) -> float:
+        found = self.notes.get(q)
+        return sum(_note_cost(n, gap_s) for n in found) if found else 0.0
 
     def gap(self, j: int, i0: int, i1: int) -> float:
         """Points i0..i1-1 without a rally of their own in gap j (before rally j)."""
@@ -628,15 +994,19 @@ class _SheetSet:
         said = self.told[j]
         base = self.base[j]
         if said is None:
-            return base[k_np] if k_np <= self.k_max[j] else math.inf
-        k_log = min(MAX_MISS_LOG, said[0] + said[1])
-        if k_np > max(self.k_max[j], k_log):
-            return math.inf
-        cost = base[k_np] if k_np < len(base) else base[-1] + C_MISS * (k_np - len(base) + 1)
-        cost = 0.3 * k_np if k == k_log else cost + C_LOG_MISS * abs(k - k_log)
-        if k:
-            du = self.us_before[i1] - self.us_before[i0]
-            cost += C_LOG_MISS * 0.5 * (abs(du - said[0]) + abs(k - du - said[1]))
+            cost = base[k_np] if k_np <= self.k_max[j] else math.inf
+        else:
+            k_log = min(MAX_MISS_LOG, said[0] + said[1])
+            if k_np > max(self.k_max[j], k_log):
+                return math.inf
+            cost = base[k_np] if k_np < len(base) else base[-1] + C_MISS * (k_np - len(base) + 1)
+            cost = 0.3 * k_np if k == k_log else cost + C_LOG_MISS * abs(k - k_log)
+            if k:
+                du = self.us_before[i1] - self.us_before[i0]
+                cost += C_LOG_MISS * 0.5 * (abs(du - said[0]) + abs(k - du - said[1]))
+        if self.notes and k and math.isfinite(cost):
+            gap_s = self.gaps_s[j] if j < len(self.gaps_s) else 0.0
+            cost += sum(self.note_cost(q, gap_s) for q in range(i0 + 1, i1 + 1))
         return cost
 
     def gap_options(self, j: int, i0: int) -> list[tuple[int, float]]:
@@ -661,7 +1031,27 @@ class _SheetSet:
             cost += C_FACT
         if self.path.penalty[i]:
             cost += C_PENALTY_RALLY
+        if self.notes:
+            after = self.gaps_s[j + 1] if j + 1 < len(self.gaps_s) else 0.0
+            cost += self.note_cost(i + 1, after)
+        if r.log_score is not None:
+            cost += r.score_cost(self.scores[i + 1])
         return cost
+
+    def point_t(self, j: int, i: int) -> float:
+        """point(), tempered for the posteriors (its log and a coach's facts as they are)."""
+        r = self.rallies[j]
+        srv = 0 if self.path.servers[i] == "us" else 1
+        won = 0 if self.path.winners[i] == "us" else 1
+        hard = r.hard[won] + (C_FACT if r.serve_fact >= 0 and r.serve_fact != srv else 0.0)
+        hard += C_FACT if r.won_fact >= 0 and r.won_fact != won else 0.0
+        if r.log_score is not None:
+            hard += r.score_cost(self.scores[i + 1])
+        return _tempered(self.point(j, i), hard)
+
+    def none_t(self, j: int, i: int) -> float:
+        hard = 0.0 if self.path.cancelled.get(i, 0) > 0 else self.rallies[j].hard[2]
+        return _tempered(self.none(j, i), hard)
 
     def none(self, j: int, i: int) -> float:
         """Rally j is no point, after i of the sheet's points."""
@@ -699,54 +1089,100 @@ def _sheet_setup(st: SetIn, side0: Court) -> _SheetSet:
         else 0.0
         for j, r in enumerate(rs)
     ]
-    return _SheetSet(st, path, rallies, side, k_max, base, told, np_before, us_before, short)
+    # Notes by the points played before them: the path's scores name them.
+    scores = [(st.start_us, st.start_them)]
+    for w in path.winners:
+        sa, sb = scores[-1]
+        scores.append((sa + (w == "us"), sb + (w == "them")))
+    at = {score: q for q, score in enumerate(scores)}
+    notes: dict[int, list[BreakNote]] = {}
+    for n in st.notes:
+        q = at.get(n.score)
+        if q is not None and q > 0 and n.kind in ("timeout", "sub", "sub_back"):
+            notes.setdefault(q, []).append(n)
+    return _SheetSet(
+        st,
+        path,
+        rallies,
+        side,
+        k_max,
+        base,
+        told,
+        np_before,
+        us_before,
+        short,
+        _gaps_s(st),
+        notes,
+        scores,
+    )
 
 
-def _sheet_forward(
-    sh: _SheetSet,
-) -> tuple[list[list[float]], list[float], list[list[int]], list[list[int]]]:
-    """Forward: per rally the cheapest cost of each state before it (after its gap); the
-    states after the last gap; back pointers."""
+@dataclass
+class _SheetPass:
+    before_min: list[list[float]]  # per rally: each state's least cost after its gap
+    before_sum: list[list[float]]
+    end_min: list[float]  # after the final gap
+    end_sum: list[float]
+    back_gap: list[list[int]]
+    back_rally: list[list[int]]
+
+
+def _sheet_forward(sh: _SheetSet, sums: bool = True) -> _SheetPass:
+    """Forward: per rally the cost of each state before it (after its gap), cheapest and of all
+    paths; the states after the last gap; back pointers."""
     n, m = sh.n, len(sh.rallies)
     inf = math.inf
-    before: list[list[float]] = []
-    back_gap: list[list[int]] = []
-    back_rally: list[list[int]] = []
-    cur = [inf] * (n + 1)
-    cur[0] = 0.0
+    out = _SheetPass([], [], [], [], [], [])
+    cur_min = [inf] * (n + 1)
+    cur_sum = [inf] * (n + 1)
+    cur_min[0] = cur_sum[0] = 0.0
     for j in range(m + 1):
-        g = [inf] * (n + 1)
+        g_min = [inf] * (n + 1)
+        g_acc: list[list[float]] = [[] for _ in range(n + 1)]
         bg = [-1] * (n + 1)
-        for i0, c0 in enumerate(cur):
+        for i0, c0 in enumerate(cur_min):
             if not math.isfinite(c0):
                 continue
+            s0 = cur_sum[i0]
             for i1, c in sh.gap_options(j, i0):
-                if c0 + c < g[i1]:
-                    g[i1], bg[i1] = c0 + c, i0
-        back_gap.append(bg)
+                if c0 + c < g_min[i1]:
+                    g_min[i1], bg[i1] = c0 + c, i0
+                if sums:
+                    g_acc[i1].append(s0 + c / TEMPERATURE)
+        g_sum = [_softmin(a) for a in g_acc] if sums else g_min
+        out.back_gap.append(bg)
         if j == m:
-            return before, g, back_gap, back_rally
-        f = [inf] * (n + 1)
+            out.end_min, out.end_sum = g_min, g_sum
+            return out
+        f_min = [inf] * (n + 1)
+        f_acc: list[list[float]] = [[] for _ in range(n + 1)]
         bf = [-1] * (n + 1)
-        for i, c0 in enumerate(g):
+        for i, c0 in enumerate(g_min):
             if not math.isfinite(c0):
                 continue
-            c = c0 + sh.none(j, i)
-            if c < f[i]:
-                f[i], bf[i] = c, i
+            s0 = g_sum[i]
+            c = sh.none(j, i)
+            if c0 + c < f_min[i]:
+                f_min[i], bf[i] = c0 + c, i
+            if sums:
+                f_acc[i].append(s0 + sh.none_t(j, i))
             if i < n:
-                c = c0 + sh.point(j, i)
-                if c < f[i + 1]:
-                    f[i + 1], bf[i + 1] = c, i
-        before.append(g)
-        back_rally.append(bf)
-        cur = f
+                c = sh.point(j, i)
+                if c0 + c < f_min[i + 1]:
+                    f_min[i + 1], bf[i + 1] = c0 + c, i
+                if sums:
+                    f_acc[i + 1].append(s0 + sh.point_t(j, i))
+        out.before_min.append(g_min)
+        out.before_sum.append(g_sum)
+        out.back_rally.append(bf)
+        cur_min = f_min
+        cur_sum = [_softmin(a) for a in f_acc] if sums else f_min
     raise AssertionError("unreachable")
 
 
 def sheet_cost(st: SetIn, side0: Court) -> float:
     sh = _sheet_setup(st, side0)
-    return _sheet_forward(sh)[1][sh.n]
+    return _sheet_forward(sh, sums=False).end_min[sh.n]
 
 
 def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
@@ -754,31 +1190,81 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
     (more points missing than the gaps can hold)."""
     sh = _sheet_setup(st, side0)
     n, m = sh.n, len(sh.rallies)
-    before, end, back_gap, back_rally = _sheet_forward(sh)
-    if not math.isfinite(end[n]):
+    fw = _sheet_forward(sh)
+    if not math.isfinite(fw.end_min[n]):
         return None
     inf = math.inf
-    # Backward: from each state before gap j (bwd_a[j]) and before rally j (bwd_b[j]) to the end.
+    T = TEMPERATURE
+    log_z = fw.end_sum[n]
+    # Backward (all paths): from each state before gap j (bwd_a[j]) and before rally j
+    # (bwd_b[j]) to the end, with the posteriors of each rally's answers and each gap's misses.
     bwd_a: list[list[float]] = [[inf] * (n + 1) for _ in range(m + 1)]
     bwd_b: list[list[float]] = [[inf] * (n + 1) for _ in range(m)]
+    # The same, cheapest path only: the max-marginals the flags use (`confidence`).
+    min_a: list[list[float]] = [[inf] * (n + 1) for _ in range(m + 1)]
+    min_b: list[list[float]] = [[inf] * (n + 1) for _ in range(m)]
     for i0 in range(n + 1):
-        bwd_a[m][i0] = min((c for i1, c in sh.gap_options(m, i0) if i1 == n), default=inf)
+        ends = [c for i1, c in sh.gap_options(m, i0) if i1 == n]
+        bwd_a[m][i0] = _softmin([c / T for c in ends])
+        min_a[m][i0] = min(ends, default=inf)
+    p_rally: list[dict[int, float]] = [{} for _ in range(m)]  # j → {point index or -1: P}
+    p_gap = [0.0] * (m + 1)  # P(a non-penalty point without a rally in gap j)
+    # The cur forward sums after each rally are not kept: rebuild them from before_sum.
+    after_sum: list[list[float]] = []
+    for j in range(m):
+        f_acc: list[list[float]] = [[] for _ in range(n + 1)]
+        for i, s0 in enumerate(fw.before_sum[j]):
+            if not math.isfinite(s0):
+                continue
+            f_acc[i].append(s0 + sh.none_t(j, i))
+            if i < n:
+                f_acc[i + 1].append(s0 + sh.point_t(j, i))
+        after_sum.append([_softmin(a) for a in f_acc])
+    for i0 in range(n + 1):
+        a0 = after_sum[m - 1][i0] if m else (0.0 if i0 == 0 else inf)
+        if not math.isfinite(a0):
+            continue
+        for i1, c in sh.gap_options(m, i0):
+            if i1 == n and sh.np_before[i1] > sh.np_before[i0]:
+                p_gap[m] += math.exp(log_z - (a0 + c / T))
     for j in range(m - 1, -1, -1):
         for i in range(n + 1):
-            best = sh.none(j, i) + bwd_a[j + 1][i]
+            c_none = sh.none(j, i)
+            c_point = sh.point(j, i) if i < n else inf
+            opts = [sh.none_t(j, i) + bwd_a[j + 1][i]]
+            min_b[j][i] = c_none + min_a[j + 1][i]
             if i < n:
-                best = min(best, sh.point(j, i) + bwd_a[j + 1][i + 1])
-            bwd_b[j][i] = best
+                opts.append(sh.point_t(j, i) + bwd_a[j + 1][i + 1])
+                min_b[j][i] = min(min_b[j][i], c_point + min_a[j + 1][i + 1])
+            bwd_b[j][i] = _softmin(opts)
+            s0 = fw.before_sum[j][i]
+            if math.isfinite(s0):
+                p_none = math.exp(log_z - (s0 + opts[0]))
+                if p_none > 0:
+                    p_rally[j][-1] = p_rally[j].get(-1, 0.0) + p_none
+                if i < n:
+                    p = math.exp(log_z - (s0 + opts[1]))
+                    if p > 0:
+                        p_rally[j][i] = p_rally[j].get(i, 0.0) + p
+        prev = after_sum[j - 1] if j > 0 else [0.0] + [inf] * n
         for i0 in range(n + 1):
-            bwd_a[j][i0] = min((c + bwd_b[j][i1] for i1, c in sh.gap_options(j, i0)), default=inf)
+            options = sh.gap_options(j, i0)
+            bwd_a[j][i0] = _softmin([c / T + bwd_b[j][i1] for i1, c in options])
+            min_a[j][i0] = min((c + min_b[j][i1] for i1, c in options), default=inf)
+            a0 = prev[i0]
+            if not math.isfinite(a0):
+                continue
+            for i1, c in options:
+                if sh.np_before[i1] > sh.np_before[i0]:
+                    p_gap[j] += math.exp(log_z - (a0 + c / T + bwd_b[j][i1]))
     # The best path along the back pointers: states before each gap and rally.
     state_after = [0] * (m + 1)  # state after gap j (before rally j); [m]: the end
     state_before = [0] * (m + 1)  # state before gap j
     state_after[m] = n
-    state_before[m] = back_gap[m][n]
+    state_before[m] = fw.back_gap[m][n]
     for j in range(m - 1, -1, -1):
-        state_after[j] = back_rally[j][state_before[j + 1]]
-        state_before[j] = back_gap[j][state_after[j]]
+        state_after[j] = fw.back_rally[j][state_before[j + 1]]
+        state_before[j] = fw.back_gap[j][state_after[j]]
 
     path = sh.path
     start = (st.start_us, st.start_them)
@@ -796,21 +1282,30 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
         gap_points = (du, (i - i_gap0) - du)
         gap_np = sh.np_before[i] - sh.np_before[i_gap0]
         missed_np += gap_np
-        # Max-marginals: the cheapest whole path with each answer for this rally.
-        by: dict[str, float] = {"us": inf, "them": inf, "none": inf}
-        for k, c0 in enumerate(before[j]):
-            if not math.isfinite(c0):
-                continue
-            by["none"] = min(by["none"], c0 + sh.none(j, k) + bwd_a[j + 1][k])
-            if k < n:
-                w = path.winners[k]
-                by[w] = min(by[w], c0 + sh.point(j, k) + bwd_a[j + 1][k + 1])
+        post = p_rally[j]
+        p_none = min(1.0, post.get(-1, 0.0))
+        p_us = min(1.0, sum(p for k, p in post.items() if k >= 0 and path.winners[k] == "us"))
+        p_them = min(1.0, sum(p for k, p in post.items() if k >= 0 and path.winners[k] == "them"))
+        p_serve_us = min(1.0, sum(p for k, p in post.items() if k >= 0 and path.servers[k] == "us"))
         side_now: Court = "near" if sh.side[min(i, n - 1)] == 0 else "far"
         a_after, b_after = scores[nxt]
+        # Max-marginals: the cheapest whole path with each answer for this rally.
+        by: dict[str, float] = {"us": inf, "them": inf, "none": inf}
+        for k, c0 in enumerate(fw.before_min[j]):
+            if not math.isfinite(c0):
+                continue
+            by["none"] = min(by["none"], c0 + sh.none(j, k) + min_a[j + 1][k])
+            if k < n:
+                w = path.winners[k]
+                by[w] = min(by[w], c0 + sh.point(j, k) + min_a[j + 1][k + 1])
+        common: dict[str, Any] = {
+            "p_us": round(p_us, 4),
+            "p_them": round(p_them, 4),
+            "p_none": round(p_none, 4),
+            "p_missed": round(min(1.0, p_gap[j]), 4),
+        }
         if nxt == i:  # no point
             extra += 1
-            point_best = min(by["us"], by["them"])
-            conf = _confidence({-1: by["none"], 0: point_best}, -1)
             covered = path.cancelled.get(i, 0) > 0
             note: Note | None = None
             if r.log in ("us", "them") and r.log_p > 0:
@@ -827,11 +1322,14 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
                     None,
                     a_after,
                     b_after,
-                    round(conf, 3),
+                    round(_confidence({-1: by["none"], 0: min(by["us"], by["them"])}, -1), 3),
                     None,
                     side_now,
                     note,
                     gap_points,
+                    p_serve_us=round(p_serve_us, 4),
+                    p_answer=round(p_none, 4),
+                    **common,
                 )
             )
             continue
@@ -842,8 +1340,8 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
         conf = _confidence({0: by["us"], 1: by["them"], -1: by["none"]}, 0 if won == "us" else 1)
         serve_p = None
         if r.p_near is not None:
-            p_us = r.p_near if side_now == "near" else 1.0 - r.p_near
-            serve_p = p_us if server == "us" else 1.0 - p_us
+            p_us_near = r.p_near if side_now == "near" else 1.0 - r.p_near
+            serve_p = p_us_near if server == "us" else 1.0 - p_us_near
         note = None
         coach = (r.serve_fact is not None and r.serve_fact != server) or (
             r.won_fact is not None and r.won_fact != won
@@ -872,6 +1370,9 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
                 note,
                 gap_points,
                 sheet_point=i + 1,
+                p_serve_us=round(p_serve_us, 4),
+                p_answer=round(min(1.0, post.get(i, 0.0)), 4),
+                **common,
             )
         )
     tail0 = state_before[m]
@@ -879,7 +1380,7 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
     du_tail = sh.us_before[n] - sh.us_before[tail0]
     return SetOut(
         no=st.no,
-        cost=end[n],
+        cost=fw.end_min[n],
         first_serve=first,
         our_side=side0,
         final=scores[n],
@@ -890,6 +1391,7 @@ def _run_sheet(st: SetIn, side0: Court, first: Side) -> SetOut | None:
         sheet="path",
         point_rally=point_rally,
         penalties=sum(1 for k, p in enumerate(path.penalty) if p and point_rally[k] is None),
+        p_missed_after=round(min(1.0, p_gap[m]), 4),
     )
 
 
@@ -897,6 +1399,10 @@ def _as_hint(st: SetIn) -> SetIn:
     """A set whose sheet cannot be lined up: its winners as a soft hint instead."""
     assert st.sheet is not None
     return replace(st, sheet=None, sheet_hint=st.sheet.hint((st.start_us, st.start_them)))
+
+
+def _cells_base(st: SetIn, first: Side) -> float:
+    return _cells_for(st.cells, first).base if st.cells is not None else 0.0
 
 
 def set_cost(st: SetIn, side0: Court, first: Side) -> float:
@@ -907,8 +1413,9 @@ def set_cost(st: SetIn, side0: Court, first: Side) -> float:
         c = sheet_cost(st, side0)
         return c if math.isfinite(c) else set_cost(_as_hint(st), side0, first) + SHEET_FALLBACK
     s = _setup(st, side0, first)
-    end = _forward(s, None)[-1]
-    return min((v + s.terminal(k) for k, v in end.items()), default=math.inf)
+    end = _forward(s, sums=False).mins[-1]
+    best = min((v + s.terminal(k) for k, v in end.items()), default=math.inf)
+    return best + (s.cells.base if s.cells is not None else 0.0)
 
 
 def _confidence(costs: dict[int, float], chosen: int) -> float:
@@ -922,7 +1429,7 @@ def _confidence(costs: dict[int, float], chosen: int) -> float:
 
 def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
     """The cheapest consistent sequence of one set, given our side at its start and who
-    serves first, with each rally's confidence (max-marginals)."""
+    serves first, with each rally's posteriors (forward-backward)."""
     if st.sheet is not None:
         lined = _run_sheet(st, side0, first) if st.sheet.servers[:1] == (first,) else None
         if lined is not None:
@@ -932,67 +1439,66 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
         return hinted
     s = _setup(st, side0, first)
     n = len(s.rallies)
-    backs: list[Back] = []
-    fwd = _forward(s, backs)
-    end = fwd[-1]
+    fw = _forward(s)
+    end = fw.mins[-1]
     finals = {k: v + s.terminal(k) for k, v in end.items()}
     best_state = min(finals, key=lambda k: finals[k]) if finals else None
     if best_state is None or not math.isfinite(finals[best_state]):
         return SetOut(
             st.no, math.inf, first, side0, (st.start_us, st.start_them), [], 0, 0, feasible=False
         )
-
-    # Backward: the cheapest way from each kept state to the end. Layer 2i holds the states
-    # before rally i's missed points, 2i+1 those right before rally i, 2n+1 the end.
-    bwd: list[Layer] = [{} for _ in fwd]
-    bwd[-1] = {k: s.terminal(k) for k in end}
-    for li in range(len(fwd) - 2, -1, -1):
-        after = bwd[li + 1]
-        out: Layer = {}
-        for state in fwd[li]:
-            edges = (
-                s.miss_edges(state, li // 2)
-                if li % 2 == 0
-                else (s.rally_edges(state, s.rallies[li // 2]))
-            )
-            best = math.inf
-            for nxt, c, _ in edges:
-                v = after.get(nxt)
-                if v is not None and c + v < best:
-                    best = c + v
-            out[state] = best
-        bwd[li] = out
+    post = _posteriors(s, fw)
 
     # The best path, along the back pointers.
-    states = [0] * len(fwd)
-    choice = [0] * len(backs)
+    states = [0] * len(fw.mins)
+    choice = [0] * len(fw.backs)
     state = best_state
-    for li in range(len(fwd) - 1, 0, -1):
+    for li in range(len(fw.mins) - 1, 0, -1):
         states[li] = state
-        state, choice[li - 1] = backs[li - 1][state]
+        state, choice[li - 1] = fw.backs[li - 1][state]
     states[0] = state
 
     rallies_out: list[RallyOut] = []
     extra_total = 0
+    cells = s.cells
     for i, r in enumerate(st.rallies):
-        g_layer, after = fwd[2 * i + 1], bwd[2 * i + 2]
-        per_opt: dict[int, float] = {}
-        for state_g, c0 in g_layer.items():
-            for nxt, c, opt in s.rally_edges(state_g, s.rallies[i]):
-                v = after.get(nxt)
-                if v is not None and c0 + c + v < per_opt.get(opt, math.inf):
-                    per_opt[opt] = c0 + c + v
+        p_opt, p_score = post.rally[i], post.score[i]
         missed = choice[2 * i]
         opt = choice[2 * i + 1]
-        a_prev, b_prev, _ = _unpack(states[2 * i])
-        a_pre, b_pre, _ = _unpack(states[2 * i + 1])
+        a_prev, b_prev, _, _ = _unpack(states[2 * i])
+        a_pre, b_pre, s_pre, t_pre = _unpack(states[2 * i + 1])
         gap_points = (a_pre - a_prev, b_pre - b_prev)
-        a_after, b_after, _ = _unpack(states[2 * i + 2])
+        a_after, b_after, _, _ = _unpack(states[2 * i + 2])
         side_now: Court = "near" if s.side_index(states[2 * i + 1]) == 0 else "far"
+        p_none = min(1.0, p_opt.get(-1, 0.0))
+        p_us = min(1.0, sum(p for k, p in p_opt.items() if k >= 0 and k % 2 == 0))
+        p_them = min(1.0, sum(p for k, p in p_opt.items() if k >= 0 and k % 2 == 1))
+        p_serve_us = min(1.0, post.serve_us[i])
+        box = box_value = box_p = None
+        if cells is not None:
+            turn = t_pre // 2
+            team_cells = cells.pos[s_pre]
+            if turn < len(team_cells):
+                p, b = team_cells[turn]
+                box = (_side_of(s_pre), p, b)
+                found = post.boxes.get(box)
+                if found is not None:
+                    box_value, box_p = found
+        common: dict[str, Any] = {
+            "p_us": round(p_us, 4),
+            "p_them": round(p_them, 4),
+            "p_none": round(p_none, 4),
+            "p_serve_us": round(p_serve_us, 4),
+            "p_missed": round(min(1.0, post.missed[i]), 4),
+            "box": box,
+            "box_value": box_value,
+            "box_p": None if box_p is None else round(box_p, 4),
+        }
         if opt == -1:
             extra_total += 1
-            point = min((v for k, v in per_opt.items() if k >= 0), default=math.inf)
-            conf = _confidence({-1: per_opt.get(-1, math.inf), 0: point}, -1)
+            mm = post.cheapest[i]
+            point = min((v for k, v in mm.items() if k >= 0), default=math.inf)
+            conf = _confidence({-1: mm.get(-1, math.inf), 0: point}, -1)
             board_overruled = r.board in ("us", "them") and r.board_p > 0
             log_overruled = r.log in ("us", "them") and r.log_p > 0
             board_overruled = board_overruled and r.log is None  # the log outranks the board
@@ -1009,19 +1515,22 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
                     side_now,
                     "log" if log_overruled else "board" if board_overruled else "extra",
                     gap_points,
+                    p_answer=round(min(1.0, p_score.get((-1, a_after, b_after), 0.0)), 4),
+                    **common,
                 )
             )
             continue
         srv, w = divmod(opt, 2)
+        mm = post.cheapest[i]
         by_winner = {
-            ww: min((v for k, v in per_opt.items() if k >= 0 and k % 2 == ww), default=math.inf)
+            ww: min((v for k, v in mm.items() if k >= 0 and k % 2 == ww), default=math.inf)
             for ww in (0, 1)
         }
         conf = _confidence(by_winner, w)
         serve_p = None
         if r.p_near is not None:
-            p_us = r.p_near if side_now == "near" else 1.0 - r.p_near
-            serve_p = p_us if srv == 0 else 1.0 - p_us
+            p_us_near = r.p_near if side_now == "near" else 1.0 - r.p_near
+            serve_p = p_us_near if srv == 0 else 1.0 - p_us_near
         serving, won = _side_of(srv), _side_of(w)
         note: Note | None = None
         if (r.serve_fact is not None and r.serve_fact != serving) or (
@@ -1058,13 +1567,18 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
                 side_now,
                 note,
                 gap_points,
+                p_answer=round(min(1.0, p_score.get((w, a_after, b_after), 0.0)), 4),
+                **common,
             )
         )
-    fa, fb, _ = _unpack(best_state)
-    la, lb, _ = _unpack(states[-2])
+    fa, fb, _, _ = _unpack(best_state)
+    la, lb, _, _ = _unpack(states[-2])
+    sheet: Literal["hint", "read"] | None = (
+        "read" if st.cells is not None else "hint" if st.sheet_hint else None
+    )
     return SetOut(
         no=st.no,
-        cost=finals[best_state],
+        cost=finals[best_state] + (cells.base if cells is not None else 0.0),
         first_serve=first,
         our_side=side0,
         final=(fa, fb),
@@ -1072,8 +1586,119 @@ def run_set(st: SetIn, side0: Court, first: Side) -> SetOut:
         missed=sum(choice[0::2]),
         extra=extra_total,
         missed_after=(fa - la, fb - lb),
-        sheet="hint" if st.sheet_hint else None,
+        sheet=sheet,
+        p_missed_after=round(min(1.0, post.missed[n]), 4),
+        boxes=post.boxes,
     )
+
+
+@dataclass
+class _Post:
+    """Posteriors of the free decode: per rally its answers (-1 no point, else server * 2 +
+    winner) and its answers with the score after it, that we served; per gap a point missing
+    there; per read box its likeliest value and how probable it is."""
+
+    rally: list[dict[int, float]]
+    score: list[dict[tuple[int, int, int], float]]
+    serve_us: list[float]
+    missed: list[float]
+    boxes: dict[tuple[Side, int, int], tuple[int | None, float]]
+    # Max-marginals: per rally and answer the cheapest whole path with it (the flags' confidence).
+    cheapest: list[dict[int, float]] = field(default_factory=list)
+
+
+def _posteriors(s: _Set, fw: _Pass) -> _Post:
+    """Backward over the states the forward pass kept, all paths: each edge's posterior is
+    exp(-(forward + edge + backward - total))."""
+    n = len(s.rallies)
+    T = TEMPERATURE
+    last = fw.sums[-1]
+    finals = {k: v + s.terminal(k) / T for k, v in last.items()}
+    log_z = _softmin(list(finals.values()))
+    rally: list[dict[int, float]] = [{} for _ in range(n)]
+    score: list[dict[tuple[int, int, int], float]] = [{} for _ in range(n)]
+    serve_us = [0.0] * n
+    missed = [0.0] * (n + 1)
+    box_mass: dict[tuple[int, int, int], float] = {}  # (team, turn, value) → P
+    beta: Layer = {k: s.terminal(k) / T for k in last}
+    beta_min: Layer = {k: s.terminal(k) for k in fw.mins[-1]}
+    cheapest: list[dict[int, float]] = [{} for _ in range(n)]
+    cells = s.cells
+    if cells is not None:
+        for k, a_sum in last.items():
+            a, b, sv, t = _unpack(k)
+            bt = beta[k]
+            if not math.isfinite(bt):
+                continue
+            p = math.exp(log_z - (a_sum + bt))
+            value = a if sv == 0 else b
+            if cells.box(sv, t // 2, value) <= FINAL_MISSING:
+                key = (sv, t // 2, value)
+                box_mass[key] = box_mass.get(key, 0.0) + p
+    for li in range(len(fw.mins) - 2, -1, -1):
+        is_gap = li % 2 == 0
+        j = li // 2
+        src = fw.sums[li]
+        nb: Layer = {}
+        nb_min: Layer = {}
+        for state, a_min in fw.mins[li].items():
+            a_sum = src.get(state, math.inf)
+            edges = s.gap_edges(state, j) if is_gap else s.rally_edges(state, j)
+            costs = []
+            least = math.inf
+            for nxt, c, opt, so, _, hard in edges:
+                bn = beta.get(nxt)
+                if bn is None or not math.isfinite(bn):
+                    continue
+                ct = _tempered(c, hard)
+                costs.append(ct + bn)
+                bm = beta_min.get(nxt, math.inf)
+                least = min(least, c + bm)
+                if not is_gap and a_min + c + bm < cheapest[j].get(opt, math.inf):
+                    cheapest[j][opt] = a_min + c + bm
+                if not math.isfinite(a_sum):
+                    continue
+                p = math.exp(log_z - (a_sum + ct + bn))
+                if p < 1e-9:
+                    continue
+                if is_gap:
+                    if opt > 0:
+                        missed[j] += p
+                else:
+                    rally[j][opt] = rally[j].get(opt, 0.0) + p
+                    if opt >= 0:
+                        a1, b1, _, _ = _unpack(nxt)
+                        key3 = (opt % 2, a1, b1)
+                    else:
+                        a1, b1, _, _ = _unpack(state)
+                        key3 = (-1, a1, b1)
+                    score[j][key3] = score[j].get(key3, 0.0) + p
+                    if _unpack(state)[2] == 0:
+                        serve_us[j] += p
+                for team, turn, value in so:
+                    key = (team, turn, value)
+                    box_mass[key] = box_mass.get(key, 0.0) + p
+            nb[state] = _softmin(costs)
+            nb_min[state] = least
+        beta = nb
+        beta_min = nb_min
+    boxes: dict[tuple[Side, int, int], tuple[int | None, float]] = {}
+    if cells is not None:
+        by_box: dict[tuple[int, int], dict[int, float]] = {}
+        for (team, turn, value), p in box_mass.items():
+            by_box.setdefault((team, turn), {})[value] = p
+        for team in (0, 1):
+            for turn, pos in enumerate(cells.pos[team]):
+                found = by_box.get((team, turn), {})
+                used = sum(found.values())
+                best_v, best_p = max(found.items(), key=lambda kv: kv[1], default=(None, 0.0))
+                blank = max(0.0, 1.0 - used)
+                key4 = (_side_of(team), pos[0], pos[1])
+                if blank >= best_p:
+                    boxes[key4] = (None, round(min(1.0, blank), 4))
+                else:
+                    boxes[key4] = (best_v, round(min(1.0, best_p), 4))
+    return _Post(rally, score, serve_us, missed, boxes, cheapest)
 
 
 # --- the match ----------------------------------------------------------------------------------
@@ -1101,7 +1726,8 @@ def _fallback(st: SetIn, side0: Court, first: Side) -> SetOut:
     loose = replace(st, official=None)
     out = run_set(loose, side0, first)
     out.rallies = [
-        replace(r, confidence=min(r.confidence, 0.5), note=r.note or "unsure") for r in out.rallies
+        replace(r, confidence=min(r.confidence, 0.5), note=r.note or "unsure", p_answer=0.0)
+        for r in out.rallies
     ]
     out.feasible = False
     out.cost += 50.0
@@ -1163,9 +1789,11 @@ def score_match(sets: Sequence[SetIn]) -> MatchOut:
         }
         side_1, first_1 = min(totals, key=lambda h: totals[h])
         told = all(sets[i].our_side and sets[i].first_serve for i in regular)
-        shares.append(1.0 if told else _share(list(totals.values())))
+        share = 1.0 if told else _share(list(totals.values()))
+        shares.append(share)
         for i in regular:
             chosen[i] = run(i, *hypothesis(sets[i], side_1, first_1))
+            chosen[i].sides_share = round(share, 4)
     for i, st in enumerate(sets):
         if not st.deciding:
             continue
@@ -1175,9 +1803,157 @@ def score_match(sets: Sequence[SetIn]) -> MatchOut:
             for first in ((st.first_serve,) if st.first_serve else SIDES)
         ]
         _, side, first = min(options, key=lambda o: o[0])
-        shares.append(_share([o[0] for o in options]) if len(options) > 1 else 1.0)
+        share = _share([o[0] for o in options]) if len(options) > 1 else 1.0
+        shares.append(share)
         chosen[i] = run(i, side, first)
+        chosen[i].sides_share = round(share, 4)
     return MatchOut([chosen[i] for i in range(len(sets))], round(min(shares, default=1.0), 3))
+
+
+# --- sure or not: what the coach is asked about --------------------------------------------------
+
+
+def judge(
+    st: SetIn,
+    so: SetOut,
+    *,
+    extra: Mapping[str, Sequence[Reason]] | None = None,
+    sure: float = SURE,
+) -> SetOut:
+    """Each rally sure or not, and why not (PLAN §10.1, §10.3). A rally is sure when the coach
+    decided it (their winner is a fact), or when its decoded answer with its score line is at
+    least `sure` probable (times how sure our side and the first server are) and no source that
+    speaks about it disagrees: the log, the board, the sheet, the serve read in the video; and no
+    point is missing next to it. `extra`: more reasons by rally key (a timeout that does not fit
+    the score there)."""
+    obs = {r.key: r for r in st.rallies}
+    outs = so.rallies
+    out: list[RallyOut] = []
+    for k, ro in enumerate(outs):
+        r = obs.get(ro.key)
+        reasons: list[Reason] = list((extra or {}).get(ro.key, ()))
+        replay = not ro.point and r is not None and r.proposal is None
+        if r is not None and (r.won_fact is not None or (replay and r.log in (None, "none"))):
+            # The coach decided it: their winner is a fact; a rally they accepted that is no
+            # point is a replay.
+            out.append(replace(ro, sure=True, reasons=()))
+            continue
+        if r is None:
+            out.append(replace(ro, sure=False, reasons=(Reason("unsure"),)))
+            continue
+        decided = ro.won_by if ro.point else "none"
+        own: list[Reason] = []
+        # The log and the board, where they speak.
+        if r.log is not None and r.log_p > 0 and r.log != decided:
+            if r.log == "none":
+                own.append(Reason("log_none"))
+            elif so.sheet == "path" and ro.point:
+                own.append(Reason("sheet_log", {"log": r.log, "sheet": decided}))
+            else:
+                own.append(Reason("log", {"team": r.log}))
+        elif r.board is not None and r.board_p > 0 and r.log is None and r.board != decided:
+            own.append(Reason("board", {"team": r.board}))
+        elif ro.note in ("log", "board") and (r.log == decided or r.board == decided):
+            # The log (or the board) decided against what the video alone was sure of
+            # (wieplay/core/scorelog.py `flag_disagreements`).
+            own.append(Reason("video", {"vs": ro.note}))
+        if (
+            ro.point
+            and r.log_score is not None
+            and r.log == decided
+            and (ro.score_us, ro.score_them) != r.log_score
+        ):
+            own.append(Reason("log_score", {"score": list(r.log_score)}))
+        if ro.note == "coach":
+            own.append(Reason("coach"))  # a serve the coach called, against the score
+        if not ro.point and not any(x.code in ("log_none", "log") for x in own):
+            # No point: a replay, or no rally (reject it); "no point on the board log" where the
+            # log says so too.
+            own.append(Reason("log_none" if r.log == "none" else "extra"))
+        # The video: this rally's serve, and the next rally's serve (this rally's winner).
+        if ro.point and ro.won_by is not None:
+            nxt = _next_point(outs, k)
+            if nxt is not None and nxt.p_missed < MISSED_NEAR:
+                nr = obs.get(nxt.key)
+                if (
+                    nr is not None
+                    and nr.p_near is not None
+                    and nr.serve_fact is None
+                    and nxt.serve_p is not None
+                    and nxt.serve_p <= 1.0 - SOURCE_SURE
+                    and nxt.serving == ro.won_by
+                    and not any(x.code == "video" for x in own)
+                ):
+                    source = "sheet" if so.sheet else "log" if r.log is not None else "score"
+                    own.append(Reason("video", {"vs": source}))
+        if (
+            ro.point
+            and ro.serve_p is not None
+            and ro.serve_p <= 1.0 - SOURCE_SURE
+            and r.serve_fact is None
+            and _prev_point(outs, k) is None  # else the rally before it carries the doubt
+        ):
+            own.append(Reason("serve"))
+        # A sheet read from its photo: the box of this rally's turn, read otherwise or unclear.
+        if so.sheet == "read" and ro.box is not None and ro.point:
+            read = (st.cells.boxes.get(ro.box[0], {}) if st.cells else {}).get(
+                (ro.box[1], ro.box[2]), ()
+            )
+            fixed = (st.cells.fixed.get(ro.box[0], {}) if st.cells else {}).get(
+                (ro.box[1], ro.box[2]), "-"
+            )
+            if fixed == "-":
+                ranked = sorted(read, key=lambda x: -x[1])
+                values = [v for v, _ in ranked if isinstance(v, int)]
+                top, top_p = ranked[0] if ranked else (None, 0.0)
+                disagrees = (
+                    ro.box_value is not None
+                    and isinstance(top, int)
+                    and top != ro.box_value
+                    and top_p >= BOX_DISAGREES
+                )
+                unclear = (
+                    ro.box_p is not None
+                    and ro.box_p < BOX_SURE
+                    and ro.p_answer * so.sides_share < sure
+                    and len(values) > 1
+                )
+                if disagrees or unclear:
+                    shown = [ro.box_value] if ro.box_value is not None else []
+                    shown += [v for v in values if v not in shown][: 2 - len(shown)]
+                    own.append(Reason("sheet_box", {"values": shown[:2], "team": ro.box[0]}))
+        # A point without a rally next to it: a rally the finder missed.
+        # (Not a penalty point: it has no rally by the rules.)
+        if ro.p_missed >= MISSED_NEAR or ro.note == "missing_before":
+            own.append(Reason("missing_before"))
+        elif k == len(outs) - 1 and (
+            so.p_missed_after >= MISSED_NEAR or ro.note == "missing_after"
+        ):
+            own.append(Reason("missing_after"))
+        p = ro.p_answer * so.sides_share
+        if p < sure and not own and not reasons:
+            if so.sides_share < sure and ro.p_answer >= sure:
+                own.append(Reason("sides"))
+            else:
+                own.append(Reason("unsure", {"p": round(p, 3)}))
+        reasons = own + reasons
+        out.append(replace(ro, sure=not reasons and p >= sure, reasons=tuple(reasons)))
+    so.rallies = out
+    return so
+
+
+def _next_point(outs: Sequence[RallyOut], k: int) -> RallyOut | None:
+    for ro in outs[k + 1 :]:
+        if ro.point:
+            return ro
+    return None
+
+
+def _prev_point(outs: Sequence[RallyOut], k: int) -> RallyOut | None:
+    for ro in reversed(outs[:k]):
+        if ro.point:
+            return ro
+    return None
 
 
 # --- sets from the breaks -----------------------------------------------------------------------
@@ -1298,9 +2074,9 @@ def evidence_final(st: SetIn, side0: Court, first: Side) -> tuple[int, int] | No
     match by itself."""
     loose = replace(st, official=None)
     s = _setup(loose, side0, first)
-    end = _forward(s, None)[-1]
+    end = _forward(s, sums=False).mins[-1]
     if not end:
         return None
     best = min(end, key=lambda k: end[k] + s.terminal(k))
-    a, b, _ = _unpack(best)
+    a, b, _, _ = _unpack(best)
     return a, b

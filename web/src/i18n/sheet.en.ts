@@ -157,6 +157,7 @@ export const sheetEn = {
     },
     scoring: {
       title: 'In the score line',
+      read: 'Read from the photo, not confirmed: the score line weighs its boxes as read, together with the video and the scoreboard log (weaker than a typed sheet).',
       path: 'Lined up with the rallies: {{aligned}} of {{points}} points found a rally.',
       missed_one: '{{count}} point without a rally (a rally WiePlay missed): flagged in the review.',
       missed_other: '{{count}} points without a rally (rallies WiePlay missed): flagged in the review.',
@@ -269,7 +270,7 @@ export const sheetEn = {
     },
     read: {
       title: 'Read from the photo',
-      hint: 'WiePlay can read the photo for you, on the club’s own server (nothing goes to an outside service): it proposes the sets, you check the doubtful cells and confirm.',
+      hint: 'WiePlay can read the photo for you, on the club’s own server (nothing goes to an outside service): the scoring uses the reading at once, together with the video and the scoreboard log, and asks you only about the rallies it stays unsure of. Checking the doubtful cells here is optional.',
       button: 'Read the photo',
       again: 'Read it again',
       queued: 'The photo is waiting to be read on the club’s server…',
@@ -277,8 +278,8 @@ export const sheetEn = {
       failed: 'The photo couldn’t be read: {{detail}}',
       notFound: 'No scoresheet grid was found on the photo. A straight, sharp photo of the sheet in good light reads best; or type the sheet in.',
       done: 'Read from the photo; every set read is confirmed.',
-      check_one: 'Read from the photo: check {{count}} cell',
-      check_other: 'Read from the photo: check {{count}} cells',
+      check_one: 'Read from the photo, already used by the scoring; optional: check {{count}} cell',
+      check_other: 'Read from the photo, already used by the scoring; optional: check {{count}} cells',
       checkedAll: 'Read from the photo: every doubtful cell is checked. Confirm each set.',
       next: 'Next cell to check',
       discard: 'Discard the reading',
@@ -303,7 +304,7 @@ export const sheetEn = {
         acceptSure_one: 'Accept the sure cell ({{count}})',
         acceptSure_other: 'Accept the sure cells ({{count}})',
         confirm: 'Confirm set {{no}}',
-        confirmHint: 'Until it is confirmed, the set is a draft: the score line doesn’t use it.',
+        confirmHint: 'Until it is confirmed, the set is a draft: the score line uses it as read, weaker than a typed sheet. A box resolves on its own once the scoring is sure of it (decide the rallies the review asks about).',
         confirmed: 'Set {{no}} confirmed.',
       },
       cell: {

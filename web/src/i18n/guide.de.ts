@@ -34,6 +34,8 @@ export const guideDe: Guide = {
       'Zwei Ballwechsel in einem Vorschlag: S teilt ihn am Abspielpunkt. Ein Ballwechsel in zwei Teilen: M verbindet ihn mit dem nächsten.',
       'Sag, wer aufgeschlagen hat (1 wir, 2 sie) und wer den Ballwechsel gewonnen hat (3 wir, 4 sie), wenn WiePlay unsicher ist oder falsch liegt: Daraus ergibt sich der Spielstand.',
       'Jede Antwort geht zum nächsten Vorschlag weiter. Ein Fehler: U macht die letzte Antwort rückgängig.',
+      'WiePlay wägt für jeden Ballwechsel alles zugleich: das Video, das Protokoll der Club-Anzeigetafel, das Matchblatt (getippt oder vom Foto gelesen), das offizielle Resultat, die Time-outs, Wechsel und Karten. Bei einem Ballwechsel, bei dem es sicher ist, braucht es niemanden: «Alle sicheren Ballwechsel übernehmen» übernimmt sie in einem Schritt. Die Liste zeigt zuerst «Braucht dich»: nur die Ballwechsel, bei denen es unsicher bleibt, je mit dem Grund («Video und Matchblatt sind uneins, wer gewonnen hat», «Das Feld auf dem Matchblatt ist hier unklar (17 oder 11)», «Kein Punkt im Anzeigetafel-Protokoll», «Ein Time-out bei 14:12 passt hier nicht», «Ein verpasster Ballwechsel daneben»).',
+      'Entscheide diese: wer gewonnen hat (3 4), wer aufgeschlagen hat (1 2), Verwerfen (X) oder eine Pause (W B T D O). Jeder Entscheid wird sofort neu gewertet: Die Ballwechsel daneben werden oft sicher, und ein Feld des Matchblatts dahinter klärt sich von selbst, ohne eigene Prüfung auf der Matchblatt-Seite.',
     ],
     keysTitle: 'Tasten beim Prüfen',
     keys: [
@@ -53,8 +55,8 @@ export const guideDe: Guide = {
     ],
     tips: [
       'Ungefähr reicht: eine Viertelsekunde zu früh oder zu spät schadet nicht. Ein vergessener oder erfundener Ballwechsel schon.',
-      '«Alle übrigen mit Sicherheit ≥ 90 % übernehmen» spart Zeit, wenn die sicheren Vorschläge stimmen; U macht es in einem Schritt rückgängig.',
-      'Ist das Protokoll der Club-Anzeigetafel zum Spiel da, übernimmt «Alle übernehmen, die zum Anzeigetafel-Protokoll passen» jeden Ballwechsel, für den das Protokoll einen Punkt hat und WiePlay denselben Gewinner; wer gewonnen hat, bleibt WiePlays Vorschlag, und der folgt dem Protokoll. Für dich bleiben: kein Punkt im Protokoll, Protokoll und WiePlay uneins, ein verpasster Ballwechsel daneben oder das Protokoll sagt nichts. U macht es in einem Schritt rückgängig.',
+      '«Alle sicheren Ballwechsel übernehmen» bestätigt Anfang und Ende; wer gewonnen hat, bleibt WiePlays Vorschlag, und der folgt den Quellen. U macht es in einem Schritt rückgängig.',
+      'Sicher heisst sicher: Auf den Spielen, an denen WiePlay geprüft wurde, war kein einziger Ballwechsel falsch, bei dem es sicher war. Ein Spiel nur mit Video und offiziellem Resultat hat wenige sichere Ballwechsel, eines mit Anzeigetafel-Protokoll oder Matchblatt viel mehr: Das ist ehrlich, kein Fehler.',
       'Unsicher? Lass den Vorschlag offen und geh mit ↓ weiter. Jemand anderes kann später entscheiden.',
     ],
   },

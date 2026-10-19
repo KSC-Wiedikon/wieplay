@@ -872,6 +872,8 @@ def discard_reading(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> SheetO
     if row is None or not ss.drafts_of(row):
         raise HTTPException(404, "The scoresheet has no draft from the photo")
     n = sr.discard(db, row, viewer.member_id)
+    if video.status == "ready":
+        scoring.score_video(db, video, reason="scoresheet")  # the drafts were evidence
     audit(db, viewer.member_id, "scoresheet_read_discarded", "video", str(video.id), sets=n)
     db.commit()
     _, access = visible_video(db, viewer, video.id)

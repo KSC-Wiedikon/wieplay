@@ -158,6 +158,7 @@ export const sheetDe: typeof sheetEn = {
     },
     scoring: {
       title: 'Im Spielstand',
+      read: 'Vom Foto gelesen, nicht bestätigt: Der Spielstand wägt die Felder so, wie sie gelesen wurden, zusammen mit dem Video und dem Anzeigetafel-Protokoll (schwächer als ein getipptes Matchblatt).',
       path: 'Den Ballwechseln zugeordnet: {{aligned}} von {{points}} Punkten haben einen Ballwechsel.',
       missed_one: '{{count}} Punkt ohne Ballwechsel (einer, den WiePlay verpasst hat): in der Durchsicht markiert.',
       missed_other: '{{count}} Punkte ohne Ballwechsel (solche, die WiePlay verpasst hat): in der Durchsicht markiert.',
@@ -271,7 +272,7 @@ export const sheetDe: typeof sheetEn = {
     },
     read: {
       title: 'Vom Foto gelesen',
-      hint: 'WiePlay kann das Foto für dich lesen, auf dem eigenen Server des Clubs (nichts geht an einen fremden Dienst): Es schlägt die Sätze vor, du prüfst die unsicheren Felder und bestätigst.',
+      hint: 'WiePlay kann das Foto für dich lesen, auf dem eigenen Server des Clubs (nichts geht an einen fremden Dienst): Die Punktefolge braucht das Gelesene sofort, zusammen mit dem Video und dem Anzeigetafel-Protokoll, und fragt dich nur nach den Ballwechseln, bei denen sie unsicher bleibt. Die unsicheren Felder hier zu prüfen ist freiwillig.',
       button: 'Foto lesen',
       again: 'Nochmals lesen',
       queued: 'Das Foto wartet darauf, auf dem Server des Clubs gelesen zu werden…',
@@ -279,8 +280,8 @@ export const sheetDe: typeof sheetEn = {
       failed: 'Das Foto konnte nicht gelesen werden: {{detail}}',
       notFound: 'Auf dem Foto wurde kein Matchblatt gefunden. Ein gerades, scharfes Foto bei gutem Licht liest sich am besten; oder tippe das Blatt ein.',
       done: 'Vom Foto gelesen; alle gelesenen Sätze sind bestätigt.',
-      check_one: 'Vom Foto gelesen: {{count}} Feld prüfen',
-      check_other: 'Vom Foto gelesen: {{count}} Felder prüfen',
+      check_one: 'Vom Foto gelesen, schon in der Punktefolge; freiwillig: {{count}} Feld prüfen',
+      check_other: 'Vom Foto gelesen, schon in der Punktefolge; freiwillig: {{count}} Felder prüfen',
       checkedAll: 'Vom Foto gelesen: Alle unsicheren Felder sind geprüft. Bestätige jeden Satz.',
       next: 'Nächstes Feld prüfen',
       discard: 'Lesung verwerfen',
@@ -305,7 +306,7 @@ export const sheetDe: typeof sheetEn = {
         acceptSure_one: 'Sicheres Feld übernehmen ({{count}})',
         acceptSure_other: 'Sichere Felder übernehmen ({{count}})',
         confirm: 'Satz {{no}} bestätigen',
-        confirmHint: 'Bis er bestätigt ist, ist der Satz ein Entwurf: Die Punktefolge braucht ihn nicht.',
+        confirmHint: 'Bis er bestätigt ist, ist der Satz ein Entwurf: Die Punktefolge braucht ihn so, wie er gelesen wurde, schwächer als ein getipptes Matchblatt. Ein Feld klärt sich von selbst, sobald die Punktefolge sicher ist (entscheide die Ballwechsel, nach denen die Prüfung fragt).',
         confirmed: 'Satz {{no}} bestätigt.',
       },
       cell: {

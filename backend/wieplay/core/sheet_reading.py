@@ -325,7 +325,7 @@ def _boxes(doc: Mapping[str, Any], side: str) -> dict[tuple[int, int], int]:
     return out
 
 
-def _person_boxes(doc: Mapping[str, Any], proposed: Mapping[str, Any] | None) -> rd.Fixed:
+def person_boxes(doc: Mapping[str, Any], proposed: Mapping[str, Any] | None) -> rd.Fixed:
     """The boxes a person wrote: all of a typed set's, or a draft's that differ from what the
     last reading proposed (a correction)."""
     out: dict[sh.Side, dict[tuple[int, int], int | str | None]] = {}
@@ -339,6 +339,21 @@ def _person_boxes(doc: Mapping[str, Any], proposed: Mapping[str, Any] | None) ->
                 if k not in _boxes(doc, side):
                     out.setdefault(side, {})[k] = None
         out.setdefault(side, {}).update(have)
+    return out
+
+
+def typed_boxes(doc: Mapping[str, Any], state: Mapping[str, Any]) -> rd.Fixed:
+    """The boxes of a draft a person wrote: corrected after the reading, or typed before it (a
+    typed set the photo was read into keeps them: `before`)."""
+    out = person_boxes(doc, state.get("proposed"))
+    before = state.get("before")
+    if before:
+        for side in sh.SIDES:
+            mine = out.setdefault(side, {})  # type: ignore[attr-defined]
+            now = _boxes(doc, side)
+            for pos, v in _boxes(before, side).items():
+                if now.get(pos) == v:
+                    mine[pos] = v
     return out
 
 
@@ -402,7 +417,7 @@ def apply(
             skipped[no] = "typed"
             continue
         proposed = state.get("proposed") if draft else None
-        fixed[no] = _person_boxes(doc, proposed)
+        fixed[no] = person_boxes(doc, proposed)
         if _owned(doc, proposed, "first_serve"):
             first[no] = doc["first_serve"]
     numbers = [no for no in candidates if no not in skipped]
@@ -431,15 +446,15 @@ def apply(
             for name in ("sanctions", "cancelled"):
                 merged[name] = doc.get(name) or []
             # The boxes a person wrote stay as they are, whatever the photo says.
-            for side, boxes in _person_boxes(doc, proposed).items():
+            for side, boxes in person_boxes(doc, proposed).items():
                 grid = [list(col) for col in merged[f"boxes_{side}"]]
                 for (p, b), v in boxes.items():
                     if p - 1 < len(grid) and b - 1 < len(grid[p - 1]):
                         grid[p - 1][b - 1] = v
                     cells.pop(f"box.{side}.{p}.{b}", None)
                 merged[f"boxes_{side}"] = grid
-        if doc is not None and not was_draft and _has_content(doc):
-            rescore = True  # a typed set becomes a draft: no longer a hint for the scoring
+        # A draft is evidence for the scoring (PLAN §10.3): every new reading scores again.
+        rescore = True
         merged = ss.SetSheetIn.model_validate(merged).model_dump(mode="json")
         docs[s.no] = merged
         new_sets[str(s.no)] = {
@@ -506,6 +521,88 @@ def _enough(r: rd.Readings, no: int) -> bool:
         ):
             n += 1
     return n >= MIN_CELLS_FOR_SET
+
+
+# --- resolved by the joint decode (PLAN §10.3) ---------------------------------------------------
+
+# A draft's box the joint decode (the video, the log, the official score and the other boxes) is
+# at least this sure of is resolved: its value written into the draft (when the reader proposed
+# another) and no longer to check. The coach decides an unsure rally in the review, the decode
+# runs again, and the box behind it resolves without a separate check on the sheet page. Only
+# to a value the ink allows (the reader gave it at least CELL_INK): where the reader saw another
+# number clearly, the paper and the decode disagree (a scorer's slip the log shows, say), and the
+# box stays to check.
+CELL_SURE = 0.98
+CELL_INK = 0.05
+
+
+def resolve(db: Session, video: Video, match: Any) -> int:
+    """The drafts' boxes the joint decode is sure of, resolved (CELL_SURE). Returns how many
+    cells changed. Boxes a person typed are never touched."""
+    row = ss.stored(db, video.id)
+    if row is None or not row.read or not row.sets:
+        return 0
+    state = dict(row.read)
+    sets = dict(state.get("sets") or {})
+    docs = {int(d["no"]): dict(d) for d in row.sets}
+    touched = 0
+    doc_changed = False
+    for so in match.sets:
+        st = sets.get(str(so.no))
+        doc = docs.get(so.no)
+        if so.sheet != "read" or not so.boxes or not st or st.get("state") != "draft" or not doc:
+            continue
+        st = dict(st)
+        cells = dict(st.get("cells") or {})
+        proposed = dict(st.get("proposed") or {})
+        typed = typed_boxes(doc, st)
+        grids = {side: [list(col) for col in doc.get(f"boxes_{side}") or []] for side in sh.SIDES}
+        pgrids = {
+            side: [list(col) for col in proposed.get(f"boxes_{side}") or []] for side in sh.SIDES
+        }
+        for (side, p, b), (value, prob) in so.boxes.items():
+            if prob < CELL_SURE or (p, b) in typed.get(side, {}):
+                continue
+            grid = grids.get(side) or []
+            if p - 1 >= len(grid) or b - 1 >= len(grid[p - 1]):
+                continue
+            key = f"box.{side}.{p}.{b}"
+            cell = cells.get(key)
+            if (
+                cell is not None
+                and cell.get("alts")
+                and not any(v == value and pr >= CELL_INK for v, pr in cell["alts"])
+            ):
+                continue
+            if grid[p - 1][b - 1] != value:
+                grid[p - 1][b - 1] = value
+                pg = pgrids.get(side) or []
+                if p - 1 < len(pg) and b - 1 < len(pg[p - 1]):
+                    pg[p - 1][b - 1] = value  # the reading's, not a person's: proposed too
+                doc_changed = True
+            elif cell is None or not cell.get("check"):
+                continue
+            found = dict(cell or {"alts": []})
+            found.update({"v": value, "check": False, "why": "decoded"})
+            cells[key] = found
+            touched += 1
+        for side in sh.SIDES:
+            doc[f"boxes_{side}"] = grids[side]
+            if pgrids[side]:
+                proposed[f"boxes_{side}"] = pgrids[side]
+        st["cells"] = cells
+        st["proposed"] = proposed
+        st["to_check"] = sum(1 for c in cells.values() if c.get("check"))
+        sets[str(so.no)] = st
+        docs[so.no] = doc
+    if not touched and not doc_changed:
+        return 0
+    _set_read(row, {**state, "sets": sets})
+    if doc_changed:
+        row.sets = [docs[no] for no in sorted(docs)]
+        row.version = (row.version or 0) + 1
+    db.flush()
+    return touched
 
 
 # --- confirming, discarding -----------------------------------------------------------------------

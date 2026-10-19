@@ -10,12 +10,11 @@ import { ProgressBar } from '../../components/ProgressBar'
 import { SuggestionChip } from '../../components/SuggestionChip'
 import { useSetRalliesReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
-import { formatClock, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
+import { formatClock, reasonText, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { periodAt } from '../../lib/rallies'
 import { cardTone, courtByRally, issueText, notesAfter, notesToShow, noteText, noteTime, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { fullNameOf, useSideNames, type SideNames } from '../../lib/sides'
 import {
-  ACCEPT_ALL_MIN,
   allProgress,
   effectiveServer,
   effectiveWinner,
@@ -24,12 +23,11 @@ import {
   GAP_KINDS,
   isGap,
   isOpen,
-  logCounts,
-  logMatches,
+  needsYou,
+  needsYouRallies,
   reviewItems,
   scoreAfter,
-  sureSuggestions,
-  type LogVerdict,
+  sureRallies,
 } from '../../lib/suggestions'
 import type { GapKind, Segment, Side } from '../../lib/types'
 import { useReview, useView, useWorkspace } from './context'
@@ -61,16 +59,6 @@ function Kbd({ children, hidden }: { children: ReactNode; hidden?: boolean }) {
   )
 }
 
-/** What the scoreboard log leaves for the coach, in this order. */
-const LOG_LEFT = ['none', 'disagree', 'missed', 'silent'] as const satisfies readonly Exclude<LogVerdict, 'match'>[]
-
-/** "15 with no point on the log, 11 where the log and WiePlay disagree, …" (the counts above 0). */
-function logLeftText(t: TFunction, counts: Partial<Record<LogVerdict, number | string>>): string {
-  return LOG_LEFT.filter((key) => Number(counts[key] ?? 0) > 0)
-    .map((key) => t(`tagging.review.logLeft.${key}`, { count: Number(counts[key]) }))
-    .join(', ')
-}
-
 /** The key of each break label (W B T D O). */
 const KEY_OF = Object.fromEntries(Object.entries(GAP_KEYS).map(([key, kind]) => [kind, key.toUpperCase()])) as Record<GapKind, string>
 
@@ -92,13 +80,8 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
       return t('tagging.review.notice.won', { side: sideLabel(t, p.side as Side, names) })
     case 'moved':
       return p.field === 'end' ? t('tagging.review.notice.movedEnd', { time }) : t('tagging.review.notice.movedStart', { time })
-    case 'acceptedAll':
-      return t('tagging.review.notice.acceptedAll', { count: Number(p.count) })
-    case 'acceptedLog': {
-      const accepted = t('tagging.review.notice.acceptedLog', { count: Number(p.count) })
-      const list = logLeftText(t, p)
-      return list ? `${accepted} ${t('tagging.review.notice.acceptedLogLeft', { left: Number(p.left), list })}` : accepted
-    }
+    case 'acceptedSure':
+      return t('tagging.review.notice.acceptedSure', { count: Number(p.count), left: Number(p.left) })
     case 'done':
       return t('tagging.review.doneTitle')
     default:
@@ -108,8 +91,9 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
 
 /**
  * The review of WiePlay's suggestions (PLAN §10.1): the suggestion on screen, its boundaries,
- * the answers as big buttons (tablets) with their keys, the progress, "accept all that match
- * the scoreboard log" (with a trusted log) and "accept all sure ones".
+ * the answers as big buttons (tablets) with their keys, the progress, and one button: "Accept all
+ * sure rallies" (the joint decode is sure of them, §10.3). The rest needs the coach, each with
+ * its reason.
  */
 export function ReviewPanel() {
   const { t } = useTranslation()
@@ -122,14 +106,12 @@ export function ReviewPanel() {
     () => allProgress(view.segments, state.seen, state.seenGaps, state.rejectedBefore),
     [view.segments, state.seen, state.seenGaps, state.rejectedBefore],
   )
-  const sure = useMemo(() => sureSuggestions(view.segments), [view.segments])
-  // Only with a trusted scoreboard log (PLAN §10.10): the server sends its answers only there.
-  const matches = useMemo(() => logMatches(view.segments), [view.segments])
-  const logLeft = useMemo(() => logLeftText(t, logCounts(view.segments)), [t, view.segments])
+  const sure = useMemo(() => sureRallies(view.segments), [view.segments])
+  const waiting = useMemo(() => needsYouRallies(view.segments).length, [view.segments])
   const current = items.find((s) => s.id === state.currentId) ?? null
   const gap = current !== null && isGap(current.kind)
   const set = current ? periodAt(view.periods, current.start_ms) : null
-  const min = formatPercent(ACCEPT_ALL_MIN)
+  const scored = useMemo(() => view.segments.some((s) => s.kind === 'rally' && s.score_sure != null), [view.segments])
   const progressText = t('tagging.review.progressLabel', { done: progress.done, total: progress.total })
 
   return (
@@ -246,19 +228,15 @@ export function ReviewPanel() {
         {state.notice ? noticeText(t, state.notice, taxonomy.sport, names) : t('tagging.review.hint')}
       </p>
 
-      {(matches.length > 0 || sure.length > 0) && (
+      {scored && (
         <div className="flex flex-col gap-2 border-t border-hairline pt-3">
-          {matches.length > 0 && (
-            <Button size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptLog)}>
+          {sure.length > 0 ? (
+            <Button variant="primary" size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptSure)}>
               <CheckIcon className="size-4" />
-              {t('tagging.review.acceptLog', { count: matches.length })}
+              {t('tagging.review.acceptSure', { count: sure.length })}
             </Button>
-          )}
-          {sure.length > 0 && (
-            <Button size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptAll)}>
-              <CheckIcon className="size-4" />
-              {t('tagging.review.acceptAll', { min, count: sure.length })}
-            </Button>
+          ) : (
+            waiting > 0 && <p className="text-sm text-muted">{t('tagging.review.sureNone')}</p>
           )}
         </div>
       )}
@@ -272,23 +250,14 @@ export function ReviewPanel() {
       <GuideLink />
 
       <ConfirmDialog
-        open={state.confirmAll}
-        title={t('tagging.review.acceptAllTitle', { count: sure.length })}
-        confirmLabel={t('tagging.review.acceptAllConfirm', { count: sure.length })}
-        onCancel={review.cancelAcceptAll}
-        onConfirm={review.confirmAcceptAll}
+        open={state.confirmSure}
+        title={t('tagging.review.acceptSureTitle', { count: sure.length })}
+        confirmLabel={t('tagging.review.acceptSureConfirm', { count: sure.length })}
+        onCancel={review.cancelAcceptSure}
+        onConfirm={review.confirmAcceptSure}
       >
-        {t('tagging.review.acceptAllBody', { min })}
-      </ConfirmDialog>
-      <ConfirmDialog
-        open={state.confirmLog}
-        title={t('tagging.review.acceptLogTitle', { count: matches.length })}
-        confirmLabel={t('tagging.review.acceptLogConfirm', { count: matches.length })}
-        onCancel={review.cancelAcceptLog}
-        onConfirm={review.confirmAcceptLog}
-      >
-        {t('tagging.review.acceptLogBody')}
-        {logLeft && ` ${t('tagging.review.acceptLogLeft', { list: logLeft })}`}
+        {t('tagging.review.acceptSureBody')}
+        {waiting > 0 && ` ${t('tagging.review.acceptSureLeft', { count: waiting })}`}
       </ConfirmDialog>
     </section>
   )
@@ -390,11 +359,27 @@ function RallyFacts({ rally }: { rally: Segment }) {
           {logText}
         </p>
       )}
-      {rally.score_conflict && (
-        <p data-check="true" className="flex items-start gap-1.5 text-sm font-semibold text-danger">
-          <AlertIcon className="mt-0.5 size-4 shrink-0" />
-          {t('tagging.scoring.checkReason', { reason: scoreNoteText(t, rally.score_note) })}
-        </p>
+      {needsYou(rally) && rally.score_reasons && rally.score_reasons.length > 0 ? (
+        <div data-needs-you="true" className="flex flex-col gap-1 rounded-lg border border-danger/40 bg-danger/5 p-2 text-sm">
+          <p className="flex items-center gap-1.5 font-semibold text-danger">
+            <AlertIcon className="size-4 shrink-0" />
+            {t('tagging.review.needsYouTitle')}
+          </p>
+          <ul className="flex list-disc flex-col gap-0.5 pl-6">
+            {rally.score_reasons.map((reason, i) => (
+              <li key={`${reason.code}-${i}`} data-reason={reason.code}>
+                {reasonText(t, reason, names)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        rally.score_conflict && (
+          <p data-check="true" className="flex items-start gap-1.5 text-sm font-semibold text-danger">
+            <AlertIcon className="mt-0.5 size-4 shrink-0" />
+            {t('tagging.scoring.checkReason', { reason: scoreNoteText(t, rally.score_note) })}
+          </p>
+        )
       )}
       <CallButtons
         label={t('tagging.review.whoServed')}

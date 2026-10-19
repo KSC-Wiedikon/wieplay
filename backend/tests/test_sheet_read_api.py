@@ -221,11 +221,15 @@ def test_a_photo_is_read_on_club_hardware_and_confirmed_set_by_set(
     cells1 = read["sets"]["1"]["cells"]
     field = "box.us.1.1" if truth[0]["first_serve"] == "us" else "box.us.2.1"
     flagged = [k for k, c in cells1.items() if c["check"]]
-    assert flagged == [field] and cells1[field]["why"] == "rules"
+    # The scoring takes the drafts at once (PLAN §10.3) and resolves the boxes it is sure of:
+    # a misread box the rules and the video decide is no longer to check ("decoded").
+    assert flagged in ([field], []) and cells1[field]["why"] in ("rules", "decoded")
+    assert cells1[field]["v"] == (truth[0]["boxes_us"][0][0] if field == "box.us.1.1" else
+                                  truth[0]["boxes_us"][1][0])  # fmt: skip
     assert cells1[field]["quad"] == QUAD and cells1[field]["img"] == img["id"]
-    assert read["to_check"] == 2
-    # Drafts are shown and checked, never scored.
-    assert [c["use"] for c in out["checks"]] == [None] * 4 and out["trusted"] is False
+    assert 0 < read["to_check"] <= 2
+    # Drafts are shown and checked, and scored as read: soft evidence (PLAN §10.3).
+    assert [c["use"] for c in out["checks"]] == ["read"] * 4 and out["trusted"] is False
     with Session(db_engine) as db:
         photo = db.get(ScoresheetImage, img["id"])
         assert photo is not None and photo.registration and photo.reading["cells"]
@@ -251,7 +255,7 @@ def test_a_photo_is_read_on_club_hardware_and_confirmed_set_by_set(
     done = r.json()
     assert done["read"]["drafts"] == [2, 3, 4] and done["status"] == "draft"
     assert done["read"]["sets"]["1"]["state"] == "confirmed"
-    assert [c["use"] for c in done["checks"]] == ["path", None, None, None]
+    assert [c["use"] for c in done["checks"]] == ["path", "read", "read", "read"]
     with Session(db_engine) as db:
         labels = db.scalars(select(ScoresheetLabel)).all()
         assert labels and {lb.set_no for lb in labels} == {1}
@@ -324,7 +328,7 @@ def test_what_people_typed_is_never_proposed_over(
         json={"base_version": out["version"], "sets": list(sets.values()), "use_in_scoring": True},
     )
     assert saved.status_code == 200 and saved.json()["status"] == "draft"
-    assert [c["use"] for c in saved.json()["checks"]][2] is None  # still a draft: not scored
+    assert [c["use"] for c in saved.json()["checks"]][2] == "read"  # still a draft: as read
     coach.post(f"/api/videos/{ready['id']}/scoresheet/read", json={})
     job = claim_read(lenovo)
     complete(lenovo, job, result(job, reading_of(truth)))

@@ -1657,8 +1657,19 @@ games), v0 keeps proposing, and a rerun never proposes again where a coach rejec
 - **Still to do**: telling our referee's pitch from the next court's in tournament halls, and
   a court mask against the neighbours' balls.
 - **Review UI**: rally strip with `Enter` accept, `←/→` nudge a boundary, `X` reject, `M`
-  merge, `S` split; "accept all remaining with confidence ≥ 90 %" and, with a trusted
-  scoreboard log, "accept all that match the scoreboard log" (§10.10), each one undo step.
+  merge, `S` split, `1`/`2` who served, `3`/`4` who won, `W B T D O` a break, `U` undo. Since
+  19.10.2026 (§10.3 "One decode, every source") it asks only about the rallies the scoring
+  stays unsure of: the review list opens on **"Needs you: N"** (each rally with why: "the video
+  and the sheet disagree on the winner", "the sheet's box here is unclear (17 or 11)", "no point
+  on the board log", "a timeout (Volero) at 14:12 doesn't fit here: the score here is 13:12",
+  "a missed rally next to it"), the walk visits those first, and one button, **"Accept all sure
+  rallies (N)"**, confirms the start and end of every open rally suggestion the scoring is sure
+  of (who won stays WiePlay's suggestion, which follows the evidence, as PR #63 decided for the
+  log), in one undo step. It replaced "accept all remaining with confidence ≥ 90 %" (the
+  finder's confidence, blind to the score) and "accept all that match the scoreboard log"
+  (§10.10). A decision (a winner, a serve, accept, reject, a break, a moved boundary) is scored
+  again in the same request, and the reply carries every rally: the rallies around it can
+  become sure while the coach watches.
 - **Bar**: boundary F1 ≥ 0.9 at ±1 s on held-out matches before condensed mode is the default
   view for new videos.
 - **First run, 16.10.2026** (2. Liga, H3 vs Volero Legends, 132 min, YouTube 1080p60), in
@@ -1954,6 +1965,113 @@ metrics keep the shift it applied (`serve_shift`).
 - The two videos filmed from the side (Stäfa away, the Volero friendly) have no serve evidence
   now: 264 of their 266 rallies are flagged unsure (111 before, read confidently on noise).
 
+**One decode, every source (built 19.10.2026).** The owner, 19.10.2026: "any rally that is not
+100 % sure by video analysis and is not 100 % sure with additionally line up, TO, sub, service
+etc. from ledboard and/or scoreboard then ask for manual review OF THE RALLY not the
+scoreboard." So the scoring weighs every source per rally in one decode per set, says which
+rallies it is sure of, and asks the coach about the rest in the review (§10.1), never about
+the scoresheet's cells.
+
+- **The decode** (`wieplay/ml/scoring.py`): the dynamic programme above, over (score, next
+  server), and, when a set's scoresheet was read from its photo and not confirmed (§10.3a,
+  SS4), the side-outs so far too (which service box the next side-out writes). Evidence per
+  rally: the serve read in the video, the board in the picture, the club scoreboard's log (who
+  won, "no point", **the score after the rally**, the points it saw without a rally), a coach's
+  serve or winner; per set: the official set score (hard), a typed or confirmed sheet as its
+  exact path (as before), a sheet read from the photo as soft evidence (each service box costs
+  `W_READ` x -log p of the reader's calibrated probability for the value the path implies, the
+  boxes it leaves blank -log p(blank); a box a coach corrected in the draft counts as typed;
+  the receiving team's X and the S/R crosses weigh in on who served first), the sheet's
+  timeouts and substitutions as "score at this break" evidence (a timeout's break long enough
+  for one: +1.6 log-odds, a short one -1.2; a substitution 0.3 / -1.0; times `W_NOTE`), its
+  penalty points (P, DP) as points without a rally at their score, the service order through
+  the boxes' turns. The cheapest path is the score line, as before.
+- **Posteriors** by forward-backward over the same lattice: per rally who won (or no point),
+  who served, a point without a rally right before it, and its answer *with its score line*;
+  per read box its likeliest value and how probable. The costs are log-probabilities only
+  roughly: plain posteriors were sure of wrong alignments next to a missed rally or a replay
+  (game 509: 14 wrong of 103 "sure" rallies with the typed sheet, 7 of 72 with the read one),
+  so the soft costs are divided
+  by `TEMPERATURE` 2 for the posteriors; the log's costs and a coach's facts are kept as they
+  are (on these games the log was never wrong). Max-marginals stay for the flags' confidence.
+- **Sure** (`judge`): the coach decided it (a winner is a fact; a rally they accepted that is
+  no point is a replay), or its answer with its score line is at least `SURE` (97 %) probable
+  (times how sure our side and the first server are) **and** no source that speaks about it
+  disagrees: the log (its winner, "no point", its score), the board, the sheet (a typed sheet's
+  winner against the log; a read box the reader saw as another value at ≥ 90 %), the video (the
+  next rally's serve read ≥ 90 % for the other team; the scoring blind to the log or the board
+  sure of another answer), a coach's serve, a timeout, substitution or card that does not fit
+  the decoded score there, and no point without a rally next to it (≥ 30 %). Everything else
+  needs the coach, with its reasons (`segment.score_sure`, `segment.score_reasons`, the first
+  also as `score_note`; migration 0026; `score_conflict` now means "needs the coach" or a
+  coach's call that disagrees). A rally outside every set needs the coach too ("no set").
+- **The coach's decisions flow back**: any decision on a rally in the review scores again in
+  the same request (`POST …/changes`); the rallies around it can become sure, and a read
+  sheet's box behind it resolves by itself (`core/sheet_reading.py` `resolve`: a box the decode
+  is ≥ 98 % sure of is written into the draft and no longer "to check", but only to a value the
+  reader gave at least 5 %: where the ink clearly says another number, the paper and the decode
+  disagree, and the box stays to check). No separate sheet confirmation is needed; the sheet
+  page's "check N cells" is optional now.
+- **Measured** (`scripts/ml/fused_eval.py`, offline, the scoring as the API runs it; the two
+  games with trusted logs, prod's rallies as they are; the sheets: the verified transcriptions
+  typed, and the real photo and scan read by the SS4 reader). The reference is the log: its
+  winner or "no point" per rally and its score after it. On game 509 the log and the paper
+  sheet differ on 4 points of set 4 between 3:2 and 7:6 (both consistent, both ending 23:25):
+  the serves read in the video (six in a row, each ≥ 96 %) and the frames (who serves from the
+  near end line) show the log is right and the scorer wrote the order wrong. Defaults: `SURE`
+  0.97, `TEMPERATURE` 2, `W_READ` 0.3, `W_NOTE` 0.5.
+
+  Game 509, H3 – Voléro Legends (191 rallies in sets, 161 open suggestions; 188 rallies the log
+  speaks about, 173 of them points):
+
+  | Evidence | Sure | Wrong among sure | Need the coach (open suggestions) | Winner right | Score line right |
+  |---|---|---|---|---|---|
+  | a: video + official score | 0 (0 %) | 0 | 191 (161) | 149/173 | 62/173 |
+  | b: + the sheet read from its photo | 0 (0 %) | 0 | 191 (161) | 152/173 | 131/173 |
+  | c: + the sheet typed | 24 (13 %) | 0 | 167 (156) | 156/173 | 143/173 |
+  | d: video + official score + log | 139 (73 %) | 0 | 52 (48) | 173/173 | 173/173 |
+  | e: + the sheet typed + log | 135 (71 %) | 0 | 56 (52) | 171/173 | 166/173 |
+  | e': + the sheet read + log | 141 (74 %) | 0 | 50 (46) | 173/173 | 173/173 |
+
+  Game 409, H1 – H3 (135 rallies, all open suggestions; 130 the log speaks about, 119 points):
+
+  | Evidence | Sure | Wrong among sure | Need the coach (open suggestions) | Winner right | Score line right |
+  |---|---|---|---|---|---|
+  | a | 0 (0 %) | 0 | 135 (135) | 102/119 | 39/119 |
+  | b | 0 (0 %) | 0 | 135 (135) | 112/119 | 100/119 |
+  | c | 2 (2 %) | 0 | 133 (133) | 110/119 | 107/119 |
+  | d | 102 (76 %) | 0 | 33 (33) | 119/119 | 119/119 |
+  | e | 103 (76 %) | 0 | 32 (32) | 119/119 | 119/119 |
+  | e' | 99 (73 %) | 0 | 36 (36) | 119/119 | 119/119 |
+
+  With the log as evidence the counts of "wrong among sure" are against the log itself (it is
+  the reference), so a, b and c set the temperature: at `TEMPERATURE` 1 sure rallies were wrong
+  (at 97 %: game 509 b 7 of 72, c 14 of 103; game 409 c 4 of 58), at 1.5 still (game 509 c 5
+  of 69), at 2 none at 95 % or 97 % on either game (at 90 %: game 509 c 3 of 60). The read sheet's
+  weight: 0.3 against 0.6 and 1.0 (b's winners 152 / 145 / 113 of 173 on 509, 112 / 109 / 86
+  of 119 on 409; e' sure 141 / 134 / 107 and 99 / 95 / 60), 0.15-0.2 lost again. A read box
+  "disagrees" from 90 % of the reader (at 50 %, e' asked about 9 and 16 more rallies). The log's
+  score after each rally (new) took the score line with the log alone from 145 to 173 of 173
+  and 111 to 119 of 119 (a log that starts late, game 409's first four points, no longer shifts
+  everything after it). Timeouts and substitutions as evidence: no consistent gain again
+  (`W_NOTE` 0, 0.5, 1: the score lines right over all mixes 740, 739, 740), kept at 0.5; they
+  mostly ask: 2-4 rallies a game where one does not fit. The read boxes: b decoded 377 of 380
+  and 283 of 285 boxes as written, every box it was ≥ 98 % sure of right; of the reader's
+  boxes "to check" (21 and 36) the decode resolves 6 and 3 without the log, 16 and 21 with it,
+  all as written; the one it was sure of otherwise (set 4 of game 509, the scorer's slip) the
+  ink rule kept to check.
+
+  **Before and after**, the coach's work on the open suggestions with the evidence prod has
+  (video and log, no sheet): game 509 "accept all that match the scoreboard log" left 47 of
+  161, the decode leaves 48 (of all 191 rallies 52: 15 no point on the log, 19 + 3 a missed
+  rally next to it, 12 the video and the log disagree, 3 no point); game 409 33 and 33. What changed is what "accepted" means: every
+  rally the decode is sure of has the log's score line after it (before, 28 of the 173 log
+  points on game 509 and 8 of 119 on 409 had another score line), and nothing it is sure of was
+  wrong. Without a log, the video and the official score alone make no rally sure on these
+  games (a): honest, the coach decides; with a typed sheet a few (c), with the sheet's photo read
+  too few to count (b): which rally is which point stays open next to every missed rally and
+  replay. A decode takes 0.2-0.7 s per game with the log, 1-3 s with a read sheet alone.
+
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
 
@@ -2168,8 +2286,11 @@ H3's league; every team gets a carbon copy), so WiePlay knows every point in ord
 - **Drafts** (`wieplay/core/sheet_reading.py`): the decoded sets are written with `status`
   "draft" and `source` "read"; `scoresheet.read` keeps per set its state (draft, confirmed,
   skipped, discarded), the proposals with the reader's top readings, the cells to check, where
-  each cell is on the photo, and the set as it was before. **A draft is checked and shown but
-  never scored** (no path, no hint, no fill of the sets). **Never over what a person typed**: a
+  each cell is on the photo, and the set as it was before. ~~A draft is checked and shown but
+  never scored~~: since 19.10.2026 a draft is **scored as read**, soft evidence in the joint
+  decode (§10.3 "One decode, every source": each box W_READ x -log p, weaker than a typed sheet
+  and the log, stronger than the serves; no path, no hint, no fill of the sets until it is
+  confirmed); the boxes the decode is sure of resolve in the draft by themselves. **Never over what a person typed**: a
   typed set that fits is skipped; in a typed set that doesn't, the typed boxes, lineups,
   timeouts, substitutions and times stay and only the empty cells are proposed; a draft's cells a
   coach changed stay when the photo is read again. `scoresheet.read` is not part of the sheet's
@@ -2283,7 +2404,10 @@ cards in case"):
   substitutions on 509 (3 flagged by the log check), 5 of 7 and 7 of 7 on 409. Neither sheet
   has a sanction (tested on made-up sets). **As alignment evidence** (a cost for a timeout or
   substitution placed in a gap shorter than 30 / 15 s, weights 0.5-3): no gain (509 without the
-  log 142-145 of 167 against 145; 409 105-106 against 106), so they only check.
+  log 142-145 of 167 against 145; 409 105-106 against 106), so they only check. Measured again
+  19.10.2026 in the joint decode (a long break as positive evidence too, §10.3): no consistent
+  gain either; they are evidence at a low weight and ask the coach about the rally next to one
+  that does not fit ("a timeout at 14:12 doesn't fit here").
 
 **Not yet:** substitutions as events (`SUB`, research §4.4): they stay on the sheet and the
 page shows where each falls in the video; a "Sheet" column, point strip and `X`/`M` keys in
@@ -2859,7 +2983,10 @@ servers the logs imply on 93 % (409) and 98 % (509) of the rallies.
 The flags left are specific now: a rally the finder missed (add it), one that was none
 (reject it), or one where the video's own evidence was confidently wrong.
 
-**Accept all that match the log (built 18.10.2026).** With a trusted log the review offers
+**Accept all that match the log (built 18.10.2026; replaced 19.10.2026 by "Accept all sure
+rallies", §10.1 and §10.3 "One decode, every source", which generalises it to every source:
+the log now also gives the score after each rally, and a rally is sure only when its score
+line is too).** With a trusted log the review offered
 "Accept all that match the scoreboard log (N)": after a confirmation, every open rally
 suggestion where the log has a point, WiePlay's winner is the log's and nothing is flagged
 becomes a confirmed rally, in one undo step, and a note says what is left and why. Accepting

@@ -115,7 +115,7 @@ describe('a sheet read from the photo', () => {
         },
       },
     })
-    expect(await screen.findByText('Read from the photo: check 2 cells')).toBeInTheDocument()
+    expect(await screen.findByText('Read from the photo, already used by the scoring; optional: check 2 cells')).toBeInTheDocument()
     expect(screen.getByText('Set 1 was read from the photo: 2 cells to check.')).toBeInTheDocument()
     expect(screen.getByText('On the sheet we are team B.')).toBeInTheDocument()
     // The doubtful cells stand out; the sure ones are marked lightly; a typed one is plain.
@@ -132,7 +132,7 @@ describe('a sheet read from the photo', () => {
     await waitFor(() => expect(box('KSCW H3', 'II', 2)).toHaveFocus())
     expect(screen.getByText(/Read: 14 \(11\?\) · not sure/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'It is right' }))
-    expect(await screen.findByText('Read from the photo: check 1 cell')).toBeInTheDocument()
+    expect(await screen.findByText('Read from the photo, already used by the scoring; optional: check 1 cell')).toBeInTheDocument()
     expect(box('KSCW H3', 'II', 2)).not.toHaveAttribute('data-read')
 
     // A correction typed in counts as checked.

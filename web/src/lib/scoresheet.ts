@@ -496,7 +496,7 @@ export interface SetCheckOut {
   no: number
   deciding: boolean
   status: SetStatus
-  use: 'path' | 'hint' | null
+  use: 'path' | 'hint' | 'read' | null
   wanted: boolean
   final: [number, number]
   official: [number, number] | null

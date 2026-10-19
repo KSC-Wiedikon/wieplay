@@ -583,6 +583,7 @@ function ScoringLine({ saved }: { saved: SetCheckOut }) {
   let lines: string[]
   if (saved.use === null) lines = [t('sheet.scoring.off')]
   else if (saved.use === 'hint') lines = [t('sheet.scoring.hint')]
+  else if (saved.use === 'read') lines = [t('sheet.scoring.read')]
   else if (!m || m.aligned === null || m.aligned === undefined) lines = [t('sheet.scoring.notYet')]
   else {
     lines = [t('sheet.scoring.path', { aligned: n('aligned'), points: n('points') })]

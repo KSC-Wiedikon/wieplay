@@ -637,6 +637,10 @@ class Segment(Base):
     score_confidence: Mapped[float | None] = mapped_column(Float)
     score_conflict: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     score_note: Mapped[str | None] = mapped_column(String(16))
+    # The joint decode (PLAN §10.3): sure (needs no coach), and else why the coach is asked
+    # ([{"code": "log_none"}, {"code": "sheet_box", "values": [17, 11]}, ...]). Null: not scored.
+    score_sure: Mapped[bool | None] = mapped_column(Boolean)
+    score_reasons: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB(none_as_null=True))
     # The club scoreboard's log (PLAN §10.10), where its set matches the official result: who
     # won by the point pressed after the rally (us | them | none), the set's score after it,
     # and when that point was pressed (video ms). Written by the scoring, never a coach's.
