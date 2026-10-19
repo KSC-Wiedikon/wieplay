@@ -29,6 +29,7 @@ function GuideContent() {
     ['regrade', g.regrade.title],
     ['sheet', g.sheet.title],
     ['actions', g.actions.title],
+    ['identify', g.identify.title],
     ['rights', g.rights.title],
   ]
 
@@ -176,6 +177,13 @@ function GuideContent() {
           <GuideSection id="actions" title={g.actions.title}>
             <p>{g.actions.body}</p>
             <KeyTable rows={g.actions.keys} guide={g} label={g.actions.title} />
+          </GuideSection>
+
+          <GuideSection id="identify" title={g.identify.title}>
+            <p>{g.identify.intro}</p>
+            <Steps steps={g.identify.steps} />
+            <KeyTable title={g.identify.keysTitle} rows={g.identify.keys} guide={g} />
+            <Tips tips={g.identify.tips} />
           </GuideSection>
 
           <GuideSection id="rights" title={g.rights.title}>

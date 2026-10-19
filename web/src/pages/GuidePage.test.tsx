@@ -24,6 +24,7 @@ describe('GuidePage', () => {
       '#regrade',
       '#sheet',
       '#actions',
+      '#identify',
       '#rights',
     ])
 

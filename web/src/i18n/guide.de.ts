@@ -192,6 +192,34 @@ export const guideDe: Guide = {
       { keys: ['0–9', 'Enter'], text: 'Den Spieler mit der Trikotnummer nennen und übernehmen' },
     ],
   },
+  identify: {
+    title: 'Spieler bestimmen',
+    intro:
+      'Nach «Spieler finden» kennt WiePlay einige Personen sicher (ihre Nummer oft genug gelesen); der Rest wartet auf dich. «Spieler bestimmen (N zu prüfen)» auf der Videoseite zeigt sie einzeln, die am längsten gesehene zuerst, gross: das Video auf die Person gezoomt, in mehreren Momenten.',
+    steps: [
+      'Tippe ihre Nummer. Unsere kommen aus dem Kader; die Nummern, die das Matchblatt in den Ballwechseln dieser Karte auf dem Feld hat, zuerst. Gegner: Nummer tippen oder eingeben.',
+      'Kein Spieler (Schiedsrichter, Linienrichter, Bank), das andere Team (nur diese Karte) oder dieselbe Person wie eine andere Karte: je ein Tippen.',
+      'Mehrere Personen auf einer Karte (WiePlay hat sie nach ihren Farben verbunden): Wähle die Bilder einer Person und tippe ihre Nummer; wiederhole für die anderen.',
+      'Unsicher? Überspringen. Rückgängig nimmt die letzte Antwort zurück.',
+      'Beim Schauen: «Spieler benennen» unter dem Video, anhalten, auf eine Person tippen und ihre Nummer wählen.',
+      'Kann WiePlay die Teams nicht sicher unterscheiden (kein Feld gesetzt, ähnliche Trikots), fragt es zuerst, auf welcher Seite des Netzes wir im ersten Satz standen.',
+    ],
+    keysTitle: 'Tasten beim Bestimmen',
+    keys: [
+      { keys: ['0–9', 'Enter'], text: 'Die Nummer' },
+      { keys: ['N'], text: 'Kein Spieler' },
+      { keys: ['T'], text: 'Das andere Team' },
+      { keys: ['S'], text: 'Gleich wie eine andere Karte' },
+      { keys: ['M'], text: 'Mehrere Personen: Stücke benennen' },
+      { keys: ['K', '→'], text: 'Überspringen' },
+      { keys: ['U'], text: 'Rückgängig' },
+    ],
+    tips: [
+      'Jede Antwort ist eine Tatsache: Karten, auf deren Trikot die gegebene Nummer gelesen wird, kommen von selbst dazu.',
+      'Du erkennst die Person mit eigenen Augen; WiePlay nutzt keine Gesichter, und nichts verlässt dieses Video.',
+      'Spieler auf der fernen Seite sind bei 1080p oft zu klein: Überspring sie, die nahe Seite zählt am meisten.',
+    ],
+  },
   rights: {
     title: 'Was Helfer können und was nicht',
     canTitle: 'Du kannst',

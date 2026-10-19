@@ -3,7 +3,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router'
 import { Badge } from '../components/Badge'
-import { Button } from '../components/Button'
+import { Button, ButtonLink } from '../components/Button'
 import { Card } from '../components/Card'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { AlertIcon, CheckIcon, ChevronRightIcon, MergeIcon, SparkleIcon, SplitIcon } from '../components/icons'
@@ -15,6 +15,7 @@ import { PageSpinner } from '../components/Spinner'
 import { ApiError } from '../lib/api'
 import { cx } from '../lib/cx'
 import { formatDuration } from '../lib/format'
+import { useIdentifyQueue } from '../lib/identify'
 import { formatClock } from '../lib/labels'
 import {
   clusterTitle,
@@ -116,6 +117,7 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
   const busy = data.status === 'queued' || data.status === 'running'
   const people = data.clusters.filter((c) => !c.not_player)
   const named = people.filter((c) => c.number !== null).length
+  const check = useIdentifyQueue(videoId, data.run !== null).data?.items.length ?? 0
 
   const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
   const doMerge = () => {
@@ -177,6 +179,11 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
                 </>
               )}
               <div className="flex flex-wrap gap-2">
+                {check > 0 && (
+                  <ButtonLink to={`/videos/${videoId}/identify`} variant="primary">
+                    {t('identify.open', { count: check })}
+                  </ButtonLink>
+                )}
                 <Button onClick={() => setAskSwap(true)} disabled={swap.isPending} title={t('players.swapHint')}>
                   {t('players.swap')}
                 </Button>
