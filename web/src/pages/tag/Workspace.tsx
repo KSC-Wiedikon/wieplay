@@ -30,6 +30,7 @@ import { keys } from '../../lib/queryClient'
 import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
 import { actionItems, factTags, suggestedCount } from '../../lib/actions'
 import { allProgress, LOOP_POST_MS, LOOP_PRE_MS, reviewProgress, suggestionCount } from '../../lib/suggestions'
+import { useSheetCourt } from '../../lib/sheetCourt'
 import { SideNamesContext, sideNamesOf, useSideNames } from '../../lib/sides'
 import { TaggingStore } from '../../lib/taggingStore'
 import type { Tagging, Taxonomy, Video } from '../../lib/types'
@@ -200,6 +201,9 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
     () => new ActionReviewController(store, playhead, controller, { rejectedBefore: actionsRejectedBefore, onLeave: () => review.stop() }),
   )
   const [regrade] = useState(() => new RegradeController(store, playhead, controller))
+  // The official scoresheet's lineups: a serve tagged without a number gets the sheet's server.
+  const court = useSheetCourt(video.id, controller.playsRallies).data
+  useEffect(() => controller.setSheetCourt(court), [controller, court])
   // Esc on the regrade setup: back to tagging (a phone has nothing else here: the video page).
   const navigate = useNavigate()
   useEffect(() => {

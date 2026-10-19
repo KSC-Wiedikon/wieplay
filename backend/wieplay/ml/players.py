@@ -708,12 +708,21 @@ def read_numbers(
     return len(jobs)
 
 
-def vote(t: Track, allowed: dict[str, set[int]] | None = None) -> None:
-    """A track's number from its readings (those its team's roster allows)."""
-    ok = allowed.get(t.team) if allowed else None
+# Who may be read on a team at an analysed frame (team, frame, number): the official
+# scoresheet's six on court and the liberos during a rally (wieplay/ml/serve_labels.py).
+Ok = Callable[[str, int, int], bool]
+
+
+def vote(t: Track, allowed: dict[str, set[int]] | None = None, ok: Ok | None = None) -> None:
+    """A track's number from its readings: those its team's roster allows, or with `ok`
+    those it allows at the frame of the reading (the sheet's players on court)."""
+    roster = allowed.get(t.team) if allowed else None
     t.votes = {}
-    for _, number, conf in t.reads:
-        if ok and number not in ok:
+    for frame, number, conf in t.reads:
+        if ok is not None:
+            if not ok(t.team, frame, number):
+                continue
+        elif roster and number not in roster:
             continue
         t.votes[number] = t.votes.get(number, 0.0) + conf
     settle_number(t)

@@ -48,6 +48,9 @@ class WorkerSettings(BaseSettings):
     # v2, PLAN §10.5); the CPU looks at the rallies only.
     players_join_gap_s: float = 2.0
     players_detect_fps: float = 10.0
+    # The official scoresheet's labels (who served, who was on court; PLAN §10.5): used when
+    # the API sends them (a sheet lined up with the rallies).
+    players_sheet: bool = True
 
     # The busy guard of a GPU worker (gpu_guard.py, PLAN §8.2): before every claim and
     # between frames, nobody else may need the card.

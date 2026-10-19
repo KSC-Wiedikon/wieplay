@@ -346,8 +346,8 @@ def test_windows_pad_join_and_keep_agreeing_sides() -> None:
     ]
     found = job.windows_from(rallies, 100_000)
     assert found == [
-        {"start_ms": 9_000, "end_ms": 31_000, "near_team": "us"},
-        {"start_ms": 59_000, "end_ms": 73_000, "near_team": None},
+        {"start_ms": 9_000, "end_ms": 31_000, "near_team": "us", "lead_ms": 0, "rallies": [0, 1]},
+        {"start_ms": 59_000, "end_ms": 73_000, "near_team": None, "lead_ms": 0, "rallies": [2, 3]},
     ]
 
 

@@ -175,6 +175,10 @@ export const guideDe: Guide = {
       'Das abgetippte Matchblatt nimmt nur Rückennummern und Spielstände; Namen, Geburtsdaten und Lizenznummern bleiben auf dem Papier (und auf dem Foto sind sie schwarz).',
       'Ein Satz, der nicht passt, bleibt gespeichert und dient nur als Hinweis. Einen Satz, dem du nicht traust, kannst du ausschalten; der Rest zählt weiter.',
       'Deine eigenen Sieger gehen dem Matchblatt immer vor: Wo sie abweichen, wird der Ballwechsel markiert, damit du nochmals hinschaust.',
+      'Ein Aufschlag, den du ohne Nummer taggst, bekommt in einem dem Matchblatt zugeordneten Ballwechsel den Aufschläger, den das Matchblatt nennt (aS für den Gegner); eine Nummer, die du tippst, geht immer vor. «Übernehmen» auf der Spielerseite füllt die früher getaggten Aufschläge.',
+      'Die Statistik zeigt die Zahlen des Matchblatts pro Spieler auch ohne ein einziges Tag: Aufschläge, Punkte daraus, die längste Serie, Asse und Fehler, wo ein Aufschlag-Tag sie bewertet hat, und das Plus/Minus auf dem Feld, auch pro Rotation.',
+      'Auszeiten, Wechsel und Karten werden in ihrer Pause im Video geprüft: «Vom Matchblatt» in der Kontrolle listet die, bei denen der Spielstand oder das Log der Anzeigetafel etwas anderes sagt, und die Karten sind auf der Zeitleiste markiert (nur das Team, nie eine Person).',
+      'Auch das Finden der Spieler nutzt das Matchblatt: Der Aufschläger bekommt die Nummer der Zone I, und wer eine Nummer trägt, die gerade nur das andere Team auf dem Feld hat, kommt zu diesem Team.',
     ],
   },
   actions: {

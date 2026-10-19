@@ -12,6 +12,7 @@ import { useSetRalliesReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
 import { formatClock, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { periodAt } from '../../lib/rallies'
+import { cardTone, courtByRally, issueText, notesAfter, notesToShow, noteText, noteTime, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { fullNameOf, useSideNames, type SideNames } from '../../lib/sides'
 import {
   ACCEPT_ALL_MIN,
@@ -262,6 +263,7 @@ export function ReviewPanel() {
         </div>
       )}
 
+      <SheetNotes />
       {!narrow && (
         <div className="border-t border-hairline pt-3">
           <KeyLegend />
@@ -305,8 +307,12 @@ function suggestedDetail(t: TFunction, parts: (string | null | undefined)[]): st
  */
 function RallyFacts({ rally }: { rally: Segment }) {
   const { t } = useTranslation()
-  const { review, narrow } = useWorkspace()
+  const { review, narrow, video } = useWorkspace()
   const names = useSideNames()
+  // The official scoresheet (docs/PLAN.md §10.3a, §10.5): who served, and its notes after the rally.
+  const court = useSheetCourt(video.id, rally.sheet_point != null).data
+  const onCourt = courtByRally(court).get(rally.id) ?? null
+  const after = notesAfter(court, rally.id)
   const server = effectiveServer(rally)
   const winner = effectiveWinner(rally)
   const score = scoreAfter(rally)
@@ -369,7 +375,15 @@ function RallyFacts({ rally }: { rally: Segment }) {
       {sheetSays && (
         <p data-sheet={sheetSays} className="text-sm text-muted tabular-nums" title={t('sheetReview.title')}>
           {t('sheetReview.point', { n: rally.sheet_point, team: sideLabel(t, sheetSays, names) })}
+          {onCourt?.server != null && ` · ${t('sheetReview.server', { number: onCourt.server, team: sideLabel(t, onCourt.serving, names) })}`}
         </p>
+      )}
+      {after.length > 0 && (
+        <ul aria-label={t('sheetCourt.afterRally')} className="flex flex-col gap-1 text-sm">
+          {after.map((note) => (
+            <SheetNoteLine key={`${note.kind}-${note.set}-${note.index}`} note={note} />
+          ))}
+        </ul>
       )}
       {logText && (
         <p data-log={logSays ?? undefined} className="text-sm text-muted tabular-nums" title={logDelay !== null ? t('tagging.scoring.log.title', { delay: logDelay }) : undefined}>
@@ -403,6 +417,80 @@ function RallyFacts({ rally }: { rally: Segment }) {
         narrow={narrow}
       />
     </div>
+  )
+}
+
+/** One of the scoresheet's notes: what it is, where, and what disagrees there. */
+function SheetNoteLine({ note, seek }: { note: SheetNote; seek?: (ms: number) => void }) {
+  const { t } = useTranslation()
+  const names = useSideNames()
+  const time = noteTime(note)
+  const card = note.kind === 'sanction' ? cardTone(note.sanction) : null
+  return (
+    <li data-note={note.kind} data-issues={note.issues.join(' ') || undefined} className="flex flex-col gap-0.5">
+      <span className={cx('flex flex-wrap items-center gap-1.5 tabular-nums', note.issues.length > 0 && 'font-semibold text-danger')}>
+        {card && <CardMark tone={card} />}
+        {note.issues.length > 0 && <AlertIcon className="size-4 shrink-0" />}
+        {noteText(t, note, names)}
+        {seek && time && note.start_ms != null ? (
+          <button
+            type="button"
+            className="cursor-pointer text-link underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={() => seek(note.start_ms ?? 0)}
+            title={t('sheetCourt.play', { time })}
+          >
+            {time}
+          </button>
+        ) : (
+          time && <span className="text-muted">· {time}</span>
+        )}
+      </span>
+      {note.issues.map((issue) => (
+        <span key={issue} className="text-muted">
+          {issueText(t, note, issue)}
+        </span>
+      ))}
+    </li>
+  )
+}
+
+/** A card's colour as a small chip (no person: the team only). */
+export function CardMark({ tone }: { tone: 'yellow' | 'red' | 'dark' }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-card={tone}
+      className={cx(
+        'inline-block h-3.5 w-2.5 shrink-0 rounded-[2px] ring-1 ring-fg/30',
+        tone === 'yellow' ? 'bg-yellow-400' : tone === 'red' ? 'bg-red-600' : 'bg-fg',
+      )}
+    />
+  )
+}
+
+/** The scoresheet's notes that disagree with the video, and its cards (docs/PLAN.md §10.3a). */
+function SheetNotes() {
+  const { t } = useTranslation()
+  const { video, controller } = useWorkspace()
+  const court = useSheetCourt(video.id).data
+  const notes = notesToShow(court)
+  const flagged = notes.filter((n) => n.issues.length > 0).length
+  if (!court || court.notes.length === 0) return null
+  return (
+    <details className="border-t border-hairline pt-3" open={flagged > 0}>
+      <summary className="cursor-pointer text-sm font-semibold">
+        {t('sheetCourt.title')}
+        <span className="ml-2 font-normal text-muted">{flagged > 0 ? t('sheetCourt.toCheck', { count: flagged }) : t('sheetCourt.allFit')}</span>
+      </summary>
+      <p className="mt-1 text-sm text-muted">{t('sheetCourt.intro')}</p>
+      {notes.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-2 text-sm">
+          {notes.map((note) => (
+            <SheetNoteLine key={`${note.kind}-${note.set}-${note.index}`} note={note} seek={(ms) => controller.seek(ms)} />
+          ))}
+        </ul>
+      )}
+    </details>
   )
 }
 

@@ -34,6 +34,7 @@ export const playersEn = {
       apply_one: 'Use WiePlay’s player for {{count}} of your tags',
       apply_other: 'Use WiePlay’s players for {{count}} of your tags',
       applyHint: 'Your tags without a number get the player WiePlay sees nearest the ball; you can change each one later.',
+      applySheet: 'Your serves without a number get the server the official scoresheet names for that rally; you can change each one later.',
       applied_one: '{{count}} tag got its player',
       applied_other: '{{count}} tags got their player',
     },

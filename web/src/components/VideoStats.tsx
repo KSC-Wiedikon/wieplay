@@ -41,6 +41,7 @@ import { SectionHeader } from './PageHeader'
 import { RotationStats } from './RotationStats'
 import { SearchBar } from './SearchBar'
 import { SetterStats } from './SetterStats'
+import { SheetPlayerStats } from './SheetPlayerStats'
 import { Spinner } from './Spinner'
 import { StatsLegend, StatsTable, TeamTable, type CellTarget, type TeamKey, type TeamTableRow } from './StatsTable'
 import { TabPanel, Tabs } from './Tabs'
@@ -103,9 +104,13 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
       ) : stats.isError ? (
         <LoadError onRetry={() => void stats.refetch()} />
       ) : !tagged ? (
-        <EmptyState icon={<ChartIcon />} title={t('stats.empty.title')}>
-          {tagging?.can_tag ? t('stats.empty.tagger') : t('stats.empty.body')}
-        </EmptyState>
+        <>
+          <EmptyState icon={<ChartIcon />} title={t('stats.empty.title')}>
+            {tagging?.can_tag ? t('stats.empty.tagger') : t('stats.empty.body')}
+          </EmptyState>
+          {/* The official scoresheet's numbers need no tag. */}
+          {stats.data?.sheet_players && stats.data.sheet_players.players.length > 0 && <SheetPlayerStats data={stats.data.sheet_players} />}
+        </>
       ) : (
         <div className="flex flex-col gap-4">
           <SearchBar
@@ -335,6 +340,7 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab, filter, search, tax
               </div>
             )}
             <StatsLegend columns={data.columns} team={data.rallies > 0} />
+            {scope === null && data.sheet_players && data.sheet_players.players.length > 0 && <SheetPlayerStats data={data.sheet_players} />}
           </>
         )}
         {tab === 'rotations' && (

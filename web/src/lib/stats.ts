@@ -173,6 +173,34 @@ export interface RallyFilter {
   won_by?: Side | 'any'
 }
 
+/** One shirt number's numbers from the official scoresheet (docs/PLAN.md §10.3a, §9.7). */
+export interface SheetPlayer {
+  side: Side
+  number: number
+  member_id: number | null
+  name: string | null
+  /** Points served, won on them, the longest run on one service turn. */
+  served: number
+  won_on_serve: number
+  won_on_serve_pct: number | null
+  longest_run: number
+  /** From the serve tags of the rallies lined up with the sheet (`tagged` of them graded). */
+  aces: number
+  errors: number
+  tagged: number
+  /** Points on court and won - lost then; per rotation (ours by the setter's zone when known). */
+  on_court: number
+  plus_minus: number
+  by_rotation: number[]
+}
+
+export interface SheetPlayers {
+  sets: number[]
+  /** Our rotations are the setter's zone (P1-P6); else 1 is the starting six. */
+  by_setter: boolean
+  players: SheetPlayer[]
+}
+
 export interface VideoStats {
   video_id: string
   team_id: number
@@ -192,6 +220,15 @@ export interface VideoStats {
   actions_gate?: ActionGate | null
   /** With ?search=: the tags it kept (`tags` stays the match's count); null without one. */
   selected?: number | null
+  /** From the official scoresheet, per player; null without a sheet lined up with the video. */
+  sheet_players?: SheetPlayers | null
+}
+
+/** "+3", "0", "−2": a plus/minus with its sign. */
+export function formatPlusMinus(value: number): string {
+  if (value > 0) return `+${value}`
+  if (value < 0) return `\u2212${-value}`
+  return '0'
 }
 
 export interface MatchLine {

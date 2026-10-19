@@ -35,6 +35,7 @@ export const playersDe: typeof playersEn = {
       apply_one: 'die Spieler von WiePlay für {{count}} deiner Tags übernehmen',
       apply_other: 'die Spieler von WiePlay für {{count}} deiner Tags übernehmen',
       applyHint: 'Deine Tags ohne Nummer bekommen den Spieler, den WiePlay am nächsten beim Ball sieht; du kannst jeden später ändern.',
+      applySheet: 'Deine Aufschläge ohne Nummer bekommen den Aufschläger, den das offizielle Matchblatt für diesen Ballwechsel nennt; du kannst jeden später ändern.',
       applied_one: '{{count}} Tag hat seinen Spieler',
       applied_other: '{{count}} Tags haben ihren Spieler',
     },

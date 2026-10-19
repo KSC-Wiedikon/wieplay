@@ -7,6 +7,7 @@ import { factTags } from '../../lib/facts'
 import { formatEntry, isEntryChar, parseEntry, toggleSide, type EntryError } from '../../lib/grammar'
 import type { Playhead } from '../../lib/playhead'
 import { proposeByKey, proposeByTag, rallyStartForServe, ralliesOf, type RallyProposal } from '../../lib/rallies'
+import { sheetServer, type SheetCourt } from '../../lib/sheetCourt'
 import { eventToIn, newId, periodToIn, segmentToIn, type TaggingStore } from '../../lib/taggingStore'
 import type { EventIn, PeriodIn, Review, Segment, SegmentIn, SegmentKind, Side, Tag, Taxonomy } from '../../lib/types'
 import type { Change } from '../../lib/outbox'
@@ -125,6 +126,8 @@ export class TagController {
   private readonly playhead: Playhead
   private readonly taxonomy: Taxonomy
   private readonly options: ControllerOptions
+  /** The official scoresheet's lineups per rally (docs/PLAN.md §10.5): a serve's server. */
+  private court: SheetCourt | undefined = undefined
 
   constructor(store: TaggingStore, playhead: Playhead, taxonomy: Taxonomy, options: ControllerOptions) {
     this.store = store
@@ -142,6 +145,11 @@ export class TagController {
 
   setFps = (fps: number): void => {
     if (fps > 0) this.fps = fps
+  }
+
+  /** The scoresheet's lineups, once loaded: a serve typed without a number gets its server. */
+  setSheetCourt = (court: SheetCourt | undefined): void => {
+    this.court = court
   }
 
   /** Volleyball is played in rallies (R, the point, skip dead time); basketball's score comes from its shots. */
@@ -286,6 +294,10 @@ export class TagController {
     if (parsed.grade) attributes.grade = parsed.grade
     if (parsed.zoneFrom !== null) attributes.zone_from = parsed.zoneFrom
     if (parsed.zoneTo !== null) attributes.zone_to = parsed.zoneTo
+    // A serve without a number in a rally the scoresheet was lined up with: its server (the
+    // number the coach types always wins; editable like any tag's).
+    const number =
+      parsed.number === null && skill.code === 'S' && this.playsRallies ? sheetServer(this.court, view.segments, t_ms, parsed.side) : parsed.number
     const event: EventIn = {
       id: newId(),
       base_version: 0,
@@ -294,7 +306,7 @@ export class TagController {
       frame: null,
       time_precision: 'live',
       side: parsed.side,
-      number: parsed.number,
+      number,
       attributes,
       // The server links tags to rallies by time (the open rally exists only here until it ends).
       segment_id: null,

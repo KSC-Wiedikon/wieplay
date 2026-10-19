@@ -223,6 +223,10 @@ export const guideEn: Guide = {
       'The typed sheet takes shirt numbers and scores only; names, dates of birth and licence numbers stay on paper (and on the photo they are black).',
       'A set that doesn’t fit is kept and used only as a hint. A set you don’t trust can be switched off; the rest still counts.',
       'Your own winners always win over the sheet: where they differ, the rally is flagged so you can look again.',
+      'A serve you tag without a number in a rally the sheet is lined up with gets the server the sheet names (aS for theirs); a number you type always wins. “Apply” on the players page fills the serves you tagged before.',
+      'The statistics show the sheet’s numbers per player even without a single tag: serves, points won on them, the longest run, aces and errors where a serve tag graded them, and the plus/minus on court, per rotation too.',
+      'Timeouts, substitutions and cards are checked at their break in the video: the review’s “From the scoresheet” lists those where the score line or the scoreboard’s log says otherwise, and the cards are marked on the timeline (the team only, never a person).',
+      'Finding the players uses the sheet too: the server gets the number of zone I, and a player whose shirt shows a number only the other team has on court then moves to that team.',
     ],
   },
   actions: {

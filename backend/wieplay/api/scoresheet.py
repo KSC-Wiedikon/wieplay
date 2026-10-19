@@ -4,6 +4,10 @@ GET    /api/videos/{id}/scoresheet         the sheet, each set decoded and check
 PUT    /api/videos/{id}/scoresheet         save it (whoever may tag); the match is scored again
 POST   /api/videos/{id}/scoresheet/check   the checks of a sheet not saved yet (repairs too)
 DELETE /api/videos/{id}/scoresheet         remove it (and its photos); scored again without it
+GET    /api/videos/{id}/scoresheet/court   per rally lined up with it: who served (team and
+                                           number) and both teams' six by zone; its timeouts,
+                                           substitutions and cards at their breaks, checked
+                                           (wieplay/core/lineups.py, sheet_notes.py)
 
 Photos of the paper sheet (SS3, wieplay/core/sheet_photos.py), for the team's coaches, team
 managers, sport admins and admins only (permissions.can_see_sheet_photo):
@@ -41,8 +45,8 @@ from sqlalchemy.orm import Session
 from wieplay.api.access import TeamAccess, team_refs, visible_video
 from wieplay.api.deps import DbDep, SettingsDep, StoreDep, ViewerDep, audit
 from wieplay.api.media import PRIVATE
+from wieplay.core import lineups, scoring, tagging
 from wieplay.core import scoresheet as ss
-from wieplay.core import scoring, tagging
 from wieplay.core import sheet_photos as sp
 from wieplay.core import sheet_reading as sr
 from wieplay.core.models import Period, ScoresheetImage, Segment, Video, VideoRoster
@@ -566,6 +570,70 @@ def get_scoresheet(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> SheetOu
     out = _state(db, viewer, video, access)
     db.rollback()
     return out
+
+
+class CourtRallyOut(BaseModel):
+    """A rally the sheet was lined up with: its point, who served (team and number), both
+    teams' six in zones I-VI, their rotations so far, the point's winner."""
+
+    rally: uuid.UUID
+    set: int
+    point: int  # 1-based, in the set's points
+    serving: str
+    server: int | None
+    us: list[int | None] | None
+    them: list[int | None] | None
+    rotation_us: int
+    rotation_them: int
+    winner: str
+    penalty: bool
+
+
+class SheetNoteOut(BaseModel):
+    """A timeout, substitution (or return) or sanction of the sheet in the video's break after
+    the rally of its last point, and what disagrees there (wieplay/core/sheet_notes.py)."""
+
+    set: int
+    kind: str  # timeout | sub | sub_back | sanction
+    index: int
+    side: str
+    score: list[int]  # us, them
+    at_points: int | None
+    sanction: str | None  # W P E D DW DP (no person)
+    number_in: int | None
+    position: int | None
+    rally: uuid.UUID | None
+    start_ms: int | None
+    end_ms: int | None
+    line: list[int] | None  # the score line after that rally
+    log: list[int] | None  # the club scoreboard's log there
+    issues: list[str]  # score_line | log | short_break | penalty_rally | off_path | no_rally
+
+
+class CourtOut(BaseModel):
+    """Who was on court per rally and the sheet's notes in the video (PLAN §10.3a, §10.5);
+    empty without a sheet lined up with the video."""
+
+    rallies: list[CourtRallyOut]
+    notes: list[SheetNoteOut]
+    liberos: dict[str, list[int]]
+
+
+@router.get("/videos/{video_id}/scoresheet/court", response_model=CourtOut)
+def sheet_court(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> CourtOut:
+    video, _ = _readable(db, viewer, video_id)
+    found = lineups.for_video(db, video)
+    if found is None:
+        return CourtOut(rallies=[], notes=[], liberos={})
+    rallies = [
+        CourtRallyOut(rally=rid, **lu.as_json())
+        for rid, lu in sorted(found.by_rally.items(), key=lambda kv: (kv[1].set_no, kv[1].point))
+    ]
+    return CourtOut(
+        rallies=rallies,
+        notes=[SheetNoteOut.model_validate(p.as_json()) for p in lineups.notes(db, video, found)],
+        liberos={k: sorted(v) for k, v in found.liberos.items() if v},
+    )
 
 
 @router.post("/videos/{video_id}/scoresheet/check", response_model=ChecksOut)

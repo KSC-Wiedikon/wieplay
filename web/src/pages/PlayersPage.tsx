@@ -189,6 +189,19 @@ function Gallery({ videoId, data }: { videoId: string; data: Players }) {
             </div>
           )}
         </Card>
+      ) : data.can_edit && data.open_suggestions > 0 ? (
+        // No players found yet, but the scoresheet names the servers of tagged serves.
+        <Card className="flex flex-col items-start gap-2 p-4" role="region" aria-label={t('players.setup.title')}>
+          <Button
+            variant="primary"
+            disabled={apply.isPending}
+            onClick={() => apply.mutate(undefined, { onSuccess: () => toast.success(t('players.setup.applied', { count: data.open_suggestions })) })}
+          >
+            <SparkleIcon className="size-4" />
+            {t('players.setup.apply', { count: data.open_suggestions })}
+          </Button>
+          <p className="text-sm text-muted">{t('players.setup.applySheet')}</p>
+        </Card>
       ) : null}
 
       <JobState data={data} onFind={() => find.mutate()} finding={find.isPending} />
