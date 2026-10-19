@@ -104,13 +104,90 @@ ROSTERS: dict[int, list[tuple[int, str]]] = {
 }
 
 
+def _game_day(team_id: int, today: date, k: int) -> date:
+    base = today - timedelta(days=21) if team_id >= 9100 else today - timedelta(days=300)
+    return base + timedelta(days=7 * k)
+
+
+# A cup game H1 played on a day H3 had none: the shared cup team's (wieplay/core/club_games.py).
+CUP_GAME_ID = 9105 * 100 + 90
+CUP_DAYS_AGO = 18
+
+
+def games_of(team_id: int, today: date) -> list[dict[str, Any]]:
+    """A team row's games: six league games a week apart (the club's teams all play the same
+    days), and H1's cup game."""
+    name, sport, league, _ = TEAMS[team_id % 100 - 1]
+    ours = f"KSC Wiedikon {name}"
+    games = []
+    for k in range(6):
+        day = _game_day(team_id, today, k)
+        played = day < today
+        home = k % 2 == 0
+        other = f"Testclub {chr(65 + k)}"
+        games.append(
+            {
+                "id": team_id * 100 + k,
+                "team": team_id,
+                "date": day.isoformat(),
+                "time": "14:00" if home else "19:30",
+                "home_name": ours if home else other,
+                "away_name": other if home else ours,
+                "our_side": "home" if home else "away",
+                "league": league,
+                "hall_name": "Halle Test" if home else "Auswärtshalle",
+                "home_score": (3 if home else 1) if played and sport == "volleyball" else None,
+                "away_score": (1 if home else 3) if played and sport == "volleyball" else None,
+                "sets": [[25, 20], [23, 25], [25, 18], [25, 22]]
+                if played and sport == "volleyball"
+                else None,
+            }
+        )
+    if team_id * 100 + 90 == CUP_GAME_ID:
+        games.append(
+            {
+                "id": CUP_GAME_ID,
+                "team": team_id,
+                "date": (today - timedelta(days=CUP_DAYS_AGO)).isoformat(),
+                "time": "20:30",
+                "home_name": "Volley S9",
+                "away_name": ours,
+                "our_side": "away",
+                "league": "Mobiliar Volley Cup — Tour 1, Spiel 34",
+                "hall_name": "Kaserne",
+                "home_score": 0,
+                "away_score": 3,
+                "sets": [[13, 25], [28, 30], [21, 25]],
+            }
+        )
+    return games
+
+
+def club_games(
+    today: date, on: date | None, ids: Sequence[int] | None, sport: str | None
+) -> dict[str, Any]:
+    """Same shape as Wiedisync's /club-games: every team's games of a day, or by id."""
+    listing = team_listing(today)["teams"]
+    wanted = set(ids or [])
+    teams, games = {}, []
+    for team in listing:
+        if sport is not None and team["sport"] != sport:
+            continue
+        for g in games_of(team["id"], today):
+            if (on is not None and g["date"] != on.isoformat()) or (ids and g["id"] not in wanted):
+                continue
+            games.append({**g, "team_name": team["name"]})
+            teams[team["id"]] = {**team, "active": True}
+    games.sort(key=lambda g: (g["date"], g["time"], g["id"]))
+    return {"version": 1, "teams": list(teams.values()), "games": games}
+
+
 def snapshot(team_ids: Sequence[int], today: date) -> dict[str, Any]:
     members: dict[int, Mapping[str, Any]] = {}
     memberships, games, trainings = [], [], []
     by_id = {m[0]: m for m in MEMBERS}
     for team_id in team_ids:
         n = team_id % 100
-        name, sport, league, _ = TEAMS[n - 1]
         for member_id, rel in ROSTERS.get(n, []):
             mid, mname, number, positions = by_id[member_id]
             members[mid] = {
@@ -122,31 +199,9 @@ def snapshot(team_ids: Sequence[int], today: date) -> dict[str, Any]:
                 "active": True,
             }
             memberships.append({"team": team_id, "member": mid, "rel": rel, "guest": False})
-        base = today - timedelta(days=21) if team_id >= 9100 else today - timedelta(days=300)
+        games.extend(games_of(team_id, today))
         for k in range(6):
-            day = base + timedelta(days=7 * k)
-            played = day < today
-            home = k % 2 == 0
-            ours = f"KSC Wiedikon {name}"
-            other = f"Testclub {chr(65 + k)}"
-            games.append(
-                {
-                    "id": team_id * 100 + k,
-                    "team": team_id,
-                    "date": day.isoformat(),
-                    "time": "14:00" if home else "19:30",
-                    "home_name": ours if home else other,
-                    "away_name": other if home else ours,
-                    "our_side": "home" if home else "away",
-                    "league": league,
-                    "hall_name": "Halle Test" if home else "Auswärtshalle",
-                    "home_score": (3 if home else 1) if played and sport == "volleyball" else None,
-                    "away_score": (1 if home else 3) if played and sport == "volleyball" else None,
-                    "sets": [[25, 20], [23, 25], [25, 18], [25, 22]]
-                    if played and sport == "volleyball"
-                    else None,
-                }
-            )
+            day = _game_day(team_id, today, k)
             trainings.append(
                 {
                     "id": team_id * 100 + 50 + k,

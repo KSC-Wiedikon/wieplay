@@ -5,7 +5,9 @@ not in Wiedisync (friendly, tournament, cup). `#` starts a comment. Each line me
 rules of the upload page: a YouTube or Twitch video link with channels on the allow-list
 (the worker checks the video's own channel before downloading), the Wiedisync game of that
 day or else a title and a date in the team row's season, the filming rules with fresh
-rosters, and no second import of a video the team already has.
+rosters, and no second import of a video the team already has. A day without a game of the
+team's own but with other club teams' (a shared cup team's) gets a note: that game is linked
+on the video page after the import (wieplay/core/club_games.py).
 
 The imports start `spacing` apart so YouTube's bot check is not woken; if it is, the worker
 reports it and every queued import waits an hour (worker API, `retry_after_s`).
@@ -21,7 +23,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from wieplay.core import imports, pipeline
+from wieplay.core import club_games, imports, pipeline
 from wieplay.core.filming import check_filming, club_today, refresh_rosters
 from wieplay.core.models import AuditLog, TeamLineage, Video, VideoSourceFile, WdGame, WdTeam
 from wieplay.core.sync import BridgeClient
@@ -46,6 +48,7 @@ class Planned:
     source: imports.ImportSource | None = None
     game_id: int | None = None
     problem: str | None = None  # why the line is skipped
+    note: str | None = None  # worth knowing, the line is imported anyway
 
 
 def _day(text: str) -> date:
@@ -87,11 +90,30 @@ def _already_imported(db: Session, lineage_id: uuid.UUID, external_id: str) -> V
     )
 
 
+def _club_note(
+    db: Session,
+    bridge: BridgeClient | None,
+    team: WdTeam,
+    on: date,
+    cache: dict[tuple[date, int], club_games.Choices],
+) -> str | None:
+    """Other club teams' games that day (one bridge call per day and team), as a note."""
+    key = (on, team.id)
+    if key not in cache:
+        cache[key] = club_games.choices(db, bridge, team, on)
+    found = cache[key].club
+    if not found:
+        return None
+    games = ", ".join(f"{c.team_name} · {c.league or '?'} (game {c.id})" for c in found)
+    return f"other KSCW teams played that day ({games}): link the game on the video page"
+
+
 def plan(db: Session, bridge: BridgeClient | None, lines: list[Line]) -> list[Planned]:
     """Check every line; nothing is written except refreshed rosters."""
     synced = refresh_rosters(db, bridge)
     today = club_today()
     allowed: dict[str, set[str]] = {}
+    club: dict[tuple[date, int], club_games.Choices] = {}
     seen: set[tuple[uuid.UUID, str]] = set()
     out: list[Planned] = []
     for line in lines:
@@ -135,15 +157,19 @@ def plan(db: Session, bridge: BridgeClient | None, lines: list[Line]) -> list[Pl
             game = games[0]
             p.game_id = game.id
             p.title = line.title or f"{game.home_name or '?'} {DASH} {game.away_name or '?'}"
-        elif line.title is None:
-            p.problem = "no Wiedisync game on that day: add a title (friendly, tournament, cup)"
-            continue
-        elif pipeline.season_of(line.on) != team.season:
-            p.problem = (
-                f"the date belongs to {pipeline.season_of(line.on)}, the team to {team.season}"
-            )
-            continue
         else:
+            # Another club team's game that day (a shared cup team's) is linked afterwards.
+            p.note = _club_note(db, bridge, team, line.on, club)
+            if line.title is None:
+                p.problem = "no Wiedisync game on that day: add a title (friendly, tournament, cup)"
+                if p.note:
+                    p.problem, p.note = f"{p.problem}; {p.note}", None
+                continue
+            if pipeline.season_of(line.on) != team.season:
+                p.problem = (
+                    f"the date belongs to {pipeline.season_of(line.on)}, the team to {team.season}"
+                )
+                continue
             p.title = line.title
         check = check_filming(db, bridge, team, line.on, fresh=True, roster_fresh=synced)
         if not check.allowed:

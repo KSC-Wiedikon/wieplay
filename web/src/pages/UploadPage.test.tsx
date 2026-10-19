@@ -374,6 +374,42 @@ describe('UploadPage', () => {
     })
   })
 
+  it('names the other KSCW teams’ games of a day without a game of the team’s own', async () => {
+    const cupDate = addDaysIso(todayIso(), -18)
+    const cup = {
+      id: 572, team_id: 95, team_name: 'H1', other_team: true, date: cupDate, time: '20:30:00',
+      home_name: 'Volley S9', away_name: 'KSC Wiedikon H1', our_side: 'away',
+      league: 'Mobiliar Volley Cup — Tour 1, Spiel 34', hall_name: 'Kaserne', home_score: 0, away_score: 3, sets: null,
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        stubFetch({
+          '/api/teams/92': { body: team },
+          '/api/video/config': { body: { enabled: true, part_size: PART_SIZE, max_file_bytes: 1e12, max_files: 20 } },
+          '/api/teams/92/games': { body: [game] },
+          '/api/inbox': { status: 403, body: { detail: 'Coaches and sport admins only' } },
+          [`/api/teams/92/filming?on=${cupDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
+          [`/api/teams/92/filming?on=${gameDate}`]: { body: { allowed: true, blockers: [], adult_checked_at: null } },
+          [`/api/teams/92/game-choices?on=${cupDate}`]: { body: { on: cupDate, current: null, own: [], club: [cup], club_state: 'ok' } },
+          [`/api/teams/92/game-choices?on=${gameDate}`]: { body: { on: gameDate, current: null, own: [{ ...cup, id: 501, team_id: 92, team_name: 'H3', other_team: false }], club: [cup], club_state: 'ok' } },
+        }),
+      ),
+    )
+    renderRoute(<UploadPage />, { path: '/teams/:id/upload', url: '/teams/92/upload' })
+    fireEvent.change(await screen.findByLabelText('Match'), { target: { value: 'other' } })
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: cupDate } })
+    expect(
+      await screen.findByText(
+        'Other KSCW teams’ games that day: H1 · Mobiliar Volley Cup — Tour 1, Spiel 34 (Volley S9 – KSC Wiedikon H1). If this video is of one of them, upload it here, then link that game on the video page.',
+      ),
+    ).toBeInTheDocument()
+    // A day with a game of the team's own: no hint.
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: gameDate } })
+    expect(await screen.findByText(`Filming is allowed on ${formatDate(gameDate)}.`)).toBeInTheDocument()
+    expect(screen.queryByText(/Other KSCW teams’ games that day/)).not.toBeInTheDocument()
+  })
+
   describe('from a link', () => {
     const imported = { ...created, source: 'import', status: 'importing', files: [] }
 

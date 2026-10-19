@@ -20,6 +20,7 @@ from wieplay.api import (
     admin,
     analysis,
     auth,
+    club_games,
     court,
     filters,
     guests,
@@ -187,6 +188,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(helpers.router)
     app.include_router(admin.router)
     app.include_router(videos.router)
+    app.include_router(club_games.router)
     app.include_router(media.router)
     app.include_router(worker.router)
     app.include_router(tagging.router)

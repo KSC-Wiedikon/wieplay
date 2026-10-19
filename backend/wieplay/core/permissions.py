@@ -162,6 +162,14 @@ def can_delete_video(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bo
     return _leads_team(viewer, team, leads)
 
 
+def can_link_game(viewer: Viewer, team: TeamRef, leads: set[uuid.UUID]) -> bool:
+    """Set or change a video's Wiedisync game after the upload, also to another KSCW team's game
+    of the same day (a shared cup team's; wieplay/core/club_games.py): the team's coaches and
+    team managers (any season), sport admins, admins. Not helpers or players: the game decides
+    the official result the scoring stands on."""
+    return _leads_team(viewer, team, leads)
+
+
 def can_use_inbox(viewer: Viewer, teams: Iterable[TeamRef]) -> bool:
     """See the NAS inbox: anyone who may upload for at least one enabled KSCW team. The inbox
     is the club's NAS share: never for guest clubs."""

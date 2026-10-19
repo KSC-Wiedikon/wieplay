@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Analysis, Tagging, TeamDetail, Video } from '../lib/types'
+import type { Analysis, GameChoices, Tagging, TeamDetail, Video, VideoGame } from '../lib/types'
 import { renderRoute, stubFetch } from '../test/render'
 import { boxScore, rotationColumns, rotationLine, setterLine, setterStats, statRow, teamLine, videoStats } from '../test/stats'
 import { parseSearch, searchParam } from '../lib/search'
@@ -1069,6 +1069,100 @@ describe('VideoPage', () => {
       expect(screen.getByRole('tab', { name: 'Zones' })).toHaveFocus()
       fireEvent.keyDown(screen.getByRole('tab', { name: 'Zones' }), { key: 'Home' })
       expect(players).toHaveAttribute('aria-selected', 'true')
+    })
+  })
+
+  describe('its Wiedisync game', () => {
+    const cup: VideoGame = {
+      id: 572,
+      team_id: 95,
+      team_name: 'H1',
+      other_team: true,
+      date: '2026-10-11',
+      time: '20:30:00',
+      home_name: 'Volley S9',
+      away_name: 'KSC Wiedikon H1',
+      our_side: 'away',
+      league: 'Mobiliar Volley Cup — Tour 1, Spiel 34',
+      hall_name: 'Kaserne',
+      home_score: 0,
+      away_score: 3,
+      sets: [
+        [13, 25],
+        [28, 30],
+        [21, 25],
+      ],
+    }
+    const choices = (patch: Partial<GameChoices> = {}): GameChoices => ({
+      on: '2026-10-11',
+      current: null,
+      own: [],
+      club: [cup],
+      club_state: 'ok',
+      ...patch,
+    })
+
+    it('shows another team’s game under the title, the result from our side', async () => {
+      show(video({ status: 'processing', game_id: 572, game: cup }))
+      const teams = await screen.findByText('Volley S9 – KSC Wiedikon H1')
+      expect(teams.parentElement).toHaveTextContent('Game Volley S9 – KSC Wiedikon H1 · 3:0 (25:13, 30:28, 25:21) · H1 · Mobiliar Volley Cup — Tour 1, Spiel 34')
+      expect(screen.queryByRole('button', { name: 'Change' })).not.toBeInTheDocument() // players
+    })
+
+    it('says nothing about a game to players when there is none', async () => {
+      show(video({ status: 'processing', game_id: null, game: null }))
+      await screen.findByRole('heading', { level: 1 })
+      expect(screen.queryByText('No Wiedisync game')).not.toBeInTheDocument()
+    })
+
+    it('lets a coach link the cup game another team played that day', async () => {
+      const linked = video({ status: 'processing', game_id: 572, game: cup, can_link_game: true })
+      const { fetch } = show(video({ status: 'processing', game_id: null, game: null, can_link_game: true }), 200, {
+        [`/api/videos/${ID}/game-choices`]: { body: choices() },
+        [`PUT /api/videos/${ID}/game`]: { body: linked },
+      })
+      expect(await screen.findByText('No Wiedisync game')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Link a game' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Wiedisync game' })
+      expect(await within(dialog).findByText('H3 had no game that day.')).toBeInTheDocument()
+      const option = await within(dialog).findByRole('radio', { name: /Volley S9 – KSC Wiedikon H1/ })
+      expect(within(dialog).getByText('H1 · Mobiliar Volley Cup — Tour 1, Spiel 34 · 20:30 · 3:0 (25:13, 30:28, 25:21)')).toBeInTheDocument()
+      expect(within(dialog).getByRole('radio', { name: /No game/ })).toBeChecked()
+      fireEvent.click(option)
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+      expect(await screen.findByText('Game saved.')).toBeInTheDocument()
+      const put = fetch.mock.calls.find(([path, init]) => path === `/api/videos/${ID}/game` && init?.method === 'PUT')
+      expect(JSON.parse(String(put?.[1]?.body))).toEqual({ game_id: 572 })
+      expect(await screen.findByText('Volley S9 – KSC Wiedikon H1')).toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('offers the team’s own games only, with a note, when Wiedisync can’t list the others', async () => {
+      const own: VideoGame = { ...cup, id: 501, team_id: 92, team_name: 'H3', other_team: false, home_name: 'KSC Wiedikon H3', away_name: 'Volley Näfels', league: '2L', our_side: 'home', home_score: 3, away_score: 1, sets: null }
+      const { fetch } = show(video({ status: 'processing', game_id: 501, game: own, can_link_game: true }), 200, {
+        [`/api/videos/${ID}/game-choices`]: { body: choices({ current: 501, own: [own], club: [], club_state: 'unavailable' }) },
+        [`PUT /api/videos/${ID}/game`]: { status: 503, body: { detail: 'Wiedisync cannot list the other teams’ games right now; try again later' } },
+      })
+      fireEvent.click(await screen.findByRole('button', { name: 'Change' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Wiedisync game' })
+      expect(await within(dialog).findByText(/can’t list the other teams’ games right now/)).toBeInTheDocument()
+      expect(within(dialog).getByRole('radio', { name: /KSC Wiedikon H3 – Volley Näfels/ })).toBeChecked()
+      // Unchanged: closes without a request.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      expect(fetch.mock.calls.some(([path, init]) => path === `/api/videos/${ID}/game` && init?.method === 'PUT')).toBe(false)
+    })
+
+    it('says why the game could not be saved', async () => {
+      show(video({ status: 'processing', game_id: null, game: null, can_link_game: true }), 200, {
+        [`/api/videos/${ID}/game-choices`]: { body: choices() },
+        [`PUT /api/videos/${ID}/game`]: { status: 422, body: { detail: 'That game was not played on the day of this video' } },
+      })
+      fireEvent.click(await screen.findByRole('button', { name: 'Link a game' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Wiedisync game' })
+      fireEvent.click(await within(dialog).findByRole('radio', { name: /Volley S9/ }))
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Couldn’t save the game: That game was not played on the day of this video')
     })
   })
 })

@@ -29,7 +29,7 @@ from wieplay.api.deps import (
     audit,
 )
 from wieplay.api.media import permission_cache
-from wieplay.core import guests, imports, names, pipeline
+from wieplay.core import club_games, guests, imports, names, pipeline
 from wieplay.core.config import Settings
 from wieplay.core.filming import (
     Blocker,
@@ -44,6 +44,7 @@ from wieplay.core.permissions import (
     can_delete_video,
     can_export,
     can_import_link,
+    can_link_game,
     can_share_with_team,
     can_tag,
     can_upload,
@@ -146,6 +147,30 @@ class NamesOut(BaseModel):
     them_set: str | None
 
 
+class VideoGameOut(BaseModel):
+    """A Wiedisync game as the video page shows it and its game picker offers it."""
+
+    id: int
+    team_id: int
+    team_name: str  # the team Wiedisync files it under ("H1")
+    # Not the video's team: another KSCW team's game (a shared cup team's; core/club_games.py).
+    other_team: bool
+    date: date | None
+    time: time | None
+    home_name: str | None
+    away_name: str | None
+    our_side: Literal["home", "away"] | None
+    league: str | None
+    hall_name: str | None
+    home_score: int | None
+    away_score: int | None
+    sets: list[list[int]] | None
+
+    @classmethod
+    def of(cls, choice: club_games.Choice) -> VideoGameOut:
+        return cls.model_validate(asdict(choice))
+
+
 class VideoOut(BaseModel):
     id: uuid.UUID
     team_id: int
@@ -189,6 +214,10 @@ class VideoOut(BaseModel):
     no_scoreboard: bool = False
     # ... or that there is no official scoresheet for this match (the setup's scoresheet step).
     no_scoresheet: bool = False
+    # The video's Wiedisync game (game_id's), with the team it is filed under.
+    game: VideoGameOut | None = None
+    # Set or change the game (coaches and team managers, sport admins, admins).
+    can_link_game: bool = False
 
 
 class SetupIn(BaseModel):
@@ -335,6 +364,15 @@ def _imported_from(video: Video) -> ImportedFromOut | None:
     )
 
 
+def _game_out(db: Session, video: Video, team: WdTeam) -> VideoGameOut | None:
+    game = db.get(WdGame, video.game_id) if video.game_id is not None else None
+    if game is None:
+        return None
+    owner = team if game.team_id == team.id else db.get(WdTeam, game.team_id)
+    name = owner.name if owner is not None else ""
+    return VideoGameOut.of(club_games.choice_of(game, name, game.team_id != team.id))
+
+
 def _video_out(
     db: Session,
     video: Video,
@@ -358,6 +396,8 @@ def _video_out(
         *guests.club_names(access.team, settings.club_short_name, settings.club_name),
     )
     return VideoOut(
+        game=_game_out(db, video, access.team),
+        can_link_game=can_link_game(viewer, access.ref, access.leads),
         id=video.id,
         team_id=video.team_id,
         team_name=access.team.name,
