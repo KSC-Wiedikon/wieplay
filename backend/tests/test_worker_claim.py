@@ -111,10 +111,13 @@ def claim(app: FastAPI, token: str, *, leaves: bool) -> tuple[dict[str, Any], fl
 
 def test_a_claim_whose_worker_went_away_stops_polling_and_leases_nothing(app: FastAPI) -> None:
     token = new_worker(app)
-    job_id = queue_job(app, runnable_in_s=0.4)  # appears after the worker has gone
+    # Appears after the worker has gone, well before the long poll ends (3 s here, 25 s in
+    # production): a claim that noticed nothing would lease it. 2 s leaves room for a slow CI
+    # runner (0.8-0.9 s seen for the request itself).
+    job_id = queue_job(app, runnable_in_s=2.0)
     answer, elapsed = claim(app, token, leaves=True)
     assert answer["jobs"] == []
-    assert elapsed < 0.4  # not the whole long poll (3 s here, 25 s in production)
+    assert elapsed < 2.0
     job = job_row(app, job_id)
     assert (job.status, job.lease_owner, job.attempts) == ("queued", None, 0)
 
