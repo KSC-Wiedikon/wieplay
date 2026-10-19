@@ -371,8 +371,11 @@ def complete(
     settings: Settings | None = None,
 ) -> None:
     """Validate a worker's result and write it. Raises ValueError on a bad result."""
-    from wieplay.core import actions, analysis, calibration, players, scoreboard
+    from wieplay.core import actions, analysis, calibration, players, scoreboard, sheet_reading
 
+    if job.kind in sheet_reading.KINDS:
+        sheet_reading.complete(db, video, job, payload)
+        return
     if job.kind in analysis.KINDS:
         analysis.complete(db, video, job, payload)
         calibration.after_analyse(db, video, job)  # the ball's path and the court follow
@@ -428,8 +431,10 @@ def complete(
 def on_failed(db: Session, video: Video | None, job: Job) -> None:
     """A job failed for good: the video failed, its other jobs stop. A failed export only
     fails that export. Failed analysis leaves the video as it is: it plays without it."""
-    from wieplay.core import actions, analysis, calibration, players, scoreboard
+    from wieplay.core import actions, analysis, calibration, players, scoreboard, sheet_reading
 
+    if job.kind in sheet_reading.KINDS:
+        return  # the sheet stays as it was; the page shows the failure
     if (
         job.kind in analysis.KINDS
         or job.kind in calibration.KINDS
@@ -455,8 +460,10 @@ def on_failed(db: Session, video: Video | None, job: Job) -> None:
 
 def may_sign(job: Job, op: str, key: str) -> bool:
     """Object keys a worker may touch for this job (PLAN §8.1: workers hold no credentials)."""
-    from wieplay.core import calibration, players
+    from wieplay.core import calibration, players, sheet_reading
 
+    if job.kind in sheet_reading.KINDS:
+        return sheet_reading.may_sign(job, op, key)
     if job.kind in calibration.KINDS:
         return calibration.may_sign(job, op, key)
     if job.kind in players.KINDS:

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -211,6 +211,8 @@ class SetCheck:
     decoded: sh.Decoded
     official: tuple[int, int] | None
     repairs: list[sh.Repair] = field(default_factory=list)
+    # Read from the photo and not confirmed yet (SS4): shown, never scored.
+    draft: bool = False
 
     @property
     def no(self) -> int:
@@ -231,7 +233,7 @@ class SetCheck:
         return bool(self.doc.get("use", True))
 
     def use(self, sheet_on: bool) -> Literal["path", "hint"] | None:
-        if not sheet_on or not self.wanted or self.sheet.first_serve is None:
+        if not sheet_on or not self.wanted or self.draft or self.sheet.first_serve is None:
             return None
         if self.status == "consistent":
             return "path"
@@ -243,16 +245,19 @@ class SetCheck:
 
 
 def check(
-    sets: Sequence[Mapping[str, Any]], official: Sequence[tuple[int, int]] | None
+    sets: Sequence[Mapping[str, Any]],
+    official: Sequence[tuple[int, int]] | None,
+    drafts: Set[int] = frozenset(),
 ) -> list[SetCheck]:
     """Every set decoded and checked against the official set scores; a repair searched for
-    each set that is not consistent."""
+    each set that is not consistent. `drafts`: the sets read from a photo and not confirmed
+    (checked and shown like the others, never used by the scoring)."""
     out = []
     for doc in sets:
         s = to_set(doc)
         off = official[s.no - 1] if official and 1 <= s.no <= len(official) else None
         decoded = sh.decode(s, off)
-        found = SetCheck(dict(doc), s, decoded, off)
+        found = SetCheck(dict(doc), s, decoded, off, draft=s.no in drafts)
         if s.has_boxes() and not decoded.consistent and s.first_serve is not None:
             found.repairs = sh.repairs(s, off)
         out.append(found)
@@ -270,6 +275,18 @@ def trusted(checks: Sequence[SetCheck], official: Sequence[tuple[int, int]] | No
 
 
 # --- storage ------------------------------------------------------------------------------------
+
+
+def drafts_of(row: Scoresheet | None) -> set[int]:
+    """The sets read from a photo that wait for a coach's confirmation (SS4)."""
+    if row is None or not row.read:
+        return set()
+    present = {int(doc.get("no", 0)) for doc in row.sets or []}
+    return {
+        int(no)
+        for no, state in (row.read.get("sets") or {}).items()
+        if isinstance(state, dict) and state.get("state") == "draft" and int(no) in present
+    }
 
 
 def stored(db: Session, video_id: uuid.UUID, *, deleted: bool = False) -> Scoresheet | None:
@@ -303,6 +320,8 @@ def save(db: Session, video: Video, body: SheetIn, actor: int, now: datetime) ->
         if row.sets == sets and row.use_in_scoring == body.use_in_scoring:
             return row
         raise Stale(row)
+    if row.deleted_at is not None:
+        row.read = None  # a removed sheet typed anew: its old reading is gone with it
     changed = (
         row.sets != sets
         or row.use_in_scoring != body.use_in_scoring
@@ -312,7 +331,7 @@ def save(db: Session, video: Video, body: SheetIn, actor: int, now: datetime) ->
     row.sets = sets
     row.use_in_scoring = body.use_in_scoring
     row.game_id = video.game_id
-    row.status = "entered"
+    row.status = "draft" if drafts_of(row) else "entered"
     row.deleted_at = None
     if changed:
         row.updated_by = actor
@@ -345,6 +364,8 @@ def ensure_row(db: Session, video: Video, actor: int) -> Scoresheet:
     elif row.deleted_at is not None:
         row.deleted_at = None
         row.sets = []
+        row.read = None
+        row.status = "entered"
         row.updated_by = actor
         row.version += 1
     db.flush()
@@ -470,7 +491,7 @@ def for_scoring(db: Session, video: Video) -> SheetUse | None:
     row = stored(db, video.id)
     if row is None or not row.sets:
         return None
-    return SheetUse(check(row.sets, official_sets(db, video)), row.use_in_scoring)
+    return SheetUse(check(row.sets, official_sets(db, video), drafts_of(row)), row.use_in_scoring)
 
 
 def path_of(points: Sequence[sh.Point], cancelled: Sequence[sh.Cancelled]) -> sc.SheetPath:

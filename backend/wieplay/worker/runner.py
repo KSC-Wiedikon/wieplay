@@ -78,9 +78,15 @@ class Worker:
             log.error("the analyse capability needs WIEPLAY_WORKER_ANALYSIS_ROOT; not analysing")
             caps.remove("analyse")
         self.main_caps = [c for c in caps if c != "analyse"]
+        self.main_kinds: list[str] | None = None
         self.background_caps = [c for c in caps if c in ("analyse", "nas")]
         if "analyse" not in caps:
             self.background_caps = []
+        else:
+            # The main lane also takes the quick jobs that need the analysis extra (reading a
+            # scoresheet photo, PLAN §10.3a), never the long ones (those are the background's).
+            self.main_caps = list(caps)
+            self.main_kinds = [k for k in HANDLERS if k not in BACKGROUND_KINDS]
         # A GPU worker (PLAN §8.2) claims only while nobody else needs the card.
         self.gpu = (
             GpuGuard(
@@ -242,7 +248,7 @@ class Worker:
                 daemon=True,
             )
             background.start()
-        self._lane(self.api, self.main_caps, None, first=True)
+        self._lane(self.api, self.main_caps, self.main_kinds, first=True)
         if background is not None:
             background.join(timeout=10)
         if self.inbox is not None:

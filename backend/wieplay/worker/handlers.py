@@ -1,5 +1,5 @@
 """Job handlers: ingest, transcode, thumbs, purge, export, import (PLAN §8.4); the analysis
-jobs are in analyse.py."""
+jobs are in analyse.py and their own modules, the scoresheet's reading in sheet_read.py."""
 
 from __future__ import annotations
 
@@ -556,6 +556,12 @@ def scoreboard(ctx: Context) -> dict[str, Any]:
     return job.run(ctx)
 
 
+def sheet_read(ctx: Context) -> dict[str, Any]:
+    from wieplay.worker import sheet_read as job  # numpy, OpenCV, ONNX Runtime: the worker image
+
+    return job.run(ctx)
+
+
 HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "import": import_video,
     "ingest": ingest,
@@ -571,8 +577,11 @@ HANDLERS: dict[str, Callable[[Context], dict[str, Any]]] = {
     "train_actions": train_actions,
     "players": players,
     "scoreboard": scoreboard,
+    "sheet_read": sheet_read,
 }
-# Long CPU jobs that run on a worker's background lane (runner.py), next to the media jobs.
+# Long CPU jobs that run on a worker's background lane (runner.py), next to the media jobs. The
+# others run on the main lane; a quick one that needs the analysis extra (sheet_read: a coach is
+# waiting for it) asks for the "analyse" cap and is taken there too.
 BACKGROUND_KINDS = (
     "analyse",
     "train_rallies",

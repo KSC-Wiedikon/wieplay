@@ -17,6 +17,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
@@ -978,9 +979,13 @@ class Scoresheet(Base):
     )
     game_id: Mapped[int | None] = mapped_column(Integer)
     source: Mapped[str] = mapped_column(String(16), default="typed")  # typed | read (SS4)
-    status: Mapped[str] = mapped_column(String(16), default="entered")  # draft | entered
+    # draft: a set read from the photo awaits a coach's confirmation (it is not scored) | entered
+    status: Mapped[str] = mapped_column(String(16), default="entered")
     use_in_scoring: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     sets: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    # SS4: the latest reading of the photos, per set its state (draft | confirmed | discarded)
+    # and proposals (wieplay/core/sheet_reading.py); not part of the revisions.
+    read: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_by: Mapped[int | None] = mapped_column(Integer)
     updated_by: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -1038,8 +1043,10 @@ class ScoresheetImage(Base):
     # {"boxes": n, "rotation": 0|90|180|270, "cropped": bool}.
     redacted: Mapped[bool] = mapped_column(Boolean)
     redaction: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    # SS4: the page's corners and the template it was matched to.
+    # SS4: how the photo maps onto the form (wieplay/ml/sheet_register.py), and what the reader
+    # saw in each cell (its likeliest values, where the cell is on the photo).
     registration: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    reading: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     uploaded_by: Mapped[int | None] = mapped_column(Integer)
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -1047,3 +1054,32 @@ class ScoresheetImage(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_by: Mapped[int | None] = mapped_column(Integer)
     purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScoresheetLabel(Base):
+    """A cell of a photo a person confirmed (PLAN §10.3a, SS4): where it is on the stored photo
+    (`quad`, fractions of its width and height) and what it holds, for the reader's next
+    training. The crop itself is never copied; it goes with the photo."""
+
+    __tablename__ = "scoresheet_label"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    image_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("scoresheet_image.id", ondelete="CASCADE")
+    )
+    video_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("video.id", ondelete="CASCADE"), index=True
+    )
+    set_no: Mapped[int] = mapped_column(Integer)
+    cell: Mapped[str] = mapped_column(String(40))  # wieplay/ml/sheet_form.py key
+    quad: Mapped[list[float]] = mapped_column(JSONB)
+    value: Mapped[str] = mapped_column(String(8))  # a number, "X", or "" (blank)
+    read_value: Mapped[str | None] = mapped_column(String(8))
+    read_p: Mapped[float | None] = mapped_column(Float)
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    confirmed_by: Mapped[int | None] = mapped_column(Integer)
+    confirmed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (UniqueConstraint("image_id", "cell", name="uq_scoresheet_label_cell"),)
