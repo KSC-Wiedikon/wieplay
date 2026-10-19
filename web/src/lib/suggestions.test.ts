@@ -174,6 +174,6 @@ describe('the joint decode: needs you, sure (docs/PLAN.md §10.1, §10.3)', () =
     expect(nextOpen(items, new Set(), null)?.id).toBe('n')
     expect(nextOpen(items, new Set(), { id: 'n', start_ms: 20_000 })?.id).toBe('x')
     // Only sure ones left open: then those.
-    expect(nextOpen([segments[0]], new Set(), null)?.id).toBe('s')
+    expect(nextOpen(segments.slice(0, 1), new Set(), null)?.id).toBe('s')
   })
 })
