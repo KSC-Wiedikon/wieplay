@@ -865,6 +865,8 @@ player_cluster   id, video_id, model_run_id, key, team 'us'|'them', tracks jsonb
                  -- "a person in this video"; the coach's number is its only identity (§5.7)
                  -- 0020 (18.10.2026, players v2): confidence NULL (0..1, one whole person?
                  -- the gallery asks to check cards below 0.5; NULL once a coach merged or split)
+                 -- 0027 (19.10.2026, players v3): kind 'person'|'pieces' (look-alike pieces
+                 -- without a number, several people as a rule; a person once the coach names it)
 event_player     event_id, video_id, model_run_id, cluster_id, track_id, number, member_id,
                  method 'court'|'image', distance, confidence, contact_ms, applied_number,
                  event_version   -- who made the action as WiePlay sees it, beside the event
@@ -2627,7 +2629,7 @@ and links by what those allow:
    chain only up to 10 s from where it was read. Pieces with the same number are one card;
    colour joins only pieces without a number, never onto a numbered card; a card without a
    number joins the one numbered teammate who is missing while it is seen and was seen just
-   before or after it ("who is missing", 15 s).
+   before or after it ("who is missing", 15 s; both replaced in v3, below).
 7. **Confidence** per card (`player_cluster.confidence`, migration `0020`): its number read
    at least once every two minutes it is on court, and only that number; a card without a
    number, or with the number of a bigger card of its team, is to be checked. The gallery
@@ -2767,6 +2769,69 @@ while it is seen) moved 293 pieces and raised the sure footage from 41 % to 57 %
 answer, but of the 16 moved pieces checked by eye 7 showed someone else and only one was
 clearly right: not used. What would help most: the job not joining unnumbered pieces by colour
 into big mixed cards (then a card would be one person, one answer).
+
+**Players v3: one person per card (19.10.2026; `wieplay/ml/players.py` `cluster_tracks`,
+migration `0027`).** A card is one person: the pieces that read the same number, or one piece
+without a number. Colour joins nothing into a person any more, and v2's "who is missing" in the
+job (a card without a number given to the one numbered teammate missing while it is seen) is
+gone: on the Legends game 38 of the 42 pictures it added to numbered cards showed someone else.
+Pieces without a number that look alike stay together as a **pieces card** (`kind`), several
+teammates as a rule (a team shares its kit), never a person: no number suggested, always to
+check, no action attributed with a number through it. Two more changes make the person cards
+right more often: the number reader reads every crop a track keeps (the best of every 2 s, at
+most 16, instead of 2 + one per 5 s, at most 12: on Legends 19,600 crops instead of 13,400 and
+49 % more readings, 85 s on the CPU with 4 threads), and a single digit is no longer folded
+into a two-digit number when the team plays that digit itself (the sheet's numbers and
+liberos, else our roster): our #1 and #12 are two people, and a track reading both holds both.
+
+"Identify players" orders the queue by what an answer names (`identify.gain`): a person card
+all its footage, a pieces card half of its 24 biggest pieces (it shows those; "Show all" for
+the rest). A pieces card asks to tick the pieces of one person and tap the number: they join
+that number's card (the coach's, or the one the job is sure of, never seen at the same time),
+and the rest comes back for the next answer; naming the whole card makes it a person.
+
+Measured on the job's own stages and local copies (`scripts/ml/players_eval.py`, the inputs
+the API hands the job with the sheet) against **by-eye labels of detections drawn uniformly
+over the players' footage** (`scripts/ml/players_labels.py`: 320 on Legends, 192 on H1-H3;
+a second look at the unclear ones with more pictures of their piece; the number, else the
+build, the hair, the shoes; "?" when it cannot be told). The queue simulated with those
+labels: sure cards named from the start, a person card answered whole with its main person,
+a pieces card (v2: a card to check, answered the same way with "several people") piece-wise,
+the coach ticking one person's among the 24 pieces shown; relink after each answer. "Named"
+is the share of the players' footage named with the right person.
+
+| | Legends v2 (prod) | Legends v3 | H1-H3 v2 (prod) | H1-H3 v3 |
+|---|---|---|---|---|
+| Cards (ours / theirs) | 158 (76 / 82) | 135 (65 / 70), 50 of them pieces cards | 142 (84 / 58) | 144 (81 / 63), 62 pieces cards |
+| Sure cards (ours / theirs) | 8 / 8 | 9 / 10 | 0 / 0 | 0 / 0 (no calibration) |
+| Players' footage on sure cards | 40.1 % | 43.4 % | – | – |
+| Pictures on numbered cards that show that number (by eye) | 106 / 166 (64 %) | 114 / 131 (87 %) | 31 / 78 (40 %) | 29 / 33 (88 %) |
+| Purity of the 10 biggest person cards (main person's share, by eye) | 76 % (83 / 109) | 87 % (97 / 111) | 71 % (20 / 28) | 96 % (26 / 27) |
+| Purity of the 10 biggest cards to check | 58 % (37 / 64; claimed one person) | 40 % (27 / 68; pieces cards, several people by design) | 71 % | 77 % |
+| Named before any answer (right / wrong) | 29.6 % / 5.8 % | 36.7 % / 5.5 % | – | – |
+| Answers to 50 / 60 / 70 / 75 % named | 26 / 55 / 99 / 134 | 19 / 45 / 77 / 119 | 143 / – / – / – | 138 / – / – / – |
+| Most named (the labels' limit) | 77.5 % | 75.2 % | 50.7 % | 50.7 % |
+
+The person cards are right far more often (a coach can trust a sure card again: 87 % of its
+pictures, against 64 %), and a coach names the same share in about a fifth fewer answers, most
+of the gain at the start (half of the footage named after 19 answers instead of 26). 90 % is
+out of reach with any linking: by eye 15 % of Legends' player footage cannot be told (the far
+side at 1080p, huddles), and 5.5 % sits on sure cards with the wrong person (the tracker
+swapping two people at the net without a box for each, a number carried along a chain past a
+swap). H1-H3 (no calibration, one
+club kit) stays at about half: without the court mask 30 % of its "player" footage is the
+bench, the stands and the referees, and only 55 % of the rest can be told.
+
+What was tried and dropped, on Legends with the same labels: a number spreading along a chain
+for 30 or 60 s on the near side instead of 10 s (more on sure cards, more of it wrong); a
+piece between two pieces of its chain with the same number taking it from further (no change);
+each unnumbered piece suggested to the numbered teammate it looks most like ("these pieces look
+like #7"; 32 % right: the colours of head, shirt, shorts and legs do not tell teammates apart,
+the best regions 42 %); the sheet's six on court as "who is missing" per rally (a single
+candidate left for 1.8 % of the footage); pieces cards per set instead of per match, or tighter
+(more answers for the same footage); cutting a track at a single reading's change (more wrong).
+Continuity links between pieces that both read a number were right 50-60 % of the time when two
+candidates were close in cost: there is no long, safe stitching to be had from motion alone.
 
 **Automatic run** (`WIEPLAY_PLAYERS_AUTO`): stays off, on demand. The GPU makes it cheap
 (~10 min a match), but only calibrated videos get sure cards (3 of the 22 prod videos had

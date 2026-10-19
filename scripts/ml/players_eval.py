@@ -16,6 +16,9 @@ video's duration and size, e.g. from the API container:
      "setups": players.setups_for(db, v), "roster": {"us": [...]},
      "duration_ms": v.duration_ms, "width": v.width, "height": v.height}
 
+The cards against by-eye labels (purity, the answers a coach needs): scripts/ml/players_labels.py
+on the same OUT_DIR.
+
 OUT_DIR holds crops of people (club members): keep it on the machine that runs it and delete
 it after the measurement (PLAN §5.5). Run from backend/ with its venv (`uv run python
 ../scripts/ml/players_eval.py ...`), the weights in WIEPLAY_WORKER_PLAYERS_WEIGHTS.
@@ -34,7 +37,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from wieplay.ml import people
+from wieplay.ml import people, serve_labels
 from wieplay.ml import players as pl
 from wieplay.worker import players as job
 from wieplay.worker.config import WorkerSettings
@@ -162,6 +165,7 @@ def identify(out: Path, gpu: bool, images: bool = False) -> None:
         roster,
         job.DETECT_FPS,
         calibrated=setups.calibrated,
+        sheet=serve_labels.sheet_inputs(inputs),  # the job's inputs carry the sheet, if any
     )
     found.stats["identify_s"] = round(time.perf_counter() - started, 1)
     if images:  # crops of people: only when asked, and deleted after looking
@@ -272,7 +276,7 @@ def main() -> None:
         "--without",
         action="append",
         default=[],
-        choices=["absorb", "propagate", "long", "encounters"],
+        choices=["propagate", "long", "encounters"],
         help="leave a step of the linking out (to measure what it does)",
     )
     i.add_argument(
@@ -293,8 +297,6 @@ def main() -> None:
     else:
         from wieplay.ml import identities
 
-        if "absorb" in args.without:
-            identities.ABSORB_GAP_MS = 0
         if "propagate" in args.without:
             identities.PROPAGATE_FRAMES = -1
         if "long" in args.without:
