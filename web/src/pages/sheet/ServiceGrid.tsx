@@ -16,9 +16,32 @@ import {
   type SubDoc,
   type TimeoutDoc,
 } from '../../lib/scoresheet'
+import { altsText, boxField, lineupField, markOf, readClass, subField, timeoutKey, type ReadCell } from '../../lib/sheetRead'
 import type { SideNames } from '../../lib/sides'
 import type { Side } from '../../lib/types'
 import { boxId, boxKey, focusBox, parseDigits, type BoxMark } from './boxes'
+
+/** What the photo's reading proposed in a draft set (SS4), and what the coach looked at. */
+export interface ReadView {
+  cells: Record<string, ReadCell> | undefined
+  accepted: ReadonlySet<string>
+  onFocus: (key: string) => void
+}
+
+/** The props a read field's input gets: its key, its mark, the reader's alternatives. */
+function readProps(view: ReadView | undefined, key: string) {
+  const mark = markOf(view?.cells, view?.accepted ?? new Set(), key)
+  const cell = view?.cells?.[key]
+  return {
+    mark,
+    attrs: {
+      'data-field': key,
+      'data-read': mark ?? undefined,
+      title: cell && mark ? altsText(cell) : undefined,
+    },
+    onFocus: () => view?.onFocus(key),
+  }
+}
 
 const CIRCLE_KEYS = new Set(['*', 'o', 'O', '+'])
 
@@ -34,6 +57,7 @@ interface TeamBoxesProps {
   /** Enter on an empty box: this team's boxes are done, go to the other team. */
   onOther: () => void
   onFocusBox: (side: Side, position: number, box: number) => void
+  read?: ReadView
 }
 
 /**
@@ -42,7 +66,7 @@ interface TeamBoxesProps {
  * deciding set), then the timeouts and the substitutions. Typing follows the sheet's order (box 1
  * of positions I-VI, then box 2, ...), which is the order of the service turns.
  */
-export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange, onOther, onFocusBox }: TeamBoxesProps) {
+export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange, onOther, onFocusBox, read }: TeamBoxesProps) {
   const { t } = useTranslation()
   const deciding = isDeciding(set)
   const per = boxesFor(deciding)
@@ -117,6 +141,8 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
               <label htmlFor={lineupId(position)} className="flex flex-col items-center gap-1">
                 <span className="text-xs font-bold text-muted">{roman}</span>
                 <input
+                  {...readProps(read, lineupField(side, position)).attrs}
+                  onFocus={readProps(read, lineupField(side, position)).onFocus}
                   id={lineupId(position)}
                   inputMode="numeric"
                   autoComplete="off"
@@ -134,7 +160,10 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
                       document.getElementById(lineupId(position + 1))?.focus()
                     }
                   }}
-                  className="h-11 w-full min-w-0 rounded-control border border-hairline-strong bg-sunken text-center font-mono text-base font-bold tabular-nums focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring sm:h-9"
+                  className={cx(
+                    'h-11 w-full min-w-0 rounded-control border border-hairline-strong bg-sunken text-center font-mono text-base font-bold tabular-nums focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring sm:h-9',
+                    readClass(readProps(read, lineupField(side, position)).mark),
+                  )}
                 />
               </label>
               <div className="grid grid-cols-2 gap-1">
@@ -143,17 +172,25 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
                     const isX = receiver && position === 1 && box === 1
                     const key = boxKey(side, position, box)
                     if (isX) {
+                      const xr = readProps(read, boxField(side, position, box))
                       return (
                         <div
                           key={key}
                           role="img"
+                          {...xr.attrs}
+                          tabIndex={xr.mark ? 0 : undefined}
+                          onFocus={xr.onFocus}
                           aria-label={t('sheet.boxX', { team, box: boxName({ position, box }) })}
-                          className="flex h-11 items-center justify-center rounded-md border border-hairline bg-sunken font-mono text-lg font-bold text-muted sm:h-10"
+                          className={cx(
+                            'flex h-11 items-center justify-center rounded-md border border-hairline bg-sunken font-mono text-lg font-bold text-muted sm:h-10',
+                            readClass(xr.mark),
+                          )}
                         >
                           X
                         </div>
                       )
                     }
+                    const br = readProps(read, boxField(side, position, box))
                     const value = valueAt(set, side, position, box)
                     const isCircled = circled?.[0] === position && circled[1] === box
                     const mark = marks[key]
@@ -166,6 +203,7 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
                           <span aria-hidden="true" className="pointer-events-none absolute inset-1 rounded-full border-2 border-fg/70" />
                         )}
                         <input
+                          {...br.attrs}
                           id={boxId(prefix, side, position, box)}
                           inputMode="numeric"
                           autoComplete="off"
@@ -178,17 +216,20 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
                           onFocus={(event) => {
                             event.currentTarget.select()
                             onFocusBox(side, position, box)
+                            br.onFocus()
                           }}
                           className={cx(
                             'h-11 w-full min-w-0 rounded-md border bg-surface pt-1 text-center font-mono text-base font-semibold tabular-nums sm:h-10',
                             'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
                             mark === 'error'
                               ? 'border-danger bg-danger/10 text-danger'
-                              : mark === 'next'
-                                ? 'border-dashed border-accent'
-                                : mark === 'warning'
-                                  ? 'border-accent'
-                                  : 'border-hairline-strong',
+                              : br.mark
+                                ? readClass(br.mark)
+                                : mark === 'next'
+                                  ? 'border-dashed border-accent'
+                                  : mark === 'warning'
+                                    ? 'border-accent'
+                                    : 'border-hairline-strong',
                           )}
                         />
                       </div>
@@ -200,8 +241,8 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
           )
         })}
       </div>
-      <Timeouts set={set} side={side} names={names} readOnly={readOnly} onChange={onChange} />
-      <Subs set={set} side={side} names={names} readOnly={readOnly} onChange={onChange} />
+      <Timeouts set={set} side={side} names={names} readOnly={readOnly} onChange={onChange} read={read} />
+      <Subs set={set} side={side} names={names} readOnly={readOnly} onChange={onChange} read={read} />
     </div>
   )
 }
@@ -214,6 +255,8 @@ export function ScorePair({
   oppLabel,
   readOnly,
   onChange,
+  read,
+  field,
 }: {
   own: number | null
   opp: number | null
@@ -222,10 +265,17 @@ export function ScorePair({
   oppLabel: string
   readOnly: boolean
   onChange: (own: number | null, opp: number | null) => void
+  read?: ReadView
+  /** Its key among the fields the photo's reading proposed. */
+  field?: string
 }) {
-  const input = 'h-11 w-12 rounded-control border border-hairline-strong bg-surface text-center font-mono tabular-nums focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring sm:h-9'
+  const r = field ? readProps(read, field) : null
+  const input = cx(
+    'h-11 w-12 rounded-control border border-hairline-strong bg-surface text-center font-mono tabular-nums focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring sm:h-9',
+    r && readClass(r.mark),
+  )
   return (
-    <span role="group" aria-label={label} className="inline-flex items-center gap-1">
+    <span role="group" aria-label={label} className="inline-flex items-center gap-1" {...(r?.attrs ?? {})} onFocus={r?.onFocus}>
       <input
         inputMode="numeric"
         autoComplete="off"
@@ -252,7 +302,21 @@ export function ScorePair({
 }
 
 /** The team's two timeout boxes: the score when it asked, its own first. */
-function Timeouts({ set, side, names, readOnly, onChange }: { set: SheetSetDoc; side: Side; names: SideNames | null; readOnly: boolean; onChange: (set: SheetSetDoc) => void }) {
+function Timeouts({
+  set,
+  side,
+  names,
+  readOnly,
+  onChange,
+  read,
+}: {
+  set: SheetSetDoc
+  side: Side
+  names: SideNames | null
+  readOnly: boolean
+  onChange: (set: SheetSetDoc) => void
+  read?: ReadView
+}) {
   const { t } = useTranslation()
   const team = sideLabel(t, side, names)
   const mine = set.timeouts.filter((x) => x.side === side)
@@ -277,6 +341,8 @@ function Timeouts({ set, side, names, readOnly, onChange }: { set: SheetSetDoc; 
               oppLabel={t('sheet.opp')}
               readOnly={readOnly}
               onChange={(own, opp) => update(k, own, opp)}
+              read={read}
+              field={timeoutKey(read?.cells, side, k, mine[k]?.own ?? null, mine[k]?.opp ?? null)}
             />
           </span>
         ))}
@@ -287,7 +353,21 @@ function Timeouts({ set, side, names, readOnly, onChange }: { set: SheetSetDoc; 
 }
 
 /** Substitutions, under the starting player's column: who came in and when, when they went back. */
-function Subs({ set, side, names, readOnly, onChange }: { set: SheetSetDoc; side: Side; names: SideNames | null; readOnly: boolean; onChange: (set: SheetSetDoc) => void }) {
+function Subs({
+  set,
+  side,
+  names,
+  readOnly,
+  onChange,
+  read,
+}: {
+  set: SheetSetDoc
+  side: Side
+  names: SideNames | null
+  readOnly: boolean
+  onChange: (set: SheetSetDoc) => void
+  read?: ReadView
+}) {
   const { t } = useTranslation()
   const id = useId()
   const team = sideLabel(t, side, names)
@@ -326,12 +406,17 @@ function Subs({ set, side, names, readOnly, onChange }: { set: SheetSetDoc; side
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">{t('sheet.sub.number')}</span>
               <input
+                {...readProps(read, subField(side, sub.position, 'number')).attrs}
+                onFocus={readProps(read, subField(side, sub.position, 'number')).onFocus}
                 inputMode="numeric"
                 autoComplete="off"
                 value={sub.number ?? ''}
                 disabled={readOnly}
                 onChange={(e) => put(k, { ...sub, number: parseDigits(e.target.value) })}
-                className="h-11 w-16 rounded-control border border-hairline-strong bg-surface text-center font-mono tabular-nums sm:h-9"
+                className={cx(
+                  'h-11 w-16 rounded-control border border-hairline-strong bg-surface text-center font-mono tabular-nums sm:h-9',
+                  readClass(readProps(read, subField(side, sub.position, 'number')).mark),
+                )}
               />
             </label>
             <span className="flex flex-col gap-1">
@@ -344,6 +429,8 @@ function Subs({ set, side, names, readOnly, onChange }: { set: SheetSetDoc; side
                 oppLabel={t('sheet.opp')}
                 readOnly={readOnly}
                 onChange={(own, opp) => put(k, { ...sub, at: pair(sub.at, own, opp) })}
+                read={read}
+                field={subField(side, sub.position, 'at')}
               />
             </span>
             <span className="flex flex-col gap-1">
@@ -356,6 +443,8 @@ function Subs({ set, side, names, readOnly, onChange }: { set: SheetSetDoc; side
                 oppLabel={t('sheet.opp')}
                 readOnly={readOnly}
                 onChange={(own, opp) => put(k, { ...sub, back: pair(sub.back, own, opp) })}
+                read={read}
+                field={subField(side, sub.position, 'back')}
               />
             </span>
             {!readOnly && (

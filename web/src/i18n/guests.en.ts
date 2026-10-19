@@ -188,7 +188,7 @@ export const guestsEn = {
         },
         sheets: {
           title: 'Scoresheet photos',
-          body: 'For a filmed match, a coach may add a photo of the official scoresheet, to type it in faster. Before the upload the coach blacks out the dates of birth on the phone or computer, so they never reach WiePlay; the names and shirt numbers on the sheet stay readable. The photo is stored without camera data (no place, no time) in the club’s storage at Hetzner in Germany. Only the team’s coaches, team managers and the club’s admins see it, and each view is logged. No program or outside service reads it. A coach can remove it at any time, and it is deleted with the video.',
+          body: 'For a filmed match, a coach may add a photo (or a PDF scan) of the official scoresheet, so the score of every rally is known. Before the upload the coach blacks out the dates of birth and licence numbers (the team lists and the officials’ block) on the phone or computer, so they never reach WiePlay; a PDF is drawn into a picture on the device and never uploaded. The names and shirt numbers on the sheet stay readable. The photo is stored without camera data (no place, no time) in the club’s storage at Hetzner in Germany. Only the team’s coaches, team managers and the club’s admins see it, and each view is logged. WiePlay reads its numbers on the club’s own server in Switzerland, never in an outside service; the reading is a proposal a coach checks. A coach can remove the photo at any time, and it is deleted with the video.',
         },
         who: {
           title: 'Who sees it',

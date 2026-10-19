@@ -3,7 +3,13 @@ import {
   FULL,
   clampRect,
   defaultBox,
+  defaultBoxes,
   initialEdits,
+  OFFICIALS,
+  OFFICIALS_PAGE,
+  TEAM_LISTS,
+  TEAM_LISTS_PAGE,
+  turnWithDefaults,
   pixelBounds,
   redactRaster,
   rotateRaster,
@@ -106,11 +112,54 @@ describe('redaction', () => {
     expect(pixel(out, 10, 0)).toEqual(pixel(src, 30, 0))
   })
 
-  it('starts with one box over the team lists of a landscape sheet', () => {
-    const [box] = initialEdits(4000, 2800).boxes
-    expect(box).toEqual(defaultBox(4000, 2800))
-    expect(box && box.x + box.w).toBeLessThanOrEqual(1)
-    expect(box && box.x).toBeGreaterThan(0.5) // the right-hand side, where the lists are
+  it('starts a landscape sheet with boxes over the team lists and the officials’ block', () => {
+    const boxes = initialEdits(4000, 2800).boxes
+    expect(boxes).toEqual(defaultBoxes(4000, 2800))
+    expect(boxes).toEqual([TEAM_LISTS, OFFICIALS])
+    expect(defaultBox(4000, 2800)).toEqual(TEAM_LISTS)
+    for (const box of boxes) {
+      expect(box.x + box.w).toBeLessThanOrEqual(1)
+      expect(box.y + box.h).toBeLessThanOrEqual(1)
+      // Both in the lower part: the set blocks above stay visible.
+      expect(box.y).toBeGreaterThan(0.45)
+    }
+    // The team lists on the right, the officials' block in the middle; between them the result
+    // table and to the left the sanctions stay visible (the reading needs them).
+    expect(TEAM_LISTS.x).toBeGreaterThan(0.65)
+    expect(OFFICIALS.x).toBeGreaterThan(0.2)
+    expect(OFFICIALS.x + OFFICIALS.w).toBeLessThan(TEAM_LISTS.x - 0.1)
     expect(clampRect({ x: 0.95, y: -0.2, w: 0.2, h: 0 })).toEqual({ x: 0.8, y: 0, w: 0.2, h: 0.01 })
+  })
+
+  it('burns both prefilled boxes black, the licence numbers of the officials too', () => {
+    const src = photo(100, 70)
+    const out = redactRaster(src, initialEdits(100, 70))
+    // A pixel in the officials' block (the middle, low) and one in the team lists (the right, low).
+    expect(pixel(out, 35, 60)).toEqual(BLACK)
+    expect(pixel(out, 85, 50)).toEqual(BLACK)
+    // The set blocks (top) and the result table (between the two) are kept.
+    expect(pixel(out, 30, 20)).toEqual(pixel(src, 30, 20))
+    expect(pixel(out, 60, 60)).toEqual(pixel(src, 60, 60))
+  })
+
+  it('starts a scanned page with the boxes where the form has the blocks', () => {
+    const [lists, officials] = initialEdits(3490, 2481, 'page').boxes
+    expect([lists, officials]).toEqual([TEAM_LISTS_PAGE, OFFICIALS_PAGE])
+    // On the page itself (no table around it) the blocks sit further out than on a photo.
+    expect(TEAM_LISTS_PAGE.y).toBeGreaterThan(TEAM_LISTS.y)
+    expect(OFFICIALS_PAGE.y).toBeGreaterThan(OFFICIALS.y)
+    for (const box of [TEAM_LISTS_PAGE, OFFICIALS_PAGE]) expect(box.y + box.h).toBeLessThanOrEqual(1)
+    expect(OFFICIALS_PAGE.x + OFFICIALS_PAGE.w).toBeLessThan(TEAM_LISTS_PAGE.x - 0.1)
+  })
+
+  it('places the boxes anew when a portrait shot of the sheet is turned upright', () => {
+    const start = initialEdits(3000, 4000)
+    expect(start.boxes).toHaveLength(1) // a portrait photo: one box in the middle
+    const upright = turnWithDefaults(start, 1, 3000, 4000)
+    expect(upright.rotation).toBe(90)
+    expect(upright.boxes).toEqual([TEAM_LISTS, OFFICIALS])
+    // Boxes the coach moved stay on what they cover.
+    const moved = { ...start, boxes: [{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }] }
+    expect(turnWithDefaults(moved, 1, 3000, 4000).boxes).toEqual(turn(moved, 1).boxes)
   })
 })

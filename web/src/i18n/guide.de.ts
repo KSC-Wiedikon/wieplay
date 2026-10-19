@@ -156,12 +156,23 @@ export const guideDe: Guide = {
       'Coaches, Teamverantwortliche und Admins können neben einem Foto der Kopie tippen: Auf dem Computer steht es neben dem Formular (Mausrad zoomt, Ziehen verschiebt), auf dem Handy als Streifen über den Sätzen. Spieler/innen und Helfer sehen es nie.',
     photo: [
       'Wähle auf der Seite des Matchblatts «Foto aufnehmen» auf dem Handy oder «Foto hinzufügen» auf dem Computer.',
-      'Schwärze die Geburtsdaten: Ein schwarzer Kasten liegt schon auf dem Foto. Zieh ihn über die Geburtsdaten beider Teams und an seinen Ecken auf die richtige Grösse. «Kasten hinzufügen» deckt alles Weitere ab; dreh oder schneide das Foto zu, wenn nötig.',
-      'Kreuze «Die Geburtsdaten sind geschwärzt» an und lade hoch. Nur das Bild, das du siehst, verlässt dein Gerät: Das Schwarz ist eingebrannt, Ort und Zeit der Kamera fallen weg. Hast du pro Satz ein Bild gemacht, wähle den Satz dazu: Beim Tippen dieses Satzes erscheint dann sein Foto.',
+      'Schwärze Geburtsdaten und Lizenznummern: Zwei schwarze Kästen liegen schon auf dem Foto, über den Teamlisten und über dem Block der Offiziellen (die Lizenznummern von Schiedsrichtern und Schreiber sind oft auch Geburtsdaten). Zieh sie an ihren Platz und an den Ecken auf die richtige Grösse. «Kasten hinzufügen» deckt alles Weitere ab, etwa einen Namen in den Bemerkungen; dreh oder schneide das Foto zu, wenn nötig. Lass die Sätze, die Sanktionen und das Resultat sichtbar: WiePlay liest sie.',
+      'Ein Scan als PDF geht auch: Wähle ihn wie ein Foto. Seine Seiten werden auf deinem Gerät gezeichnet und gehen je durch denselben Schritt; hochgeladen wird nur das geschwärzte Bild, nie das PDF.',
+      'Kreuze «Geburtsdaten und Lizenznummern sind geschwärzt» an und lade hoch. Nur das Bild, das du siehst, verlässt dein Gerät: Das Schwarz ist eingebrannt, Ort und Zeit der Kamera fallen weg. Hast du pro Satz ein Bild gemacht, wähle den Satz dazu: Beim Tippen dieses Satzes erscheint dann sein Foto.',
       'Entferne ein Foto jederzeit mit dem Papierkorb. Es verschwindet auch, wenn das Matchblatt oder das Video gelöscht wird.',
     ],
+    readTitle: 'WiePlay das Foto lesen lassen',
+    readIntro:
+      'WiePlay liest das Foto auf dem eigenen Server des Clubs (kein fremder Dienst sieht es): Es findet das gedruckte Raster, liest jedes Kästchen, die Aufstellungen, Auszeiten und Spielerwechsel und prüft sie an den Regeln und am offiziellen Resultat. Du prüfst nur die Felder, bei denen es unsicher ist: ein paar Minuten statt zehn.',
+    read: [
+      'Füg das Foto hinzu, solange noch nichts getippt ist: Es wird nach ein paar Sekunden von selbst gelesen. Sonst drück «Foto lesen». Was du getippt hast, wird nie ersetzt.',
+      'Die vom Foto gelesenen Sätze sind Entwürfe: Die Punktefolge braucht sie noch nicht. «Vom Foto gelesen: N Felder prüfen» zählt die unsicheren; sie sind gelb markiert, die sicheren gestrichelt.',
+      'Drück «Nächstes Feld prüfen» (oder klick ein gelbes Feld): Das Foto zoomt auf dieses Feld. Stimmt der Wert, drück «Stimmt»; sonst tippe den richtigen.',
+      'Drück «Sichere Felder übernehmen», dann «Satz N bestätigen». Ein bestätigter Satz ist ein getippter Satz wie jeder andere: Das Spiel wird damit neu gewertet.',
+      'Hat WiePlay das falsche Team für unseres gehalten, wechsle mit «Wir sind Team A/B». Ein Satz, den die Regeln nicht zusammenbringen (Kästchen, die der Schreiber leer liess, eine verschmierte Kopie), steht so da, wie er gelesen wurde, nichts ergänzt: Zu prüfen ist, was unsicher gelesen wurde oder nicht in die Reihenfolge der Punkte passt; oder tippe ihn selbst.',
+    ],
     tips: [
-      'Das abgetippte Matchblatt nimmt nur Rückennummern und Spielstände; Namen, Geburtsdaten und Lizenznummern bleiben auf dem Papier (und auf dem Foto sind die Geburtsdaten schwarz).',
+      'Das abgetippte Matchblatt nimmt nur Rückennummern und Spielstände; Namen, Geburtsdaten und Lizenznummern bleiben auf dem Papier (und auf dem Foto sind sie schwarz).',
       'Ein Satz, der nicht passt, bleibt gespeichert und dient nur als Hinweis. Einen Satz, dem du nicht traust, kannst du ausschalten; der Rest zählt weiter.',
       'Deine eigenen Sieger gehen dem Matchblatt immer vor: Wo sie abweichen, wird der Ballwechsel markiert, damit du nochmals hinschaust.',
     ],

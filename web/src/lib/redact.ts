@@ -39,18 +39,57 @@ export const JPEG_QUALITY = 0.9
 export const MIN_BOX = 0.01
 
 /**
- * The prefilled box: the team lists at the lower right of the Matchblatt (FIVB layout, a sheet
- * photographed upright in landscape), where each player's date of birth stands next to the
- * name. The coach moves and sizes it over the dates of birth; on a portrait photo it starts in
- * the middle.
+ * The prefilled boxes of a sheet photographed upright in landscape (the Swiss Volley / FIVB
+ * Matchblatt): the team lists on the lower right (names, licence numbers, dates of birth) and the
+ * officials' approval block at the bottom middle (referees' and scorer's names and licence
+ * numbers, which are often their dates of birth). The result table between them, the sanctions
+ * on the left and every set block stay visible: the reading needs them. The coach moves and
+ * sizes them; on a portrait photo (one set, or a sheet still to be turned) one box starts in the
+ * middle.
  */
-export function defaultBox(width: number, height: number): Rect {
-  if (width >= height) return { x: 0.77, y: 0.52, w: 0.22, h: 0.3 }
-  return { x: 0.3, y: 0.4, w: 0.4, h: 0.2 }
+export const TEAM_LISTS: Rect = { x: 0.68, y: 0.475, w: 0.31, h: 0.495 }
+export const OFFICIALS: Rect = { x: 0.22, y: 0.66, w: 0.31, h: 0.29 }
+/** A scan's page is the sheet itself (no table around it): the blocks where the form puts them. */
+export const TEAM_LISTS_PAGE: Rect = { x: 0.7, y: 0.5, w: 0.29, h: 0.49 }
+export const OFFICIALS_PAGE: Rect = { x: 0.215, y: 0.735, w: 0.335, h: 0.255 }
+const PORTRAIT: Rect = { x: 0.3, y: 0.4, w: 0.4, h: 0.2 }
+
+/** A phone photo of the sheet (a margin of table around it), or a scanned page. */
+export type Layout = 'photo' | 'page'
+
+export function defaultBoxes(width: number, height: number, layout: Layout = 'photo'): Rect[] {
+  if (width < height) return [{ ...PORTRAIT }]
+  return layout === 'page' ? [{ ...TEAM_LISTS_PAGE }, { ...OFFICIALS_PAGE }] : [{ ...TEAM_LISTS }, { ...OFFICIALS }]
 }
 
-export function initialEdits(width: number, height: number): Edits {
-  return { rotation: 0, crop: { ...FULL }, boxes: [defaultBox(width, height)] }
+/** The first prefilled box (the team lists on a landscape photo). */
+export function defaultBox(width: number, height: number): Rect {
+  return defaultBoxes(width, height)[0] ?? { ...PORTRAIT }
+}
+
+export function initialEdits(width: number, height: number, layout: Layout = 'photo'): Edits {
+  return { rotation: 0, crop: { ...FULL }, boxes: defaultBoxes(width, height, layout) }
+}
+
+function sameRects(a: Rect[], b: Rect[]): boolean {
+  const near = (x: number, y: number) => Math.abs(x - y) < 1e-6
+  return a.length === b.length && a.every((r, k) => {
+    const o = b[k]
+    return o !== undefined && near(r.x, o.x) && near(r.y, o.y) && near(r.w, o.w) && near(r.h, o.h)
+  })
+}
+
+/**
+ * Turn the photo a quarter (`turn`), except that boxes nobody moved yet are placed anew for the
+ * photo's new shape: a portrait shot of the landscape sheet, once turned upright, gets the boxes
+ * over the team lists and the officials' block.
+ */
+export function turnWithDefaults(edits: Edits, dir: 1 | -1, width: number, height: number, layout: Layout = 'photo'): Edits {
+  const turned = turn(edits, dir)
+  const [bw, bh] = turnedSize(width, height, edits.rotation)
+  if (!sameRects(edits.boxes, defaultBoxes(bw, bh, layout))) return turned
+  const [aw, ah] = turnedSize(width, height, turned.rotation)
+  return { ...turned, boxes: defaultBoxes(aw, ah, layout) }
 }
 
 const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value))

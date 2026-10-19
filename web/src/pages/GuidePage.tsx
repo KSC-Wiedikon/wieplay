@@ -165,6 +165,11 @@ function GuideContent() {
             </h3>
             <p>{g.sheet.photoIntro}</p>
             <Steps steps={g.sheet.photo} />
+            <h3 id="sheet-read" className="text-lg font-semibold">
+              {g.sheet.readTitle}
+            </h3>
+            <p>{g.sheet.readIntro}</p>
+            <Steps steps={g.sheet.read} />
             <Tips tips={g.sheet.tips} />
           </GuideSection>
 

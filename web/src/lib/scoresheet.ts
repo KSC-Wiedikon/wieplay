@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiRequest } from './api'
 import { keys } from './queryClient'
 import type { SheetPhoto } from './sheetPhotos'
+import type { SheetReading } from './sheetRead'
 import type { Side } from './types'
 
 export const BOXES = 8
@@ -538,6 +539,11 @@ export interface Scoresheet extends ChecksOut {
   /** Photos of the paper sheet (SS3): null for whoever may not see them (players, helpers). */
   images: SheetPhoto[] | null
   can_add_images: boolean
+  /** SS4: "draft" while a set read from the photo waits for a coach's confirmation. */
+  status: 'draft' | 'entered'
+  /** The photo's reading on the club's server: its job, the drafts, the cells to check. */
+  read: SheetReading | null
+  can_read: boolean
 }
 
 export interface SheetIn {
@@ -553,6 +559,8 @@ export function useScoresheet(videoId: string, enabled = true) {
     queryKey: scoresheetKey(videoId),
     queryFn: ({ signal }) => apiRequest<Scoresheet>(`/api/videos/${videoId}/scoresheet`, { signal }),
     enabled,
+    // While the photo is being read on the club's server: a few seconds, then the drafts.
+    refetchInterval: (query) => (['queued', 'running'].includes(query.state.data?.read?.job?.status ?? '') ? 2500 : false),
   })
 }
 

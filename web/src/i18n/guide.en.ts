@@ -39,6 +39,9 @@ export interface Guide {
     keys: GuideKey[]
     photoTitle: string
     photoIntro: string
+    readTitle: string
+    readIntro: string
+    read: string[]
     photo: string[]
     tips: string[]
   }
@@ -201,12 +204,23 @@ export const guideEn: Guide = {
       'Coaches, team managers and admins can type next to a photo of the copy: it shows beside the form on a computer (zoom with the wheel, drag to move) and as a strip above the sets on a phone. Players and helpers never see it.',
     photo: [
       'On the scoresheet page choose “Take a photo” on a phone, or “Add a photo” on a computer.',
-      'Black out the dates of birth: one black box is already on the photo. Drag it over the dates of birth of both teams and pull its corners to size it. “Add a box” covers anything else; turn or crop the photo if you need to.',
-      'Tick “The dates of birth are blacked out” and upload. Only the picture you see leaves your device: the black is burned in, and the camera’s place and time are dropped. If you photographed one set per picture, say which set it shows: typing that set shows that photo.',
+      'Black out the dates of birth and licence numbers: two black boxes are already on the photo, over the team lists and over the officials’ block (the referees’ and scorer’s licence numbers are often dates of birth too). Drag them into place and pull their corners to size them. “Add a box” covers anything else, such as a name in the remarks; turn or crop the photo if you need to. Leave the sets, the sanctions and the result visible: WiePlay reads them.',
+      'A scan as a PDF works too: choose it like a photo. Its pages are drawn on your device and each goes through the same step; only the blacked-out picture is uploaded, never the PDF.',
+      'Tick “The dates of birth and licence numbers are blacked out” and upload. Only the picture you see leaves your device: the black is burned in, and the camera’s place and time are dropped. If you photographed one set per picture, say which set it shows: typing that set shows that photo.',
       'Remove a photo with the bin at any time. It also goes when the scoresheet or the video is deleted.',
     ],
+    readTitle: 'Let WiePlay read the photo',
+    readIntro:
+      'WiePlay reads the photo on the club’s own server (no outside service sees it): it finds the printed grid, reads every box, lineup, timeout and substitution, and checks them against the rules and the official result. You only check the cells it isn’t sure of: a few minutes instead of ten.',
+    read: [
+      'Add the photo while nothing is typed yet: it is read by itself within a few seconds. Otherwise press “Read the photo”. What you typed is never replaced.',
+      'The sets read from the photo are drafts: the score line doesn’t use them yet. “Read from the photo: check N cells” counts the doubtful ones; they are marked yellow, the sure ones dashed.',
+      'Press “Next cell to check” (or click a yellow cell): the photo zooms to that cell. If the value is right, press “It is right”; if not, type the right one.',
+      'Press “Accept the sure cells”, then “Confirm set N”. A confirmed set is a typed set like any other: the match is scored again with it.',
+      'If WiePlay took the wrong team for yours, switch with “We are team A/B”. A set the rules couldn’t make fit (boxes the scorer left empty, a smudged copy) is shown as read, nothing filled in: what the reader wasn’t sure of, or what breaks the order of the scores, is to check; or type it yourself.',
+    ],
     tips: [
-      'The typed sheet takes shirt numbers and scores only; names, dates of birth and licence numbers stay on paper (and on the photo the dates of birth are black).',
+      'The typed sheet takes shirt numbers and scores only; names, dates of birth and licence numbers stay on paper (and on the photo they are black).',
       'A set that doesn’t fit is kept and used only as a hint. A set you don’t trust can be switched off; the rest still counts.',
       'Your own winners always win over the sheet: where they differ, the rally is flagged so you can look again.',
     ],
