@@ -11,6 +11,7 @@ import { formatEntry } from '../../lib/grammar'
 import { formatClock, periodLabel, scoreNoteText, segmentKindLabel, segmentLabel, sideLabel } from '../../lib/labels'
 import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
+import { cardTone, noteText, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { useSideNames } from '../../lib/sides'
 import {
   formatPercent,
@@ -122,12 +123,25 @@ export function Timeline() {
   )
 }
 
+/** The scoresheet's cards and substitutions at their breaks (docs/PLAN.md §10.3a). */
+function useSheetMarks(videoId: string): SheetNote[] {
+  const court = useSheetCourt(videoId).data
+  return useMemo(() => (court?.notes ?? []).filter((n) => n.start_ms != null && (n.kind === 'sanction' || n.kind === 'sub')), [court])
+}
+
+function markClass(note: SheetNote): string {
+  if (note.kind !== 'sanction') return 'bg-link'
+  const tone = cardTone(note.sanction)
+  return tone === 'yellow' ? 'bg-yellow-400' : tone === 'red' ? 'bg-red-600' : 'bg-fg'
+}
+
 function Overview({ duration, span }: { duration: number; span: number }) {
   const { t } = useTranslation()
   const { controller, video } = useWorkspace()
   const view = useView()
   const comments = useComments(video.id)
   const marks = useMemo(() => commentMoments(comments.data ?? []), [comments.data])
+  const notes = useSheetMarks(video.id)
 
   const layers = useMemo(() => {
     const pct = (ms: number) => `${Math.min(100, Math.max(0, (ms / duration) * 100))}%`
@@ -174,9 +188,17 @@ function Overview({ duration, span }: { duration: number; span: number }) {
             style={{ left: pct(m.t_ms) }}
           />
         ))}
+        {notes.map((n) => (
+          <div
+            key={`${n.kind}-${n.set}-${n.index}`}
+            data-sheet-note={n.kind === 'sanction' ? `card-${n.sanction}` : n.kind}
+            className={cx('absolute top-0.5 h-2.5 w-1.5 -translate-x-1/2 rounded-[1px] ring-1 ring-surface', markClass(n))}
+            style={{ left: pct(n.start_ms ?? 0) }}
+          />
+        ))}
       </>
     )
-  }, [view.periods, view.segments, view.events, marks, duration])
+  }, [view.periods, view.segments, view.events, marks, notes, duration])
 
   return (
     <div
@@ -227,7 +249,8 @@ function tickStep(span: number): number {
 
 function Zoom({ duration, span }: { duration: number; span: number }) {
   const { t } = useTranslation()
-  const { playhead, controller, taxonomy, review, actions } = useWorkspace()
+  const { playhead, controller, taxonomy, review, actions, video } = useWorkspace()
+  const sheetNotes = useSheetMarks(video.id)
   const view = useView()
   const ui = useUi()
   const reviewState = useReview()
@@ -281,6 +304,17 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
       ))}
       {from < 0 && <div className="absolute inset-y-0 left-0 bg-page" style={{ width: x(0) }} />}
       {to > duration && <div className="absolute inset-y-0 right-0 bg-page" style={{ left: x(duration) }} />}
+      {sheetNotes
+        .filter((n) => (n.start_ms ?? 0) >= from && (n.start_ms ?? 0) <= to)
+        .map((n) => (
+          <div
+            key={`${n.kind}-${n.set}-${n.index}`}
+            data-sheet-note={n.kind === 'sanction' ? `card-${n.sanction}` : n.kind}
+            title={noteText(t, n, names)}
+            className={cx('absolute top-4 h-4 w-2.5 -translate-x-1/2 rounded-[2px] ring-1 ring-surface', markClass(n))}
+            style={{ left: x(n.start_ms ?? 0) }}
+          />
+        ))}
       {sets.map((p) => {
         const suggested = isSetSuggestion(p)
         const name = periodLabel(t, taxonomy.sport, p.no)
