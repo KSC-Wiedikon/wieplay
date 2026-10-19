@@ -22,8 +22,9 @@ from tests.test_analysis_api import (
     make_ready,
     payload,
 )
+from wieplay.core import scoring
 from wieplay.core.config import Settings
-from wieplay.core.models import ModelRun, Segment
+from wieplay.core.models import ModelRun, Segment, WdGame
 from wieplay.ml import tracks
 
 # Game k=0 of the fixtures is a home game: [us, them] per set.
@@ -176,6 +177,31 @@ def test_an_analysis_scores_the_match(
     assert scoring["vs_coach"] is None  # nothing a coach decided yet
     # Stats count a model set only once a coach accepts it.
     assert club["coach"].get(f"/api/videos/{ready['id']}/stats").json()["sets"] == []
+
+
+def test_an_official_result_that_comes_later_scores_again(
+    app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    """Analysed the night of the match, before the federation had the result: the hourly
+    sync's sweep scores it again once Wiedisync has it, and only then."""
+    with app.state.sessionmaker() as db:
+        game = db.get(WdGame, ready["game_id"])
+        assert game is not None
+        sets, game.sets = game.sets, None
+        db.commit()
+    played, _ = match()
+    analysed(analyser, played)
+    with app.state.sessionmaker() as db:
+        assert scoring.rescore_new_results(db) == []  # nothing new
+        game = db.get(WdGame, ready["game_id"])
+        assert game is not None
+        game.sets = sets
+        db.commit()
+        assert scoring.rescore_new_results(db) == [uuid.UUID(ready["id"])]
+        assert scoring.rescore_new_results(db) == []  # once
+    assert score_runs(app, ready)[-1] == "official_result"
+    periods = sorted(tagging(club["coach"], ready)["periods"], key=lambda p: p["no"])
+    assert [(p["final_us"], p["final_them"]) for p in periods] == OFFICIAL
 
 
 def test_a_missed_rally_is_flagged_and_the_score_still_ends_right(
