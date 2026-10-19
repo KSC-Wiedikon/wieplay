@@ -261,7 +261,7 @@ def test_clusters_link_numbers_and_never_two_people_at_once() -> None:
         track(1, 0, 50, number=7),
         track(2, 100, 150, number=7),  # the same number later: the same player
         track(3, 0, 50, hue=0.01),  # same kit, same time as 1: someone else
-        track(4, 200, 260, hue=0.02),  # same kit, later: may be anyone, joins by kit
+        track(4, 200, 260, hue=0.02),  # same kit, later: may be anyone, a pieces card
         track(5, 0, 50, side=pl.FAR, hue=0.62),
     ]
     identities.assign_teams(tracks, ["us"])
@@ -270,6 +270,8 @@ def test_clusters_link_numbers_and_never_two_people_at_once() -> None:
     assert by_track[1] is by_track[2]
     assert by_track[1].number == 7 and by_track[1].team == "us"
     assert by_track[3] is not by_track[1]
+    assert by_track[3] is by_track[4] and by_track[3].kind == pl.PIECES  # not one person
+    assert by_track[1].kind == pl.PERSON and by_track[3].number is None
     assert by_track[5].team == "them"
     for c in clusters:
         spans = sorted((t.first, t.last) for t in c.tracks)

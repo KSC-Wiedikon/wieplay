@@ -22,11 +22,15 @@ video and in memory only, in this order (wieplay/worker/players.py `identify`):
    longer gaps where nobody else could be them; a chain reading two numbers is cut;
 5. **numbers to people** (`assign_numbers`): pieces claim the numbers they read, the
    surest first; a number spreads along its chain only briefly;
-6. **cards** (players.cluster_tracks): pieces with the same number are one card; colour
-   joins only pieces without a number; `absorb` gives a card without a number to the one
-   numbered teammate missing while it is seen;
+6. **cards** (players.cluster_tracks): a card is one person, the pieces with the same
+   number or one piece without a number; colour joins nothing into a person (teammates
+   share the kit): pieces without a number that look alike are kept as a *pieces* card the
+   coach names a few at a time (players v3, PLAN §10.5; v2's "who is missing", a card
+   without a number given to the one numbered teammate missing while it is seen, put other
+   people on the numbered cards and is gone);
 7. a **confidence** per card (`set_confidence`): its number read often enough for its time
-   on court, and no bigger card with the same number; the rest is to be checked.
+   on court, and no bigger card with the same number; the rest is to be checked, a pieces
+   card always.
 
 The look of a person is the colour of the head, shirt, shorts and legs regions (players.py
 `descriptor`): no face, no re-identification model. It exists only in memory while the job
@@ -49,6 +53,7 @@ from scipy.optimize import linear_sum_assignment
 from wieplay.ml.players import (
     FAR,
     NEAR,
+    PIECES,
     Cluster,
     Ok,
     Track,
@@ -259,13 +264,16 @@ def _top(reads: Sequence[tuple[int, int, float]]) -> tuple[int | None, float, fl
     return n, v, sum(votes.values())
 
 
-def fold_reads(reads: Sequence[tuple[int, int, float]]) -> list[tuple[int, int, float]]:
+def fold_reads(
+    reads: Sequence[tuple[int, int, float]], team: str | None = None
+) -> list[tuple[int, int, float]]:
     """Readings with a single digit taken as the two-digit number it is part of, where the
-    track reads that number too (players.fold_partials): "2" in a track of "12" is no swap."""
+    track reads that number too (players.fold_partials): "2" in a track of "12" is no swap
+    (unless the team plays a #2 too)."""
     votes: dict[int, float] = defaultdict(float)
     for _, n, c in reads:
         votes[n] += c
-    folded = fold_partials(dict(votes))
+    folded = fold_partials(dict(votes), team)
     host = {}
     for d in votes:
         if d not in folded:
@@ -324,7 +332,7 @@ def split_swaps(
         at = None
         if data is not None and not t.referee and depth.get(id(t), 0) < MAX_SPLITS:
             reads = _allowed_reads(t, allowed, ok)
-            at = number_switch(fold_reads(reads))
+            at = number_switch(fold_reads(reads, t.team))
         if at is None or data is None:
             out.append(t)
             continue
@@ -796,80 +804,6 @@ def in_play(chain: Track) -> bool:
     )
 
 
-# --- who is missing -------------------------------------------------------------------------
-
-ABSORB_GAP_MS = 15_000
-
-
-def _intervals(c: Cluster) -> list[tuple[int, int]]:
-    return sorted((m.t0_ms, m.t1_ms) for t in c.tracks for m in (t.members or [t]))
-
-
-def _gap_ms(a: list[tuple[int, int]], b: list[tuple[int, int]]) -> int | None:
-    """The shortest time between two sets of intervals; None when they overlap."""
-    best: int | None = None
-    starts = [s for s, _ in b]
-    for s0, e0 in a:
-        k = bisect.bisect_left(starts, s0)
-        for j in (k - 1, k):
-            if 0 <= j < len(b):
-                s1, e1 = b[j]
-                if s0 <= e1 and s1 <= e0:
-                    return None
-                gap = s1 - e0 if s1 > e0 else s0 - e1
-                best = gap if best is None else min(best, gap)
-        if k < len(b) and b[k][0] <= e0:
-            return None
-    return best
-
-
-def absorb(clusters: list[Cluster], max_gap_ms: int | None = None) -> int:
-    """A card without a number joins the numbered card of its team that is missing while it
-    is seen and was seen just before or after it (within `max_gap_ms`): the one teammate
-    it can be. Only when no other numbered card comes close (half the gap or less) and the
-    two look alike. Returns how many cards were joined."""
-    from wieplay.ml.players import _cluster_number
-
-    max_gap_ms = ABSORB_GAP_MS if max_gap_ms is None else max_gap_ms
-    joined = 0
-    for team in ("us", "them"):
-        anchors = [c for c in clusters if c.team == team and not c.referee and c.number is not None]
-        spans = {id(a): _intervals(a) for a in anchors}
-        rest = [c for c in clusters if c.team == team and not c.referee and c.number is None]
-        rest.sort(key=lambda c: -c.detections)
-        for u in rest:
-            mine = _intervals(u)
-            options = []
-            for a in anchors:
-                gap = _gap_ms(mine, spans[id(a)])
-                if gap is not None and gap <= max_gap_ms:
-                    options.append((gap, a))
-            if not options:
-                continue
-            options.sort(key=lambda o: o[0])
-            gap, best = options[0]
-            if len(options) > 1 and options[1][0] < 2 * gap:
-                continue
-            da = _mean_look(best)
-            du = _mean_look(u)
-            if da is not None and du is not None and distance(da, du) > StitchParams().max_look:
-                continue
-            best.tracks = sorted([*best.tracks, *u.tracks], key=lambda t: t.first)
-            spans[id(best)] = _intervals(best)
-            _cluster_number(best)
-            clusters.remove(u)
-            joined += 1
-    clusters.sort(key=lambda c: (c.referee, c.team != "us", -c.detections))
-    for i, c in enumerate(clusters):
-        c.key = i + 1
-    return joined
-
-
-def _mean_look(c: Cluster) -> np.ndarray[Any, Any] | None:
-    items = [(t.descriptor, t.detections) for t in c.tracks if t.descriptor is not None]
-    return _mean([d for d, _ in items], [float(n) for _, n in items])
-
-
 # --- confidence -----------------------------------------------------------------------------
 
 
@@ -878,11 +812,13 @@ def confidence(c: Cluster, fps: float) -> float:
     that one, and its time on court. 0..1; below UNCERTAIN the card asks to be checked."""
     if c.referee:
         return 1.0
+    if c.kind == PIECES:
+        return 0.0  # several people, likely: never one whole person
     votes: dict[int, float] = defaultdict(float)
     for t in c.tracks:
         for k, v in t.votes.items():
             votes[k] += v
-    votes = defaultdict(float, fold_partials(dict(votes)))
+    votes = defaultdict(float, fold_partials(dict(votes), c.team))
     total = sum(votes.values())
     top = votes.get(c.number, 0.0) if c.number is not None else 0.0
     seconds = sum(t.detections for t in c.tracks) / max(fps, 1e-6)

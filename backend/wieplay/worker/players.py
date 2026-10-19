@@ -54,7 +54,9 @@ from wieplay.worker.handlers import Context, PermanentError, raw_inputs
 
 log = logging.getLogger(__name__)
 MODEL = "wieplay-players"
-VERSION = 2  # players v2: stretches, chains, roster-checked numbers, confidence
+# players v2: stretches, chains, roster-checked numbers, confidence; v3: one person per card
+# (pieces cards for the rest), every kept crop read, no folding of numbers a team plays.
+VERSION = 3
 DETECT_FPS = 10.0
 IMGSZ = 1280
 PAD_BEFORE_MS = 1000
@@ -69,9 +71,11 @@ TRACK_BUFFER_S = 1.0
 MATCH_COST = 0.8
 SECOND_COST = 0.5
 UNCONFIRMED_COST = 0.7
-# Shirt-number readings per track: a few, more for a track followed long.
-OCR_MIN_PER_TRACK = 2
-OCR_MAX_PER_TRACK = 12
+# Shirt-number readings per track: every crop it keeps (the best of every 2 s, at most 16,
+# players.MAX_CROPS). Reading all of them instead of 2 + one per 5 s (at most 12) read 19,600
+# crops of the Legends game instead of 13,400 (85 s on 4 threads of the Lenovo's CPU) for
+# 49 % more readings and more of its footage on sure cards (PLAN §10.5).
+OCR_MAX_PER_TRACK = pl.MAX_CROPS
 # The number reader runs on the CPU, on this many threads: its small models with a new input
 # size per crop took 37 ms a crop on the laptop's GPU and 13 ms on its CPU (18.10.2026).
 OCR_WORKERS = 4
@@ -487,8 +491,8 @@ class Identified:
 
 
 def ocr_budget(t: pl.Track) -> int:
-    """Readings for a track: two, one more per 5 s it was followed, at most twelve."""
-    return int(min(OCR_MAX_PER_TRACK, OCR_MIN_PER_TRACK + t.detections // 50))
+    """Readings for a track: every crop it keeps."""
+    return OCR_MAX_PER_TRACK
 
 
 def identify(
@@ -510,6 +514,41 @@ def identify(
     the other's cards. `sheet`: what the official scoresheet says about the rallies (who
     served, who was on court; serve_labels.py). `reads`: reads the shirt numbers instead of
     `reader` (measuring: the same readings for every variant)."""
+    with pl.playing(playing_numbers(roster, sheet)):
+        return _identify(
+            col, windows, reader, roster, fps, stitch, calibrated, sheet, reads, sheet_use
+        )
+
+
+def playing_numbers(
+    roster: dict[str, list[int]], sheet: serve_labels.SheetInputs | None
+) -> dict[str, set[int]]:
+    """The numbers each team plays: the sheet's (lineups, substitutions) and its liberos,
+    else our roster (players.fold_partials keeps a single digit the team plays)."""
+    out: dict[str, set[int]] = {}
+    if sheet is not None and sheet.any:
+        for team in ("us", "them"):
+            found = set(sheet.numbers.get(team, set())) | set(sheet.liberos.get(team, set()))
+            if found:
+                out[team] = found
+    for team, numbers in roster.items():
+        if team not in out and numbers:
+            out[team] = set(numbers)
+    return out
+
+
+def _identify(
+    col: pl.Collector,
+    windows: list[dict[str, Any]],
+    reader: people.NumberReader | None,
+    roster: dict[str, list[int]],
+    fps: float,
+    stitch: identities.StitchParams | None,
+    calibrated: bool,
+    sheet: serve_labels.SheetInputs | None,
+    reads: Callable[[list[pl.Track]], int] | None,
+    sheet_use: frozenset[str] | None,
+) -> Identified:
     tracks = pl.finish_tracks(col)
     near = [w["near_team"] for w in windows]
     sides = identities.smooth_sides(near)
@@ -573,7 +612,6 @@ def identify(
             standing += 1
     kept = identities.assign_numbers([c for c in chains if identities.in_play(c)])
     clusters = pl.cluster_tracks(kept)
-    absorbed = identities.absorb(clusters)
     identities.set_confidence(clusters, fps, sure=calibrated)
     sheets = pl.contact_sheets(clusters)
     index = pl.encode_index(col, kept)
@@ -586,7 +624,6 @@ def identify(
         "encounter_cuts": met,
         "sides_smoothed": sum(1 for a, b in zip(near, sides, strict=True) if a != b),
         "standing_still": standing,
-        "absorbed": absorbed,
         "chains": len(chains),
         "chains_in_play": len(kept),
         "numbers_read_tracks": numbered_tracks,
@@ -598,6 +635,13 @@ def identify(
         "clusters_us": sum(1 for c in players if c.team == "us"),
         "clusters_them": sum(1 for c in players if c.team == "them"),
         "clusters_numbered": sum(1 for c in players if c.number is not None),
+        # Pieces cards (several people, likely; PLAN §10.5) and their share of the footage.
+        "pieces_cards": sum(1 for c in players if c.kind == pl.PIECES),
+        "pieces_share": round(
+            sum(c.detections for c in players if c.kind == pl.PIECES)
+            / max(1, sum(c.detections for c in players)),
+            3,
+        ),
         "clusters_uncertain": sum(1 for c in players if c.confidence < identities.UNCERTAIN),
         # Cards the job is sure of (confidence >= 0.5): the people; and their share of the
         # players' detections (the rest is on cards to check).
@@ -824,6 +868,7 @@ def run(ctx: Context) -> dict[str, Any]:
             {
                 "key": c.key,
                 "team": c.team,
+                "kind": c.kind,
                 "referee": c.referee,
                 "number": c.number,
                 "number_conf": c.number_conf,

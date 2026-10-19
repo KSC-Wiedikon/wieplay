@@ -254,7 +254,7 @@ def test_split_swaps_cuts_a_track_and_the_index_follows_the_pieces() -> None:
     assert ids == {c.track_id for c in chains} and len(ids) == 2
 
 
-# --- who is missing, confidence ------------------------------------------------------------------
+# --- cards, numbers a team plays, confidence -----------------------------------------------------
 
 
 def cluster(key: int, *tracks: pl.Track, number: int | None = None) -> pl.Cluster:
@@ -263,22 +263,55 @@ def cluster(key: int, *tracks: pl.Track, number: int | None = None) -> pl.Cluste
     return c
 
 
-def test_a_card_without_a_number_joins_the_one_teammate_missing_then() -> None:
-    seven = cluster(1, piece(1, 0, 60, number=7), number=7)
-    nine = cluster(2, piece(2, 0, 30, number=9), piece(3, 45, 60, number=9), number=9)
-    unknown = cluster(3, piece(4, 31, 44))
-    clusters = [seven, nine, unknown]
-    assert identities.absorb(clusters) == 1
-    assert [c.number for c in clusters] == [7, 9] and [c.key for c in clusters] == [1, 2]
-    assert {t.track_id for t in clusters[1].tracks} == {2, 3, 4}
+def test_a_card_is_one_person_and_look_alike_pieces_make_a_pieces_card() -> None:
+    """Players v3 (PLAN §10.5): colour joins nothing into a person. The pieces of a number
+    are one card; a piece without a number stays off the numbered cards whoever is missing
+    then; unnumbered pieces that look alike are one pieces card, never a person, with no
+    number and to be checked."""
+    seven = piece(1, 0, 60, number=7)
+    nine = [piece(2, 0, 30, number=9), piece(3, 45, 60, number=9)]
+    unknown = piece(4, 31, 44)  # #9 is the one teammate missing then: no matter
+    alike = [piece(5, 70, 80, look=0.01), piece(6, 90, 100, look=0.02)]
+    alone = piece(7, 70, 80, start=(5.0, 6.0), look=0.6)  # another look, seen with 5
+    clusters = pl.cluster_tracks([seven, *nine, unknown, *alike, alone])
+    by = {frozenset(t.track_id for t in c.tracks): c for c in clusters}
+    assert by[frozenset({1})].number == 7 and by[frozenset({2, 3})].number == 9
+    assert by[frozenset({1})].kind == by[frozenset({2, 3})].kind == pl.PERSON
+    pieces = next(c for c in clusters if c.kind == pl.PIECES)
+    assert {t.track_id for t in pieces.tracks} == {4, 5, 6} and pieces.number is None
+    assert by[frozenset({7})].kind == pl.PERSON  # one piece: one person
+    identities.set_confidence(clusters, FPS)
+    assert pieces.confidence == 0.0 < identities.UNCERTAIN
+    # Person cards first, then the pieces cards, per team.
+    assert clusters[-1] is pieces
 
 
-def test_no_join_when_two_teammates_could_be_it() -> None:
-    seven = cluster(1, piece(1, 0, 30, number=7), number=7)
-    nine = cluster(2, piece(2, 0, 30, number=9), number=9)
-    unknown = cluster(3, piece(3, 33, 44))
-    clusters = [seven, nine, unknown]
-    assert identities.absorb(clusters) == 0 and len(clusters) == 3
+def test_a_digit_the_team_plays_is_not_folded_into_a_two_digit_number() -> None:
+    votes = {12: 2.0, 1: 1.2}
+    assert pl.fold_partials(votes, "us") == {12: 3.2}  # nobody says #1 plays
+    with pl.playing({"us": [1, 12]}):
+        assert pl.fold_partials(votes, "us") == votes  # our #1 and #12: two people
+        assert pl.fold_partials(votes, "them") == {12: 3.2}
+        t = pl.Track(1, 0, 50, 51, pl.NEAR, 0, team="us", votes={12: 0.9, 1: 0.8})
+        pl.settle_number(t)
+        assert t.number is None  # neither alone is read often enough
+        reads = [(10, 12, 0.9), (20, 12, 0.9), (30, 1, 0.9), (40, 1, 0.9)]
+        assert identities.number_switch(identities.fold_reads(reads, "us")) == 25
+    assert identities.number_switch(identities.fold_reads(reads, "us")) is None
+    assert pl.PLAYING.get() is None
+
+
+def test_the_numbers_a_team_plays_come_from_the_sheet_else_the_roster() -> None:
+    from wieplay.ml import serve_labels
+
+    sheet = serve_labels.SheetInputs(
+        [None], liberos={"us": {4}}, numbers={"us": {1, 12}, "them": {7, 9}}
+    )
+    sheet.rallies = [
+        serve_labels.RallySheet(0, 1000, "us", 1, {"us": (1, 12, 3, 4, 5, 6), "them": None})
+    ]
+    assert job.playing_numbers({"us": [1, 2, 12]}, sheet) == {"us": {1, 4, 12}, "them": {7, 9}}
+    assert job.playing_numbers({"us": [1, 2, 12]}, None) == {"us": {1, 2, 12}}
 
 
 def test_confidence_favours_a_number_read_often_and_time_on_court() -> None:

@@ -24,7 +24,9 @@ import sys
 import zlib
 from array import array
 from collections import defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -74,9 +76,11 @@ CLUSTER_CROPS = 4
 # confidences) and make most of its votes.
 NUMBER_MIN_VOTES = 1.2
 NUMBER_SHARE = 0.6
-# Clustering: average-linkage merges stop above this appearance distance (Hellinger,
-# 0..2 over the four regions).
-MERGE_DISTANCE = 0.55
+# Pieces cards: average-linkage merges stop above this appearance distance (Hellinger,
+# 0..2 over the four regions). Teammates look alike, so a pieces card holds several
+# people at any distance; looser groups (0.8 instead of v2's 0.55) gave the coach fewer
+# answers for the same footage on the Legends game (PLAN §10.5).
+MERGE_DISTANCE = 0.8
 
 
 # --- geometry -------------------------------------------------------------------------------
@@ -712,6 +716,21 @@ def read_numbers(
 # scoresheet's six on court and the liberos during a rally (wieplay/ml/serve_labels.py).
 Ok = Callable[[str, int, int], bool]
 
+# The numbers each team plays in the video (the sheet's lineups, substitutions and liberos;
+# our roster without a sheet), set by the job while it links (worker/players.identify): a
+# single digit one of them is not folded into a two-digit number (`fold_partials`).
+PLAYING: ContextVar[Mapping[str, frozenset[int]] | None] = ContextVar("PLAYING", default=None)
+
+
+@contextmanager
+def playing(numbers: Mapping[str, Iterable[int]]) -> Iterator[None]:
+    """The numbers each team plays, for the linking inside the block."""
+    token = PLAYING.set({team: frozenset(int(n) for n in ns) for team, ns in numbers.items()})
+    try:
+        yield
+    finally:
+        PLAYING.reset(token)
+
 
 def vote(t: Track, allowed: dict[str, set[int]] | None = None, ok: Ok | None = None) -> None:
     """A track's number from its readings: those its team's roster allows, or with `ok`
@@ -728,13 +747,17 @@ def vote(t: Track, allowed: dict[str, set[int]] | None = None, ok: Ok | None = N
     settle_number(t)
 
 
-def fold_partials(votes: dict[int, float]) -> dict[int, float]:
+def fold_partials(votes: dict[int, float], team: str | None = None) -> dict[int, float]:
     """A single digit read where a two-digit number is read too is mostly that number with
     a digit hidden (an arm, a fold): "2" and "12" → "12", when one two-digit number holds
-    the digit at its start or end and has at least half its votes."""
+    the digit at its start or end and has at least half its votes. Not when the team plays
+    that digit itself (`PLAYING`, the job's sheet and roster): our #1 and #12 are two
+    people, and a track that reads both holds both (on the Legends game #1 landed on #12's
+    card that way, PLAN §10.5)."""
     out = dict(votes)
+    keep = (PLAYING.get() or {}).get(team or "", frozenset())
     for d, v in votes.items():
-        if d >= 10:
+        if d >= 10 or d in keep:
             continue
         hosts = [n for n in votes if n >= 10 and str(d) in (str(n)[0], str(n)[1])]
         if len(hosts) == 1 and votes[hosts[0]] >= 0.5 * v:
@@ -747,13 +770,16 @@ def settle_number(t: Track) -> None:
     if not t.votes:
         t.number, t.number_conf = None, 0.0
         return
-    votes = fold_partials(t.votes)
+    votes = fold_partials(t.votes, t.team)
     number, score = max(votes.items(), key=lambda kv: kv[1])
     total = sum(votes.values())
     if score >= NUMBER_MIN_VOTES and score / total >= NUMBER_SHARE:
         t.number, t.number_conf = number, round(min(1.0, score / (score + 1.0)), 3)
     else:
         t.number, t.number_conf = None, 0.0
+
+
+PERSON, PIECES = "person", "pieces"
 
 
 @dataclass
@@ -765,6 +791,10 @@ class Cluster:
     number_conf: float = 0.0
     referee: bool = False
     confidence: float = 0.0  # one whole person? (identities.confidence)
+    # PERSON: one person (a number's pieces, or one stretch the tracker followed); PIECES:
+    # pieces without a number that look alike, likely of several teammates (a team shares
+    # its kit), for the coach to name a few at a time (PLAN §10.5, players v3).
+    kind: str = PERSON
 
     @property
     def detections(self) -> int:
@@ -783,17 +813,19 @@ def _overlap(a: Track, b: Track) -> bool:
 def cluster_tracks(
     tracks: Sequence[Track], merge_distance: float = MERGE_DISTANCE
 ) -> list[Cluster]:
-    """Tracks → players, per team. Must link: the same confident shirt number. Cannot link:
-    tracks seen at the same time (two people), different confident numbers. Then average
-    linkage on appearance, closest admissible pair first, until the closest is farther than
-    `merge_distance`. Referee-like tracks form their own cluster (marked)."""
+    """Tracks → cards, per team. A card is one person: the pieces that read the same number
+    (two seen at the same time: the less sure one is a misread), or one piece without a
+    number. Colour never makes a person: teammates share the kit, and pieces joined by it
+    were several people on most cards (players v2's cards to check, PLAN §10.5). Pieces
+    without a number that look alike (average linkage on appearance, closest admissible pair
+    first, never two seen at the same time) are kept together as a PIECES card instead, for
+    the coach to name a few at a time. Referee-like tracks form their own card (marked)."""
     clusters: list[Cluster] = []
     referees = [t for t in tracks if t.referee]
     for team in ("us", "them"):
         items = [t for t in tracks if t.team == team and not t.referee]
         if not items:
             continue
-        groups: list[list[Track]] = []
         by_number: dict[int, list[Track]] = defaultdict(list)
         rest: list[Track] = []
         for t in items:
@@ -806,16 +838,16 @@ def cluster_tracks(
                     rest.append(t)
                 else:
                     group.append(t)
-            groups.append(group)
-        groups.extend([t] for t in rest)
-        groups = _agglomerate(groups, merge_distance)
-        for g in groups:
-            clusters.append(Cluster(key=0, team=team, tracks=sorted(g, key=lambda t: t.first)))
+            clusters.append(Cluster(0, team, sorted(group, key=lambda t: t.first)))
+        for g in _agglomerate([[t] for t in rest], merge_distance):
+            kind = PIECES if len(g) > 1 else PERSON
+            clusters.append(Cluster(0, team, sorted(g, key=lambda t: t.first), kind=kind))
     if referees:
         clusters.append(Cluster(key=0, team="them", tracks=referees, referee=True))
     for c in clusters:
-        _cluster_number(c)
-    clusters.sort(key=lambda c: (c.referee, c.team != "us", -c.detections))
+        if c.kind == PERSON:
+            _cluster_number(c)  # a pieces card suggests no number: it is not one person
+    clusters.sort(key=lambda c: (c.referee, c.team != "us", c.kind == PIECES, -c.detections))
     for i, c in enumerate(clusters):
         c.key = i + 1
     return clusters
@@ -895,7 +927,7 @@ def _cluster_number(c: Cluster) -> None:
             votes[number] += v
     if not votes:
         return
-    votes = defaultdict(float, fold_partials(dict(votes)))
+    votes = defaultdict(float, fold_partials(dict(votes), c.team))
     number, score = max(votes.items(), key=lambda kv: kv[1])
     total = sum(votes.values())
     if score >= NUMBER_MIN_VOTES and score / total >= NUMBER_SHARE:
