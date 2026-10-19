@@ -21,6 +21,7 @@ import { RallyPanel } from '../components/RallyPanel'
 import { PageSpinner } from '../components/Spinner'
 import { Tendencies } from '../components/Tendencies'
 import { TrajectoryLayer, TrajectoryToggle } from '../components/Trajectories'
+import { VideoGameLine } from '../components/VideoGame'
 import { VideoSetup } from '../components/VideoSetup'
 import { useTrajectories } from '../lib/trajectories'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
@@ -141,6 +142,7 @@ function VideoView({ videoId }: { videoId: string }) {
               )}
             </p>
             {v.imported_from && <ImportOrigin origin={v.imported_from} />}
+            <VideoGameLine video={v} />
           </div>
         }
       />

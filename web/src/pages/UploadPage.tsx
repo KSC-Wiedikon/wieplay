@@ -24,6 +24,7 @@ import { sportOf, useSportAccent } from '../lib/sport'
 import { useToast } from '../lib/toast'
 import type { InboxFile, TeamDetail, Video, VideoConfig, VideoCreate } from '../lib/types'
 import { matchFiles, sortByName, useUpload, type FilePair } from '../lib/upload'
+import { gamePlace, gameTeams, useTeamGameChoices } from '../lib/videoGame'
 import {
   inboxFolder,
   inTeamFolder,
@@ -152,6 +153,10 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
   const otherDateOk = /^\d{4}-\d{2}-\d{2}$/.test(otherDate) && otherDate >= oldest && otherDate <= today
   const on = other ? (otherDateOk ? otherDate : null) : (choice?.date ?? null)
   const filming = useFilming(team.id, on)
+  // No game of the team's own that day, but another KSCW team played (a shared cup team): the
+  // video is uploaded as another match and linked to that game on the video page afterwards.
+  const clubDay = useTeamGameChoices(team.id, other && otherDateOk ? otherDate : null, !guest)
+  const clubGames = clubDay.data && clubDay.data.own.length === 0 ? clubDay.data.club : []
 
   // The inbox has one folder per team; only this team's files can go into its videos.
   const folder = inboxFolder(team)
@@ -305,6 +310,11 @@ function UploadFlow({ team, config }: { team: TeamDetail; config: VideoConfig })
             {!otherDateOk && (
               <p role="alert" className="text-sm text-danger">
                 {t('upload.dateRange')}
+              </p>
+            )}
+            {otherDateOk && clubGames.length > 0 && (
+              <p role="status" className="rounded-control border border-hairline bg-sunken px-3 py-2 text-sm">
+                {t('upload.clubGames', { games: clubGames.map((g) => `${gamePlace(g)} (${gameTeams(g)})`).join('; ') })}
               </p>
             )}
             <Field label={t('upload.matchTitle')} hint={t('upload.matchTitleHint')} htmlFor={`${id}-match-title`}>

@@ -178,6 +178,8 @@ def import_batch(path: str, by: str, spacing_min: int, dry_run: bool) -> int:
         for p in planned:
             if p.problem:
                 print(f"line {p.line.number}: skipped: {p.problem}")
+            elif p.note:
+                print(f"line {p.line.number}: note: {p.note}")
         if dry_run:
             ok = [p for p in planned if not p.problem]
             for p in ok:

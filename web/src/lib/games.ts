@@ -27,17 +27,19 @@ export function opponentOf(game: Game): string {
   return `${game.home_name} – ${game.away_name}`
 }
 
-function ours(game: Game, [home, away]: [number, number]): string {
+type Sides = Pick<Game, 'our_side'>
+
+function ours(game: Sides, [home, away]: [number, number]): string {
   return game.our_side === 'away' ? `${away}:${home}` : `${home}:${away}`
 }
 
 /** Final score from our side ("3:1" = we won 3 sets to 1); home:away when our side is unknown. */
-export function scoreOf(game: Game): string {
+export function scoreOf(game: Sides & Pick<Game, 'home_score' | 'away_score'>): string {
   if (game.home_score === null || game.away_score === null) return ''
   return ours(game, [game.home_score, game.away_score])
 }
 
 /** Set scores from our side, e.g. "25:20, 23:25". */
-export function setsOf(game: Game): string {
+export function setsOf(game: Sides & Pick<Game, 'sets'>): string {
   return (game.sets ?? []).map((set) => ours(game, set)).join(', ')
 }

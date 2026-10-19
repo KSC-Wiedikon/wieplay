@@ -262,6 +262,12 @@ sequenceDiagram
   trainings (ID, date, time, home/away names, league, hall name, **official set scores** from
   `games.sets_json`). Never birthdates.
 - Runs hourly, on admin demand, and right before an upload is accepted.
+- **Other teams' games ("borrowed", 19.10.2026).** `GET /kscw/wieplay/v1/club-games?date=` (or
+  `?ids=`) lists every KSCW team's games of a day, without rosters: the game shape above plus
+  the owning team's name and metadata. A video may be linked to such a game (§6.4); the sync
+  then refreshes, by id, every game a video links to that the snapshot did not just bring, so
+  late results and corrections arrive (`sync.refresh_borrowed`). A Wiedisync without the route
+  (404) leaves them as they are and the sync still succeeds.
 
 ### 4.4 Changes needed in Wiedisync (small, separate PR there)
 
@@ -271,6 +277,7 @@ sequenceDiagram
 | `GET /kscw/wieplay/v1/teams`, `GET /kscw/wieplay/v1/sync?teams=` | same file | `X-WiePlay-Service-Token` (not `Authorization: Bearer`, which Directus would claim), internal network only, read-only, versioned contract with tests. |
 | `GET /kscw/wieplay/v1/adult-check?team=&date=` | same file | Pass/fail per rostered person for a recording date (§5.3); birthdates never leave Wiedisync. |
 | `GET /kscw/wieplay/v1/score-log?game=` (built 18.10.2026, Wiedisync PR #14) | `kscw-endpoints/src/wieplay-score-log.js` | The club scoreboard's point-by-point log of a game (§10.10): team names and scores only, read-only. |
+| `GET /kscw/wieplay/v1/club-games?date=\|ids=` (built 19.10.2026, Wiedisync PR #16) | `kscw-endpoints/src/wieplay-bridge.js` | Every KSCW team's games of a day, or by id (≤ 100): the `/sync` game shape plus the team's name and metadata; no rosters (§4.3, §6.4). |
 | Allow-listed cross-host `next` on `/login` | `LoginPage` / `AuthRoute` (`?next=` exists for in-app paths) | Only the bridge's authorize URL. |
 | ~~Team toggle in `teams.features_enabled`~~ | — | **Changed in M0 (ADR-001):** full admins enable teams **in WiePlay**, per lineage. The bridge returns personal data only for the team ids WiePlay asks for, so Wiedisync needs no migration and coaches cannot enable their own team. |
 | Env | Directus `.env` (prod + dev) | `WIEPLAY_JWT_PRIVATE_KEY`, `WIEPLAY_JWT_KID`, `WIEPLAY_RETURN_URLS`, `WIEPLAY_SYNC_TOKEN_HASH`, and on dev `WIEPLAY_LOGIN_URL=https://wiedisync-dev.kscw.ch/login`; recreate the container (restart does not re-read env). |
@@ -405,6 +412,7 @@ the team's **lineage** (§6.3) unless a season is named.
 | Tag, mark rallies, correct scores and model output | | ✓ | ✓ | ✓ | ✓⁴ |
 | Download / export MP4 (watermarked) | | | ✓ | ✓ | ✓⁴ |
 | Delete a video | | | ✓ | ✓ | ✓ |
+| Set or change a video's game, also another KSCW team's (§6.4) | | | ✓ all seasons | ✓ | ✓ |
 | See, add, remove a photo of the paper scoresheet⁷ | | | ✓ all seasons | ✓ | ✓ |
 | Grant analyst | | | ✓ | ✓ | ✓⁵ |
 | Enable a team for WiePlay | | | | | in Wiedisync |
@@ -679,6 +687,22 @@ inbox_file        id, nas_path, size, probed jsonb, recorded_at_guess, status, v
   by tier 2 and shown with a hint.
 - `video_roster` is a **snapshot** (numbers differ between teams, guests play); tags resolve
   number → member through it, so later roster changes never rewrite history.
+- **The game after the upload (19.10.2026).** On the video page, the team's coaches and team
+  managers (any season), sport admins and admins set or change the video's game, or say there
+  is none (`PUT /api/videos/{id}/game`, audited as `video_game`). The choices are the games of
+  the recording day: the team's own, and every other KSCW team's of the same sport through the
+  bridge's `/club-games` ("H1 · Mobiliar Volley Cup"). Cup teams are shared between club
+  teams, and Wiedisync files the cup game under one of them: the Mobiliar Cup video of H3 is
+  game 572, filed under H1. Such a borrowed game is kept in `wd_game` under its own team (the
+  team row is the mirror's, or a new unlisted one for an older season) and refreshed hourly
+  (§4.3); the snapshot's replace never drops it, and a game moved to an enabled team is
+  replaced by id. Its official sets feed the scoring like any other: changing the game scores a
+  scored video again (reason `game`) after fetching the new game's scoreboard log. The names
+  come from the game unless a coach set them (the setup's names): with H1's game the title card
+  says "KSC Wiedikon H1", the bug still "KSCW H3". Guest clubs' teams never see the club's games.
+  Without the bridge route the picker offers the team's own games with a note. The upload page
+  and the batch import say when a day without a game of the team's own had other teams' games:
+  the video is then linked on the video page.
 
 ### 6.5 Taxonomy (sport-specific, data not code)
 

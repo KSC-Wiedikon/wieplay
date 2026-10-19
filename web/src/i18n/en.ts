@@ -273,6 +273,7 @@ export const en = {
     choose: 'Choose…',
     noGames: 'No played games in the last 13 months.',
     otherMatch: 'Other match (friendly, tournament, cup)',
+    clubGames: 'Other KSCW teams’ games that day: {{games}}. If this video is of one of them, upload it here, then link that game on the video page.',
     date: 'Date',
     matchTitle: 'Title',
     matchTitleHint: 'For example: Friendly against VBC Zürich',

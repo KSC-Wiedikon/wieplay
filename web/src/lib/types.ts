@@ -236,6 +236,45 @@ export interface Video {
   no_scoreboard?: boolean
   /** ... or that there is no official scoresheet for the match (the setup's scoresheet step). */
   no_scoresheet?: boolean
+  /** The video's Wiedisync game with the team it is filed under (older servers: absent). */
+  game?: VideoGame | null
+  /** Set or change the game: coaches and team managers, sport admins, admins. */
+  can_link_game?: boolean
+}
+
+/** A Wiedisync game as the video page shows it and its game picker offers it. */
+export interface VideoGame {
+  id: number
+  team_id: number
+  /** The team Wiedisync files it under ("H1"). */
+  team_name: string
+  /** Another KSCW team's game: a cup team shared by several club teams plays under one of them. */
+  other_team: boolean
+  /** yyyy-mm-dd */
+  date: string | null
+  /** hh:mm:ss */
+  time: string | null
+  home_name: string | null
+  away_name: string | null
+  our_side: 'home' | 'away' | null
+  league: string | null
+  hall_name: string | null
+  home_score: number | null
+  away_score: number | null
+  /** Per-set points as [home, away]. */
+  sets: [number, number][] | null
+}
+
+/** The games a video of a day can be linked to (backend wieplay/core/club_games.py). */
+export interface GameChoices {
+  /** yyyy-mm-dd */
+  on: string
+  /** The video's game now; null on the upload page. */
+  current: number | null
+  own: VideoGame[]
+  club: VideoGame[]
+  /** ok: the other KSCW teams' games are listed; unavailable: Wiedisync couldn't list them; none: not offered (a guest club's team). */
+  club_state: 'ok' | 'unavailable' | 'none'
 }
 
 /** The teams' names of a video (backend wieplay/core/names.py). */

@@ -4,6 +4,9 @@
    and map each row to its lineage, so a team keeps its identity across the 1 June rollover.
 2. Ask the bridge for a snapshot of the *enabled* teams only: rosters, games, trainings.
 3. Replace the mirror for those teams and purge members no enabled team references.
+4. Refresh the "borrowed" games: games of other KSCW teams that a video is linked to (a shared
+   cup team's game, filed in Wiedisync under another team), by id through /club-games. They
+   carry no personal data. A Wiedisync without that route leaves them as they are.
 
 Guest clubs' teams and people (PLAN §4.5, wd_team.guest, ids from GUEST_ID_BASE up) live in
 the same tables and are kept by their coaches: every step here leaves them alone.
@@ -15,16 +18,18 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
+from itertools import batched
 from typing import Any, Protocol
 
 import httpx
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from wieplay.core.guests import GUEST_ID_BASE
 from wieplay.core.models import (
     SyncState,
     TeamLineage,
+    Video,
     WdGame,
     WdMember,
     WdTeam,
@@ -37,6 +42,7 @@ log = logging.getLogger(__name__)
 SPORTS = frozenset({"volleyball", "basketball"})
 RELS = frozenset({"player", "coach", "team_responsible", "captain"})
 MAX_TEAMS_PER_SNAPSHOT = 20
+MAX_CLUB_GAME_IDS = 100  # per /club-games call (the bridge's limit)
 
 
 class BridgeError(Exception):
@@ -51,6 +57,10 @@ class BridgeClient(Protocol):
     def adult_check(self, team_id: int, on: date) -> Mapping[str, Any]: ...
 
     def score_log(self, game_id: int) -> Mapping[str, Any]: ...
+
+    def club_games(
+        self, *, on: date | None = None, ids: Sequence[int] | None = None, sport: str | None = None
+    ) -> Mapping[str, Any]: ...
 
 
 class HttpBridgeClient:
@@ -72,7 +82,10 @@ class HttpBridgeClient:
             raise BridgeError(f"bridge unreachable: {exc}") from exc
         if response.status_code != 200:
             raise BridgeError(f"bridge answered {response.status_code} for {path}")
-        body = response.json()
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise BridgeError(f"bridge answered no JSON for {path}") from exc
         if not isinstance(body, dict) or body.get("version") != 1:
             raise BridgeError(f"unexpected bridge payload for {path}")
         return body
@@ -91,6 +104,20 @@ class HttpBridgeClient:
         the route, or for a game it does not know: a BridgeError like any other."""
         return self._get("/score-log", {"game": str(game_id)})
 
+    def club_games(
+        self, *, on: date | None = None, ids: Sequence[int] | None = None, sport: str | None = None
+    ) -> Mapping[str, Any]:
+        """Every KSCW team's games of a day, or these games by id: no rosters. 404 from a
+        Wiedisync without the route (before 19.10.2026): a BridgeError like any other."""
+        params: dict[str, str] = {}
+        if on is not None:
+            params["date"] = on.isoformat()
+        if ids is not None:
+            params["ids"] = ",".join(str(i) for i in ids)
+        if sport is not None:
+            params["sport"] = sport
+        return self._get("/club-games", params)
+
 
 @dataclass(frozen=True)
 class SyncResult:
@@ -99,6 +126,7 @@ class SyncResult:
     members: int
     games: int
     trainings: int
+    borrowed: int = 0  # other teams' games that videos are linked to, refreshed
 
     def counts(self) -> dict[str, int]:
         return {
@@ -107,6 +135,7 @@ class SyncResult:
             "members": self.members,
             "games": self.games,
             "trainings": self.trainings,
+            "borrowed": self.borrowed,
         }
 
 
@@ -120,6 +149,23 @@ def _time(value: Any) -> time | None:
 
 def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _game_values(g: Mapping[str, Any]) -> dict[str, Any]:
+    """A bridge game's columns of wd_game (the same shape from /sync and /club-games)."""
+    league = g.get("league")
+    return {
+        "date": _date(g.get("date")),
+        "time": _time(g.get("time")),
+        "home_name": g.get("home_name"),
+        "away_name": g.get("away_name"),
+        "our_side": g.get("our_side") if g.get("our_side") in ("home", "away") else None,
+        "league": league[:64] if isinstance(league, str) else None,
+        "hall_name": g.get("hall_name"),
+        "home_score": _int(g.get("home_score")),
+        "away_score": _int(g.get("away_score")),
+        "sets": g.get("sets") if isinstance(g.get("sets"), list) else None,
+    }
 
 
 def _lineage_for(session: Session, team: Mapping[str, Any]) -> TeamLineage:
@@ -225,28 +271,20 @@ def _apply_snapshot(
             )
         )
 
-    session.execute(
-        delete(WdGame).where(WdGame.team_id.in_(enabled_ids), WdGame.team_id < GUEST_ID_BASE)
-    )
     games = [g for g in snap.get("games", []) if g.get("team") in enabled_ids]
-    for g in games:
-        session.add(
-            WdGame(
-                id=g["id"],
-                team_id=g["team"],
-                date=_date(g.get("date")),
-                time=_time(g.get("time")),
-                home_name=g.get("home_name"),
-                away_name=g.get("away_name"),
-                our_side=g.get("our_side") if g.get("our_side") in ("home", "away") else None,
-                league=g.get("league"),
-                hall_name=g.get("hall_name"),
-                home_score=_int(g.get("home_score")),
-                away_score=_int(g.get("away_score")),
-                sets=g.get("sets") if isinstance(g.get("sets"), list) else None,
-                synced_at=now,
-            )
+    # The enabled teams' games are replaced, and so is a row of the same game kept under another
+    # team (a borrowed game Wiedisync has since moved to an enabled team): no duplicate key.
+    session.execute(
+        delete(WdGame).where(
+            or_(
+                WdGame.team_id.in_(enabled_ids),
+                WdGame.id.in_([g["id"] for g in games if isinstance(g.get("id"), int)]),
+            ),
+            WdGame.team_id < GUEST_ID_BASE,
         )
+    )
+    for g in games:
+        session.add(WdGame(id=g["id"], team_id=g["team"], **_game_values(g), synced_at=now))
 
     session.execute(
         delete(WdTraining).where(
@@ -276,6 +314,149 @@ def _apply_snapshot(
     return len(referenced), len(games), len(trainings)
 
 
+# --- other KSCW teams' games ("borrowed"): /club-games -----------------------------------------
+
+
+@dataclass(frozen=True)
+class ClubTeam:
+    """The team row a club game is filed under (metadata only, as /teams gives it)."""
+
+    id: int
+    name: str
+    sport: str
+    season: str
+    league: str | None
+    team_key: str | None
+
+
+@dataclass(frozen=True)
+class ClubGame:
+    """A KSCW game from /club-games: any team's, not only the enabled ones'."""
+
+    id: int
+    team: ClubTeam
+    values: Mapping[str, Any]  # wd_game's columns (_game_values)
+
+    @property
+    def date(self) -> date | None:
+        value: date | None = self.values["date"]
+        return value
+
+
+def parse_club_games(payload: Mapping[str, Any]) -> list[ClubGame]:
+    """/club-games → games with their team. A game whose team is not described, is in the
+    guest clubs' range or of another sport is left out; a malformed answer is a BridgeError."""
+    teams_in, games_in = payload.get("teams"), payload.get("games")
+    if not isinstance(teams_in, list) or not isinstance(games_in, list):
+        raise BridgeError("club games answer has no teams or games")
+    teams: dict[int, ClubTeam] = {}
+    for t in teams_in:
+        if not isinstance(t, Mapping):
+            continue
+        tid, name, season = _int(t.get("id")), t.get("name"), t.get("season")
+        if tid is None or tid >= GUEST_ID_BASE or t.get("sport") not in SPORTS:
+            continue
+        if not isinstance(name, str) or not name or not isinstance(season, str):
+            continue
+        league = t.get("league")
+        teams[tid] = ClubTeam(
+            id=tid,
+            name=name,
+            sport=t["sport"],
+            season=season,
+            league=league if isinstance(league, str) else None,
+            team_key=t.get("team_key") or None,
+        )
+    out: list[ClubGame] = []
+    for g in games_in:
+        if not isinstance(g, Mapping):
+            continue
+        gid, team = _int(g.get("id")), teams.get(_int(g.get("team")) or -1)
+        if gid is None or team is None:
+            continue
+        try:
+            values = _game_values(g)
+        except (TypeError, ValueError) as exc:
+            raise BridgeError(f"club game {gid} is malformed: {exc}") from exc
+        out.append(ClubGame(gid, team, values))
+    return out
+
+
+def ensure_team(session: Session, team: ClubTeam, now: datetime) -> WdTeam | None:
+    """The team row of a club game: the mirror's (the sync lists the current and the previous
+    season), else a new unlisted row for an older season's team. None for a guest team."""
+    row = session.get(WdTeam, team.id)
+    if row is not None:
+        return None if row.guest else row
+    meta = {"id": team.id, "sport": team.sport, "team_key": team.team_key, "name": team.name}
+    row = WdTeam(
+        id=team.id,
+        lineage=_lineage_for(session, meta),
+        name=team.name,
+        sport=team.sport,
+        season=team.season,
+        league=team.league[:64] if team.league else None,
+        team_key=team.team_key,
+        listed=False,  # the next sync lists it when it is the current or previous season's
+        synced_at=now,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def store_club_games(session: Session, games: Sequence[ClubGame], now: datetime) -> list[WdGame]:
+    """Keep these games in the mirror (insert or update), with their teams' rows."""
+    rows = []
+    for game in games:
+        if ensure_team(session, game.team, now) is None:
+            continue
+        row = session.get(WdGame, game.id) or WdGame(id=game.id)
+        row.team_id = game.team.id
+        for key, value in game.values.items():
+            setattr(row, key, value)
+        row.synced_at = now
+        session.add(row)
+        rows.append(row)
+    session.flush()
+    return rows
+
+
+def refresh_borrowed(
+    session: Session, client: BridgeClient, enabled_ids: set[int], now: datetime
+) -> int:
+    """Games that videos are linked to and the snapshot did not just bring (another team's,
+    or one that left an enabled team's list): fetched again by id, so late results and
+    corrections arrive. A game the bridge no longer knows stays as it was. Quiet when the
+    bridge cannot answer (an older Wiedisync): returns how many were refreshed."""
+    referenced = set(
+        session.scalars(
+            select(Video.game_id)
+            .where(Video.game_id.is_not(None), Video.status != "deleted")
+            .distinct()
+        )
+    )
+    if not referenced:
+        return 0
+    fresh = set(
+        session.scalars(
+            select(WdGame.id).where(WdGame.id.in_(referenced), WdGame.team_id.in_(enabled_ids))
+        )
+    )
+    todo = sorted(i for i in referenced - fresh if i is not None)
+    if not todo:
+        return 0
+    found: list[ClubGame] = []
+    try:
+        for chunk in batched(todo, MAX_CLUB_GAME_IDS):
+            found += parse_club_games(client.club_games(ids=chunk))
+    except BridgeError as exc:
+        log.info("borrowed games not refreshed: %s", exc)
+        return 0
+    wanted = set(todo)
+    return len(store_club_games(session, [g for g in found if g.id in wanted], now))
+
+
 def run_sync(session: Session, client: BridgeClient, now: datetime | None = None) -> SyncResult:
     """One full sync in one transaction. Records the outcome in sync_state either way."""
     now = now or datetime.now(UTC)
@@ -287,7 +468,8 @@ def run_sync(session: Session, client: BridgeClient, now: datetime | None = None
             raise BridgeError(f"{len(enabled_ids)} enabled teams; the bridge serves at most 20")
         snap = client.snapshot(sorted(enabled_ids)) if enabled_ids else {}
         members, games, trainings = _apply_snapshot(session, enabled_ids, snap, now)
-        result = SyncResult(len(listed), len(enabled_ids), members, games, trainings)
+        borrowed = refresh_borrowed(session, client, enabled_ids, now)
+        result = SyncResult(len(listed), len(enabled_ids), members, games, trainings, borrowed)
         state.last_run = state.last_ok = now
         state.error = None
         state.counts = result.counts()

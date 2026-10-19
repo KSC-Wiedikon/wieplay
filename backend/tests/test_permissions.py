@@ -435,3 +435,29 @@ def test_scoresheet_photo_permission_matrix() -> None:
         # Whoever sees the photo sees the typed sheet: the photo's rule is the narrower one.
         if sees:
             assert can_see_sheet(who, team, ALL_TEAMS), (who, team)
+
+
+# A video's Wiedisync game, also another club team's (core/game_links.py): coaches, team
+# managers, sport admins, admins; not players or helpers. A guest team's coach: its own team.
+from wieplay.core.permissions import can_link_game  # noqa: E402
+
+LINK_GAME_MATRIX = [
+    (viewer(roles=("admin",)), H3_NOW, True),
+    (viewer(sport_admin=("volleyball",)), H3_NOW, True),
+    (viewer(sport_admin=("volleyball",)), HERREN1_NOW, False),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), H3_NOW, True),
+    (viewer(teams=[{"team": 12, "rel": ["coach"]}]), H3_NOW, True),  # any season of the team
+    (viewer(teams=[{"team": 92, "rel": ["team_responsible"]}]), H3_NOW, True),
+    (viewer(teams=[{"team": 92, "rel": ["player", "captain"]}]), H3_NOW, False),
+    (H3_HELPER, H3_NOW, False),
+    (viewer(teams=[{"team": 92, "rel": ["coach"]}]), OFF_TEAM, False),
+    (GUEST_COACH, GAST_NOW, True),
+    (GUEST_PLAYER, GAST_NOW, False),
+    (viewer(sport_admin=("volleyball",)), GAST_NOW, False),
+]
+
+
+def test_who_links_a_video_to_a_game() -> None:
+    for who, team, ok in LINK_GAME_MATRIX:
+        leads = lead_lineages(who, ALL_TEAMS)
+        assert can_link_game(who, team, leads) is ok, (who, team)

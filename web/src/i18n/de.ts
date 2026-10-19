@@ -279,6 +279,7 @@ export const de: Messages<typeof en> = {
     choose: 'Auswählen…',
     noGames: 'Keine gespielten Spiele in den letzten 13 Monaten.',
     otherMatch: 'Anderes Spiel (Freundschaftsspiel, Turnier, Cup)',
+    clubGames: 'Spiele anderer KSCW-Teams an diesem Tag: {{games}}. Ist das Video von einem davon, lade es hier hoch und verknüpfe das Spiel danach auf der Videoseite.',
     date: 'Datum',
     matchTitle: 'Titel',
     matchTitleHint: 'Zum Beispiel: Freundschaftsspiel gegen VBC Zürich',

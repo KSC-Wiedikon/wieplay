@@ -38,6 +38,11 @@ class FixtureBridgeClient:
         """No scoreboard logs in local development: every game has none."""
         return {"version": 1, "game": {"id": game_id}, "source": None, "events": [], "sets": []}
 
+    def club_games(
+        self, *, on: date | None = None, ids: Sequence[int] | None = None, sport: str | None = None
+    ) -> Mapping[str, Any]:
+        return dev_fixtures.club_games(date.today(), on, ids, sport)
+
 
 def make_dev_bridge(settings: Settings) -> tuple[APIRouter, str]:
     """Router for /api/dev-bridge and the public key it signs with."""
