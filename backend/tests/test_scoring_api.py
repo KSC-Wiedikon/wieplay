@@ -152,7 +152,11 @@ def test_an_analysis_scores_the_match(
     for seg, (_, _, server, won) in zip(rallies, played, strict=True):
         assert (seg["model_serving"], seg["model_won_by"]) == (server, won)
         assert seg["won_by"] is None and seg["serving"] is None  # facts only
-        assert seg["score_source"] == "model" and seg["score_conflict"] is False
+        assert seg["score_source"] == "model"
+        # The video and the official score alone: right, but never sure (PLAN §10.3): the
+        # coach is asked, with why.
+        assert seg["score_sure"] is False and seg["score_conflict"] is True
+        assert seg["score_reasons"] and seg["score_note"] == seg["score_reasons"][0]["code"]
         assert seg["serving_court"] in ("near", "far") and seg["serve_confidence"] > 0.9
     assert (rallies[-1]["score_us_after"], rallies[-1]["score_them_after"]) == OFFICIAL[-1]
     # Gaps: the warm-up, three set breaks, the end; ordinary dead time stays unlabelled.
@@ -168,6 +172,7 @@ def test_an_analysis_scores_the_match(
     state = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()
     scoring = state["scoring"]
     assert scoring["serve_finder"] == "v0" and scoring["flagged"] == 0
+    assert (scoring["sure"], scoring["needs_coach"]) == (0, len(played))
     assert (scoring["sets_official"], scoring["sets_matching_official"]) == (4, 4)
     assert scoring["sides_confidence"] > 0.9
     assert scoring["gaps"] == {
@@ -294,9 +299,13 @@ def test_a_winner_set_in_review_is_a_fact_and_scores_again(
     seg = next(s for s in back["segments"] if s["id"] == first["id"])
     assert (seg["won_by"], seg["review"], seg["model_won_by"]) == (None, "unreviewed", right)
     assert score_runs(app, ready) == [*before, "changes", "changes"]
-    # A change that leaves the winner as it is does not score again.
-    change(club["coach"], ready, {**_seg_in(seg), "end_ms": seg["end_ms"] + 250})
-    assert len(score_runs(app, ready)) == len(before) + 2
+    # A moved boundary scores again too (the gaps around it change, PLAN §10.1); a change that
+    # leaves the rally as it is does not.
+    moved = change(club["coach"], ready, {**_seg_in(seg), "end_ms": seg["end_ms"] + 250})
+    assert len(score_runs(app, ready)) == len(before) + 3
+    seg = next(s for s in moved["segments"] if s["id"] == first["id"])
+    change(club["coach"], ready, _seg_in(seg))
+    assert len(score_runs(app, ready)) == len(before) + 3
 
 
 def _seg_in(seg: dict[str, Any]) -> dict[str, Any]:
@@ -569,5 +578,5 @@ def test_score_from_the_command_line(
     finally:
         get_settings.cache_clear()
     out = capsys.readouterr().out
-    assert f"{len(played)} rallies, 0 to check, serve v0" in out
+    assert f"{len(played)} rallies, sure 0, needs you {len(played)}, 0 flagged, serve v0" in out
     assert "1:25-20 (official 25-20)" in out

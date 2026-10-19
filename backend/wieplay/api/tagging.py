@@ -106,6 +106,10 @@ class SegmentOut(BaseModel):
     score_confidence: float | None = None
     score_conflict: bool = False
     score_note: str | None = None
+    # The joint decode (PLAN §10.3): sure needs no coach ("Needs you" lists the others), and why
+    # it asks ([{"code": "log_none"}, {"code": "sheet_box", "values": [17, 11]}, ...]).
+    score_sure: bool | None = None
+    score_reasons: list[dict[str, Any]] | None = None
     # Points the model thinks were played right before this rally without one (counted).
     model_missed_us: int | None = None
     model_missed_them: int | None = None
@@ -483,7 +487,18 @@ def _changes_scoring(
             found is None or found.serving_manual != seg.serving_manual
         ):
             return True
-        if seg.kind == "rally" and found is not None and found.won_by != seg.won_by:
+        if seg.kind != "rally" and (found is None or found.kind != "rally"):
+            continue
+        # A rally the coach decided in the review (PLAN §10.1): its winner, accepted, rejected
+        # ("no rally", a break), moved, added. The joint decode runs again, so the rallies around
+        # it can become sure and a draft sheet's box behind it resolves.
+        if found is None or found.won_by != seg.won_by or found.kind != seg.kind:
+            return True
+        if seg.deleted != (found.deleted_at is not None):
+            return True
+        if seg.review is not None and seg.review != found.review:
+            return True
+        if (seg.start_ms, seg.end_ms) != (found.start_ms, found.end_ms):
             return True
     return False
 

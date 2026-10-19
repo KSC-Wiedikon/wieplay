@@ -247,8 +247,12 @@ def _side(says: str, us: str) -> Literal["us", "them", "none"]:
     return "us" if says == us else "them"
 
 
-def _ours(pair: tuple[int, int], us: str) -> tuple[int, int]:
+def ours(pair: tuple[int, int], us: str) -> tuple[int, int]:
+    """A score of the log (a, b) as (us, them)."""
     return pair if us == "a" else (pair[1], pair[0])
+
+
+_ours = ours
 
 
 def _ours_list(pair: list[int] | None, us: str) -> list[int] | None:
@@ -282,6 +286,13 @@ class Evidence:
         if v.says == "none":
             return "none", v.p
         return _side(v.says, self.us), P_FLOOR + (1 - P_FLOOR) * v.p
+
+    def score_after(self, key: str) -> tuple[int, int] | None:
+        """The set's score after this rally by the log (us, them), where it names a winner."""
+        v = self.verdict(key)
+        if v is None or v.says == "none" or v.score is None:
+            return None
+        return ours(v.score, self.us)
 
     def missed_before(self, key: str) -> tuple[int, int] | None:
         """Points (us, them) the log saw right before this rally with no rally of their own;
@@ -366,6 +377,7 @@ def apply(ev: Evidence, set_ins: list[sc.SetIn]) -> list[sc.SetIn]:
                     log=said[0] if said else None,
                     log_p=round(said[1], 3) if said else 0.0,
                     log_missed=ev.missed_before(r.key),
+                    log_score=ev.score_after(r.key),
                 )
             )
         last = st.rallies[-1].key if st.rallies else None
@@ -379,7 +391,9 @@ def flag_disagreements(with_log: list[sc.SetIn], match: sc.MatchOut) -> tuple[sc
     blind_sets = [
         replace(
             st,
-            rallies=[replace(r, log=None, log_p=0.0, log_missed=None) for r in st.rallies],
+            rallies=[
+                replace(r, log=None, log_p=0.0, log_missed=None, log_score=None) for r in st.rallies
+            ],
             log_missed_after=None,
             our_side=so.our_side,
             first_serve=so.first_serve,

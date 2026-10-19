@@ -293,9 +293,10 @@ def score(video: str | None, all_ready: bool) -> int:
             m = run.metrics
             sets = " ".join(_set_line(s) for s in m["sets"])
             print(
-                f"{row.recorded_on:%d.%m.%Y} {row.title}: {m['rallies']} rallies, "
-                f"{m['flagged']} to check, serve {m['serve_finder'] or '-'}, sets {sets or '-'}, "
-                f"gaps {sum(m['gaps'].values())}"
+                f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id}): {m['rallies']} rallies, "
+                f"sure {m.get('sure', 0)}, needs you {m.get('needs_coach', 0)}, "
+                f"{m['flagged']} flagged, serve {m['serve_finder'] or '-'}, sets {sets or '-'}, "
+                f"gaps {sum(m['gaps'].values())}, {run.timing.get('wall_s')} s"
             )
     return 0
 

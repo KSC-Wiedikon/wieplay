@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from wieplay.api.access import TeamAccess, visible_video
@@ -128,6 +128,12 @@ class ScoringOut(BaseModel):
     serve_finder: str | None  # v0 | v1; null: no serve evidence for this video yet
     rallies: int
     flagged: int
+    # The joint decode (PLAN §10.3): rallies it is sure of, rallies that need the coach, the
+    # first reason of each of those, the threshold used.
+    sure: int | None = None
+    needs_coach: int | None = None
+    reasons: dict[str, int] = Field(default_factory=dict)
+    sure_threshold: float | None = None
     sets: list[ScoringSetOut]
     sets_matching_official: int
     sets_official: int
@@ -349,6 +355,10 @@ def _scoring(db: DbDep, video: Video) -> ScoringOut | None:
         serve_finder=m.get("serve_finder"),
         rallies=m.get("rallies", 0),
         flagged=m.get("flagged", 0),
+        sure=m.get("sure"),
+        needs_coach=m.get("needs_coach"),
+        reasons=m.get("reasons") or {},
+        sure_threshold=m.get("sure_threshold"),
         sets=[ScoringSetOut.model_validate(s) for s in m.get("sets", [])],
         sets_matching_official=m.get("sets_matching_official", 0),
         sets_official=m.get("sets_official", 0),

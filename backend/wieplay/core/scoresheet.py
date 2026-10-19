@@ -11,6 +11,12 @@ model. A coach's winner or serve is never changed; where it disagrees with the s
 is flagged ("sheet"). The sheet never overrides the official set score either: a sheet whose set
 ends elsewhere is inconsistent (both are shown).
 
+A set read from the photo and not confirmed (SS4, a draft) is evidence too, weaker than a typed
+one and the log, stronger than the serves (PLAN §10.3): the reader's probabilities per service
+box go into the joint decode (wieplay/ml/scoring.py `BoxCells`); the boxes a coach corrected in
+the draft count as typed. Its timeouts and substitutions are "score at this break" evidence like
+a typed set's.
+
 What is typed: per set the first server, both starting lineups and every service box by shirt
 number and score, timeouts, substitutions, sanctions (no person), "points cancelled", start and
 end times. No names, birthdates or licence numbers ever. Opponents by shirt number only.
@@ -232,8 +238,12 @@ class SetCheck:
     def wanted(self) -> bool:
         return bool(self.doc.get("use", True))
 
-    def use(self, sheet_on: bool) -> Literal["path", "hint"] | None:
-        if not sheet_on or not self.wanted or self.draft or self.sheet.first_serve is None:
+    def use(self, sheet_on: bool) -> Literal["path", "hint", "read"] | None:
+        if not sheet_on or not self.wanted:
+            return None
+        if self.draft:
+            return "read"  # its boxes as the reader saw them: soft evidence (PLAN §10.3)
+        if self.sheet.first_serve is None:
             return None
         if self.status == "consistent":
             return "path"
@@ -479,6 +489,10 @@ def fill_periods(
 class SheetUse:
     checks: list[SetCheck]
     on: bool
+    # The drafts (SS4): what the reader saw on the sheet's photos, and per set the reading's
+    # state (which half is us, what it proposed).
+    readings: Any = None
+    read: Mapping[str, Any] = field(default_factory=dict)
 
     def by_no(self) -> dict[int, SetCheck]:
         return {c.no: c for c in self.checks}
@@ -491,7 +505,18 @@ def for_scoring(db: Session, video: Video) -> SheetUse | None:
     row = stored(db, video.id)
     if row is None or not row.sets:
         return None
-    return SheetUse(check(row.sets, official_sets(db, video), drafts_of(row)), row.use_in_scoring)
+    drafts = drafts_of(row)
+    readings = None
+    if drafts:
+        from wieplay.core import sheet_photos, sheet_reading
+
+        readings = sheet_reading.readings_of(sheet_photos.live(db, row))
+    return SheetUse(
+        check(row.sets, official_sets(db, video), drafts),
+        row.use_in_scoring,
+        readings,
+        dict((row.read or {}).get("sets") or {}),
+    )
 
 
 def path_of(points: Sequence[sh.Point], cancelled: Sequence[sh.Cancelled]) -> sc.SheetPath:
@@ -527,10 +552,66 @@ def _from(path: sc.SheetPath, start: tuple[int, int]) -> sc.SheetPath | None:
     return None
 
 
+def break_notes(s: sh.SheetSet) -> tuple[sc.BreakNote, ...]:
+    """A set's timeouts, substitutions (and returns) and sanctions with their scores (us, them):
+    "score at this break" evidence for the joint decode."""
+    out: list[sc.BreakNote] = []
+    for k, t in enumerate(s.timeouts):
+        out.append(sc.BreakNote("timeout", t.side, t.score(), index=k))
+    for k, u in enumerate(s.subs):
+        for kind, score in (("sub", u.at), ("sub_back", u.back)):
+            if score is None:
+                continue
+            us_them = (score[0], score[1]) if u.side == "us" else (score[1], score[0])
+            out.append(sc.BreakNote(kind, u.side, us_them, index=k))  # type: ignore[arg-type]
+    for k, x in enumerate(s.sanctions):
+        out.append(sc.BreakNote("sanction", x.side, x.score(), x.kind, index=k))
+    return tuple(out)
+
+
+def penalties_of(s: sh.SheetSet) -> dict[tuple[int, int], sc.Side]:
+    """The penalty points (P, DP) of a set that is not lined up as a path: the score when the
+    sanction was given → the team the point went to (a point without a rally)."""
+    return {x.score(): sh.other(x.side) for x in s.sanctions if x.kind in sh.POINT_KINDS}
+
+
+def cells_of(use: SheetUse, c: SetCheck) -> sc.BoxCells | None:
+    """A draft set's service boxes as the reader saw them (wieplay/ml/scoring.py `BoxCells`),
+    the boxes a coach corrected in the draft as typed; None without a reading."""
+    from wieplay.core import sheet_reading
+    from wieplay.ml import sheet_read as rd
+
+    readings = use.readings
+    if readings is None or not any(k.startswith(f"s{c.no}.") for k in readings.cells):
+        return None
+    state = use.read.get(str(c.no)) or {}
+    us_half = state.get("us_half")
+    if us_half not in ("L", "R", "C"):
+        return None
+    halves = rd.halves_of(us_half)
+    deciding = c.sheet.deciding
+    box = {
+        side: rd.box_cells(readings, c.no, half, deciding, cont=deciding and half == "L")
+        for side, half in halves.items()
+    }
+    fixed = sheet_reading.typed_boxes(c.doc, state)
+    return sc.BoxCells(
+        boxes={side: {pos: c.alts for pos, c in cells.items()} for side, cells in box.items()},
+        fixed={
+            side: {pos: v if isinstance(v, int) else None for pos, v in typed.items()}
+            for side, typed in fixed.items()
+        },
+        deciding=deciding,
+        first_cost={first: rd.first_cost(readings, c.no, halves, first, box) for first in sh.SIDES},
+        weight=sc.W_READ,
+    )
+
+
 def apply(use: SheetUse, set_ins: list[sc.SetIn]) -> list[sc.SetIn]:
     """The sets with the sheet: a consistent set's path (its first server too), a doubtful
-    set's winners as a hint. A coach's first server that differs from the sheet's makes the set
-    a hint (the coach ranks first; flagged on the sheet page)."""
+    set's winners as a hint, a draft's boxes as read; their timeouts, substitutions and
+    sanctions. A coach's first server that differs from the sheet's makes the set a hint (the
+    coach ranks first; flagged on the sheet page)."""
     from dataclasses import replace
 
     by_no = use.by_no()
@@ -541,15 +622,42 @@ def apply(use: SheetUse, set_ins: list[sc.SetIn]) -> list[sc.SetIn]:
         if c is None or how is None:
             out.append(st)
             continue
+        notes = break_notes(c.sheet)
+        if how == "read":
+            cells = cells_of(use, c)
+            if cells is None:
+                out.append(st)
+                continue
+            first = st.first_serve
+            state = use.read.get(str(c.no)) or {}
+            proposed = state.get("proposed") or {}
+            typed_first = c.doc.get("first_serve")
+            if (
+                first is None
+                and typed_first in sh.SIDES
+                and typed_first != proposed.get("first_serve")
+            ):
+                first = typed_first  # a coach set the draft's first server
+            out.append(
+                replace(
+                    st,
+                    cells=cells,
+                    notes=notes,
+                    penalties=penalties_of(c.sheet),
+                    first_serve=first,
+                )
+            )
+            continue
         path = path_of(c.decoded.points, c.sheet.cancelled)
         start = (st.start_us, st.start_them)
         cut = _from(path, start)
         first = cut.servers[0] if cut and cut.servers else None
         coach_agrees = st.first_serve is None or st.first_serve == first
         if how == "path" and cut is not None and first is not None and coach_agrees:
-            out.append(replace(st, sheet=cut, first_serve=first))
+            out.append(replace(st, sheet=cut, first_serve=first, notes=notes))
             continue
-        out.append(replace(st, sheet_hint=path.hint()))  # by score: a late start fits too
+        # By score: a late start fits too.
+        out.append(replace(st, sheet_hint=path.hint(), penalties=penalties_of(c.sheet)))
     return out
 
 
@@ -596,6 +704,7 @@ def metrics(use: SheetUse, set_ins: Sequence[sc.SetIn], match: sc.MatchOut) -> d
         sets[str(st.no)] = {
             "status": c.status,
             "use": so.sheet,
+            "draft": c.draft,
             "points": len(c.decoded.points),
             "aligned": aligned if so.sheet == "path" else None,
             "penalties": so.penalties if so.sheet == "path" else None,
@@ -609,6 +718,7 @@ def metrics(use: SheetUse, set_ins: Sequence[sc.SetIn], match: sc.MatchOut) -> d
         "sets": sets,
         "sets_lined_up": sum(1 for s in sets.values() if s["use"] == "path"),
         "sets_hint": sum(1 for s in sets.values() if s["use"] == "hint"),
+        "sets_read": sum(1 for s in sets.values() if s["use"] == "read"),
         "vs_log": {"agree": agree_log, "told": told_log},
         "vs_coach": {"agree": agree_coach, "told": told_coach},
     }

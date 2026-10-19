@@ -30,7 +30,10 @@ What it writes, always next to the coach's work and never in its place (PLAN §1
 - with the official scoresheet (PLAN §10.3a, wieplay/core/scoresheet.py): a consistent set's
   points lined up with the rallies (`sheet_point`, `sheet_won_by`, `sheet_serving`), its first
   server and lineups on the set where empty, its timeouts as `timeout` breaks with their team
-  (source "import"), a doubtful set's winners as a hint.
+  (source "import"), a doubtful set's winners as a hint, a draft read from the photo as soft
+  evidence (its boxes the decode is sure of are resolved in the draft);
+- per rally whether the joint decode is sure (`score_sure`) and why the coach is asked
+  (`score_reasons`, the first one also as `score_note`; PLAN §10.1 "Needs you").
 """
 
 from __future__ import annotations
@@ -39,8 +42,8 @@ import os
 import time
 import uuid
 from collections import Counter
-from collections.abc import Sequence
-from dataclasses import replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -435,26 +438,21 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     scored = [p for p in periods if by_period.get(p.id)]
     set_ins = [_set_in(p, [obs[i] for i in by_period[p.id]], official) for p in scored]
-    # The sheet: ranked below the coach, above the log and everything else.
+    # The sheet: ranked below the coach, above the log and everything else; a draft read from the
+    # photo as soft evidence.
     if sheet is not None and set_ins:
         set_ins = scoresheet.apply(sheet, set_ins)
-    # The club scoreboard's log: the strongest evidence after a coach's (PLAN §10.10).
-    if log_ev is not None and set_ins:
-        set_ins = scorelog.apply(log_ev, set_ins)
     # The scoreboard, when it was read: it wins over the serve evidence (PLAN §10.3, step 5).
     from wieplay.core import scoreboard as sboard
 
     board = sboard.board_for(db, video, rallies, scored, by_period) if set_ins else None
-    if board is not None:
-        set_ins = sboard.orient(board, set_ins)
-    match = sc.score_match(set_ins) if set_ins else sc.MatchOut([], 1.0)
+    done = decide(set_ins, log_ev=log_ev, board=board)
+    set_ins, match = done.set_ins, done.match
     board_metrics = log_metrics = None
-    if board is not None:
-        match, disagreements = sboard.flag_disagreements(set_ins, match)
-        board_metrics = sboard.metrics(board, set_ins, match, disagreements)
-    if log_ev is not None and set_ins:
-        match, log_disagree = scorelog.flag_disagreements(set_ins, match)
-        log_metrics = scorelog.metrics(log_ev, set_ins, match, log_disagree)
+    if board is not None and done.board_extra is not None:
+        board_metrics = sboard.metrics(board, set_ins, match, done.board_extra)
+    if log_ev is not None and done.log_disagree is not None:
+        log_metrics = scorelog.metrics(log_ev, set_ins, match, done.log_disagree)
     scorelog.write(log_ev, rallies)
     scoresheet.write(match, rallies)
     sheet_metrics = scoresheet.metrics(sheet, set_ins, match) if sheet is not None else None
@@ -466,6 +464,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         rally.model_missed_us = rally.model_missed_them = None
         rally.score_confidence = None
         rally.score_conflict = False
+        # Outside every set (a warm-up burst, after the match): the coach says what it is.
+        rally.score_sure = False if set_ins else None
+        rally.score_reasons = [{"code": "no_set"}] if set_ins else None
         if o.p_near is None:
             rally.serving_court = rally.serve_confidence = None
         else:
@@ -476,9 +477,11 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
             rally = by_key[out.key]
             rally.model_serving = out.serving
             rally.model_won_by = out.won_by
-            rally.score_confidence = out.confidence
-            rally.score_note = out.note
-            rally.score_conflict = out.note is not None
+            rally.score_confidence = _shown_confidence(out)
+            rally.score_sure = out.sure
+            rally.score_reasons = [r.as_json() for r in out.reasons]
+            rally.score_note = out.reasons[0].code if out.reasons else out.note
+            rally.score_conflict = rally.score_note is not None
             if out.missed != (0, 0):
                 rally.model_missed_us, rally.model_missed_them = out.missed
     for period in periods:
@@ -491,6 +494,12 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         if period.source == "model":
             period.model_run_id = run.id
 
+    if sheet is not None:
+        # A draft read from the photo: the boxes the joint decode is sure of resolve on their
+        # own (PLAN §10.3a), so the coach checks only what is still unclear.
+        from wieplay.core import sheet_reading
+
+        sheet_reading.resolve(db, video, match)
     _sheet_timeouts(db, video, run, scoresheet.timeout_gaps(sheet, match, rallies) if sheet else [])
     gap_counts = _label_gaps(db, video, run, rallies, scored, by_period, act)
     db.flush()
@@ -521,6 +530,8 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         )
     flagged = sum(s["flagged"] for s in sets_out)
     in_sets = sum(len(so.rallies) for so in match.sets)
+    sure = sum(1 for so in match.sets for r in so.rallies if r.sure)
+    reasons = Counter(r.reasons[0].code for so in match.sets for r in so.rallies if r.reasons)
     first_serve_ms = _first_serve_ms(db, video)
     run.metrics = {
         "serve_finder": serve_track.finder if serve_track else None,
@@ -530,6 +541,12 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         "rallies": in_sets,
         "flagged": flagged,
         "flagged_share": round(flagged / in_sets, 4) if in_sets else None,
+        # The joint decode (PLAN §10.3): rallies sure, needing the coach, and the first reason.
+        "sure": sure,
+        "needs_coach": in_sets - sure,
+        "sure_share": round(sure / in_sets, 4) if in_sets else None,
+        "reasons": dict(reasons),
+        "sure_threshold": sc.SURE,
         "sets": sets_out,
         "sets_official": sum(1 for s in sets_out if s["official"]),
         "sets_matching_official": sum(1 for s in sets_out if s["matches_official"]),
@@ -561,6 +578,162 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     actions.after_scoring(db, video, reason)
     return run
+
+
+def _shown_confidence(out: sc.RallyOut) -> float:
+    """How sure the suggested answer is, as the review shows it ("87 %"): the posterior of the
+    winner (or of no point), times how sure the set's sides are."""
+    p = (out.p_us if out.won_by == "us" else out.p_them) if out.point else out.p_none
+    return round(max(0.0, min(1.0, p)), 3)
+
+
+# --- the joint decode, pure -----------------------------------------------------------------------
+
+
+@dataclass
+class Decision:
+    """The decode with every source: the sets as decoded (with the log and the board), the
+    match with each rally sure or not, and what the flags need for the metrics."""
+
+    set_ins: list[sc.SetIn]
+    match: sc.MatchOut
+    board_extra: dict[str, int] | None = None
+    log_disagree: int | None = None
+
+
+def decide(
+    set_ins: list[sc.SetIn],
+    *,
+    log_ev: Any = None,
+    board: Any = None,
+    sure: float = sc.SURE,
+) -> Decision:
+    """The joint decode of every set with all evidence there is (PLAN §10.3): the video, the
+    sheet (in `set_ins` already), the club scoreboard's log (`log_ev`, wieplay/core/scorelog.py),
+    the board read in the picture (`board`, wieplay/core/scoreboard.py), the official score; the
+    flags where the video alone said otherwise; then which rallies are sure and why the others
+    need the coach. No database: the evaluation runs the same (scripts/ml/fused_eval.py)."""
+    from wieplay.core import scoreboard as sboard
+    from wieplay.core import scorelog
+
+    if not set_ins:
+        return Decision([], sc.MatchOut([], 1.0))
+    # The club scoreboard's log: the strongest evidence after a coach's and the sheet (§10.10).
+    if log_ev is not None:
+        set_ins = scorelog.apply(log_ev, set_ins)
+    if board is not None:
+        set_ins = sboard.orient(board, set_ins)
+    match = sc.score_match(set_ins)
+    out = Decision(set_ins, match)
+    if board is not None:
+        out.match, out.board_extra = sboard.flag_disagreements(set_ins, out.match)
+    if log_ev is not None:
+        out.match, out.log_disagree = scorelog.flag_disagreements(set_ins, out.match)
+    log_scores: dict[str, tuple[int, int]] = {}
+    if log_ev is not None:
+        for st in set_ins:
+            for r in st.rallies:
+                v = log_ev.verdict(r.key)
+                if v is not None and v.score is not None:
+                    log_scores[r.key] = scorelog.ours(v.score, log_ev.us)
+    for st, so in zip(set_ins, out.match.sets, strict=True):
+        sc.judge(st, so, extra=note_reasons(st, so, log_scores), sure=sure)
+    return out
+
+
+SHORT_TIMEOUT_S = 20.0  # a timeout in a break this short does not fit there
+
+
+def note_reasons(
+    st: sc.SetIn, so: sc.SetOut, log_scores: Mapping[str, tuple[int, int]] | None = None
+) -> dict[str, list[sc.Reason]]:
+    """The sheet's timeouts, substitutions and sanctions against the decoded score: a note whose
+    score the decode never had, a timeout in a break too short for one, a score the club
+    scoreboard's log had otherwise there, a penalty point (no rally, by the rules) on a rally.
+    The reason goes to the rally next to the break ("a timeout at 14:12 doesn't fit here")."""
+    if not st.notes or not so.rallies:
+        return {}
+    obs = {r.key: r for r in st.rallies}
+    outs = so.rallies
+    # Per rally: the score before its gap, right before it (after the points without a rally),
+    # after it.
+    before = (st.start_us, st.start_them)
+    places: list[tuple[tuple[int, int], tuple[int, int], tuple[int, int]]] = []
+    for ro in outs:
+        pre = (before[0] + ro.missed[0], before[1] + ro.missed[1])
+        after = (ro.score_us, ro.score_them)
+        places.append((before, pre, after))
+        before = after
+    found: dict[str, list[sc.Reason]] = {}
+
+    def flag(key: str, note: sc.BreakNote, issue: str, here: tuple[int, int]) -> None:
+        params: dict[str, Any] = {
+            "kind": note.kind,
+            "side": note.side,
+            "score": list(note.score),
+            "issue": issue,
+            "here": list(here),
+        }
+        if note.sanction:
+            params["sanction"] = note.sanction
+        found.setdefault(key, []).append(sc.Reason("note", params))
+
+    for note in st.notes:
+        k_after = next(
+            (k for k, (_, _, after) in enumerate(places) if outs[k].point and after == note.score),
+            None,
+        )
+        k_gap = next(
+            (
+                k
+                for k, (b0, pre, _) in enumerate(places)
+                if sum(b0) < note.points <= sum(pre)
+                and pre[0] >= note.score[0]
+                and pre[1] >= note.score[1]
+                and (b0[0] <= note.score[0] and b0[1] <= note.score[1])
+            ),
+            None,
+        )
+        if note.kind == "sanction" and note.sanction in ("P", "DP"):
+            # The penalty point: the next point after the sanction's score goes to the other
+            # team without a rally.
+            k = next(
+                (
+                    k
+                    for k, (_, pre, _) in enumerate(places)
+                    if outs[k].point and pre == note.score and outs[k].won_by == other(note.side)
+                ),
+                None,
+            )
+            if k is not None:
+                flag(outs[k].key, note, "penalty_rally", places[k][2])
+            continue
+        if k_after is None and k_gap is None:
+            # Never this score: the rally where the set had as many points.
+            k = next(
+                (k for k, (_, _, after) in enumerate(places) if sum(after) >= note.points),
+                len(outs) - 1,
+            )
+            flag(outs[k].key, note, "off_path", places[k][2])
+            continue
+        if k_after is not None:
+            k = k_after
+            nxt = next((j for j in range(k + 1, len(outs))), None)
+            gap_s = (
+                (obs[outs[nxt].key].start_ms - obs[outs[k].key].end_ms) / 1000
+                if nxt is not None
+                else None
+            )
+            score_log = (log_scores or {}).get(outs[k].key)
+            if score_log is not None and score_log != note.score:
+                flag(outs[k].key, note, "log", score_log)
+            elif note.kind == "timeout" and gap_s is not None and gap_s < SHORT_TIMEOUT_S:
+                flag(outs[k].key, note, "short", places[k][2])
+    return found
+
+
+def other(side: str) -> sc.Side:
+    return "them" if side == "us" else "us"
 
 
 def _live_periods(db: Session, video: Video) -> list[Period]:

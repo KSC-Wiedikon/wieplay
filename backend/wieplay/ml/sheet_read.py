@@ -376,11 +376,16 @@ def _key(no: int, half: Half, *parts: object) -> str:
     return ".".join([f"s{no}", half, *[str(p) for p in parts]])
 
 
+def halves_of(us_half: Half) -> dict[Side, Half]:
+    """Which half of the set block each team writes on."""
+    return {"us": us_half, "them": "R" if us_half == "L" else "L"}
+
+
 def _halves(no: int, us_half: Half) -> dict[Side, Half]:
     return {"us": us_half, "them": "R" if us_half == "L" else "L"}
 
 
-def _box_cells(r: Readings, no: int, half: Half, deciding: bool, cont: bool) -> dict[Pos, Cell]:
+def box_cells(r: Readings, no: int, half: Half, deciding: bool, cont: bool) -> dict[Pos, Cell]:
     """A team's boxes as read; in the deciding set the left team goes on in part 3 (C): a box
     filled there is read from there."""
     out: dict[Pos, Cell] = {}
@@ -396,7 +401,7 @@ def _box_cells(r: Readings, no: int, half: Half, deciding: bool, cont: bool) -> 
     return out
 
 
-def _first_cost(
+def first_cost(
     r: Readings,
     no: int,
     halves: Mapping[Side, Half],
@@ -547,7 +552,7 @@ def read_set(
     deciding = no == 5
     halves = _halves(no, us_half)
     box = {
-        side: _box_cells(r, no, half, deciding, cont=deciding and half == "L")
+        side: box_cells(r, no, half, deciding, cont=deciding and half == "L")
         for side, half in halves.items()
     }
     best: tuple[float, BoxSolution] | None = None
@@ -555,7 +560,7 @@ def read_set(
         sol = solve_boxes(box, first, deciding, official, fixed, margins=False)
         if sol is None:
             continue
-        total = sol.cost + _first_cost(r, no, halves, first, box)
+        total = sol.cost + first_cost(r, no, halves, first, box)
         if best is None or total < best[0]:
             best = (total, sol)
     doc: dict[str, Any] = {"no": no, "deciding": deciding}
