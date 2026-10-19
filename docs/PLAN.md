@@ -2592,6 +2592,47 @@ number read and no label. The sure cards with it, ours #1, #2, #4, #6, #7, #8, #
 #22 and theirs #4, #5, #7, #9, #10, #12 and their libero #15, all wear numbers the sheet (or
 the roster's liberos) has for that team.
 
+**Identifying the players with the coach (19.10.2026; `wieplay/core/identify.py`, the page
+`/videos/:id/identify`).** The owner: "if not sure let me try to identify players (and teams),
+like in Hudl/Balltime", picture-first, "identify by picture". After a players run the setup
+card and the gallery offer "Identify players (N to check)": the cards WiePlay is not sure of
+(not named, confidence below 0.5), the biggest share of the footage first. Each shows the
+person large: the video itself zoomed onto the card's box, looping 3 s around up to six
+moments (the boxes from the players index, `GET …/players/clusters/{id}/moments`; no picture
+is made or stored), and its contact-sheet crops. Answers (`POST …/players/clusters/{id}/answer`,
+audited `player_identified`): a number (ours from the roster, the numbers the scoresheet has on
+court in the card's rallies first; theirs typed), not a player, the other team (this card
+only, new), the same person as another card (suggested: its team, never seen at once, a likely
+number), several people (tick the pictures of one person and name them: they join that
+number's card, or a new card; or move them to a card of their own), skip; keys, "12 of 31",
+the share of the footage on sure cards, Undo (each answer returns the cards as they were;
+`POST …/players/restore`). Each answer is a fact: unsure cards whose read number is the named
+number, never seen at the same time, join it (`relink`). While watching, "Name a player" under
+the video outlines the people followed at the paused moment (`GET …/players/frame`); a tap
+asks for the number and names that track's card (split off first when the coach named the
+card otherwise; `POST …/players/tap`). When the teams are uncertain (no calibration) and
+nobody set our side, it first asks "Which team is ours?" with the biggest cards on each side of
+the net in the first set; the answer turns the cards round when they say the other and keeps
+the first set's side as the coach's (`POST …/players/teams`). No faces: the coach's eyes match
+the person; everything stays within the video (§5.7).
+
+Measured on the Legends game (the local detection with the sheet, by eye; offline, the same
+linking the API runs): 151 cards to check hold 59 % of the players' footage, in 1,243 pieces.
+The biggest ones are not one person: of the first eight in the queue, seven mix several people,
+often of both teams (pieces without a readable number that the job joined by their colours),
+one is mostly one player. By eye,
+the 43 pieces of the biggest card show 9 people with a legible number or kit (them #1, #7, #10,
+#12, the libero #15; our #1, #2, #7, #8) on 48 % of its footage, the rest (mostly the far side)
+not tellable at 1080p; our biggest card's 24 first pieces show 5 (36 % of their footage). One
+answer names about 0.15 % of the match's player footage there, so 90 % on sure cards would take
+about 300 answers, and the far side's untellable pieces cap it before that; piece by piece,
+the longest first, it takes 107 answers to 60 %, 216 to 70 %, 604 to 90 %. "Who is missing" as
+a linking rule after answers (a piece without a number given to the one sure teammate missing
+while it is seen) moved 293 pieces and raised the sure footage from 41 % to 57 % without an
+answer, but of the 16 moved pieces checked by eye 7 showed someone else and only one was
+clearly right: not used. What would help most: the job not joining unnumbered pieces by colour
+into big mixed cards (then a card would be one person, one answer).
+
 **Automatic run** (`WIEPLAY_PLAYERS_AUTO`): stays off, on demand. The GPU makes it cheap
 (~10 min a match), but only calibrated videos get sure cards (3 of the 22 prod videos had
 one on 18.10.2026), more than half of a match's player footage stays on cards to
