@@ -18,7 +18,7 @@ from tests.media_helpers import worker_client
 from tests.test_analysis_api import ANALYSE_CAPS, make_ready
 from tests.test_scoring_api import OFFICIAL, analysed, match, rallies_of, tagging
 from wieplay.core.config import Settings
-from wieplay.core.models import AuditLog, Scoresheet, ScoresheetRevision, Segment
+from wieplay.core.models import AuditLog, ModelRun, Scoresheet, ScoresheetRevision, Segment
 from wieplay.ml import sheet as sh
 
 LINEUP_US = [7, 3, 11, 5, 9, 1]  # #3 is the roster's setter (position II)
@@ -126,6 +126,12 @@ def test_a_typed_sheet_lines_up_the_whole_match(
         assert row.sets[0]["lineup_us"] == LINEUP_US
         assert db.scalars(select(ScoresheetRevision)).one().action == "create"
         assert db.scalars(select(AuditLog).where(AuditLog.action == "scoresheet_saved")).one()
+        # The score run says it used the sheet (written, not only set on the object).
+        run = db.scalars(
+            select(ModelRun).where(ModelRun.kind == "score").order_by(ModelRun.created_at.desc())
+        ).first()
+        assert run is not None and run.params["scoresheet"] is True
+        assert run.params["reason"] == "scoresheet"
 
 
 def test_a_coachs_winner_wins_and_the_disagreement_is_flagged(

@@ -402,8 +402,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
     from wieplay.core import scorelog
 
     log_ev = scorelog.evidence_for(db, video, rallies)
+    # `params` is plain JSONB: a key set in place is never written. A new dict is.
     if log_ev is not None:
-        run.params["score_log_run"] = str(log_ev.stored.track.model_run_id)
+        run.params = {**run.params, "score_log_run": str(log_ev.stored.track.model_run_id)}
     periods = _live_periods(db, video)
     if not any(_coach_period(p) for p in periods):
         log_spans = scorelog.set_spans(log_ev, rallies) if log_ev and log_ev.any_trusted else None
@@ -414,7 +415,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     sheet = scoresheet.for_scoring(db, video)
     if sheet is not None:
-        run.params["scoresheet"] = True
+        run.params = {**run.params, "scoresheet": True}
         scoresheet.fill_periods(db, video, sheet.checks, sheet.on)
 
     calls = _serve_calls(db, video, rallies)

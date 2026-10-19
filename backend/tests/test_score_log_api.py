@@ -150,6 +150,13 @@ def test_the_analysis_imports_the_log_and_the_score_follows_it(
         runs = db.scalars(select(ModelRun).where(ModelRun.kind == "score_log")).all()
         assert [r.params["points"] for r in runs] == [len(played)]
         assert runs[0].metrics["trusted"] is True
+        # The score run names the log it used (written, not only set on the object).
+        score = db.scalars(
+            select(ModelRun)
+            .where(ModelRun.kind == "score", ModelRun.video_id == video["id"])
+            .order_by(ModelRun.created_at.desc())
+        ).first()
+        assert score is not None and score.params["score_log_run"] == str(runs[0].id)
         # Already there: the next analysis asks no more.
         row = db.get(Video, video["id"])
         assert row is not None and not scorelog.needs_log(db, row)
