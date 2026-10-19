@@ -281,6 +281,38 @@ describe('ReviewController', () => {
     expect(review.needsYou()).toEqual([])
   })
 
+  it('accepts the rallies the finder is 90 % sure of when the scoring is not sure, who won left open', async () => {
+    // A match without the board's log or a scoresheet: the scoring is sure of no winner.
+    const unsure = { score_sure: false, score_conflict: true, score_note: 'unsure', score_reasons: [{ code: 'unsure' }] } as Partial<Segment>
+    const scored = bundle({
+      segments: [
+        suggestion('s1', 10_000, 0.95, { model_won_by: 'us', ...unsure }),
+        suggestion('s2', 30_000, 0.6, { model_won_by: 'them', ...unsure }),
+        suggestion('s3', 50_000, 0.92, { model_won_by: 'them', ...unsure }),
+        // Sure of the score too: that is "Accept all sure rallies", not this button.
+        suggestion('s4', 70_000, 0.97, { score_sure: true, model_won_by: 'us' }),
+      ],
+    })
+    const { review, sent, segment, press } = await setup(scored)
+    expect(review.confident().map((s) => s.id)).toEqual(['s1', 's3'])
+    review.askAcceptRallies()
+    expect(review.getState().confirmRallies).toBe(true)
+    press('x') // keys wait while the dialog asks
+    expect(segment('s1')?.review).toBe('unreviewed')
+    review.confirmAcceptRallies()
+    expect(review.getState().confirmRallies).toBe(false)
+    expect(['s1', 's2', 's3', 's4'].map((id) => segment(id)?.review)).toEqual(['confirmed', 'unreviewed', 'confirmed', 'unreviewed'])
+    expect(review.getState().notice).toMatchObject({ key: 'acceptedRallies', params: { count: 2 } })
+    // Start and end only: no winner written, so who won still needs the coach.
+    expect(await sent()).toEqual([
+      expect.objectContaining({ id: 's1', won_by: null, review: 'confirmed' }),
+      expect.objectContaining({ id: 's3', won_by: null, review: 'confirmed' }),
+    ])
+    expect(review.needsYou().map((s) => s.id)).toEqual(['s1', 's2', 's3'])
+    press('u')
+    expect(segment('s1')?.review).toBe('unreviewed')
+  })
+
   it('has nothing to accept when the scoring is sure of no rally', async () => {
     const { review } = await setup()
     expect(review.sure()).toEqual([])

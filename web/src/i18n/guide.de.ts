@@ -55,7 +55,7 @@ export const guideDe: Guide = {
     ],
     tips: [
       'Ungefähr reicht: eine Viertelsekunde zu früh oder zu spät schadet nicht. Ein vergessener oder erfundener Ballwechsel schon.',
-      '«Alle sicheren Ballwechsel übernehmen» bestätigt Anfang und Ende; wer gewonnen hat, bleibt WiePlays Vorschlag, und der folgt den Quellen. U macht es in einem Schritt rückgängig.',
+      '«Alle sicheren Ballwechsel übernehmen» bestätigt Anfang und Ende; wer gewonnen hat, bleibt WiePlays Vorschlag, und der folgt den Quellen. U macht es in einem Schritt rückgängig. Ein Spiel ohne Protokoll der Anzeigetafel und ohne Matchblatt hat keine sicheren Ballwechsel; dort bestätigt «Ballwechsel übernehmen, bei denen WiePlay 90 % sicher ist» Anfang und Ende, und wer gewonnen hat, bleibt unter «Braucht dich».',
       'Sicher heisst sicher: Auf den Spielen, an denen WiePlay geprüft wurde, war kein einziger Ballwechsel falsch, bei dem es sicher war. Ein Spiel nur mit Video und offiziellem Resultat hat wenige sichere Ballwechsel, eines mit Anzeigetafel-Protokoll oder Matchblatt viel mehr: Das ist ehrlich, kein Fehler.',
       'Unsicher? Lass den Vorschlag offen und geh mit ↓ weiter. Jemand anderes kann später entscheiden.',
     ],

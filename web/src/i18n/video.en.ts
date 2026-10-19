@@ -530,6 +530,12 @@ export const videoEn = {
       acceptSureConfirm_one: 'Accept {{count}}',
       acceptSureConfirm_other: 'Accept {{count}}',
       needsYouTitle: 'Needs you',
+      // Without the board's log or a scoresheet: the rallies the finder is sure of, who won still open.
+      acceptRallies: 'Accept the rallies WiePlay is {{min}} sure of ({{count}}): who won stays to check',
+      acceptRalliesTitle_one: 'Accept {{count}} rally?',
+      acceptRalliesTitle_other: 'Accept {{count}} rallies?',
+      acceptRalliesBody:
+        'Every suggestion still to review that WiePlay is at least {{min}} sure is a rally becomes a confirmed rally: its start and end. Who won is not sure yet, so those rallies stay under “Needs you”. U undoes it.',
       sureNone: 'WiePlay is not sure of any rally yet. Each one you decide is scored again at once.',
       doneTitle: 'Every suggestion is reviewed',
       doneBody: 'Mark the rallies reviewed so WiePlay learns from this game and suggests better rallies for the next ones.',
@@ -551,6 +557,8 @@ export const videoEn = {
         noNext: 'There is no next suggestion to merge with.',
         cannotSplit: 'Move the playhead inside the rally to split it there.',
         tooShort: "A rally can't get that short.",
+        acceptedRallies_one: 'Accepted {{count}} rally. Who won is still to check.',
+        acceptedRallies_other: 'Accepted {{count}} rallies. Who won is still to check.',
         acceptedSure_one: 'Accepted {{count}} sure rally. {{left}} need you.',
         acceptedSure_other: 'Accepted {{count}} sure rallies. {{left}} need you.',
         nothingSelected: 'No suggestion on screen.',
