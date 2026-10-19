@@ -50,6 +50,7 @@ from wieplay.ml.players import (
     FAR,
     NEAR,
     Cluster,
+    Ok,
     Track,
     distance,
     fold_partials,
@@ -272,6 +273,15 @@ def fold_reads(reads: Sequence[tuple[int, int, float]]) -> list[tuple[int, int, 
     return [(f, host.get(n, n), c) for f, n, c in reads]
 
 
+def _allowed_reads(
+    t: Track, allowed: dict[str, set[int]] | None, ok: Ok | None
+) -> list[tuple[int, int, float]]:
+    if ok is not None:
+        return [r for r in t.reads if ok(t.team, r[0], r[1])]
+    roster = allowed.get(t.team) if allowed else None
+    return [r for r in t.reads if not roster or r[1] in roster]
+
+
 def number_switch(reads: Sequence[tuple[int, int, float]]) -> int | None:
     """Where the readings of a track change from one number to another: the frame between
     the two readings around the change, or None."""
@@ -295,9 +305,11 @@ def split_swaps(
     col: Any,
     teams: Teams,
     allowed: dict[str, set[int]] | None = None,
+    ok: Ok | None = None,
 ) -> tuple[list[Track], int]:
     """Tracks cut where two people swapped (number_switch); the parts get new
-    ids, their own readings, votes and team. Returns the tracks and the number of cuts."""
+    ids, their own readings, votes and team. Returns the tracks and the number of cuts.
+    `ok`: who may be read at a frame (the sheet), instead of the roster."""
     from wieplay.ml.players import _fallback, make_track, vote
 
     fallback = _fallback(col)
@@ -311,8 +323,7 @@ def split_swaps(
         data = t.data
         at = None
         if data is not None and not t.referee and depth.get(id(t), 0) < MAX_SPLITS:
-            ok = allowed.get(t.team) if allowed else None
-            reads = [r for r in t.reads if not ok or r[1] in ok]
+            reads = _allowed_reads(t, allowed, ok)
             at = number_switch(fold_reads(reads))
         if at is None or data is None:
             out.append(t)
@@ -328,7 +339,7 @@ def split_swaps(
             next_id += 1
             part.reads = [r for r in t.reads if part.first <= r[0] <= part.last]
             part.team = teams.team_of(part)
-            vote(part, allowed)
+            vote(part, allowed, ok)
             depth[id(part)] = level
             work.append(part)
     out.sort(key=lambda t: t.track_id)
@@ -382,6 +393,7 @@ def split_encounters(
     col: Any,
     teams: Teams,
     allowed: dict[str, set[int]] | None = None,
+    ok: Ok | None = None,
 ) -> tuple[list[Track], int]:
     """Tracks cut after each meeting with another track (encounters); the parts get new ids,
     their readings, votes and team. Returns the tracks and the number of cuts."""
@@ -411,7 +423,7 @@ def split_encounters(
             next_id += 1
             part.reads = [r for r in t.reads if part.first <= r[0] <= part.last]
             part.team = teams.team_of(part)
-            vote(part, allowed)
+            vote(part, allowed, ok)
             out.append(part)
     out.sort(key=lambda t: t.track_id)
     return out, cuts

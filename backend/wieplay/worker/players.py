@@ -45,7 +45,7 @@ from typing import Any
 import httpx
 import numpy as np
 
-from wieplay.ml import bytetrack, identities, people
+from wieplay.ml import bytetrack, identities, people, serve_labels
 from wieplay.ml import players as pl
 from wieplay.ml.extract import NICE, lower_thread_priority
 from wieplay.worker import ffmpeg
@@ -87,39 +87,49 @@ def _nice() -> None:
 
 
 def windows_from(rallies: list[dict[str, Any]], duration_ms: int) -> list[dict[str, Any]]:
-    """Rally spans padded and joined: [{start_ms, end_ms, near_team}]. Joined windows keep
-    the near team only when their rallies agree."""
+    """Rally spans padded and joined: [{start_ms, end_ms, near_team, lead_ms, rallies}].
+    Joined windows keep the near team only when their rallies agree. `lead_ms`: how long
+    before the window the tracker starts (a set's first rally: the lineup check before its
+    first serve, PLAN §10.5); `rallies`: the indexes of the rallies in it (inputs order)."""
     spans = sorted(
         (
             max(0, int(r["start_ms"]) - PAD_BEFORE_MS),
             min(duration_ms, int(r["end_ms"]) + PAD_AFTER_MS),
             r.get("near_team"),
+            max(0, int(r.get("lead_ms") or 0)),
+            i,
         )
-        for r in rallies
+        for i, r in enumerate(rallies)
         if int(r["end_ms"]) > int(r["start_ms"])
     )
     out: list[dict[str, Any]] = []
-    for s, e, team in spans:
+    for s, e, team, lead, i in spans:
         if out and s - out[-1]["end_ms"] <= JOIN_GAP_MS:
             last = out[-1]
             last["end_ms"] = max(last["end_ms"], e)
+            last["rallies"].append(i)
             if last["near_team"] != team:
                 last["near_team"] = None
         else:
-            out.append({"start_ms": s, "end_ms": e, "near_team": team})
+            lead = min(lead, s)
+            out.append(
+                {"start_ms": s, "end_ms": e, "near_team": team, "lead_ms": lead, "rallies": [i]}
+            )
     return [w for w in out if w["end_ms"] - w["start_ms"] >= 500]
 
 
 def spans_of(windows: list[dict[str, Any]], join_gap_ms: int) -> list[dict[str, Any]]:
     """The stretches the tracker follows without a break: windows closer than `join_gap_ms`
-    joined, the dead time between them included. [{start_ms, end_ms, windows: [index]}]"""
+    joined, the dead time between them included, and a window's lead before it (its frames
+    belong to no window). [{start_ms, end_ms, windows: [index]}]"""
     out: list[dict[str, Any]] = []
     for i, w in enumerate(windows):
-        if out and w["start_ms"] - out[-1]["end_ms"] <= join_gap_ms:
+        begin = w["start_ms"] - int(w.get("lead_ms") or 0)
+        if out and begin - out[-1]["end_ms"] <= join_gap_ms:
             out[-1]["end_ms"] = max(out[-1]["end_ms"], w["end_ms"])
             out[-1]["windows"].append(i)
         else:
-            out.append({"start_ms": w["start_ms"], "end_ms": w["end_ms"], "windows": [i]})
+            out.append({"start_ms": begin, "end_ms": w["end_ms"], "windows": [i]})
     return out
 
 
@@ -489,18 +499,26 @@ def identify(
     fps: float,
     stitch: identities.StitchParams | None = None,
     calibrated: bool = True,
+    sheet: serve_labels.SheetInputs | None = None,
+    reads: Callable[[list[pl.Track]], int] | None = None,
+    sheet_use: frozenset[str] | None = None,
 ) -> Identified:
-    """Tracks → teams → numbers → chains → people (identities.py), then the gallery's
-    sheets and the API's index. Without a court calibration every card is to be checked:
-    the sides of the net come from foot heights then, and on two uncalibrated games
-    (18.10.2026) whole stretches of one team landed on the other's cards."""
+    """Tracks → teams → numbers (and the scoresheet's labels) → chains → people
+    (identities.py), then the gallery's sheets and the API's index. Without a court
+    calibration every card is to be checked: the sides of the net come from foot heights
+    then, and on two uncalibrated games (18.10.2026) whole stretches of one team landed on
+    the other's cards. `sheet`: what the official scoresheet says about the rallies (who
+    served, who was on court; serve_labels.py). `reads`: reads the shirt numbers instead of
+    `reader` (measuring: the same readings for every variant)."""
     tracks = pl.finish_tracks(col)
     near = [w["near_team"] for w in windows]
     sides = identities.smooth_sides(near)
     teams = identities.assign_teams(tracks, sides)
     allowed = {team: set(nums) for team, nums in roster.items() if nums}
     ocr_read = 0
-    if reader is not None:
+    if reads is not None:
+        ocr_read = reads(tracks)
+    elif reader is not None:
         ocr_read = pl.read_numbers(tracks, reader, ocr_budget, allowed or None, OCR_WORKERS)
     # How often the reader reads a number our roster has (before the roster drops the
     # rest): a precision check that needs no coach (18 numbers of 99 on H3's roster).
@@ -510,8 +528,42 @@ def identify(
         if ours and "us" in allowed
         else None
     )
-    tracks, cuts = identities.split_swaps(tracks, col, teams, allowed or None)
-    tracks, met = identities.split_encounters(tracks, col, teams, allowed or None)
+    # The official scoresheet: the server and the receivers labelled at each serve, and
+    # only the numbers on court (and the liberos) read during its rallies.
+    ok: pl.Ok | None = None
+    sheet_info: dict[str, Any] = {}
+    use = serve_labels.USE if sheet_use is None else sheet_use
+    if sheet is not None and sheet.any and use:
+        rally_near: list[str | None] = [None] * len(sheet.rallies)
+        for w, win in enumerate(windows):
+            for i in win.get("rallies") or ():
+                if 0 <= i < len(rally_near):
+                    rally_near[i] = sides[w]
+        found = serve_labels.serve_labels(
+            col, tracks, sheet.rallies, rally_near, calibrated, sheet.liberos, sheet.middles,
+            use=use,
+        )  # fmt: skip
+        added = serve_labels.add_labels(tracks, found.labels)
+        check = serve_labels.Allowed(col, sheet, allowed)
+        if "allowed" in use:
+            ok = check.ok
+        if "teams" in use:
+            sheet_info["sheet_team_fixed"] = serve_labels.fix_teams(tracks, check)
+        for t in tracks:
+            if not t.referee:
+                pl.vote(t, allowed or None, ok)
+        sheet_info.update({f"sheet_{k}": v for k, v in found.info.items()})
+        sheet_info["sheet_labels"] = added
+        sheet_info["sheet_use"] = sorted(use)
+    tracks, cuts = identities.split_swaps(tracks, col, teams, allowed or None, ok)
+    tracks, met = identities.split_encounters(tracks, col, teams, allowed or None, ok)
+    if sheet is not None and sheet.any and "teams" in use:
+        check = serve_labels.Allowed(col, sheet, allowed)
+        fixed = serve_labels.fix_teams(tracks, check)
+        for t in tracks:
+            if not t.referee:
+                pl.vote(t, allowed or None, ok)
+        sheet_info["sheet_team_fixed_pieces"] = fixed
     numbered_tracks = sum(1 for t in tracks if t.number is not None)
     chains = identities.chains_of(tracks, stitch)
     standing = 0
@@ -564,6 +616,7 @@ def identify(
         "main_us": sum(1 for c in players if c.team == "us" and c.detections >= MAIN_S * fps),
         "main_them": sum(1 for c in players if c.team == "them" and c.detections >= MAIN_S * fps),
         **teams.info,
+        **sheet_info,
     }
     return Identified(tracks, kept, clusters, sheets, index, stats)
 
@@ -662,7 +715,10 @@ def run(ctx: Context) -> dict[str, Any]:
     except (OSError, ValueError, RuntimeError) as exc:  # no OCR weights: the coach types
         log.warning("no shirt-number reader: %s", exc)
     roster = {k: [int(n) for n in v] for k, v in (found.get("roster") or {}).items()}
-    out = identify(detected.col, windows, reader, roster, fps, calibrated=setups.calibrated)
+    sheet = serve_labels.sheet_inputs(found) if settings.players_sheet else None
+    out = identify(
+        detected.col, windows, reader, roster, fps, calibrated=setups.calibrated, sheet=sheet
+    )
     timing["identify_s"] = round(time.perf_counter() - t, 1)
     if ctx.gpu is not None:
         timing["gpu_paused_s"] = round(ctx.gpu.paused_s, 1)
@@ -753,6 +809,8 @@ def run(ctx: Context) -> dict[str, Any]:
                 "stitch": identities.StitchParams().as_dict(),
                 "ocr": reader.sha256 if reader is not None else None,
                 "roster_checked": sorted(k for k, v in roster.items() if v),
+                # The official scoresheet's labels (serve_labels.py): what was used.
+                "sheet": sorted(serve_labels.USE) if sheet is not None else None,
                 "merge_distance": pl.MERGE_DISTANCE,
                 "geometry": setups.as_dict(),
                 "providers": used,
