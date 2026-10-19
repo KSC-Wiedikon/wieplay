@@ -568,8 +568,10 @@ def resolve(db: Session, video: Video, match: Any) -> int:
                 continue
             key = f"box.{side}.{p}.{b}"
             cell = cells.get(key)
-            if cell is not None and cell.get("alts") and not any(
-                v == value and pr >= CELL_INK for v, pr in cell["alts"]
+            if (
+                cell is not None
+                and cell.get("alts")
+                and not any(v == value and pr >= CELL_INK for v, pr in cell["alts"])
             ):
                 continue
             if grid[p - 1][b - 1] != value:
