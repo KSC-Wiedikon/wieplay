@@ -2071,6 +2071,17 @@ the scoresheet's cells.
   games (a): honest, the coach decides; with a typed sheet a few (c), with the sheet's photo read
   too few to count (b): which rally is which point stays open next to every missed rally and
   replay. A decode takes 0.2-0.7 s per game with the log, 1-3 s with a read sheet alone.
+- **On prod, 19.10.2026** (deployed as 289c7f27f113, then 32fbe4a2c0dd, which writes the score
+  run's `params` again: the log and the sheet a run used had never been stored, the JSONB was set
+  in place; every ready video scored once with `python -m wieplay.cli score --all-ready`,
+  0.5-3.1 s each). The two games with a log have their scoresheet typed now, so prod is mix e
+  above, and matches it exactly: game 509 135 rallies sure, "Needs you" 56 (52 of them open
+  suggestions; "Accept all sure rallies" offers 109); game 409 103 sure, 32 need you (all open;
+  103 offered). On game 509 the typed sheet adds a few questions to the log's (set 4, where the
+  scorer's order is wrong, `sheet_log` and `log_score`): 56 against 52 with the log alone. The
+  other 19 videos have neither a log nor a sheet: none of their rallies is sure, every one needs
+  the coach (74-265 a video, the rallies outside the sets included). A typed or read scoresheet
+  and the board's log are what make a game mostly sure.
 
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
