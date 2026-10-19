@@ -86,6 +86,39 @@ def official_sets(db: Session, video: Video) -> list[tuple[int, int]] | None:
     return out
 
 
+def rescore_new_results(db: Session) -> list[uuid.UUID]:
+    """Videos scored before their game's official result came through Wiedisync (or scored
+    with one that was corrected since): scored again with it, in the hourly sync. A video
+    never scored is left to its analysis. Commits per video."""
+    done = []
+    videos = db.scalars(
+        select(Video).where(
+            Video.game_id.is_not(None),
+            Video.deleted_at.is_(None),
+            Video.status == "ready",
+            Video.sport.in_(SPORTS),
+        )
+    ).all()
+    for video in videos:
+        last = db.scalars(
+            select(ModelRun)
+            .where(ModelRun.video_id == video.id, ModelRun.kind == "score")
+            .order_by(ModelRun.created_at.desc())
+            .limit(1)
+        ).first()
+        if last is None:
+            continue
+        official = official_sets(db, video)
+        if (last.params or {}).get("official_sets") == (
+            [list(s) for s in official] if official else None
+        ):
+            continue
+        score_video(db, video, reason="official_result")
+        db.commit()
+        done.append(video.id)
+    return done
+
+
 def latest_track(db: Session, video_id: uuid.UUID, kind: str) -> AnalysisTrack | None:
     return db.scalars(
         select(AnalysisTrack)

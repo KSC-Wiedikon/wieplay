@@ -1675,7 +1675,12 @@ knowing who serves each rally, plus the rules and the official result:
 4. **Constraint from the official result**: Wiedisync holds the official set scores
    (`games.sets_json`, synced from Swiss Volley). The inferred point sequence of each set must
    end at that score; a small alignment step finds the cheapest consistent sequence (missed or
-   extra rallies, misread serve sides) and marks the uncertain rallies for review.
+   extra rallies, misread serve sides) and marks the uncertain rallies for review. The result
+   often arrives after the video was analysed (the same night): the hourly sync scores every
+   video again whose last scoring used another official result than its game has now
+   (`scoring.rescore_new_results`, reason `official_result`, 19.10.2026). It is the floor
+   under the scoreboard's log and the scoresheet: a match without either still ends each set
+   on its official score.
 5. **Scoreboard OCR when the scoreboard is in frame**: the coach draws the scoreboard box once
    per hall (`scoreboard_region`, reused for later videos in that hall); the Lenovo worker
    samples it at 2 fps, reads digits (seven-segment/LED digits: a tiny digit classifier trained

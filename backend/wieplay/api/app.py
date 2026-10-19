@@ -35,7 +35,7 @@ from wieplay.api import (
     videos,
     worker,
 )
-from wieplay.core import scorelog, sheet_photos
+from wieplay.core import scorelog, scoring, sheet_photos
 from wieplay.core.config import Settings, get_settings
 from wieplay.core.db import make_engine, make_sessionmaker
 from wieplay.core.retention import run_housekeeping
@@ -208,6 +208,14 @@ def _sync_once(sessionmaker: sessionmaker[Session], factory: Callable[[], Bridge
     with sessionmaker() as session, contextlib.suppress(BridgeError):  # recorded in sync_state
         client = factory()
         run_sync(session, client)
+        # Official results arrive after the match: videos scored without theirs, again.
+        try:
+            done = scoring.rescore_new_results(session)
+            if done:
+                log.info("scored %d videos again with their official result", len(done))
+        except Exception:
+            session.rollback()
+            log.exception("scoring with new official results failed")
         # Videos with a game and no scoreboard log yet: tried once a day (PLAN §10.10).
         try:
             scorelog.import_missing(session, client)
