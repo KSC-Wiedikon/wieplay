@@ -29,7 +29,7 @@ import {
   type QueueItem,
   type TeamsQuestion,
 } from '../lib/identify'
-import { clusterTitle, cropStyle, parseNumber, sheetUrl, usePlayers, type PlayerCluster, type Players, type Sheets } from '../lib/players'
+import { clusterTitle, cropStyle, isPieces, parseNumber, sheetUrl, usePlayers, type PlayerCluster, type PlayerTrack, type Players, type Sheets } from '../lib/players'
 import { useVideo } from '../lib/queries'
 import { sideLabel } from '../lib/labels'
 import { SideNamesContext, sideNamesOf, useSideNames } from '../lib/sides'
@@ -163,6 +163,19 @@ function Queue({ video, players, sheets, items, sureShare, teams }: QueueProps) 
       {teams && players.can_edit && <TeamsCard videoId={video.id} sheets={sheets} question={teams} />}
       {!players.can_edit ? (
         <Message>{t('identify.readOnly')}</Message>
+      ) : card && current && isPieces(card) ? (
+        <PiecesQuestion
+          key={`${card.id}-${card.tracks.length}`}
+          players={players}
+          sheets={sheets}
+          card={card}
+          item={current}
+          busy={busy}
+          canUndo={undo.length > 0}
+          onAnswer={send}
+          onSkip={skip}
+          onUndo={takeBack}
+        />
       ) : card && current ? (
         <CardQuestion
           key={card.id}
@@ -425,6 +438,66 @@ function Kbd({ children }: { children: string }) {
   )
 }
 
+type Offer = { number: number; name: string | null; onCourt: boolean }[]
+
+/** The pieces of a card as toggles: a picture each, its time and the number read on it. */
+function PieceTiles({ videoId, sheets, tracks, picked, onToggle }: { videoId: string; sheets: Sheets; tracks: PlayerTrack[]; picked: number[]; onToggle: (id: number) => void }) {
+  return (
+    <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+      {tracks.map((tr) => {
+        const on = picked.includes(tr.id)
+        return (
+          <button
+            key={tr.id}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onToggle(tr.id)}
+            className={cx('flex cursor-pointer flex-col items-center gap-1 rounded-control border-2 p-1 text-xs', on ? 'border-accent bg-accent-soft' : 'border-hairline')}
+          >
+            {tr.crop ? <Crop videoId={videoId} sheets={sheets} crop={tr.crop} scale={0.7} /> : <span className="h-28 w-14 bg-sunken" />}
+            <span className="tabular-nums">
+              {Math.floor(tr.t0 / 60000)}:{String(Math.floor(tr.t0 / 1000) % 60).padStart(2, '0')}
+              {tr.number !== null && ` · #${tr.number}`}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** "These N pieces are…": the numbers to offer, a typed one, and not a player. */
+function NamePieces({ count, offer, onName }: { count: number; offer: Offer; onName: (number: number | null, notPlayer?: boolean) => void }) {
+  const { t } = useTranslation()
+  const [typed, setTyped] = useState('')
+  const some = count > 0
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm font-semibold">{t('identify.piecesAre', { count })}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {offer.map((o) => (
+          <Button key={o.number} variant={o.onCourt ? 'primary' : 'secondary'} disabled={!some} title={o.name ?? undefined} onClick={() => onName(o.number)}>
+            #{o.number}
+          </Button>
+        ))}
+        <input
+          inputMode="numeric"
+          aria-label={t('identify.typeNumber')}
+          className="h-11 w-16 rounded-control border border-hairline-strong bg-surface px-2 text-center font-mono sm:h-9"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value.replace(/\D/g, '').slice(0, 2))}
+        />
+        <Button disabled={!some || parseNumber(typed) == null} onClick={() => onName(Number(typed))}>
+          {t('identify.save')}
+        </Button>
+        <Button disabled={!some} onClick={() => onName(null, true)}>
+          {t('identify.notPlayer')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Several people on one card (WiePlay joined them by their colours): tick the pieces that are
  * one person and name them (they join that number's card), or just move them to a card of
@@ -441,64 +514,26 @@ function PiecesDialog({
   videoId: string
   sheets: Sheets
   card: PlayerCluster
-  offer: { number: number; name: string | null; onCourt: boolean }[]
+  offer: Offer
   onClose: () => void
   onAnswer: (a: Answer) => void
 }) {
   const { t } = useTranslation()
   const [picked, setPicked] = useState<number[]>([])
-  const [typed, setTyped] = useState('')
   const tracks = [...card.tracks].sort((a, b) => a.t0 - b.t0)
   const some = picked.length > 0
-  const name = (number: number | null, notPlayer = false) => onAnswer({ kind: 'pieces', tracks: picked, number, not_player: notPlayer })
+  const toggle = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
   return (
     <Modal open onClose={onClose} title={t('identify.splitTitle')} size="lg">
       <p className="text-sm text-muted">{t('identify.splitBody')}</p>
-      <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
-        {tracks.map((tr) => {
-          const on = picked.includes(tr.id)
-          return (
-            <button
-              key={tr.id}
-              type="button"
-              aria-pressed={on}
-              onClick={() => setPicked((p) => (on ? p.filter((x) => x !== tr.id) : [...p, tr.id]))}
-              className={cx('flex cursor-pointer flex-col items-center gap-1 rounded-control border-2 p-1 text-xs', on ? 'border-accent bg-accent-soft' : 'border-hairline')}
-            >
-              {tr.crop ? <Crop videoId={videoId} sheets={sheets} crop={tr.crop} scale={0.7} /> : <span className="h-28 w-14 bg-sunken" />}
-              <span className="tabular-nums">
-                {Math.floor(tr.t0 / 60000)}:{String(Math.floor(tr.t0 / 1000) % 60).padStart(2, '0')}
-                {tr.number !== null && ` · #${tr.number}`}
-              </span>
-            </button>
-          )
-        })}
+      <div className="mt-3">
+        <PieceTiles videoId={videoId} sheets={sheets} tracks={tracks} picked={picked} onToggle={toggle} />
       </div>
       <div className="mt-3 flex flex-col gap-2 border-t border-hairline pt-3">
-        <p className="text-sm font-semibold">{t('identify.piecesAre', { count: picked.length })}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {offer.map((o) => (
-            <Button key={o.number} variant={o.onCourt ? 'primary' : 'secondary'} disabled={!some} onClick={() => name(o.number)}>
-              #{o.number}
-            </Button>
-          ))}
-          <input
-            inputMode="numeric"
-            aria-label={t('identify.typeNumber')}
-            className="h-11 w-16 rounded-control border border-hairline-strong bg-surface px-2 text-center font-mono sm:h-9"
-            value={typed}
-            onChange={(e) => setTyped(e.target.value.replace(/\D/g, '').slice(0, 2))}
-          />
-          <Button disabled={!some || parseNumber(typed) == null} onClick={() => name(Number(typed))}>
-            {t('identify.save')}
-          </Button>
-        </div>
+        <NamePieces count={picked.length} offer={offer} onName={(number, notPlayer = false) => onAnswer({ kind: 'pieces', tracks: picked, number, not_player: notPlayer })} />
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             {t('common.cancel')}
-          </Button>
-          <Button disabled={!some} onClick={() => name(null, true)}>
-            {t('identify.notPlayer')}
           </Button>
           <Button disabled={!some || picked.length === tracks.length} onClick={() => onAnswer({ kind: 'split', tracks: picked })}>
             {t('identify.splitConfirm', { count: picked.length })}
@@ -506,6 +541,95 @@ function PiecesDialog({
         </div>
       </div>
     </Modal>
+  )
+}
+
+/** A pieces card shows its biggest pieces first, this many at once (core/identify.py). */
+const PIECES_SHOWN = 24
+
+interface PiecesQuestionProps {
+  players: Players
+  sheets: Sheets
+  card: PlayerCluster
+  item: QueueItem
+  busy: boolean
+  canUndo: boolean
+  onAnswer: (a: Answer) => void
+  onSkip: () => void
+  onUndo: () => void
+}
+
+/**
+ * A pieces card (players v3): pieces without a number that look alike, most often of several
+ * teammates. Tick the pieces of one person and tap their number: they join that number's card,
+ * the rest comes back for the next answer.
+ */
+function PiecesQuestion({ players, sheets, card, item, busy, canUndo, onAnswer, onSkip, onUndo }: PiecesQuestionProps) {
+  const { t } = useTranslation()
+  const names = useSideNames()
+  const [picked, setPicked] = useState<number[]>([])
+  const [all, setAll] = useState(false)
+  const offer = numbersToOffer(card.team, item.on_court, players.roster)
+  const tracks = [...card.tracks].sort((a, b) => b.n - a.n)
+  const shown = all ? tracks : tracks.slice(0, PIECES_SHOWN)
+  const toggle = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
+  const name = (number: number | null, notPlayer = false) => {
+    if (busy || picked.length === 0) return
+    onAnswer({ kind: 'pieces', tracks: picked, number, not_player: notPlayer })
+  }
+
+  // Keys: K or → skip, U undo (numbers are tapped: the pieces are ticked first).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+      const target = event.target
+      if (target instanceof Element && target.closest('input, textarea, select, [role="dialog"]')) return
+      if (event.key === 'k' || event.key === 'K' || event.key === 'ArrowRight') onSkip()
+      else if (event.key === 'u' || event.key === 'U') onUndo()
+      else return
+      event.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onSkip, onUndo])
+
+  return (
+    <Card className="flex flex-col gap-3 p-3 sm:p-4" role="region" aria-label={t('identify.answers')}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-semibold">
+          {clusterTitle(
+            card,
+            (key) => t('players.unnamed', { key }),
+            (key) => t('players.piecesCard', { key }),
+          )}
+          <span className="ml-2 font-normal text-muted">
+            {sideLabel(t, card.team, names)} · {t('players.pieces', { count: card.tracks.length })}
+          </span>
+        </h2>
+      </div>
+      <p className="max-w-3xl text-sm text-muted">{t('identify.piecesBody')}</p>
+      <PieceTiles videoId={players.video_id} sheets={sheets} tracks={shown} picked={picked} onToggle={toggle} />
+      {tracks.length > shown.length && (
+        <Button variant="ghost" className="self-start" onClick={() => setAll(true)}>
+          {t('identify.showAll', { count: tracks.length })}
+        </Button>
+      )}
+      {/* Kept in view while ticking down a long list of pieces (a phone). */}
+      <div className="sticky bottom-0 z-10 -mx-3 -mb-3 flex flex-col gap-2 rounded-b-card border-t border-hairline bg-surface p-3 sm:-mx-4 sm:-mb-4 sm:p-4">
+        <NamePieces count={picked.length} offer={offer} onName={name} />
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" disabled={busy} onClick={onSkip}>
+            {t('identify.skip')}
+            <Kbd>K</Kbd>
+          </Button>
+          <Button variant="ghost" disabled={busy || !canUndo} onClick={onUndo}>
+            <UndoIcon className="size-4" />
+            {t('identify.undo')}
+            <Kbd>U</Kbd>
+          </Button>
+        </div>
+      </div>
+    </Card>
   )
 }
 

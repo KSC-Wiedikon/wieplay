@@ -1,10 +1,11 @@
 """Identifying the players with the coach (PLAN §10.5, the owner's "if not sure let me try to
 identify players (and teams), like in Hudl/Balltime", 19.10.2026), API side.
 
-    the players job's cards ─▶ a queue of the cards WiePlay is not sure of, the biggest share of
-        the footage first ─▶ the coach answers from pictures (the video zoomed onto the card at
-        several moments): a number, not a player, wrong team, "same as" another card, mixed
-        (split), skip ─▶ each answer is a fact: the cards linked anew around it (`relink`), so
+    the players job's cards ─▶ a queue of the cards WiePlay is not sure of, the most footage
+        named per answer first (`gain`) ─▶ the coach answers from pictures (the video zoomed
+        onto the card at several moments): a number, not a player, wrong team, "same as"
+        another card, mixed (split), skip; for a pieces card, the pieces of one person ticked
+        and named ─▶ each answer is a fact: the cards linked anew around it (`relink`), so
         neighbouring cards join a named one and the queue shrinks
 
 and, while watching, a tap on a person in the paused video names the card of that track.
@@ -20,9 +21,10 @@ number on it (`ocr_number`, at least MIN_OCR) and the two are never seen at the 
 "Who is missing" (a card or a piece without a number given to the one named teammate missing
 while it is seen) was measured on the Legends game and is not used: of the pieces it moved,
 those whose number shows were mostly someone else (the libero, a teammate the coach had not
-named yet, the other team's player). The cards WiePlay is unsure of are often several people
-joined by their colours: a "pieces" answer names some of a card's pieces at once (they move
-to the card with that number, or a new one).
+named yet, the other team's player). Since players v3 a card is one person; the pieces
+without a number that look alike are a *pieces* card (`kind`), several teammates as a rule: a
+"pieces" answer names the ticked ones at once (they move to the card with that number, or a
+new one), and the rest stays for the next answer.
 """
 
 from __future__ import annotations
@@ -40,6 +42,8 @@ from sqlalchemy.orm import Session
 from wieplay.core import lineups
 from wieplay.core.models import Period, Segment, Video
 from wieplay.core.players import (
+    PERSON,
+    PIECES,
     UNCERTAIN,
     GalleryError,
     Index,
@@ -50,11 +54,15 @@ from wieplay.core.players import (
 )
 
 MIN_OCR = 0.5
+# A pieces card shows its biggest pieces (the web shows the same): one answer names one
+# person among them, about half of their footage (the Legends game, 19.10.2026).
+PIECES_SHOWN = 24
+PIECES_GAIN = 0.5
 MOMENTS = 6
 CLIP_MS = 3000  # the loop around a moment
 FIELDS = (
     "team", "number", "member_id", "not_player", "confidence", "merged_into", "tracks", "crops",
-    "detections", "source", "assigned_by", "assigned_at",
+    "detections", "source", "assigned_by", "assigned_at", "kind",
 )  # fmt: skip
 
 
@@ -87,10 +95,21 @@ def sure_share(rows: Iterable[PlayerCluster]) -> float:
     return round(sum(c.detections for c in cards if sure(c)) / total, 4) if total else 0.0
 
 
+def gain(c: PlayerCluster) -> float:
+    """What an answer about the card is expected to name (detections): a person card all of
+    its footage; a pieces card one of its people among the pieces shown (PIECES_SHOWN, the
+    biggest), about half of them on the Legends game (PLAN §10.5)."""
+    if c.kind == PIECES:
+        shown = sorted((int(t["n"]) for t in c.tracks), reverse=True)[:PIECES_SHOWN]
+        return PIECES_GAIN * sum(shown)
+    return float(c.detections)
+
+
 def queue(rows: Iterable[PlayerCluster]) -> list[PlayerCluster]:
-    """The cards to check: not sure, not answered, the biggest share of the footage first."""
+    """The cards to check: not sure, not answered, the most footage named per answer first
+    (`gain`)."""
     out = [c for c in players_of(rows) if not sure(c)]
-    out.sort(key=lambda c: (-c.detections, c.key))
+    out.sort(key=lambda c: (-gain(c), c.key))
     return out
 
 
@@ -202,6 +221,8 @@ def restore(db: Session, video: Video, items: Sequence[dict[str, Any]]) -> int:
                 value = uuid.UUID(value) if value else None
             elif name == "assigned_at":
                 value = datetime.fromisoformat(value) if value else None
+            elif name == "kind" and value not in (PERSON, PIECES):
+                raise GalleryError("a card is a person or pieces")
             setattr(c, name, value)
     db.flush()
     return len(items)
@@ -232,8 +253,9 @@ def name_pieces(
     actor: int,
 ) -> PlayerCluster:
     """Some pieces of a card are one person (a number, or not a player): they move to the card
-    the coach named with that number (when it is not seen at the same time), else to a new
-    card named so. All of a card's pieces: the card itself is named."""
+    of that number (`holder`: the coach's, else the one the job is sure of; never seen at the
+    same time), else to a new card named so. All of a card's pieces: the card itself is
+    named."""
     from wieplay.core.players import assign
 
     wanted = {int(p) for p in pieces}
@@ -246,19 +268,30 @@ def name_pieces(
         rows.append(part)
     target = None
     if number is not None and not not_player:
-        target = next(
-            (
-                c for c in players_of(rows)
-                if c.id != part.id and named(c) and c.team == part.team and c.number == number
-                and not overlap(intervals(c), intervals(part))
-            ),
-            None,
-        )  # fmt: skip
+        target = holder(rows, part, number)
     if target is not None:
         merge(db, target, [part], actor)
         return target
     assign(db, video, part, number=number, not_player=not_player, actor=actor)
     return part
+
+
+def holder(rows: Sequence[PlayerCluster], part: PlayerCluster, number: int) -> PlayerCluster | None:
+    """The card of `number` on `part`'s team that `part` can join (never seen at the same
+    time): the one the coach named so, else the one the job is sure of with that number
+    read."""
+    mine = intervals(part)
+    cands = [
+        c for c in players_of(rows)
+        if c.id != part.id and c.team == part.team and not overlap(intervals(c), mine)
+    ]  # fmt: skip
+    for c in cands:
+        if named(c) and c.number == number:
+            return c
+    for c in cands:
+        if not named(c) and sure(c) and c.number is None and c.ocr_number == number:
+            return c
+    return None
 
 
 def tap(

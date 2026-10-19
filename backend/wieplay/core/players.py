@@ -95,6 +95,8 @@ RENDITION_FILE = re.compile(r"init\.mp4|seg_\d{5}\.m4s")
 RENDITION = "1080p"
 # Cards below this confidence ask the coach to check them (wieplay/ml/identities.py).
 UNCERTAIN = 0.5
+# A card's kind (players v3, PLAN §10.5): one person, or look-alike pieces of several.
+PERSON, PIECES = "person", "pieces"
 
 # Attribution: the contact is looked for this close to the tag (a live tag lags the play).
 CONTACT_WINDOW_MS = {"frame": 250, "adjusted": 400, "live": 700}
@@ -143,6 +145,9 @@ class PlayerCluster(Base):
     # Players v2 (0020): how sure the job is that the card is one whole person (0..1); the
     # gallery asks the coach to check cards below UNCERTAIN. NULL: an older run.
     confidence: Mapped[float | None] = mapped_column(Float)
+    # Players v3 (0027): "person", or "pieces": pieces without a number that look alike,
+    # likely several teammates; the coach names them a few at a time (core/identify.py).
+    kind: Mapped[str] = mapped_column(String(8), default=PERSON, server_default=PERSON)
     merged_into: Mapped[uuid.UUID | None] = mapped_column(UUID)
     source: Mapped[str] = mapped_column(String(16), default="model")  # model | split
     assigned_by: Mapped[int | None] = mapped_column(Integer)
@@ -471,6 +476,7 @@ class TrackIn(BaseModel):
 class ClusterIn(BaseModel):
     key: int = Field(ge=1)
     team: Team
+    kind: Literal["person", "pieces"] = "person"  # players v3; older workers send persons
     referee: bool = False
     number: int | None = Field(default=None, ge=0, le=99)
     number_conf: float = Field(default=0.0, ge=0, le=1)
@@ -660,6 +666,7 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
             not_player=c.referee,
             referee_guess=c.referee,
             confidence=c.confidence,
+            kind=c.kind,
             source="model",
         )
         # A rerun keeps the coach's work where it can tell: same team, same number read.
@@ -667,7 +674,7 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
             (
                 p for p in previous
                 if p.number is not None and p.team == c.team and c.number is not None
-                and p.number == c.number
+                and p.number == c.number and c.kind == PERSON
             ),
             None,
         )  # fmt: skip
@@ -731,6 +738,7 @@ def assign(
                 raise GalleryError(f"#{number} is not in this video's roster")
             member = roster[number]
         cluster.number, cluster.member_id, cluster.not_player = number, member, False
+        cluster.kind = PERSON  # the coach says the whole card is this person
     cluster.assigned_by = actor
     cluster.assigned_at = datetime.now(UTC)
 
@@ -755,6 +763,7 @@ def merge(db: Session, target: PlayerCluster, sources: Sequence[PlayerCluster], 
     target.crops = crops[:8]
     target.detections = sum(int(t["n"]) for t in tracks)
     target.confidence = None  # the coach's grouping now, not the job's
+    target.kind = PERSON  # the coach says they are one person
     if target.number is None and not target.not_player:
         named = {s.number for s in sources if s.number is not None}
         if len(named) == 1:
@@ -788,6 +797,7 @@ def split(
         tracks=moving,
         crops=[t["crop"] for t in moving if t.get("crop")][:4],
         detections=sum(int(t["n"]) for t in moving),
+        kind=PERSON,  # the coach's pick of one person's pieces
         source="split",
         assigned_by=actor,
         assigned_at=datetime.now(UTC),

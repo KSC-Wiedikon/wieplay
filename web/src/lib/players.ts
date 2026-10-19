@@ -41,6 +41,12 @@ export interface PlayerCluster {
   confidence?: number | null
   /** The card asks to be checked (unsure, no number yet). Older servers: absent. */
   uncertain?: boolean
+  /**
+   * Players v3: `person` (one person), or `pieces`: look-alike pieces without a number, most
+   * often of several teammates (they share the kit); the coach names one person's at a time.
+   * Older servers: absent (a person).
+   */
+  kind?: 'person' | 'pieces'
   crops: [number, number][]
   detections: number
   seconds: number
@@ -173,6 +179,7 @@ export function groupClusters(clusters: readonly PlayerCluster[]): Grouped {
   const sorted = [...clusters].sort((a, b) => b.seconds - a.seconds || a.key - b.key)
   for (const c of sorted) {
     if (c.not_player) out.others.push(c)
+    else if (isPieces(c)) out.check.push(c)
     else if (c.seconds < BRIEF_SECONDS && c.number === null) out.brief.push(c)
     else if (c.uncertain) out.check.push(c)
     else out[c.team].push(c)
@@ -181,9 +188,18 @@ export function groupClusters(clusters: readonly PlayerCluster[]): Grouped {
   return out
 }
 
-/** "#7 Alex Muster", "#12", or "Player 4" until it has a number. */
-export function clusterTitle(c: Pick<PlayerCluster, 'number' | 'name' | 'key'>, unnamed: (key: number) => string): string {
-  if (c.number === null) return unnamed(c.key)
+/** A pieces card: look-alike pieces of (most often) several people, not one person. */
+export function isPieces(c: Pick<PlayerCluster, 'kind' | 'number'>): boolean {
+  return c.kind === 'pieces' && c.number === null
+}
+
+/** "#7 Alex Muster", "#12", or "Player 4" until it has a number ("Pieces 9" for a pieces card). */
+export function clusterTitle(
+  c: Pick<PlayerCluster, 'number' | 'name' | 'key'> & Partial<Pick<PlayerCluster, 'kind'>>,
+  unnamed: (key: number) => string,
+  pieces?: (key: number) => string,
+): string {
+  if (c.number === null) return pieces && c.kind === 'pieces' ? pieces(c.key) : unnamed(c.key)
   return c.name ? `#${c.number} ${c.name}` : `#${c.number}`
 }
 
