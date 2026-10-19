@@ -14,6 +14,21 @@ POST  /api/videos/{id}/players/swap-teams          ours and theirs were the wron
 POST  /api/videos/{id}/players/apply               take WiePlay's players for the coach's tags
                                                    that have no number
 
+Identifying the players with the coach (core/identify.py):
+GET   /api/videos/{id}/players/queue               the cards to check, biggest first, with the
+                                                   numbers on court in their rallies and cards
+                                                   that may be the same person; "which team is
+                                                   ours" when the teams are uncertain
+POST  /api/videos/{id}/players/clusters/{cid}/answer  a number, not a player, the other team,
+                                                   same as another card, two people (split);
+                                                   the cards linked anew around it; `undo`
+POST  /api/videos/{id}/players/restore             undo an answer
+GET   /api/videos/{id}/players/clusters/{cid}/moments  moments of a card (boxes, for the video
+                                                   zoomed onto the person)
+GET   /api/videos/{id}/players/frame?t_ms=         the people followed at a moment
+POST  /api/videos/{id}/players/tap                 name the person tapped in the paused video
+POST  /api/videos/{id}/players/teams               which team is ours (the first set's side)
+
 Whoever may watch the video may read (the crops show who played, like the video does);
 whoever may tag it names, merges, splits and applies. Every change re-attributes the
 video's actions. No faces, nothing across videos (PLAN §5.7).
@@ -35,7 +50,7 @@ from wieplay.api.access import TeamAccess
 from wieplay.api.analysis import JobStateOut, _manages
 from wieplay.api.deps import DbDep, StoreDep, ViewerDep, audit
 from wieplay.api.tagging import RosterOut, _readable, _roster_out
-from wieplay.core import guests, players, tagging
+from wieplay.core import guests, identify, lineups, players, tagging
 from wieplay.core.models import Event, Video
 from wieplay.core.permissions import Viewer, can_run_analysis, can_tag
 from wieplay.core.players import EventPlayer, PlayerCluster
@@ -522,4 +537,320 @@ def apply(
     return ApplyOut(
         applied=applied,
         players=players_out(db, video, viewer, access, _store(request), _minutes(request)),
+    )
+
+
+# --- identifying the players with the coach (PLAN §10.5) -------------------------------------
+
+
+class QueueItemOut(BaseModel):
+    card: uuid.UUID
+    # The numbers to offer first: on court for its team in its rallies (the scoresheet), then
+    # the liberos.
+    on_court: list[int]
+    # Cards that may be the same person (its team, never seen at once, a likely number).
+    same_as: list[uuid.UUID]
+
+
+class TeamsSideOut(BaseModel):
+    card: uuid.UUID
+    crops: list[list[int]]
+    team: str
+
+
+class TeamsQuestionOut(BaseModel):
+    """Which team is ours: the biggest cards on each side of the net in the first set."""
+
+    set: int
+    near: list[TeamsSideOut]
+    far: list[TeamsSideOut]
+    near_team: str | None  # what the cards say now
+    far_team: str | None
+
+
+class QueueOut(BaseModel):
+    items: list[QueueItemOut]  # the cards to check, the biggest share of the footage first
+    named: int  # cards the coach answered
+    sure_share: float  # the players' footage on sure cards (0..1)
+    teams: TeamsQuestionOut | None
+
+
+class AnswerIn(BaseModel):
+    kind: str = Field(pattern=r"^(number|not_player|team|same_as|split|pieces)$")
+    number: int | None = Field(default=None, ge=0, le=99)
+    team: str | None = Field(default=None, pattern=r"^(us|them)$")
+    into: uuid.UUID | None = None  # same_as
+    # split: the other person's pieces; pieces: those that are `number` (or not a player)
+    tracks: list[int] | None = Field(default=None, max_length=5000)
+    not_player: bool = False  # pieces
+
+
+class AnsweredOut(BaseModel):
+    players: PlayersOut
+    queue: QueueOut
+    # The cards as they were: POST …/players/restore with it undoes the answer.
+    undo: list[dict[str, Any]]
+    relinked: list[dict[str, Any]]  # cards that joined a named one because of the answer
+
+
+class RestoreIn(BaseModel):
+    cards: list[dict[str, Any]] = Field(min_length=1, max_length=1000)
+
+
+class MomentOut(BaseModel):
+    t_ms: int
+    track: int
+    box: list[float]  # u1 v1 u2 v2, 0..1 of the frame
+    clip: list[list[float]]  # [t_ms, u1, v1, u2, v2] around it
+
+
+class FrameOut(BaseModel):
+    t_ms: int | None  # the analysed frame's time
+    boxes: list[dict[str, Any]]
+
+
+class TapIn(BaseModel):
+    t_ms: int = Field(ge=0)
+    track: int = Field(ge=0)
+    number: int | None = Field(default=None, ge=0, le=99)
+    not_player: bool = False
+
+
+class TeamsIn(BaseModel):
+    near_is_ours: bool  # in the first set
+
+
+def _uncertain_teams(run: Any) -> bool:
+    stats = ((run.metrics or {}).get("players") or {}) if run is not None else {}
+    return stats.get("calibrated") is False or bool(stats.get("kit_guessed_windows"))
+
+
+def _queue_out(db: Session, video: Video) -> QueueOut:
+    rows = players.clusters(db, video.id)
+    found = lineups.for_video(db, video)
+    spans = identify.rally_spans(db, video) if found is not None else []
+    items = []
+    for c in identify.queue(rows):
+        on_court = identify.on_court_numbers(c, rows, found, spans)
+        items.append(
+            QueueItemOut(
+                card=c.id,
+                on_court=on_court,
+                same_as=[o.id for o in identify.same_as(c, rows, on_court[:3])],
+            )
+        )
+    run = players.latest_run(db, video.id)
+    question = identify.teams_question(db, video, rows, _uncertain_teams(run))
+    return QueueOut(
+        items=items,
+        named=sum(1 for c in identify.live(rows) if identify.named(c)),
+        sure_share=identify.sure_share(rows),
+        teams=TeamsQuestionOut.model_validate(question) if question else None,
+    )
+
+
+@router.get("/videos/{video_id}/players/queue", response_model=QueueOut)
+def identify_queue(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> QueueOut:
+    video, _ = _readable(db, viewer, video_id)
+    out = _queue_out(db, video)
+    db.rollback()
+    return out
+
+
+def _changed(before: list[dict[str, Any]], rows: list[PlayerCluster]) -> list[dict[str, Any]]:
+    """What `restore` needs to undo: the cards that changed as they were, and the cards that
+    did not exist (from a split) emptied into the card they came from."""
+    after = {item["id"]: item for item in identify.snapshot(rows)}
+    old = {item["id"]: item for item in before}
+    out = [item for cid, item in old.items() if after.get(cid) != item]
+    for cid, item in after.items():
+        if cid not in old:
+            origin = next(
+                (o["id"] for o in before if any(t in o["tracks"] for t in item["tracks"])), None
+            )
+            out.append(
+                {"id": cid, "tracks": [], "crops": [], "detections": 0, "merged_into": origin}
+            )
+    return out
+
+
+@router.post("/videos/{video_id}/players/clusters/{cluster_id}/answer", response_model=AnsweredOut)
+def answer(
+    video_id: uuid.UUID,
+    cluster_id: uuid.UUID,
+    body: AnswerIn,
+    request: Request,
+    viewer: ViewerDep,
+    db: DbDep,
+) -> AnsweredOut:
+    """An answer in the queue: a number (ours from the roster, theirs any), not a player, the
+    other team (this card only), the same person as another card, or two people (split). The
+    cards are then linked anew around it (core/identify.py `relink`)."""
+    video, access = _editable(db, viewer, video_id)
+    row = _cluster(db, video, cluster_id)
+    rows = players.clusters(db, video.id)
+    before = identify.snapshot(
+        db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id))
+    )
+    actor = viewer.member_id
+    try:
+        if body.kind == "number":
+            players.assign(db, video, row, number=body.number, not_player=False, actor=actor)
+        elif body.kind == "not_player":
+            players.assign(db, video, row, number=None, not_player=True, actor=actor)
+        elif body.kind == "team":
+            identify.set_team(db, video, row, body.team or "", actor)
+        elif body.kind == "same_as":
+            if body.into is None:
+                raise players.GalleryError("same as which card?")
+            target = _cluster(db, video, body.into)
+            if target.team != row.team:
+                raise players.GalleryError("the same person plays for one team")
+            players.merge(db, target, [row], actor)
+        elif body.kind == "pieces":
+            identify.name_pieces(
+                db, video, rows, row, body.tracks or [], body.number, body.not_player, actor
+            )
+        else:  # split
+            new = players.split(db, row, body.tracks or [], actor)
+            rows.append(new)
+    except players.GalleryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    db.flush()
+    relinked = identify.relink(db, video, players.clusters(db, video.id), actor)
+    all_rows = list(db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id)))
+    undo = _changed(before, all_rows)
+    _reattribute(db, video, _store(request))
+    audit(
+        db, actor, "player_identified", "video", str(video.id),
+        cluster=str(row.id), kind=body.kind, number=body.number, team=body.team,
+        into=str(body.into) if body.into else None, relinked=len(relinked),
+    )  # fmt: skip
+    db.commit()
+    return AnsweredOut(
+        players=players_out(db, video, viewer, access, _store(request), _minutes(request)),
+        queue=_queue_out(db, video),
+        undo=undo,
+        relinked=relinked,
+    )
+
+
+@router.post("/videos/{video_id}/players/restore", response_model=AnsweredOut)
+def restore(
+    video_id: uuid.UUID, body: RestoreIn, request: Request, viewer: ViewerDep, db: DbDep
+) -> AnsweredOut:
+    """Undo an answer: the cards back as the answer's `undo` had them."""
+    video, access = _editable(db, viewer, video_id)
+    before = identify.snapshot(
+        db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id))
+    )
+    try:
+        identify.restore(db, video, body.cards)
+    except (players.GalleryError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(422, f"Cannot undo: {exc}") from exc
+    all_rows = list(db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id)))
+    redo = _changed(before, all_rows)
+    _reattribute(db, video, _store(request))
+    audit(
+        db, viewer.member_id, "player_answer_undone", "video", str(video.id), cards=len(body.cards)
+    )
+    db.commit()
+    return AnsweredOut(
+        players=players_out(db, video, viewer, access, _store(request), _minutes(request)),
+        queue=_queue_out(db, video),
+        undo=redo,
+        relinked=[],
+    )
+
+
+@router.get(
+    "/videos/{video_id}/players/clusters/{cluster_id}/moments", response_model=list[MomentOut]
+)
+def card_moments(
+    video_id: uuid.UUID, cluster_id: uuid.UUID, viewer: ViewerDep, db: DbDep, store: StoreDep
+) -> list[MomentOut]:
+    """Moments of a card for the pictures: the video zoomed onto the person (boxes from the
+    players index; no picture is made or stored)."""
+    video, _ = _readable(db, viewer, video_id)
+    row = _cluster(db, video, cluster_id)
+    run = players.latest_run(db, video.id)
+    index = players.load_index(db, run, store.read) if run is not None and store else None
+    out = [MomentOut.model_validate(m) for m in identify.moments(index, row)]
+    db.rollback()
+    return out
+
+
+@router.get("/videos/{video_id}/players/frame", response_model=FrameOut)
+def frame(
+    video_id: uuid.UUID, t_ms: int, viewer: ViewerDep, db: DbDep, store: StoreDep
+) -> FrameOut:
+    """The people WiePlay followed at a moment of the video (tap one to name them)."""
+    video, _ = _readable(db, viewer, video_id)
+    run = players.latest_run(db, video.id)
+    index = players.load_index(db, run, store.read) if run is not None and store else None
+    at, boxes = identify.frame_boxes(index, players.clusters(db, video.id), t_ms)
+    db.rollback()
+    return FrameOut(t_ms=at, boxes=boxes)
+
+
+@router.post("/videos/{video_id}/players/tap", response_model=AnsweredOut)
+def tap(
+    video_id: uuid.UUID, body: TapIn, request: Request, viewer: ViewerDep, db: DbDep
+) -> AnsweredOut:
+    """A person tapped in the paused video named (a number, or not a player)."""
+    video, access = _editable(db, viewer, video_id)
+    rows = players.clusters(db, video.id)
+    before = identify.snapshot(
+        db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id))
+    )
+    try:
+        card = identify.tap(
+            db, video, rows, body.track, body.number, body.not_player, viewer.member_id
+        )
+    except players.GalleryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    db.flush()
+    relinked = identify.relink(db, video, players.clusters(db, video.id), viewer.member_id)
+    all_rows = list(db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id)))
+    undo = _changed(before, all_rows)
+    _reattribute(db, video, _store(request))
+    audit(
+        db, viewer.member_id, "player_tapped", "video", str(video.id),
+        cluster=str(card.id), t_ms=body.t_ms, number=body.number, not_player=body.not_player,
+    )  # fmt: skip
+    db.commit()
+    return AnsweredOut(
+        players=players_out(db, video, viewer, access, _store(request), _minutes(request)),
+        queue=_queue_out(db, video),
+        undo=undo,
+        relinked=relinked,
+    )
+
+
+@router.post("/videos/{video_id}/players/teams", response_model=AnsweredOut)
+def teams(
+    video_id: uuid.UUID, body: TeamsIn, request: Request, viewer: ViewerDep, db: DbDep
+) -> AnsweredOut:
+    """Which team is ours (the first set's side of the net): the cards turned round if they
+    said the other, the side kept as the coach's."""
+    video, access = _editable(db, viewer, video_id)
+    tagging.set_actor(db, viewer.member_id)
+    rows = players.clusters(db, video.id)
+    before = identify.snapshot(
+        db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id))
+    )
+    turned = identify.answer_teams(db, video, rows, body.near_is_ours, viewer.member_id)
+    all_rows = list(db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id)))
+    undo = _changed(before, all_rows)
+    _reattribute(db, video, _store(request))
+    audit(
+        db, viewer.member_id, "players_teams_answered", "video", str(video.id),
+        near_is_ours=body.near_is_ours, turned=turned,
+    )  # fmt: skip
+    db.commit()
+    return AnsweredOut(
+        players=players_out(db, video, viewer, access, _store(request), _minutes(request)),
+        queue=_queue_out(db, video),
+        undo=undo,
+        relinked=[],
     )

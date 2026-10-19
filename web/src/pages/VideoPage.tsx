@@ -27,7 +27,9 @@ import { useTrajectories } from '../lib/trajectories'
 import { Table, TBody, Td, Th, THead } from '../components/Table'
 import { UploadProgress } from '../components/UploadProgress'
 import { VideoStatusBadge } from '../components/VideoBadges'
+import { TapLayer } from '../components/TapPlayers'
 import { VideoPlayer } from '../components/VideoPlayer'
+import { useAnalysis } from '../lib/analysis'
 import { VIDEO_STATS_ID, VideoStats } from '../components/VideoStats'
 import { ApiError, blockersOf } from '../lib/api'
 import { clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
@@ -271,6 +273,11 @@ function Ready({ video }: { video: Video }) {
   const [draft, setDraft] = useState<ClipDraft | null>(null)
   const volleyball = video.sport === 'volleyball'
   const trajectories = useTrajectories(video.id, volleyball)
+  // Name a player by tapping them in the paused video (docs/PLAN.md §10.5): with players found.
+  const playersRun = useAnalysis(video.id, volleyball).data?.players?.run_id ?? null
+  const canName = volleyball && Boolean(tagging.data?.can_tag) && playersRun !== null
+  const [tapping, setTapping] = useState(false)
+  const tapRoster = tagging.data?.roster ?? []
   useEffect(() => {
     playhead.attach(element)
     return () => playhead.detach()
@@ -393,11 +400,22 @@ function Ready({ video }: { video: Video }) {
           <VideoPlayer
             video={video}
             videoRef={setElement}
-            overlay={trajectories.available && trajectories.on ? <TrajectoryLayer state={trajectories} video={element} /> : undefined}
+            overlay={
+              tapping && canName ? (
+                <TapLayer videoId={video.id} video={element} roster={tapRoster} />
+              ) : trajectories.available && trajectories.on ? (
+                <TrajectoryLayer state={trajectories} video={element} />
+              ) : undefined
+            }
             toolbar={
-              trajectories.available || firstServe !== null ? (
+              trajectories.available || firstServe !== null || canName ? (
                 <>
                   {volleyball && <TrajectoryToggle state={trajectories} />}
+                  {canName && (
+                    <Button variant={tapping ? 'primary' : 'ghost'} aria-pressed={tapping} title={t('identify.tap.hint')} onClick={() => setTapping((on) => !on)}>
+                      {t('identify.tap.button')}
+                    </Button>
+                  )}
                   {firstServe !== null && (
                     <Button variant="ghost" onClick={startAtFirstServe}>
                       <PlayIcon className="size-4" />

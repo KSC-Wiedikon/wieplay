@@ -58,9 +58,16 @@ export function PlayersStep({ video, canEdit, className }: { video: Video; canEd
         )}
       </div>
       {done ? (
-        <ButtonLink to={`/videos/${video.id}/players`} variant={canEdit && players.named < players.clusters ? 'primary' : 'secondary'}>
-          {canEdit ? t('players.step.open') : t('players.step.openReadOnly')}
-        </ButtonLink>
+        <div className="flex flex-wrap gap-2">
+          {canEdit && (players.uncertain ?? 0) > 0 && (
+            <ButtonLink to={`/videos/${video.id}/identify`} variant="primary">
+              {t('identify.open', { count: players.uncertain ?? 0 })}
+            </ButtonLink>
+          )}
+          <ButtonLink to={`/videos/${video.id}/players`} variant={canEdit && players.named < players.clusters && !(players.uncertain ?? 0) ? 'primary' : 'secondary'}>
+            {canEdit ? t('players.step.open') : t('players.step.openReadOnly')}
+          </ButtonLink>
+        </div>
       ) : canFind ? (
         <Button
           variant="secondary"

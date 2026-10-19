@@ -46,6 +46,7 @@ export interface Guide {
     tips: string[]
   }
   actions: { title: string; body: string; keys: GuideKey[] }
+  identify: { title: string; intro: string; steps: string[]; keysTitle: string; keys: GuideKey[]; tips: string[] }
   rights: { title: string; canTitle: string; can: string[]; cannotTitle: string; cannot: string[]; privacy: string }
 }
 
@@ -238,6 +239,34 @@ export const guideEn: Guide = {
       { keys: ['S', 'R', 'E', 'A', 'B', 'D', 'F'], text: 'It was another skill' },
       { keys: ['#', '+', '!', '-', '/', '='], text: 'Give it a grade' },
       { keys: ['0–9', 'Enter'], text: 'Name the player by shirt number, and accept' },
+    ],
+  },
+  identify: {
+    title: 'Identify players',
+    intro:
+      'After “Find players”, WiePlay knows some people for sure (their number read often enough); the rest wait for you. “Identify players (N to check)” on the video page shows them one at a time, the one seen longest first, large: the video zoomed onto the person at several moments.',
+    steps: [
+      'Tap their number. Ours come from the roster; the numbers the scoresheet has on court in that card’s rallies come first. Theirs: tap or type the number.',
+      'Not a player (a referee, a line judge, the bench), the other team (this card only), or the same person as another card: one tap each.',
+      'Several people on one card (WiePlay joined them by their colours): tick the pictures of one person and tap their number; repeat for the others.',
+      'Not sure? Skip. Undo takes back the last answer.',
+      'While watching: “Name a player” under the video, pause, tap a person and pick their number.',
+      'If WiePlay can’t tell the teams apart (no court set, similar kits), it first asks which side of the net was ours in the first set.',
+    ],
+    keysTitle: 'Keys while identifying',
+    keys: [
+      { keys: ['0–9', 'Enter'], text: 'The number' },
+      { keys: ['N'], text: 'Not a player' },
+      { keys: ['T'], text: 'The other team' },
+      { keys: ['S'], text: 'Same as another card' },
+      { keys: ['M'], text: 'Several people: name pieces' },
+      { keys: ['K', '→'], text: 'Skip' },
+      { keys: ['U'], text: 'Undo' },
+    ],
+    tips: [
+      'Each answer is a fact: cards whose shirt shows the number you gave join that card by themselves.',
+      'You match the person with your own eyes; WiePlay uses no faces, and nothing leaves this video.',
+      'Far-side players at 1080p are often too small to tell: skip them, the near side matters most.',
     ],
   },
   rights: {

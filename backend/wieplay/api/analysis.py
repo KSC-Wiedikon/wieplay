@@ -26,7 +26,7 @@ from sqlalchemy import select
 
 from wieplay.api.access import TeamAccess, visible_video
 from wieplay.api.deps import DbDep, SettingsDep, ViewerDep, audit
-from wieplay.core import actions, analysis, guests, players, scoring, tagging
+from wieplay.core import actions, analysis, guests, identify, players, scoring, tagging
 from wieplay.core.config import Settings
 from wieplay.core.models import Job, ModelRun, Segment, Video
 from wieplay.core.permissions import (
@@ -213,9 +213,11 @@ class PlayersSummaryOut(BaseModel):
     # WiePlay's players against the coach's numbers where both exist
     compared: int
     accuracy: float | None
-    # Players v2: cards the job is unsure of (to check), and what a search takes (minutes).
+    # Cards to check (the identify queue: not sure, not answered), what a search takes
+    # (minutes), and the players' footage on sure cards (0..1).
     uncertain: int = 0
     find_minutes: int = 120
+    sure_share: float | None = None
 
 
 class ActionsOut(BaseModel):
@@ -439,11 +441,9 @@ def _players(db: DbDep, video: Video, minutes: int = 120) -> PlayersSummaryOut |
         suggested=int(found.get("suggested", 0)),
         compared=int(vs.get("compared", 0)),
         accuracy=vs.get("accuracy"),
-        uncertain=sum(
-            1
-            for c in people
-            if c.confidence is not None and c.confidence < players.UNCERTAIN and c.number is None
-        ),
+        # The cards to check: the identify queue (core/identify.py).
+        uncertain=len(identify.queue(people)),
+        sure_share=identify.sure_share(people) if people else None,
         find_minutes=minutes,
     )
 
