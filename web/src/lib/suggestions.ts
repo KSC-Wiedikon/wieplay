@@ -87,7 +87,10 @@ export function isOpen(segment: Segment, pending: ReadonlySet<string>): boolean 
  * open one from the start (one skipped earlier). Null when everything is answered.
  */
 export function nextOpen(items: readonly Segment[], pending: ReadonlySet<string>, from: Pick<Segment, 'id' | 'start_ms'> | null): Segment | null {
-  const open = items.filter((s) => isOpen(s, pending) && s.id !== from?.id)
+  const all = items.filter((s) => isOpen(s, pending) && s.id !== from?.id)
+  // A sure rally suggestion waits for "Accept all sure rallies": the ones that need the coach first.
+  const unsure = all.filter((s) => !(isSuggestion(s) && s.score_sure === true))
+  const open = unsure.length > 0 ? unsure : all
   if (!from) return open[0] ?? null
   return open.find((s) => s.start_ms > from.start_ms) ?? open[0] ?? null
 }
@@ -134,6 +137,30 @@ export function logCounts(segments: readonly Segment[]): Record<LogVerdict, numb
   const counts: Record<LogVerdict, number> = { match: 0, none: 0, disagree: 0, missed: 0, silent: 0 }
   for (const s of segments) if (isSuggestion(s)) counts[logVerdict(s)] += 1
   return counts
+}
+
+// The joint decode (docs/PLAN.md §10.1, §10.3): every source per rally; the coach is asked
+// only about the rallies it is not sure of ("Needs you").
+
+/**
+ * The coach is needed for this rally: the scoring is not sure of it (its reasons say why) and
+ * the coach has not said who won. A rally outside every set counts too (warm-up, a break).
+ */
+export function needsYou(segment: Pick<Segment, 'kind' | 'score_sure' | 'won_by' | 'deleted_at'>): boolean {
+  return segment.kind === 'rally' && !segment.deleted_at && segment.score_sure === false && !segment.won_by
+}
+
+/** The rallies that need the coach, in time order. */
+export function needsYouRallies(segments: readonly Segment[]): Segment[] {
+  return segments.filter(needsYou).sort(byStart)
+}
+
+/**
+ * Open rally suggestions the scoring is sure of: "Accept all sure rallies" confirms their start
+ * and end (who won stays WiePlay's suggestion, which follows the evidence; PR #63).
+ */
+export function sureRallies(segments: readonly Segment[]): Segment[] {
+  return segments.filter((s) => isSuggestion(s) && s.score_sure === true).sort(byStart)
 }
 
 export interface ReviewProgress {

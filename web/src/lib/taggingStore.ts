@@ -141,6 +141,9 @@ function segmentFromIn(p: SegmentIn, prev: Segment | undefined): Segment {
     score_confidence: prev?.score_confidence ?? null,
     score_conflict: prev?.score_conflict ?? false,
     score_note: prev?.score_note ?? null,
+    // Sure or not (the joint decode) until the server scores the change.
+    score_sure: prev?.score_sure ?? null,
+    score_reasons: prev?.score_reasons ?? null,
     model_missed_us: prev?.model_missed_us ?? null,
     model_missed_them: prev?.model_missed_them ?? null,
     // So does what the club scoreboard's log says about the rally (PLAN §10.10).

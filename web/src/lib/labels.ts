@@ -2,7 +2,7 @@
 
 import type { TFunction } from 'i18next'
 import type { SideNames } from './sides'
-import type { RosterEntry, ScoreNote, Segment, SegmentKind, Side, TaxonomySkill } from './types'
+import type { RosterEntry, ScoreNote, ScoreReason, Segment, SegmentKind, Side, TaxonomySkill } from './types'
 
 /** Volleyball's skills; their names double as the categories that have grade meanings. */
 const VOLLEYBALL = ['serve', 'reception', 'set', 'attack', 'block', 'dig', 'freeball'] as const
@@ -82,6 +82,82 @@ export function segmentLabel(
 /** Why the automatic scoring flags a rally, in words (needs the video strings, src/i18n/pages.ts). */
 export function scoreNoteText(t: TFunction, note: ScoreNote | null | undefined): string {
   return note ? t(`tagging.scoring.notes.${note}`) : t('tagging.scoring.notes.unsure')
+}
+
+/** The score as written ("14:12"). */
+function scoreText(score: readonly number[] | null | undefined): string {
+  return score && score.length === 2 ? `${score[0]}:${score[1]}` : '–'
+}
+
+/**
+ * Why the joint decode needs the coach for a rally, in words, with what the sources say
+ * (docs/PLAN.md §10.1): "The sheet’s box here is unclear (17 or 11).", "A timeout (Volero) at
+ * 14:12 doesn’t fit here: the score here is 13:12.".
+ */
+export function reasonText(t: TFunction, reason: ScoreReason, names?: SideNames | null): string {
+  const team = (side: Side | 'none' | null | undefined) => (side === 'us' || side === 'them' ? sideLabel(t, side, names) : '–')
+  switch (reason.code) {
+    case 'log':
+    case 'board':
+      return t(`tagging.scoring.reason.${reason.code}`, { team: team(reason.team) })
+    case 'log_score':
+      return t('tagging.scoring.reason.log_score', { score: scoreText(reason.score) })
+    case 'sheet_log':
+      return t('tagging.scoring.reason.sheet_log', { log: team(reason.log), sheet: team(reason.sheet) })
+    case 'video':
+      return t(`tagging.scoring.reason.video.${reason.vs ?? 'score'}`)
+    case 'sheet_box': {
+      const values = reason.values ?? []
+      const or = t('tagging.scoring.reason.or')
+      return values.length > 1
+        ? t('tagging.scoring.reason.sheet_box', { values: values.join(` ${or} `) })
+        : t('tagging.scoring.reason.sheet_box_one', { values: values[0] ?? '?' })
+    }
+    case 'note': {
+      const what = noteWhat(t, reason, names)
+      const why = t(`tagging.scoring.reason.noteIssue.${reason.issue ?? 'off_path'}`, { here: scoreText(reason.here) })
+      return t('tagging.scoring.reason.note', { what, why })
+    }
+    case 'missing_before':
+    case 'missing_after':
+    case 'extra':
+    case 'log_none':
+    case 'coach':
+    case 'serve':
+    case 'sides':
+    case 'no_set':
+    case 'sheet':
+    case 'unsure':
+      return t(`tagging.scoring.reason.${reason.code}`)
+  }
+}
+
+/** A sheet's timeout, substitution or card in words ("Timeout (Volero) at 14:12"). */
+function noteWhat(t: TFunction, reason: ScoreReason, names?: SideNames | null): string {
+  const who = sideLabel(t, reason.side ?? null, names)
+  const other = reason.side === 'us' ? 'them' : 'us'
+  const score = scoreText(reason.score)
+  switch (reason.kind) {
+    case 'sub':
+    case 'sub_back':
+      return t(`tagging.scoring.reason.what.${reason.kind}`, { team: who, score })
+    case 'sanction': {
+      const kind = (['W', 'DW', 'P', 'DP', 'E', 'D'] as const).find((k) => k === reason.sanction) ?? 'W'
+      return t(`sheetCourt.card.${kind}`, { team: who, to: sideLabel(t, other, names), score })
+    }
+    default:
+      return t('tagging.scoring.reason.what.timeout', { team: who, score })
+  }
+}
+
+/** The first reason a rally needs the coach, in words; else the flag's. */
+export function firstReasonText(
+  t: TFunction,
+  rally: { score_reasons?: ScoreReason[] | null; score_note?: ScoreNote | null },
+  names?: SideNames | null,
+): string {
+  const first = rally.score_reasons?.[0]
+  return first ? reasonText(t, first, names) : scoreNoteText(t, rally.score_note)
 }
 
 /** "KSCW H3", "Volero" with the video's names (src/lib/sides.ts); else "Us", "Them". */

@@ -83,6 +83,8 @@ export const guideEn: Guide = {
       'Two rallies in one suggestion: S splits it at the playhead. One rally cut in two: M merges it with the next one.',
       'Say who served (1 us, 2 them) and who won the rally (3 us, 4 them) when WiePlay is unsure or wrong: the score line follows from it.',
       'Each answer moves on to the next suggestion. A mistake: U undoes the last answer.',
+      'WiePlay weighs everything it has for each rally at once: the video, the club scoreboard’s log, the scoresheet (typed, or read from its photo), the official result, the timeouts, substitutions and cards. A rally it is sure of needs no one: “Accept all sure rallies” accepts them in one step. The list shows “Needs you” first: only the rallies it stays unsure of, each with why (“the video and the sheet disagree on the winner”, “the sheet’s box here is unclear (17 or 11)”, “no point on the board log”, “a timeout at 14:12 doesn’t fit here”, “a missed rally next to it”).',
+      'Decide those: who won (3 4), who served (1 2), reject (X) or a break (W B T D O). Each decision is scored again at once: the rallies around it often become sure, and a scoresheet box behind it resolves by itself, with no separate check on the sheet page.',
     ],
     keysTitle: 'Keys while reviewing',
     keys: [
@@ -102,8 +104,8 @@ export const guideEn: Guide = {
     ],
     tips: [
       'Being close is enough: a quarter of a second either way does no harm. A missed or invented rally does.',
-      '“Accept all remaining with confidence ≥ 90%” saves time once the sure ones look right; U undoes it in one step.',
-      'When the club scoreboard’s log of the game is there, “Accept all that match the scoreboard log” accepts every rally where the log has a point and WiePlay the same winner; who won stays WiePlay’s suggestion, which follows the log. Left for you: no point on the log, the log and WiePlay disagree, a rally WiePlay missed next to it, or the log says nothing. U undoes it in one step.',
+      '“Accept all sure rallies” confirms their start and end; who won stays WiePlay’s suggestion, which follows the evidence. U undoes it in one step.',
+      'Sure means sure: on the games WiePlay was checked on, not one rally it was sure of was wrong. A game with only the video and the official result has few sure rallies, one with the scoreboard’s log or the scoresheet many more: that is honest, not a fault.',
       'Not sure? Leave it open and move on with ↓. Someone else can decide later.',
     ],
   },

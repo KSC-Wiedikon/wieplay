@@ -18,10 +18,13 @@ import {
   logMatches,
   logVerdict,
   loopRestart,
+  needsYou,
+  needsYouRallies,
   nextOpen,
   reviewItems,
   reviewProgress,
   scoreAfter,
+  sureRallies,
   sureSuggestions,
   suggestionCount,
 } from './suggestions'
@@ -140,5 +143,37 @@ describe('suggestions', () => {
     expect(formatPercent(0.87)).toBe('87%')
     expect(formatPercent(0.9)).toBe('90%')
     expect(formatPercent(null)).toBe('')
+  })
+})
+
+describe('the joint decode: needs you, sure (docs/PLAN.md §10.1, §10.3)', () => {
+  const unsure = { score_sure: false, score_reasons: [{ code: 'log_none' as const }] }
+  const segments: Segment[] = [
+    rally({ id: 's', start_ms: 10_000, end_ms: 15_000, source: 'model', score_sure: true }),
+    rally({ id: 'n', start_ms: 20_000, end_ms: 25_000, source: 'model', ...unsure }),
+    // Accepted, but the scoring is still not sure who won: it still needs the coach.
+    rally({ id: 'a', start_ms: 30_000, end_ms: 35_000, source: 'model', review: 'confirmed', ...unsure }),
+    // The coach said who won: a fact, never asked again.
+    rally({ id: 'w', start_ms: 40_000, end_ms: 45_000, source: 'model', review: 'corrected', won_by: 'us', ...unsure }),
+    // Not scored (no set yet): neither.
+    rally({ id: 'x', start_ms: 50_000, end_ms: 55_000, source: 'model', score_sure: null }),
+    rally({ id: 'g', kind: 'timeout', start_ms: 60_000, end_ms: 90_000, source: 'model', score_sure: false }),
+  ]
+
+  it('needs you: not sure, no winner from the coach, rallies only', () => {
+    expect(segments.filter(needsYou).map((s) => s.id)).toEqual(['n', 'a'])
+    expect(needsYouRallies([...segments].reverse()).map((s) => s.id)).toEqual(['n', 'a'])
+  })
+
+  it('accept all sure rallies takes the open suggestions the scoring is sure of', () => {
+    expect(sureRallies(segments).map((s) => s.id)).toEqual(['s'])
+  })
+
+  it('the walk visits what needs the coach first; the sure ones wait for the button', () => {
+    const items = reviewItems(segments, new Set())
+    expect(nextOpen(items, new Set(), null)?.id).toBe('n')
+    expect(nextOpen(items, new Set(), { id: 'n', start_ms: 20_000 })?.id).toBe('x')
+    // Only sure ones left open: then those.
+    expect(nextOpen([segments[0]], new Set(), null)?.id).toBe('s')
   })
 })
