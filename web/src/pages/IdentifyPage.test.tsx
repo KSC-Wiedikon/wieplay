@@ -99,6 +99,40 @@ describe('IdentifyPage', () => {
     )
   })
 
+  it('a pieces card: tick one person’s pieces, the biggest first, and name them', async () => {
+    const pieces = cluster({
+      key: 5,
+      kind: 'pieces',
+      seconds: 400,
+      confidence: 0,
+      uncertain: true,
+      tracks: Array.from({ length: 30 }, (_, i) => ({ id: 500 + i, t0: i * 10_000, t1: i * 10_000 + 5_000, n: 10 + i, side: 'near' as const, number: null, crop: [0, i] as [number, number] })),
+    })
+    const state = players()
+    const fetch = vi.fn(
+      stubFetch({
+        [`/api/videos/${ID}`]: { body: readyVideo() },
+        [`/api/videos/${ID}/players`]: { body: { ...state, clusters: [pieces, ...state.clusters] } },
+        [`/api/videos/${ID}/players/queue`]: { body: { ...queue(['c5', 'c1']), items: [{ card: 'c5', on_court: [11], same_as: [] }, { card: 'c1', on_court: [11], same_as: [] }] } },
+        [`POST /api/videos/${ID}/players/clusters/c5/answer`]: { body: answered(['c1']) },
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    renderRoute(<IdentifyPage />, { path: '/videos/:id/identify', url: `/videos/${ID}/identify` })
+    const region = await screen.findByRole('region', { name: 'Answer' })
+    expect(within(region).getByRole('heading', { name: /Pieces 5/ })).toBeInTheDocument()
+    const tiles = within(region).getAllByRole('button', { pressed: false })
+    expect(tiles).toHaveLength(24) // the biggest 24 of 30
+    expect(within(region).getByRole('button', { name: 'Show all 30' })).toBeInTheDocument()
+    expect(within(region).getByRole('button', { name: '#11' })).toBeDisabled() // nothing ticked yet
+    fireEvent.click(tiles[0] as HTMLElement)
+    fireEvent.click(tiles[2] as HTMLElement)
+    fireEvent.click(within(region).getByRole('button', { name: '#11' }))
+    await waitFor(() =>
+      expect(posted(fetch, `/api/videos/${ID}/players/clusters/c5/answer`)).toEqual([{ kind: 'pieces', tracks: [529, 527], number: 11, not_player: false }]),
+    )
+  })
+
   it('asks which team is ours when the teams are uncertain', async () => {
     const teams = { set: 1, near: [{ card: 'c1', crops: [[0, 1]] as [number, number][], team: 'us' as const }], far: [{ card: 'c3', crops: [[0, 3]] as [number, number][], team: 'them' as const }], near_team: 'us' as const, far_team: 'them' as const }
     const fetch = show({ [`POST /api/videos/${ID}/players/teams`]: { body: answered(['c1', 'c2']) } }, queue(['c1', 'c2'], teams))

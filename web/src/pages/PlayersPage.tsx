@@ -21,6 +21,7 @@ import {
   clusterTitle,
   cropStyle,
   groupClusters,
+  isPieces,
   parseNumber,
   sheetUrl,
   useApplySuggestions,
@@ -363,7 +364,11 @@ function PlayerCard({ cluster: c, videoId, data, sheets, order, selected, toggle
   const assign = useAssignPlayer(videoId)
   const [text, setText] = useState(c.number === null ? '' : String(c.number))
   const [error, setError] = useState<string | null>(null)
-  const name = clusterTitle(c, (key) => t('players.unnamed', { key }))
+  const name = clusterTitle(
+    c,
+    (key) => t('players.unnamed', { key }),
+    (key) => t('players.piecesCard', { key }),
+  )
   const inputId = `number-${c.id}`
   const ours = new Set(data.roster.filter((r) => r.side === 'us').map((r) => r.number))
   const isSelected = selected.includes(c.id)
@@ -418,10 +423,16 @@ function PlayerCard({ cluster: c, videoId, data, sheets, order, selected, toggle
           {c.number !== null && <CheckIcon className="size-5 shrink-0 text-on-accent-soft" aria-hidden="true" />}
         </div>
         {c.referee_guess && !c.not_player && <Badge>{t('players.refereeGuess')}</Badge>}
-        {c.uncertain && (
-          <p className="text-sm" title={t('players.uncertainHint')}>
-            <Badge tone="danger">{t('players.uncertain')}</Badge> <span className="text-muted">{t('players.uncertainHint')}</span>
+        {isPieces(c) ? (
+          <p className="text-sm" title={t('players.piecesHint')}>
+            <Badge tone="danger">{t('players.pieces', { count: c.tracks.length })}</Badge> <span className="text-muted">{t('players.piecesHint')}</span>
           </p>
+        ) : (
+          c.uncertain && (
+            <p className="text-sm" title={t('players.uncertainHint')}>
+              <Badge tone="danger">{t('players.uncertain')}</Badge> <span className="text-muted">{t('players.uncertainHint')}</span>
+            </p>
+          )
         )}
         {c.ocr_number !== null && c.number === null && (
           <p className="flex flex-wrap items-center gap-2 text-sm" title={t('players.readsHint')}>
@@ -499,7 +510,11 @@ function SplitDialog({ videoId, cluster, sheets, onClose }: { videoId: string; c
   const { t } = useTranslation()
   const split = useSplitPlayer(videoId)
   const [picked, setPicked] = useState<number[]>([])
-  const name = clusterTitle(cluster, (key) => t('players.unnamed', { key }))
+  const name = clusterTitle(
+    cluster,
+    (key) => t('players.unnamed', { key }),
+    (key) => t('players.piecesCard', { key }),
+  )
   const valid = picked.length > 0 && picked.length < cluster.tracks.length
   const toggle = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
   return (

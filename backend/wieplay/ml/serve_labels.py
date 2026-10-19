@@ -429,7 +429,7 @@ def fix_teams(tracks: Sequence[Track], allowed: Allowed) -> int:
         votes: dict[int, float] = defaultdict(float)
         for _, n, c in t.reads:
             votes[n] += c
-        folded = fold_partials(dict(votes))
+        folded = fold_partials(dict(votes), t.team)
         number, score = max(folded.items(), key=lambda kv: kv[1])
         if score < NUMBER_MIN_VOTES or score < NUMBER_SHARE * sum(folded.values()):
             continue

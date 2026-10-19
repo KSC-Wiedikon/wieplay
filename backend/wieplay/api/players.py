@@ -15,10 +15,11 @@ POST  /api/videos/{id}/players/apply               take WiePlay's players for th
                                                    that have no number
 
 Identifying the players with the coach (core/identify.py):
-GET   /api/videos/{id}/players/queue               the cards to check, biggest first, with the
-                                                   numbers on court in their rallies and cards
-                                                   that may be the same person; "which team is
-                                                   ours" when the teams are uncertain
+GET   /api/videos/{id}/players/queue               the cards to check, the most footage named
+                                                   per answer first, with the numbers on court
+                                                   in their rallies and cards that may be the
+                                                   same person; "which team is ours" when the
+                                                   teams are uncertain
 POST  /api/videos/{id}/players/clusters/{cid}/answer  a number, not a player, the other team,
                                                    same as another card, two people (split);
                                                    the cards linked anew around it; `undo`
@@ -94,6 +95,9 @@ class ClusterOut(BaseModel):
     # run, or the coach merged or split it); `uncertain` asks the coach to check it.
     confidence: float | None = None
     uncertain: bool = False
+    # Players v3: "person", or "pieces" (look-alike pieces without a number, likely several
+    # teammates: the coach ticks one person's and names them).
+    kind: str = "person"
     crops: list[list[int]]  # [page, cell] in the contact sheets
     detections: int
     seconds: float  # footage of this person, at the detection rate
@@ -314,6 +318,7 @@ def players_out(
                     and c.number is None
                     and not c.not_player
                 ),
+                kind=c.kind,
                 crops=c.crops,
                 detections=c.detections,
                 seconds=round(c.detections / fps, 1),
@@ -569,7 +574,7 @@ class TeamsQuestionOut(BaseModel):
 
 
 class QueueOut(BaseModel):
-    items: list[QueueItemOut]  # the cards to check, the biggest share of the footage first
+    items: list[QueueItemOut]  # the cards to check, the most footage named per answer first
     named: int  # cards the coach answered
     sure_share: float  # the players' footage on sure cards (0..1)
     teams: TeamsQuestionOut | None

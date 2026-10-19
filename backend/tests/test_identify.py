@@ -294,3 +294,63 @@ def test_time_on_court_overlaps_and_gaps() -> None:
     assert identify.overlap(a, [(900, 1200)]) and not identify.overlap(a, [(1100, 4000)])
     assert identify.gap_ms(a, [(7000, 8000)]) == 1000
     assert identify.gap_ms(a, [(500, 700)]) is None
+
+
+def test_a_pieces_card_names_one_person_at_a_time(
+    ready: Any, analyser: TestClient, store: FakeStore, club: dict[str, TestClient], app: FastAPI
+) -> None:
+    """Players v3: look-alike pieces without a number are a pieces card, never one person.
+    The coach ticks the pieces of one person: they join the card WiePlay is sure has that
+    number (never seen at the same time), the rest stays a pieces card; naming the whole card
+    makes it a person, and undo takes it back."""
+    trajectory(analyser, store)
+    job = claim(analyser, "players")
+    payload = result(job, store)
+    by_key = {c["key"]: c for c in payload["clusters"]}
+    by_key[2]["confidence"] = 0.9  # the job is sure of #7 (seen 9-12 s)
+    pieces = {
+        "key": 3, "team": "us", "kind": "pieces", "confidence": 0.0, "crops": [[0, 3]],
+        "tracks": [row(3, "near"), row(5, "near")],  # 13-15 s and 10-14 s
+    }  # fmt: skip
+    payload["clusters"] = [by_key[1], by_key[2], pieces, by_key[4], by_key[6]]
+    complete(analyser, job, payload)
+    coach = club["coach"]
+    url = f"/api/videos/{ready['id']}/players"
+    rows = cards(app, ready)
+    assert rows[3].kind == "pieces" and rows[2].kind == "person"
+    out = coach.get(url).json()
+    assert {c["key"]: (c["kind"], c["uncertain"]) for c in out["clusters"]}[3] == ("pieces", True)
+    assert str(rows[3].id) in [i["card"] for i in queue(coach, ready)["items"]]
+    # #7's pieces: piece 3 joins the job's sure #7; piece 5 is seen with #7 and stays.
+    r = coach.post(
+        f"{url}/clusters/{rows[3].id}/answer", json={"kind": "pieces", "tracks": [3], "number": 7}
+    )
+    assert r.status_code == 200, r.text
+    after = cards(app, ready)
+    assert sorted(int(t["id"]) for t in after[2].tracks) == [2, 3]
+    assert [int(t["id"]) for t in after[3].tracks] == [5] and after[3].kind == "pieces"
+    undo = r.json()["undo"]
+    # The rest is one person: naming the whole card makes it a person card.
+    r = coach.post(f"{url}/clusters/{rows[3].id}/answer", json={"kind": "number", "number": 3})
+    assert r.status_code == 200 and cards(app, ready)[3].kind == "person"
+    coach.post(f"{url}/restore", json={"cards": r.json()["undo"]})
+    coach.post(f"{url}/restore", json={"cards": undo})
+    back = cards(app, ready)
+    assert back[3].kind == "pieces" and sorted(int(t["id"]) for t in back[3].tracks) == [3, 5]
+    bad = [{"id": str(rows[3].id), "kind": "everyone"}]
+    assert coach.post(f"{url}/restore", json={"cards": bad}).status_code == 422
+
+
+def test_the_queue_puts_the_most_footage_named_per_answer_first() -> None:
+    def card(key: int, kind: str, *ns: int) -> PlayerCluster:
+        tracks = [{"id": key * 10 + i, "t0": 0, "t1": 1, "n": n} for i, n in enumerate(ns)]
+        return PlayerCluster(
+            id=uuid.uuid4(), key=key, team="us", kind=kind, tracks=tracks,
+            detections=sum(ns), confidence=0.2, not_player=False, merged_into=None,
+        )  # fmt: skip
+
+    person = card(1, "person", 70)
+    pieces = card(2, "pieces", 60, 50)  # more footage, but one answer names one of them
+    many = card(3, "pieces", *([10] * 40))  # only the biggest pieces are shown at once
+    assert identify.gain(pieces) == 55 and identify.gain(many) == 120
+    assert [c.key for c in identify.queue([pieces, person, many])] == [3, 1, 2]
