@@ -69,6 +69,13 @@ module = ["onnxruntime", "onnxruntime.*", "scipy.*", "sklearn", "sklearn.*", "th
 ignore_missing_imports = true
 
 [dependency-groups]
+# Training the scoresheet's cell reader (scripts/ml/sheet_cells.py), offline only: PyTorch for
+# the CPU, never in the worker image (it runs the exported ONNX file with ONNX Runtime).
+#   uv sync --group train
+train = [
+    "onnx==1.23.2",
+    "torch==2.14.1",
+]
 dev = [
     "wieplay[analysis]",
     "boto3-stubs[s3]>=1.43.114",
@@ -77,3 +84,12 @@ dev = [
     "ruff>=0.17.0",
     "types-pyyaml>=6.0.12.20260906",
 ]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+

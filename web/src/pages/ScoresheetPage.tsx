@@ -32,11 +32,22 @@ import {
   type Scoresheet,
   type SheetSetDoc,
 } from '../lib/scoresheet'
+import {
+  changedFields,
+  draftSummary,
+  isWorking,
+  nextCheck,
+  useConfirmSets,
+  useDiscardReading,
+  useReadPhotos,
+  type SheetReading,
+} from '../lib/sheetRead'
 import { SideNamesContext, sideNamesOf, useSideNames } from '../lib/sides'
 import { readStorage, writeStorage } from '../lib/storage'
 import { useToast } from '../lib/toast'
 import type { Video } from '../lib/types'
 import { isUuid } from '../lib/video'
+import type { PhotoFocus } from './sheet/PhotoViewer'
 import { SetPanel } from './sheet/SetPanel'
 import { PhotoPrompt, SheetPhotos } from './sheet/SheetPhotos'
 import { SheetStats } from './sheet/SheetStats'
@@ -60,6 +71,12 @@ function ScoresheetView({ videoId }: { videoId: string }) {
   const volleyball = video.data?.sport === 'volleyball'
   const sheet = useScoresheet(videoId, volleyball)
   const [tab, setTab] = useState(1)
+  // What the coach looked at in each draft set, kept across saves; a new reading starts afresh.
+  const readAt = sheet.data?.read?.at ?? null
+  const [accepted, setAccepted] = useState<{ at: string | null; sets: Record<number, Set<string>> }>({ at: readAt, sets: {} })
+  if (accepted.at !== readAt) setAccepted({ at: readAt, sets: {} })
+  const accept = (no: number, fields: string[]) =>
+    setAccepted((a) => ({ ...a, sets: { ...a.sets, [no]: new Set([...(a.sets[no] ?? []), ...fields]) } }))
   if (video.isPending || (volleyball && sheet.isPending)) return <PageSpinner />
   if (video.isError || !video.data) {
     if (video.error instanceof ApiError && [403, 404, 422].includes(video.error.status)) return <Message>{t('video.notFound')}</Message>
@@ -105,7 +122,15 @@ function ScoresheetView({ videoId }: { videoId: string }) {
         ) : (
           // Keyed by the saved version: a save, a reload or a removal starts from the server's sheet.
           // A photo added before anything is typed changes no typed sheet: the form stays as typed.
-          <SheetEditor key={`${data.exists ? data.version : 'new'}-${data.exists}`} video={v} sheet={data} tab={tab} onTab={setTab} />
+          <SheetEditor
+            key={`${data.exists ? data.version : 'new'}-${data.exists}`}
+            video={v}
+            sheet={data}
+            tab={tab}
+            onTab={setTab}
+            accepted={accepted.sets}
+            onAccept={accept}
+          />
         )}
       </div>
     </SideNamesContext>
@@ -146,7 +171,21 @@ function initialSets(sheet: Scoresheet): SheetSetDoc[] {
   return Array.from({ length: count }, (_, k) => emptySet(k + 1, sheet.previous_lineup))
 }
 
-function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scoresheet; tab: number; onTab: (no: number) => void }) {
+function SheetEditor({
+  video,
+  sheet,
+  tab,
+  onTab,
+  accepted,
+  onAccept,
+}: {
+  video: Video
+  sheet: Scoresheet
+  tab: number
+  onTab: (no: number) => void
+  accepted: Record<number, Set<string>>
+  onAccept: (no: number, fields: string[]) => void
+}) {
   const { t } = useTranslation()
   const toast = useToast()
   const names = useSideNames()
@@ -191,8 +230,39 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
   }, [body, dirty, readOnly, sets, useAll, video.id, sheet.version])
   const checks: ChecksOut | null = !dirty ? sheet : server?.body === body ? server.out : null
 
+  // SS4: the sets read from the photo that wait for confirmation.
+  const reading = sheet.read
+  const drafts = new Set(reading?.drafts ?? [])
+  const confirmSets = useConfirmSets(video.id)
+  const [photoFocus, setPhotoFocus] = useState<(PhotoFocus & { image: string }) | null>(null)
+  const [focusAsk, setFocusAsk] = useState<{ no: number; key: string; seq: number } | null>(null)
+  const focusPhoto = (no: number, key: string) => {
+    const cell = reading?.sets[String(no)]?.cells?.[key]
+    if (cell?.img && cell.quad) setPhotoFocus((f) => ({ image: cell.img ?? '', quad: cell.quad ?? [], seq: (f?.seq ?? 0) + 1 }))
+  }
+  const onConfirm = (no: number) =>
+    confirmSets.mutate(
+      { base_version: sheet.version, sets, use_in_scoring: useAll, confirm: [no] },
+      {
+        onSuccess: () => {
+          clearDraft(video.id)
+          toast.success(t('sheet.read.set.confirmed', { no }))
+        },
+        onError: (error) => {
+          if (error instanceof ApiError && error.status === 409) setStale(true)
+          else toast.error(t('sheet.saveFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') }))
+        },
+      },
+    )
+
   const change = (index: number, next: SheetSetDoc) => {
     touched.current = true
+    const before = sets[index]
+    // A person typed these: in a draft they count as looked at.
+    if (before && drafts.has(next.no)) {
+      const edited = changedFields(before, next)
+      if (edited.length > 0) onAccept(next.no, edited)
+    }
     setSets((all) => {
       const out = all.map((s, i) => (i === index ? next : s))
       // The first serve alternates in sets 1-4: fill in the sets nobody set yet.
@@ -254,7 +324,7 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
     <div className={cx(side && 'grid grid-cols-2 items-start gap-6')}>
       {side && photos && (
         <aside className="sticky top-4 h-[calc(100dvh-2rem)] min-h-96">
-          <SheetPhotos {...photoProps} photos={photos} canAdd={sheet.can_add_images} variant="side" />
+          <SheetPhotos {...photoProps} photos={photos} canAdd={sheet.can_add_images} variant="side" focus={photoFocus} />
         </aside>
       )}
       <div className="@container flex min-w-0 flex-col gap-6">
@@ -313,10 +383,26 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
         {photos !== null &&
           !side &&
           (photos.length > 0 ? (
-            <SheetPhotos {...photoProps} photos={photos} canAdd={sheet.can_add_images} variant="strip" />
+            <SheetPhotos {...photoProps} photos={photos} canAdd={sheet.can_add_images} variant="strip" focus={photoFocus} />
           ) : sheet.can_add_images ? (
             <PhotoPrompt {...photoProps} />
           ) : null)}
+
+        {(reading || sheet.can_read) && (
+          <ReadPanel
+            videoId={video.id}
+            reading={reading}
+            canRead={sheet.can_read}
+            readOnly={readOnly}
+            accepted={accepted}
+            onNext={() => {
+              const next = nextCheck(reading, accepted, current?.no ?? 1)
+              if (!next) return
+              onTab(next[0])
+              setFocusAsk((f) => ({ no: next[0], key: next[1], seq: (f?.seq ?? 0) + 1 }))
+            }}
+          />
+        )}
 
         <Card className="flex flex-col gap-5 p-4">
           <div className="flex flex-wrap items-end gap-2">
@@ -333,6 +419,9 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
                   label: (
                     <span className="inline-flex items-center gap-1.5">
                       {t('sheet.set', { no: s.no })}
+                      {drafts.has(s.no) && (
+                        <span className="size-2.5 rounded-full bg-vb-yellow ring-1 ring-navy/30" aria-label={t('sheet.read.draftTab')} title={t('sheet.read.draftTab')} />
+                      )}
                       {d.consistent ? (
                         <CheckIcon className="size-4 text-on-accent-soft" aria-label={t('sheet.status.consistent')} />
                       ) : bad ? (
@@ -363,6 +452,14 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
                 readOnly={readOnly}
                 onChange={(next) => change(currentIndex, next)}
                 onRemove={() => setAskRemoveSet(current.no)}
+                draft={drafts.has(current.no) ? reading?.sets[String(current.no)] : undefined}
+                accepted={accepted[current.no]}
+                onAccept={(fields) => onAccept(current.no, fields)}
+                onReadFocus={(key) => focusPhoto(current.no, key)}
+                onConfirm={() => onConfirm(current.no)}
+                confirming={confirmSets.isPending}
+                focusAsk={focusAsk && focusAsk.no === current.no ? focusAsk : null}
+                photos={photos}
               />
             </TabPanel>
           )}
@@ -468,3 +565,118 @@ function SheetEditor({ video, sheet, tab, onTab }: { video: Video; sheet: Scores
     </div>
   )
 }
+
+/**
+ * The photo's reading (SS4): read it on the club's server, follow the job, then "check N cells"
+ * with a jump to the next one, the team we are on the sheet, and discarding the drafts.
+ */
+function ReadPanel({
+  videoId,
+  reading,
+  canRead,
+  readOnly,
+  accepted,
+  onNext,
+}: {
+  videoId: string
+  reading: SheetReading | null
+  canRead: boolean
+  readOnly: boolean
+  accepted: Record<number, Set<string>>
+  onNext: () => void
+}) {
+  const { t } = useTranslation()
+  const toast = useToast()
+  const read = useReadPhotos(videoId)
+  const discard = useDiscardReading(videoId)
+  const [askDiscard, setAskDiscard] = useState(false)
+  const working = isWorking(reading)
+  const failed = reading?.job?.status === 'failed' || (reading?.error && !working && (reading.drafts.length ?? 0) === 0)
+  const summary = draftSummary(reading, accepted)
+  const letter = reading?.us_letter ?? null
+  const go = (us: 'A' | 'B' | null) =>
+    read.mutate(us, {
+      onError: (error) => toast.error(t('sheet.read.failed', { detail: error instanceof ApiError ? error.detail : t('common.error') })),
+    })
+  const readButton = canRead && !readOnly && !working && (
+    <Button variant={summary.sets.length > 0 ? 'ghost' : 'secondary'} disabled={read.isPending} onClick={() => go(null)}>
+      {reading ? t('sheet.read.again') : t('sheet.read.button')}
+    </Button>
+  )
+  return (
+    <section
+      aria-labelledby="sheet-read-title"
+      className={cx(
+        'flex flex-col gap-2 rounded-xl border p-3 text-sm',
+        summary.sets.length > 0 ? 'border-2 border-vb-yellow bg-vb-yellow/10' : 'border-hairline bg-sunken',
+      )}
+    >
+      <h2 id="sheet-read-title" className="sr-only">
+        {t('sheet.read.title')}
+      </h2>
+      <div role="status" aria-live="polite" className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {working ? (
+          <span className="flex items-center gap-2">
+            <span aria-hidden="true" className="size-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+            {t(reading?.job?.status === 'queued' ? 'sheet.read.queued' : 'sheet.read.working')}
+          </span>
+        ) : summary.sets.length > 0 ? (
+          <span className="text-base font-semibold">
+            {summary.check > 0 ? t('sheet.read.check', { count: summary.check }) : t('sheet.read.checkedAll')}
+          </span>
+        ) : failed ? (
+          <span className="flex items-center gap-2">
+            <AlertIcon className="size-5 shrink-0 text-danger" />
+            {reading?.error === 'not_found' || reading?.job?.error?.includes('not_found') ? t('sheet.read.notFound') : t('sheet.read.failed', { detail: reading?.job?.error ?? '' })}
+          </span>
+        ) : reading?.at ? (
+          <span>{t('sheet.read.done')}</span>
+        ) : (
+          <span className="max-w-3xl text-muted">{t('sheet.read.hint')}</span>
+        )}
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          {summary.check > 0 && (
+            <Button variant="primary" onClick={onNext}>
+              {t('sheet.read.next')}
+            </Button>
+          )}
+          {readButton}
+          {summary.sets.length > 0 && !readOnly && (
+            <Button variant="ghost" onClick={() => setAskDiscard(true)}>
+              {t('sheet.read.discard')}
+            </Button>
+          )}
+        </span>
+      </div>
+      {summary.sets.length > 0 && letter && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+          {t('sheet.read.team', { letter })}
+          {!readOnly && (
+            <button type="button" className="link font-semibold" disabled={read.isPending} onClick={() => go(letter === 'A' ? 'B' : 'A')}>
+              {t('sheet.read.swap', { letter: letter === 'A' ? 'B' : 'A' })}
+            </button>
+          )}
+          <span>· {t('sheet.read.where')}</span>
+        </p>
+      )}
+      <ConfirmDialog
+        open={askDiscard}
+        title={t('sheet.read.discardTitle')}
+        confirmLabel={t('sheet.read.discard')}
+        onCancel={() => setAskDiscard(false)}
+        onConfirm={() =>
+          discard.mutate(undefined, {
+            onSuccess: () => {
+              setAskDiscard(false)
+              toast.success(t('sheet.read.discarded'))
+            },
+            onError: (error) => toast.error(t('sheet.saveFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') })),
+          })
+        }
+      >
+        {t('sheet.read.discardBody')}
+      </ConfirmDialog>
+    </section>
+  )
+}
+

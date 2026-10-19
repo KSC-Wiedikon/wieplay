@@ -9,10 +9,11 @@ import { ApiError } from '../../lib/api'
 import { cx } from '../../lib/cx'
 import { useMediaQuery } from '../../lib/mediaQuery'
 import { formatDateTime } from '../../lib/format'
+import { isPdf, PDF_TYPE, pdfPages } from '../../lib/pdfPages'
 import { photoForSet, refusalOf, useAddSheetPhoto, useRemoveSheetPhoto, type SheetPhoto } from '../../lib/sheetPhotos'
 import { useToast } from '../../lib/toast'
 import { PhotoRedactor } from './PhotoRedactor'
-import { PhotoViewer } from './PhotoViewer'
+import { PhotoViewer, type PhotoFocus } from './PhotoViewer'
 
 const REFUSALS = ['metadata', 'type', 'too_large', 'too_small', 'too_many_pixels', 'unreadable', 'too_many', 'not_redacted'] as const
 
@@ -29,24 +30,37 @@ function AddPhoto({ videoId, sets, compact = false }: { videoId: string; sets: n
   const toast = useToast()
   const add = useAddSheetPhoto(videoId)
   const touch = useMediaQuery('(pointer: coarse)', false)
-  const [file, setFile] = useState<File | null>(null)
+  // The pictures to black out and upload, one after the other: a photo, or a PDF's pages.
+  const [queue, setQueue] = useState<{ files: File[]; at: number; pdf: boolean } | null>(null)
+  const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const camera = useRef<HTMLInputElement>(null)
   const picker = useRef<HTMLInputElement>(null)
+  const file = queue ? (queue.files[queue.at] ?? null) : null
+  const next = () => setQueue((q) => (q && q.at + 1 < q.files.length ? { ...q, at: q.at + 1 } : null))
 
   const chosen = (input: HTMLInputElement | null) => {
     const picked = input?.files?.[0] ?? null
     if (input) input.value = '' // the same file again opens the editor again
     if (!picked) return
     setError(null)
-    setFile(picked)
+    if (!isPdf(picked)) {
+      setQueue({ files: [picked], at: 0, pdf: false })
+      return
+    }
+    // A scan: its pages are drawn here, on this device; the PDF is never uploaded.
+    setOpening(true)
+    pdfPages(picked)
+      .then((pages) => (pages.length ? setQueue({ files: pages, at: 0, pdf: true }) : toast.error(t('sheet.photo.pdfFailed'))))
+      .catch(() => toast.error(t('sheet.photo.pdfFailed')))
+      .finally(() => setOpening(false))
   }
 
   const input = (ref: typeof camera, capture: boolean) => (
     <input
       ref={ref}
       type="file"
-      accept="image/*"
+      accept={capture ? 'image/*' : `image/*,${PDF_TYPE}`}
       {...(capture ? { capture: 'environment' as const } : {})}
       className="sr-only"
       onChange={(event) => chosen(event.currentTarget)}
@@ -70,21 +84,28 @@ function AddPhoto({ videoId, sets, compact = false }: { videoId: string; sets: n
         <ImageIcon />
         <span className={cx(compact && 'sr-only')}>{touch ? t('sheet.photo.choose') : t('sheet.photo.add')}</span>
       </label>
-      {file && (
+      {opening && (
+        <span role="status" className="text-sm text-muted">
+          {t('sheet.photo.pdfOpening')}
+        </span>
+      )}
+      {file && queue && (
         <PhotoRedactor
+          key={`${queue.at}-${file.name}`}
           file={file}
+          page={queue.pdf ? { no: queue.at + 1, of: queue.files.length } : undefined}
           sets={sets}
           initialSet={null}
           busy={add.isPending}
           error={error}
           onCancel={() => {
-            setFile(null)
+            setQueue(null)
             setError(null)
           }}
           onUpload={(photo) =>
             add.mutate(photo, {
               onSuccess: () => {
-                setFile(null)
+                next()
                 toast.success(t('sheet.photo.added'))
               },
               onError: (e) => {
@@ -134,6 +155,7 @@ export function SheetPhotos({
   set,
   sets,
   variant,
+  focus,
 }: {
   videoId: string
   photos: SheetPhoto[]
@@ -141,6 +163,8 @@ export function SheetPhotos({
   set: number
   sets: number
   variant: 'side' | 'strip'
+  /** A cell read from a photo (SS4): that photo is shown, zoomed to the cell. */
+  focus?: (PhotoFocus & { image: string }) | null
 }) {
   const { t } = useTranslation()
   const toast = useToast()
@@ -150,7 +174,14 @@ export function SheetPhotos({
   const [open, setOpen] = useState(true)
   const [tall, setTall] = useState(false)
   const chosen = picked && picked.set === set ? photos.find((p) => p.id === picked.id) : undefined
-  const shown = chosen ?? photoForSet(photos, set)
+  const focused = focus ? photos.find((p) => p.id === focus.image) : undefined
+  const shown = focused ?? chosen ?? photoForSet(photos, set)
+  // A cell to check opens a hidden strip.
+  const [seenFocus, setSeenFocus] = useState<number | null>(null)
+  if (focus && focus.seq !== seenFocus) {
+    setSeenFocus(focus.seq)
+    if (!open) setOpen(true)
+  }
 
   if (!shown) return null
   const strip = variant === 'strip'
@@ -202,6 +233,7 @@ export function SheetPhotos({
           {chips}
           <PhotoViewer
             key={shown.id}
+            focus={focused ? focus : null}
             url={shown.url}
             alt={t('sheet.photo.alt', { name: photoName(t, shown) })}
             className={strip ? (tall ? 'h-[70dvh]' : 'h-56') : 'min-h-0 flex-1'}

@@ -9,6 +9,11 @@ import { ScoresheetPage } from './ScoresheetPage'
 // The canvas is not in jsdom: the redaction's pixels are tested in src/lib/redact.test.ts.
 const redactToJpeg = vi.hoisted(() => vi.fn(async () => new Blob(['jpeg'], { type: 'image/jpeg' })))
 vi.mock('../lib/redact', async (original) => ({ ...(await original<typeof import('../lib/redact')>()), redactToJpeg }))
+// PDF.js draws a scan's pages on the device; here, two pages as pictures.
+const pdfPages = vi.hoisted(() =>
+  vi.fn(async () => [new File(['p1'], 'scan-p1.jpg', { type: 'image/jpeg' }), new File(['p2'], 'scan-p2.jpg', { type: 'image/jpeg' })]),
+)
+vi.mock('../lib/pdfPages', async (original) => ({ ...(await original<typeof import('../lib/pdfPages')>()), pdfPages }))
 
 const NAMES = { us: 'KSCW H3', them: 'Volley Näfels', us_full: 'KSC Wiedikon H3', them_full: 'Volley Näfels', them_from: 'game' as const, us_set: null, them_set: null }
 
@@ -34,6 +39,9 @@ const empty = (patch: Partial<Scoresheet> = {}): Scoresheet => ({
   no_scoresheet: false,
   images: null,
   can_add_images: false,
+  status: 'entered',
+  read: null,
+  can_read: false,
   checks: [],
   trusted: false,
   match: null,
@@ -267,8 +275,8 @@ describe('ScoresheetPage', () => {
       expect(screen.queryByText('Add a photo')).not.toBeInTheDocument()
     })
 
-    it('uploads only after the dates of birth are blacked out', async () => {
-      const posted = `POST /api/videos/${ID}/scoresheet/images?redacted=true&boxes=1&rotation=0&cropped=false`
+    it('uploads only after the dates of birth and licence numbers are blacked out', async () => {
+      const posted = `POST /api/videos/${ID}/scoresheet/images?redacted=true&boxes=2&rotation=0&cropped=false`
       let answer: { status: number; body: unknown } = { status: 422, body: { detail: { message: 'meta', code: 'metadata' } } }
       const { fetch } = show(empty({ images: [], can_add_images: true }), { [posted]: { body: () => answer.body } })
       fetch.mockImplementation(
@@ -286,27 +294,32 @@ describe('ScoresheetPage', () => {
       vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:sheet', revokeObjectURL: () => undefined }))
 
       const prompt = await screen.findByRole('region', { name: 'Photo of the sheet' })
-      expect(within(prompt).getByText(/Only the team’s coaches, team managers and admins see it/)).toBeInTheDocument()
+      expect(within(prompt).getByText(/Only the team’s coaches, team managers and admins see the photo/)).toBeInTheDocument()
       const input = prompt.querySelector('input[type="file"]')
       if (!(input instanceof HTMLInputElement)) throw new Error('no file input')
       fireEvent.change(input, { target: { files: [new File(['raw'], 'IMG_0001.jpg', { type: 'image/jpeg' })] } })
 
-      const editor = await screen.findByRole('dialog', { name: 'Black out the dates of birth' })
+      const editor = await screen.findByRole('dialog', { name: 'Black out the dates of birth and licence numbers' })
       const img = within(editor).getByRole('img', { name: 'The photo to black out' })
       Object.defineProperty(img, 'naturalWidth', { value: 4000 })
       Object.defineProperty(img, 'naturalHeight', { value: 2800 })
       fireEvent.load(img)
-      // One box is there already, over the team lists; the upload waits for the confirmation.
+      // Two boxes are there already, over the team lists and the officials' block (their
+      // licence numbers are often dates of birth); the upload waits for the confirmation.
       expect(within(editor).getByRole('button', { name: /^Black box 1/ })).toBeInTheDocument()
+      expect(within(editor).getByRole('button', { name: /^Black box 2/ })).toBeInTheDocument()
       const upload = within(editor).getByRole('button', { name: 'Upload' })
       expect(upload).toBeDisabled()
-      fireEvent.click(within(editor).getByRole('checkbox', { name: 'The dates of birth are blacked out' }))
+      fireEvent.click(within(editor).getByRole('checkbox', { name: 'The dates of birth and licence numbers are blacked out' }))
       expect(upload).toBeEnabled()
 
       // The server finds camera data: the editor stays open and says so.
       fireEvent.click(upload)
       expect(await within(editor).findByRole('alert')).toHaveTextContent('The photo still carries the camera’s data')
-      expect(redactToJpeg).toHaveBeenCalledWith(img, expect.objectContaining({ rotation: 0, boxes: [expect.objectContaining({ x: 0.77 })] }))
+      expect(redactToJpeg).toHaveBeenCalledWith(
+        img,
+        expect.objectContaining({ rotation: 0, boxes: [expect.objectContaining({ x: 0.68 }), expect.objectContaining({ x: 0.22 })] }),
+      )
       const call = fetch.mock.calls.find(([path]) => String(path).includes('/scoresheet/images?'))
       expect(call?.[1]?.body).toBeInstanceOf(Blob)
       expect(call?.[1]?.headers).toMatchObject({ 'Content-Type': 'image/jpeg' })
@@ -317,7 +330,55 @@ describe('ScoresheetPage', () => {
       fireEvent.click(within(editor).getByRole('button', { name: 'Turn left' }))
       fireEvent.click(within(editor).getByRole('button', { name: 'Upload' }))
       expect(await screen.findByText('Photo added.')).toBeInTheDocument()
-      expect(screen.queryByRole('dialog', { name: 'Black out the dates of birth' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog', { name: 'Black out the dates of birth and licence numbers' })).not.toBeInTheDocument()
+    })
+    it('takes a PDF scan page by page through the redaction; only the pictures are uploaded', async () => {
+      const posted = `POST /api/videos/${ID}/scoresheet/images?redacted=true&boxes=2&rotation=0&cropped=false`
+      const uploads: unknown[] = []
+      const { fetch } = show(empty({ images: [], can_add_images: true }), {
+        [posted]: {
+          status: 201,
+          body: ({ body }: { body: unknown }) => {
+            uploads.push(body)
+            return photo({ id: `p${uploads.length}` })
+          },
+        },
+      })
+      fetch.mockImplementation(
+        (async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (`${init?.method ?? 'GET'} ${String(input)}` === posted) {
+            uploads.push(init?.body)
+            return new Response(JSON.stringify(photo({ id: `p${uploads.length}` })), { status: 201, headers: { 'Content-Type': 'application/json' } })
+          }
+          return stubFetch({
+            [`/api/videos/${ID}`]: { body: readyVideo({ names: NAMES, game_id: 501 }) },
+            [`/api/videos/${ID}/scoresheet`]: { body: empty({ images: [], can_add_images: true }) },
+          })(input, init)
+        }) as typeof globalThis.fetch,
+      )
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:sheet', revokeObjectURL: () => undefined }))
+
+      const prompt = await screen.findByRole('region', { name: 'Photo of the sheet' })
+      const input = prompt.querySelector('input[type="file"]')
+      if (!(input instanceof HTMLInputElement)) throw new Error('no file input')
+      expect(input.accept).toContain('application/pdf')
+      const scan = new File(['%PDF-1.7'], 'scan.pdf', { type: 'application/pdf' })
+      fireEvent.change(input, { target: { files: [scan] } })
+      expect(pdfPages).toHaveBeenCalledWith(scan)
+
+      for (const page of [1, 2]) {
+        const editor = await screen.findByRole('dialog', { name: new RegExp(`^Black out the dates of birth and licence numbers\\W+page ${page} of 2$`) })
+        const img = within(editor).getByRole('img', { name: 'The photo to black out' })
+        Object.defineProperty(img, 'naturalWidth', { value: 3200 })
+        Object.defineProperty(img, 'naturalHeight', { value: 2262 })
+        fireEvent.load(img)
+        fireEvent.click(within(editor).getByRole('checkbox', { name: 'The dates of birth and licence numbers are blacked out' }))
+        fireEvent.click(within(editor).getByRole('button', { name: 'Upload' }))
+        await waitFor(() => expect(uploads).toHaveLength(page))
+      }
+      // Two pictures went up, never the PDF.
+      expect(uploads.every((b) => b instanceof Blob && b.type === 'image/jpeg')).toBe(true)
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     })
   })
 })

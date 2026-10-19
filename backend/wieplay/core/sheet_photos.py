@@ -14,7 +14,8 @@ privacy OK of 18.10.2026, PLAN O14).
   (permissions.can_see_sheet_photo), through a URL signed for 5 minutes; every view is audited.
 - **Removed** by them at any time (the object is deleted at once, the sweep retries), with the
   typed sheet, and with the video (its `sheets/<video>/` prefix, like `media/`).
-- **Not read** in this phase: no OCR, no AI, no external service (SS4 reads on club hardware).
+- **Read on club hardware only** (SS4, wieplay/core/sheet_reading.py): the Lenovo's CPU, in
+  memory; what it read is kept with the photo and goes with it, as do the labelled cells.
 """
 
 from __future__ import annotations
@@ -31,10 +32,10 @@ from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from wieplay.core.models import Scoresheet, ScoresheetImage, Video
+from wieplay.core.models import Scoresheet, ScoresheetImage, ScoresheetLabel, Video
 from wieplay.core.storage import ObjectStore
 
 log = logging.getLogger(__name__)
@@ -234,10 +235,13 @@ def add(
 
 
 def mark_removed(rows: Sequence[ScoresheetImage], actor: int | None, now: datetime) -> list[str]:
-    """Mark photos removed; returns their object keys for the caller to delete (purge)."""
+    """Mark photos removed; returns their object keys for the caller to delete (purge). What
+    was read on them goes too (SS4): the registration and the cells' readings."""
     for row in rows:
         row.deleted_at = now
         row.deleted_by = actor
+        row.registration = None
+        row.reading = None
     return [row.object_key for row in rows]
 
 
@@ -252,6 +256,8 @@ def purge(db: Session, store: ObjectStore, rows: Sequence[ScoresheetImage], now:
         return False
     for row in rows:
         row.purged_at = now
+    # The labelled cells of a photo point into it: without the photo they go too (SS4).
+    db.execute(delete(ScoresheetLabel).where(ScoresheetLabel.image_id.in_([r.id for r in rows])))
     return True
 
 

@@ -11,7 +11,9 @@ import {
   isCropped,
   redactToJpeg,
   turn,
+  turnWithDefaults,
   turnedSize,
+  type Layout,
   type Edits,
   type Rect,
 } from '../../lib/redact'
@@ -36,10 +38,11 @@ const pct = (v: number) => `${(v * 100).toFixed(3)}%`
 
 /**
  * The redaction step before a scoresheet photo is uploaded (docs/PLAN.md §10.3a, SS3): the photo
- * with one black box already on it, which the coach moves over the dates of birth; more boxes,
- * undo, a quarter turn either way, a crop. Only the result leaves the device, as a new JPEG
- * whose pixels under the boxes are black (src/lib/redact.ts). Confirming that the dates of birth
- * are covered is required.
+ * with black boxes already over the team lists and the officials' block (names, licence numbers,
+ * dates of birth), which the coach moves and sizes; more boxes, undo, a quarter turn either way,
+ * a crop. Only the result leaves the device, as a new JPEG whose pixels under the boxes are black
+ * (src/lib/redact.ts). Confirming that the dates of birth and licence numbers are covered is
+ * required. A PDF scan's pages come here one by one as pictures (src/lib/pdfPages.ts).
  */
 export function PhotoRedactor({
   file,
@@ -49,8 +52,11 @@ export function PhotoRedactor({
   error,
   onCancel,
   onUpload,
+  page,
 }: {
   file: Blob
+  /** A page of a PDF scan: which of how many (the boxes start where the form has the blocks). */
+  page?: { no: number; of: number }
   /** How many sets the sheet has, for "on the photo". */
   sets: number
   initialSet: number | null
@@ -61,6 +67,7 @@ export function PhotoRedactor({
 }) {
   const { t } = useTranslation()
   const id = useId()
+  const layout: Layout = page ? 'page' : 'photo'
   const [url] = useState(() => URL.createObjectURL(file))
   useEffect(() => () => URL.revokeObjectURL(url), [url])
   const image = useRef<HTMLImageElement>(null)
@@ -92,7 +99,7 @@ export function PhotoRedactor({
       return
     }
     setSize([img.naturalWidth, img.naturalHeight])
-    setEdits((e) => e ?? initialEdits(img.naturalWidth, img.naturalHeight))
+    setEdits((e) => e ?? initialEdits(img.naturalWidth, img.naturalHeight, layout))
   }
 
   const commit = (next: Edits, before: Edits | null = edits) => {
@@ -124,8 +131,9 @@ export function PhotoRedactor({
   }
 
   const rotate = (dir: 1 | -1) => {
+    const img = image.current
     if (!edits) return
-    commit(turn(edits, dir))
+    commit(img ? turnWithDefaults(edits, dir, img.naturalWidth, img.naturalHeight, layout) : turn(edits, dir))
   }
 
   /** A pointer's place as fractions of the turned photo. */
@@ -270,6 +278,7 @@ export function PhotoRedactor({
       <header className="flex items-center gap-2 border-b border-hairline py-1.5 pr-2 pl-4">
         <h2 id={`${id}-title`} className="min-w-0 flex-1 truncate text-base font-semibold sm:text-lg">
           {t('sheet.photo.editor.title')}
+          {page && page.of > 1 ? <span className="text-sm font-normal text-muted">{` · ${t('sheet.photo.editor.page', { no: page.no, of: page.of })}`}</span> : null}
         </h2>
         <Button variant="ghost" size="icon" aria-label={t('common.close')} disabled={busy} onClick={onCancel}>
           <CloseIcon />

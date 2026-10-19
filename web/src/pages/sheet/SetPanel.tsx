@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
 import { AlertIcon, CheckIcon, CircleIcon, PlusIcon, TrashIcon } from '../../components/icons'
@@ -19,10 +19,12 @@ import {
   type SetCheckOut,
   type SheetSetDoc,
 } from '../../lib/scoresheet'
+import type { SheetPhoto } from '../../lib/sheetPhotos'
+import { altsText, canConfirm, markOf, readClass, remaining, sureFields, type ReadCell, type ReadSet } from '../../lib/sheetRead'
 import type { SideNames } from '../../lib/sides'
 import type { Side } from '../../lib/types'
-import { boxKey, focusBox, parseDigits, type BoxMark } from './boxes'
-import { ScorePair, TeamBoxes } from './ServiceGrid'
+import { boxKey, focusBox, focusField, parseDigits, type BoxMark } from './boxes'
+import { ScorePair, TeamBoxes, type ReadView } from './ServiceGrid'
 import { issueText, repairText } from './text'
 
 interface SetPanelProps {
@@ -36,6 +38,17 @@ interface SetPanelProps {
   readOnly: boolean
   onChange: (set: SheetSetDoc) => void
   onRemove: () => void
+  /** SS4: this set is a draft read from the photo; what the coach looked at; the actions. */
+  draft?: ReadSet
+  accepted?: ReadonlySet<string>
+  onAccept?: (keys: string[]) => void
+  onReadFocus?: (key: string) => void
+  onConfirm?: () => void
+  confirming?: boolean
+  /** Go to this field (the page's "next cell to check"); `seq` changes on every ask. */
+  focusAsk?: { key: string; seq: number } | null
+  /** The photos (for whoever may see them): a doubtful cell shows its crop. */
+  photos?: SheetPhoto[] | null
 }
 
 /** The live check's marks on the boxes: the one a check doubts, the next one to type. */
@@ -55,7 +68,24 @@ function marksOf(decoded: Decoded): Record<string, BoxMark> {
  * and service boxes; the live check (the score as it grows, the first box that doesn't fit, the
  * server's suggested repair); sanctions and cancelled points; the points it decodes to.
  */
-export function SetPanel({ set, names, official, server, saved, readOnly, onChange, onRemove }: SetPanelProps) {
+export function SetPanel({
+  set,
+  names,
+  official,
+  server,
+  saved,
+  readOnly,
+  onChange,
+  onRemove,
+  draft,
+  accepted = new Set<string>(),
+  onAccept,
+  onReadFocus,
+  onConfirm,
+  confirming = false,
+  focusAsk = null,
+  photos = null,
+}: SetPanelProps) {
   const { t } = useTranslation()
   const prefix = useId().replace(/:/g, '')
   const deciding = isDeciding(set)
@@ -64,6 +94,33 @@ export function SetPanel({ set, names, official, server, saved, readOnly, onChan
   const [phoneSide, setPhoneSide] = useState<Side>('us')
   const [focused, setFocused] = useState<{ side: Side; position: number; box: number } | null>(null)
   const team = (side: Side) => sideLabel(t, side, names)
+  const [readFocus, setReadFocus] = useState<string | null>(null)
+  const read: ReadView | undefined = draft
+    ? {
+        cells: draft.cells,
+        accepted,
+        onFocus: (key) => {
+          setReadFocus(key)
+          onReadFocus?.(key)
+        },
+      }
+    : undefined
+  const timeMark = (key: 'start' | 'end') => markOf(draft?.cells, accepted, key)
+  /** Focus a field; on a phone the team whose grid holds it is shown first. */
+  const goTo = (key: string) => {
+    const side = key.split('.')[1]
+    if (side === 'us' || side === 'them') setPhoneSide(side)
+    window.setTimeout(() => focusField(set.no, key), 0)
+  }
+  const [askSeen, setAskSeen] = useState<number | null>(null)
+  if (focusAsk && focusAsk.seq !== askSeen) {
+    setAskSeen(focusAsk.seq)
+    const side = focusAsk.key.split('.')[1]
+    if (side === 'us' || side === 'them') setPhoneSide(side)
+  }
+  useEffect(() => {
+    if (focusAsk) window.setTimeout(() => focusField(set.no, focusAsk.key), 0)
+  }, [focusAsk, set.no])
 
   const jumpTo = (side: Side, position: number, box: number) => {
     setPhoneSide(side)
@@ -86,7 +143,7 @@ export function SetPanel({ set, names, official, server, saved, readOnly, onChan
   const score = `${decoded.final[0]}:${decoded.final[1]}`
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" data-set={set.no}>
       <div className="flex flex-wrap items-end gap-x-6 gap-y-4">
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-semibold" id={`${prefix}-first`}>
@@ -107,20 +164,24 @@ export function SetPanel({ set, names, official, server, saved, readOnly, onChan
           {t('sheet.start')}
           <input
             type="time"
+            data-field="start"
             value={set.start ?? ''}
             disabled={readOnly}
+            onFocus={() => read?.onFocus('start')}
             onChange={(e) => onChange({ ...set, start: e.target.value || null })}
-            className="h-11 rounded-control border border-hairline-strong bg-surface px-2 font-normal tabular-nums sm:h-9"
+            className={cx('h-11 rounded-control border border-hairline-strong bg-surface px-2 font-normal tabular-nums sm:h-9', readClass(timeMark('start')))}
           />
         </label>
         <label className="flex flex-col gap-1.5 text-sm font-semibold">
           {t('sheet.end')}
           <input
             type="time"
+            data-field="end"
             value={set.end ?? ''}
             disabled={readOnly}
+            onFocus={() => read?.onFocus('end')}
             onChange={(e) => onChange({ ...set, end: e.target.value || null })}
-            className="h-11 rounded-control border border-hairline-strong bg-surface px-2 font-normal tabular-nums sm:h-9"
+            className={cx('h-11 rounded-control border border-hairline-strong bg-surface px-2 font-normal tabular-nums sm:h-9', readClass(timeMark('end')))}
           />
         </label>
         <div className="flex flex-col gap-1.5">
@@ -151,6 +212,18 @@ export function SetPanel({ set, names, official, server, saved, readOnly, onChan
           </label>
         )}
       </div>
+
+      {draft && (
+        <DraftBar
+          no={set.no}
+          draft={draft}
+          accepted={accepted}
+          readOnly={readOnly}
+          busy={confirming}
+          onAcceptSure={() => onAccept?.(sureFields(draft.cells))}
+          onConfirm={() => onConfirm?.()}
+        />
+      )}
 
       <CheckLine
         decoded={decoded}
@@ -195,6 +268,7 @@ export function SetPanel({ set, names, official, server, saved, readOnly, onChan
               onChange={onChange}
               onOther={toOther(side)}
               onFocusBox={(s, position, box) => setFocused({ side: s, position, box })}
+              read={read}
             />
           </div>
         ))}
@@ -215,6 +289,27 @@ export function SetPanel({ set, names, official, server, saved, readOnly, onChan
             {`${t('sheet.circle')}: ${team(focused.side)} ${boxName(focused)}`}
           </Button>
           <span className="text-xs text-muted">{t('sheet.circleHint')}</span>
+        </div>
+      )}
+
+      {draft && readFocus && !readOnly && markOf(draft.cells, accepted, readFocus) && (
+        <div role="status" className="flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-sunken p-2 text-sm">
+          <CellCrop cell={draft.cells?.[readFocus]} photos={photos} />
+          <span>
+            {t('sheet.read.cell.read', { alts: altsText(draft.cells?.[readFocus]) })}
+            {draft.cells?.[readFocus]?.why ? ` · ${t(`sheet.read.cell.why.${draft.cells[readFocus].why ?? 'unsure'}`)}` : ''}
+          </span>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              onAccept?.([readFocus])
+              const next = remaining(draft.cells, new Set([...accepted, readFocus])).check[0]
+              if (next) goTo(next)
+            }}
+          >
+            <CheckIcon className="size-4" />
+            {t('sheet.read.cell.right')}
+          </Button>
         </div>
       )}
 
@@ -504,5 +599,97 @@ function ScoringLine({ saved }: { saved: SetCheckOut }) {
         </p>
       ))}
     </section>
+  )
+}
+
+/** A set read from the photo: how many cells are left, accept the sure ones, confirm it. */
+function DraftBar({
+  no,
+  draft,
+  accepted,
+  readOnly,
+  busy,
+  onAcceptSure,
+  onConfirm,
+}: {
+  no: number
+  draft: ReadSet
+  accepted: ReadonlySet<string>
+  readOnly: boolean
+  busy: boolean
+  onAcceptSure: () => void
+  onConfirm: () => void
+}) {
+  const { t } = useTranslation()
+  const left = remaining(draft.cells, accepted)
+  const ready = canConfirm(draft.cells, accepted)
+  return (
+    <section aria-label={t('sheet.read.title')} className="flex flex-col gap-2 rounded-xl border-2 border-vb-yellow bg-vb-yellow/10 p-3 text-sm">
+      <p className="font-semibold">
+        {left.check.length > 0
+          ? t('sheet.read.set.draft', { no, count: left.check.length })
+          : ready
+            ? t('sheet.read.set.ready', { no })
+            : t('sheet.read.set.sure', { no, count: left.sure.length })}
+      </p>
+      {draft.decoded === false && <p>{t('sheet.read.set.notDecoded')}</p>}
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+        <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden="true" className="inline-block size-3.5 rounded border-2 border-vb-yellow bg-vb-yellow/20" />
+          {t('sheet.read.legend.check')}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden="true" className="inline-block size-3.5 rounded border border-dashed border-accent bg-accent-soft/40" />
+          {t('sheet.read.legend.read')}
+        </span>
+      </p>
+      {!readOnly && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" disabled={left.sure.length === 0} onClick={onAcceptSure}>
+            <CheckIcon className="size-4" />
+            {t('sheet.read.set.acceptSure', { count: left.sure.length })}
+          </Button>
+          <Button variant="primary" disabled={!ready || busy} onClick={onConfirm}>
+            {busy ? t('sheet.saving') : t('sheet.read.set.confirm', { no })}
+          </Button>
+          <span className="text-xs text-muted">{t('sheet.read.set.confirmHint')}</span>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** The cell as it is on the photo: the part of the photo around its quad, enlarged. */
+function CellCrop({ cell, photos }: { cell: ReadCell | undefined; photos: SheetPhoto[] | null }) {
+  const { t } = useTranslation()
+  const photo = photos?.find((p) => p.id === cell?.img)
+  const q = cell?.quad
+  if (!photo || !q || q.length !== 8) return null
+  const xs = [q[0], q[2], q[4], q[6]] as number[]
+  const ys = [q[1], q[3], q[5], q[7]] as number[]
+  const pad = 0.004
+  const x0 = Math.max(0, Math.min(...xs) - pad)
+  const y0 = Math.max(0, Math.min(...ys) - pad)
+  const x1 = Math.min(1, Math.max(...xs) + pad)
+  const y1 = Math.min(1, Math.max(...ys) + pad)
+  const W = 168
+  const scale = W / Math.max(1, (x1 - x0) * photo.width)
+  const H = Math.round((y1 - y0) * photo.height * scale)
+  return (
+    <span
+      role="img"
+      aria-label={t('sheet.read.cell.crop')}
+      className="relative inline-block shrink-0 overflow-hidden rounded-md border border-hairline-strong bg-surface"
+      style={{ width: W, height: Math.min(H, 120) }}
+    >
+      <img
+        src={photo.url}
+        alt=""
+        referrerPolicy="no-referrer"
+        draggable={false}
+        className="absolute max-w-none select-none"
+        style={{ width: photo.width * scale, height: photo.height * scale, left: -x0 * photo.width * scale, top: -y0 * photo.height * scale }}
+      />
+    </span>
   )
 }

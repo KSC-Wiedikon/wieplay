@@ -13,6 +13,14 @@ POST   /api/videos/{id}/scoresheet/images             add one: the redacted JPEG
 GET    /api/videos/{id}/scoresheet/images/{image}     302 to a URL signed for 5 minutes, audited
 DELETE /api/videos/{id}/scoresheet/images/{image}     remove it: the bucket object goes at once
 
+Reading the photos on club hardware (SS4, wieplay/core/sheet_reading.py), for whoever may type
+the sheet (the photo itself stays under the photo rule):
+POST   /api/videos/{id}/scoresheet/read      read the photos (a job on the Lenovo's CPU), or
+                                             decode the last reading again ("we are team B")
+DELETE /api/videos/{id}/scoresheet/read      drop the drafts it made
+POST   /api/videos/{id}/scoresheet/confirm   save the sheet and confirm drafts: they are typed
+                                             sets from then on, scored; their cells are labels
+
 The typed sheet holds shirt numbers and scores only; the photos carry the players' names
 (dates of birth blacked out before the upload), hence their narrower rule.
 """
@@ -21,12 +29,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -36,6 +44,7 @@ from wieplay.api.media import PRIVATE
 from wieplay.core import scoresheet as ss
 from wieplay.core import scoring, tagging
 from wieplay.core import sheet_photos as sp
+from wieplay.core import sheet_reading as sr
 from wieplay.core.models import Period, ScoresheetImage, Segment, Video, VideoRoster
 from wieplay.core.permissions import (
     Viewer,
@@ -182,6 +191,11 @@ class SheetOut(ChecksOut):
     # The photos of the paper sheet: None for whoever may not see them (players, helpers).
     images: list[PhotoOut] | None = None
     can_add_images: bool = False
+    # SS4: draft (a set read from the photo awaits confirmation) | entered; the reading's state,
+    # its drafts and the cells to check (wieplay/core/sheet_reading.py state()).
+    status: str = "entered"
+    read: dict[str, Any] | None = None
+    can_read: bool = False
 
 
 # --- helpers ------------------------------------------------------------------------------------
@@ -447,7 +461,7 @@ def _state(db: Session, viewer: Viewer, video: Video, access: TeamAccess) -> She
     typed = ss.typed(row)
     official = ss.official_sets(db, video)
     sets = row.sets if row is not None else []
-    checks = ss.check(sets, official)
+    checks = ss.check(sets, official, ss.drafts_of(row))
     on = row.use_in_scoring if row is not None else True
     run = scoring.latest_run(db, video.id)
     sheet_metrics = (run.metrics or {}).get("sheet") if run is not None else None
@@ -474,14 +488,17 @@ def _state(db: Session, viewer: Viewer, video: Video, access: TeamAccess) -> She
         .order_by(VideoRoster.number)
     ).all()
     photos = None
-    if can_see_sheet_photo(viewer, access.ref, access.leads):
-        photos = [_photo_out(db, video, r) for r in sp.live(db, row)]
+    sees_photos = can_see_sheet_photo(viewer, access.ref, access.leads)
+    live = sp.live(db, row)
+    if sees_photos:
+        photos = [_photo_out(db, video, r) for r in live]
     entered = row if typed else None
+    edit = can_edit_sheet(viewer, access.ref, access.leads) and video.status == "ready"
     return SheetOut(
         **found.model_dump(),
         video_id=video.id,
         exists=typed,
-        can_edit=can_edit_sheet(viewer, access.ref, access.leads) and video.status == "ready",
+        can_edit=edit,
         version=row.version if row is not None else 0,
         use_in_scoring=on,
         source=entered.source if entered is not None else None,
@@ -501,6 +518,9 @@ def _state(db: Session, viewer: Viewer, video: Video, access: TeamAccess) -> She
         images=photos,
         can_add_images=can_edit_sheet_photo(viewer, access.ref, access.leads)
         and video.status == "ready",
+        status=row.status if row is not None else "entered",
+        read=sr.state(db, video, row, photos_visible=sees_photos),
+        can_read=edit and bool(live),
     )
 
 
@@ -577,7 +597,7 @@ def put_scoresheet(video_id: uuid.UUID, body: ss.SheetIn, viewer: ViewerDep, db:
         db.rollback()
         raise HTTPException(409, "The scoresheet was changed meanwhile: reload it") from None
     video.no_scoresheet = False
-    checks = ss.check(row.sets, ss.official_sets(db, video))
+    checks = ss.check(row.sets, ss.official_sets(db, video), ss.drafts_of(row))
     ss.fill_periods(db, video, checks, row.use_in_scoring)
     scoring.score_video(db, video, reason="scoresheet")
     consistent = sum(1 for c in checks if c.status == "consistent")
@@ -646,12 +666,15 @@ def add_photo(
     camera metadata. The API stores its own JPEG of the pixels; the same photo again (a
     resend) answers 200 with the one kept already."""
     video = _photos(db, viewer, video_id, write=True)
+    _, access = visible_video(db, viewer, video.id)
     if video.status != "ready":
         raise HTTPException(409, "Add the scoresheet's photo once the video is ready")
     if not redacted:
         raise _refused(
             sp.PhotoRefused(
-                422, "not_redacted", "Black out the dates of birth on the photo first, then upload."
+                422,
+                "not_redacted",
+                "Black out the dates of birth and licence numbers first, then upload.",
             )
         )
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -679,6 +702,9 @@ def add_photo(
         audit(db, viewer.member_id, "scoresheet_photo_uploaded", "video", str(video.id),
               image=str(row.id), bytes=row.bytes, width=row.width, height=row.height,
               boxes=boxes)  # fmt: skip
+        # Nothing typed yet: read the photos right away (SS4), on club hardware.
+        if sr.wants_auto(sheet) and can_edit_sheet(viewer, access.ref, access.leads):
+            sr.queue(db, video, sheet, sp.live(db, sheet), viewer.member_id, auto=True)
     db.commit()
     response.status_code = 201 if created else 200
     return _photo_out(db, video, row)
@@ -725,3 +751,92 @@ def remove_photo(
     if sp.purge(db, store, [row], now):
         db.commit()
     return Response(status_code=204)
+
+
+# --- reading the photos (SS4) ---------------------------------------------------------------------
+
+
+class ReadIn(BaseModel):
+    """`us`: decode the last reading again with us as team A or B on the sheet (no new job);
+    without it the photos are read anew."""
+
+    us: Literal["A", "B"] | None = None
+
+
+class ConfirmIn(ss.SheetIn):
+    """The sheet as the coach checked it, and the drafts to confirm."""
+
+    confirm: list[int] = Field(default_factory=list, max_length=ss.MAX_SETS)
+
+
+@router.post("/videos/{video_id}/scoresheet/read", response_model=SheetOut)
+def read_photos(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep,
+                body: ReadIn | None = None) -> SheetOut:  # fmt: skip
+    """Read the sheet's photos on club hardware (a job), or decode the last reading again as
+    team A or B. The drafts never replace what someone typed."""
+    video, _ = _writable(db, viewer, video_id)
+    if video.status != "ready":
+        raise HTTPException(409, "Read the scoresheet once the video is ready")
+    row = ss.stored(db, video.id)
+    photos = sp.live(db, row)
+    if row is None or not photos:
+        raise HTTPException(409, "The scoresheet has no photo to read")
+    if body is not None and body.us is not None:
+        if not any(p.reading and p.reading.get("cells") for p in photos):
+            raise HTTPException(409, "The photos have not been read yet")
+        summary = sr.apply(db, video, row, photos, actor=viewer.member_id, us_letter=body.us)
+        audit(db, viewer.member_id, "scoresheet_read_again", "video", str(video.id),
+              us=body.us, **summary)  # fmt: skip
+    else:
+        job = sr.queue(db, video, row, photos, viewer.member_id)
+        audit(db, viewer.member_id, "scoresheet_read_requested", "video", str(video.id),
+              job=str(job.id) if job else None, photos=len(photos))  # fmt: skip
+    db.commit()
+    _, access = visible_video(db, viewer, video.id)
+    return _state(db, viewer, video, access)
+
+
+@router.delete("/videos/{video_id}/scoresheet/read", response_model=SheetOut)
+def discard_reading(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> SheetOut:
+    """Drop the drafts the reading made: an empty set goes again, a typed one is as it was."""
+    video, _ = _writable(db, viewer, video_id)
+    row = ss.stored(db, video.id)
+    if row is None or not ss.drafts_of(row):
+        raise HTTPException(404, "The scoresheet has no draft from the photo")
+    n = sr.discard(db, row, viewer.member_id)
+    audit(db, viewer.member_id, "scoresheet_read_discarded", "video", str(video.id), sets=n)
+    db.commit()
+    _, access = visible_video(db, viewer, video.id)
+    return _state(db, viewer, video, access)
+
+
+@router.post("/videos/{video_id}/scoresheet/confirm", response_model=SheetOut)
+def confirm_sheet(video_id: uuid.UUID, body: ConfirmIn, viewer: ViewerDep, db: DbDep) -> SheetOut:
+    """Save the sheet as checked and confirm the given drafts: typed sets from then on, scored;
+    their cells are kept as labelled examples (where the cell is, what it holds)."""
+    video, _ = _writable(db, viewer, video_id)
+    if video.status != "ready":
+        raise HTTPException(409, "Enter the scoresheet once the video is ready")
+    row = ss.stored(db, video.id)
+    drafts = ss.drafts_of(row)
+    missing = sorted(set(body.confirm) - drafts)
+    if not body.confirm or missing:
+        raise HTTPException(409, f"No draft to confirm for set {missing[0] if missing else '-'}")
+    now = tagging.now_utc()
+    sheet_in = ss.SheetIn.model_validate(body.model_dump(exclude={"confirm"}))
+    try:
+        row = ss.save(db, video, sheet_in, viewer.member_id, now)
+    except ss.Stale:
+        db.rollback()
+        raise HTTPException(409, "The scoresheet was changed meanwhile: reload it") from None
+    done = sr.confirm(db, video, row, body.confirm, viewer.member_id, now)
+    row.version += 1
+    video.no_scoresheet = False
+    checks = ss.check(row.sets, ss.official_sets(db, video), ss.drafts_of(row))
+    ss.fill_periods(db, video, checks, row.use_in_scoring)
+    scoring.score_video(db, video, reason="scoresheet")
+    audit(db, viewer.member_id, "scoresheet_confirmed", "video", str(video.id),
+          version=row.version, **done)  # fmt: skip
+    db.commit()
+    _, access = visible_video(db, viewer, video.id)
+    return _state(db, viewer, video, access)

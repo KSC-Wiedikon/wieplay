@@ -34,7 +34,7 @@ from wieplay.ml.features import Signals
 from wieplay.worker import ffmpeg
 from wieplay.worker.client import ClaimedJob
 from wieplay.worker.config import WorkerSettings
-from wieplay.worker.handlers import HANDLERS, Context
+from wieplay.worker.handlers import BACKGROUND_KINDS, HANDLERS, Context
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 ANALYSE_CAPS = ["analyse", "nas"]
@@ -293,10 +293,15 @@ def test_the_analysis_runs_on_a_background_lane(tmp_path: Path) -> None:
         analysis_root=tmp_path, work_dir=tmp_path,
     )  # fmt: skip
     worker = Worker(settings)
-    assert worker.main_caps == ["ingest", "transcode", "nas"]
+    # The main lane takes the media jobs and the quick ones that need the analysis extra (the
+    # scoresheet's reading: a coach waits for it), never the long analysis jobs.
+    assert worker.main_caps == ["ingest", "transcode", "nas", "analyse"]
+    assert worker.main_kinds is not None and "sheet_read" in worker.main_kinds
+    assert not set(worker.main_kinds) & set(BACKGROUND_KINDS)
     assert worker.background_caps == ["nas", "analyse"]
     no_root = Worker(settings.model_copy(update={"analysis_root": None}))
     assert no_root.background_caps == [] and "analyse" not in no_root.main_caps
+    assert no_root.main_kinds is None
 
     main_calls: list[tuple[bool, Any]] = []
     background_calls: list[tuple[bool, Any, list[str]]] = []
@@ -320,8 +325,8 @@ def test_the_analysis_runs_on_a_background_lane(tmp_path: Path) -> None:
         kwargs={"first": False},
     )
     lane.start()
-    worker._lane(Main(), worker.main_caps, None, first=True)  # type: ignore[arg-type]
+    worker._lane(Main(), worker.main_caps, worker.main_kinds, first=True)  # type: ignore[arg-type]
     lane.join(10)
     # The main lane tells the API it restarted (old leases free) before the other claims.
-    assert main_calls[0] == (True, None)
+    assert main_calls[0] == (True, worker.main_kinds)
     assert background_calls == [(False, ["analyse", "train_rallies"], ["nas", "analyse"])]

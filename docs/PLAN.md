@@ -1961,7 +1961,7 @@ proposes the shot type.
 
 *Owner's idea, 18.10.2026. Research and design:
 [`research/scoresheets-2026-10.md`](research/scoresheets-2026-10.md). **SS1 (typed sheet) and
-SS2 (into the scoring) built 19.10.2026; SS3 (photo) built 19.10.2026**; SS4–SS5 later.*
+SS2 (into the scoring) built 19.10.2026; SS3 (photo) and SS4 (reading the photo on club hardware) built 19.10.2026**; SS5 later.*
 
 Coaches add the match's official scoresheet (Swiss Volley's paper Matchblatt, compulsory in
 H3's league; every team gets a carbon copy), so WiePlay knows every point in order:
@@ -2108,16 +2108,147 @@ H3's league; every team gets a carbon copy), so WiePlay knows every point in ord
   dates of birth are blacked out before the upload; the guide's "Enter the scoresheet" has the
   steps.
 
+**Built (SS4; migration `0025`; the owner's "go" of 19.10.2026):**
+
+- **Reading on club hardware only.** A photo added while nothing is typed, or "Read the photo",
+  queues a `sheet_read` job for the Lenovo's CPU (cap `analyse`, `WIEPLAY_SHEET_READ_CAPS`; the
+  worker's main lane takes it, so it never waits behind an hour of analysis; `cuda,ml` would send
+  it to the Framework). The worker fetches each photo through a GET the API signs for that job
+  and key only (no other key, nothing written), decodes it in memory and sends back per photo
+  its registration and per cell its likeliest values and where the cell is on the photo. Nothing
+  is written to the worker's disk, nothing goes to any other service, no hosted model.
+- **The form** (`wieplay/ml/sheet_form.py`): the Swiss Volley Matchblatt's layout in millimetres,
+  measured on a clean scan of a filled sample (SVRZ, 2025) and checked on three real sheets (the
+  SS3 editor's "MATCHBLATT" was a guess): the set blocks of sets 1-4 in a 2 x 2 grid (header with
+  start or end time and the S/R circles, I-VI, lineup, substitute, two score rows, four service
+  rows of boxes 1-4 and 5-8; per half the running score 1-48 with "T" and two timeout rows), the
+  deciding set with its third part, the label panels and the bottom blocks. 952 cells are read
+  (service boxes, lineups, substitutes, both halves of every substitution and timeout score,
+  start and end times) and 20 marks (the S/R crosses).
+- **Registration** (`sheet_register.py`): the paper (the bright region), thin dark lines relative
+  to the paper's own light (faint carbon copies), the turn (the angle at which the lines stand
+  straight, then each quarter turn), scale and offset from the printed rules' row and column
+  profiles (FFT correlations at every scale, the candidates judged in 2-D), then enhanced
+  correlation (ECC) of the blurred rules on the photo warped into the form's frame (2.5, 1.2,
+  0.6 mm), then every rule point snapped to its line and a homography fitted (RANSAC), once more
+  per set block (a curl or a bend is local). Kept in `scoresheet_image.registration` (page mm →
+  photo px, per block). A photo of one set (the SS3 "On the photo: set 2") is matched to that
+  block alone (its rows repeat, so the row above and below are tried too).
+- **The reader** (`sheet_cells.py`; weights `wieplay/ml/weights/sheet-cells-v1.onnx`, run with
+  ONNX Runtime on the CPU): each set block is warped onto the form at 6 px/mm, the paper's light
+  divided out, the printed rules taken out (straight strokes longer than 7 mm: a box's border
+  no longer reads as a "1") and the ink scaled to the block's strongest strokes; each cell's
+  window (with the
+  overflow of handwriting) is cut to 48 x 40 and a small CNN (three stages of 3 x 3 convolutions,
+  0.9 M weights) gives 102 classes: 0-99, blank (nothing, or only the printed small number
+  struck) and X; probabilities calibrated (softmax temperature on held-out sheets). Trained
+  offline by `scripts/ml/sheet_cells.py` (`uv sync --group train`: PyTorch for the CPU and onnx,
+  never in the worker image) on 700 synthetic sheets (≈ 300 k cells): `sheet_synth.py` draws the
+  form, writes numbers in every kind of cell with digits from EMNIST and MNIST's training splits
+  (downloaded by hand, never in git), drawn continental 1s ("Λ") and barred 7s and OpenCV's
+  script fonts, in pen or as a faint, grainy carbon copy, and photographs it (perspective, a
+  turn, uneven light, a bend, blur, JPEG); the cells are cut as the worker cuts them, with the
+  registration off by a fraction of a millimetre.
+- **Decoding** (`sheet_read.py`, plain Python in the API, at the job's completion): which half
+  is us (team A writes on the left in sets 1 and 3, so one choice orients sets 1-4; the official
+  set scores decide it, our roster breaks ties; the deciding set on its own), then per set a
+  dynamic programme over the service turns with the score as state, for either first server
+  (the X in the receiving team's position I box 1 and the S/R crosses weigh in): every box at
+  least the team's score, the set not over before the last box, ending on the official score,
+  every box after the end blank; a value the reader did not list can be filled in at a high cost,
+  and a set needing more than two is not decoded but shown as read, nothing filled in (no value
+  is made up), to check what the reader was not sure of and what breaks the order of the team's
+  scores. Max-marginals (the cheapest sheet with a box read otherwise) mark the
+  doubtful boxes. Timeouts and substitutions take the reading whose score lies on the decoded
+  path; lineups and substitutes prefer our roster's numbers and the numbers read surely elsewhere
+  on the sheet; the times are checked for a plausible set length. A cell is to check when the
+  rules took another value than the reader's first ("rules"), another reading is almost as likely
+  ("unsure"), or no score of the set fits ("off_path"); a mark after the set's last box that the
+  reader only half saw is left out.
+- **Drafts** (`wieplay/core/sheet_reading.py`): the decoded sets are written with `status`
+  "draft" and `source` "read"; `scoresheet.read` keeps per set its state (draft, confirmed,
+  skipped, discarded), the proposals with the reader's top readings, the cells to check, where
+  each cell is on the photo, and the set as it was before. **A draft is checked and shown but
+  never scored** (no path, no hint, no fill of the sets). **Never over what a person typed**: a
+  typed set that fits is skipped; in a typed set that doesn't, the typed boxes, lineups,
+  timeouts, substitutions and times stay and only the empty cells are proposed; a draft's cells a
+  coach changed stay when the photo is read again. `scoresheet.read` is not part of the sheet's
+  revisions (the revision trigger leaves it out). Per photo the reader's cells are kept in
+  `scoresheet_image.reading` (to decode again as the other team without a new job); removed with
+  the photo.
+- **API**: `POST …/scoresheet/read` (queue the job; with `{"us": "A"|"B"}` decode the last
+  reading again), `DELETE …/scoresheet/read` (drop the drafts: an empty set goes, a typed one is
+  back as it was), `POST …/scoresheet/confirm` (save the sheet as checked and confirm the given
+  drafts: typed sets from then on, scored). Whoever may type the sheet (`can_edit_sheet`) may read
+  and confirm; the photo, and where a cell is on it, stays for those under the photo rule. Audit:
+  `scoresheet_read` (where it ran: club hardware, the worker, its caps and host, the model, the
+  counts), `scoresheet_read_requested`, `scoresheet_read_again`, `scoresheet_confirmed`,
+  `scoresheet_read_discarded`; a `model_run` (kind `sheet_read`) with the weights' SHA-256 and the
+  timing.
+- **Labels for the next training**: confirming a set records its cells in `scoresheet_label`
+  (the photo, the cell's key and quad, the confirmed value, the reader's first reading): labels
+  and boxes, never a copy of a crop; removed with the photo.
+- **Page**: "Read from the photo: check N cells" with "Next cell to check", "We are team A/B" and
+  "Discard the reading"; the doubtful cells yellow (their tooltip says what else was read), the
+  sure ones dashed; focusing a cell zooms the photo to it with an outline; "It is right" under a
+  doubtful cell; per set "Accept the sure cells" and "Confirm set N" (enabled once every proposed
+  cell was looked at; a correction typed counts); a dot on the tabs of draft sets; the page polls
+  while the job runs. EN and DE; the guide's "Enter the scoresheet" has the steps.
+- **Redaction (SS3, changed)**: the officials' block holds the referees' and scorer's licence
+  numbers, which on the real sheets are dates of birth too, and the team lists hold names and
+  licence numbers (dates of birth): the editor now starts a landscape photo with two boxes, over
+  the team lists and over the officials' block, keeping the set blocks, the sanctions and the
+  result visible; a portrait shot turned upright gets them anew. "The dates of birth and licence
+  numbers are blacked out". **PDF scans**: a PDF chosen on the sheet page is drawn on the device
+  with PDF.js (`pdfjs-dist` 6.3.289, loaded only then), each page (up to eight) goes through the
+  same editor; only the blacked-out JPEG is uploaded, the server keeps refusing PDFs.
+
+**Measured** (`scripts/ml/sheet_read_eval.py`; seconds on the Lenovo's CPU, shared with its other
+work):
+
+- **Synthetic** (40 evaluation sheets drawn with the digit datasets' test splits, never trained
+  on; 142 sets, 7,303 written cells; 12 sheets faint carbon copies): the reader alone 75.1 % of
+  the cells right, after the rules 82.0 %; wrong and not marked to check 3.3 %; 47 of 142 sets
+  exact (every box and the first server), 123 decoded; to check per sheet median 54 (mean 67);
+  team A/B right 38 of 40. Carbon copies alone 59.0 % / 65.5 %. Per sheet 3.1 s reading
+  (registration, cutting, CNN) on the Lenovo's CPU and 2.3 s decoding in the API.
+- **Three real sheets** (development only, never in the repository; transcribed by eye), cells
+  right by the reader alone / after the rules, to check, wrong without a mark:
+  - game 509, a phone photo turned by 90°, four sets: 73.2 % / 87.3 %, 4 of 4 sets decoded and
+    3 exact, 72 of 213 cells to check, none wrong without a mark;
+  - game 409, a 300 dpi PDF scan, three sets: 70.7 % / 96.1 %, 3 of 3 decoded and 2 exact, 54 of
+    153 to check, none wrong without a mark;
+  - another club's game (no video), a phone photo, three sets, written small and over the rows,
+    "Λ" ones: 53.7 % / 55.0 %, none decoded (set 1 has boxes the scorer left empty; sets 2-3
+    need more repairs than two), 110 of 120 to check, 2 wrong without a mark (an end time, a
+    substitute's number).
+  Registration found 71-83 % of the rules on each; 2.4-2.8 s reading per photo, 0.5-3.6 s
+  decoding. Taking the printed rules out before the reader (a box's border had read as a "1"
+  beside the number) raised the reader alone from 60.0, 61.7 and 47.2 % to 73.2, 70.7 and
+  53.7 %; the synthetic numbers above are from the harder set drawn since (smaller writing, long
+  slashes after the score).
+- **The SS4 targets are not reached** (≥ 98 % right after the rules, ≤ 10 cells to check per
+  sheet): the reader learnt from synthetic handwriting only, and real scorers write larger or
+  crammed, tick or slash each box, write "Λ" ones. What holds: the cells it gets wrong are
+  marked to check (0, 0 and 2 on the real sheets), so a coach accepts the dashed cells and
+  checks the yellow ones (54-110 per sheet instead of typing 150-210). Next: a retraining on
+  the confirmed labels (`scoresheet_label`: each photo's cells re-cut from the photo), then SS5.
+- **The sheets against the scoreboard logs** (SS2): game 509's sheet gives the same point
+  winner as the log for 149 of 149 points in sets 1-3 and 44 of 48 in set 4 (four points
+  between 3:2 and 7:6 differ; the sheet is consistent and ends 23:25 as the official score);
+  its 15 timeouts all lie on the path. Game 409's sheet equals its log exactly (the log starts at
+  1:4 in set 1).
+
 **Not yet:** substitutions as events (`SUB`, research §4.4): they stay on the sheet and the
 page shows where each falls in the video; a "Sheet" column, point strip and `X`/`M` keys in
 the review (§4.5); the opponent's rotations on the stats tabs (they are on the sheet page);
 the sets' clock times as a hint; the sheet's labels for the serve model's training (§4.6);
-who is on court per rally for player tracking (computed, not used); finding the printed grid in
-the photo to place the boxes by itself (research §5.1: a box prefilled where the team lists
-usually are instead). SS4: reading the photo on club hardware (template registration into
-`scoresheet_image.registration`, cell crops, digit and mark classifiers on the Lenovo CPU,
-proposals into the form). SS5: a local
-vision model as a second opinion; the OpenVolley import into the same table.
+who is on court per rally for player tracking (computed, not used). Reading: the running-score
+columns and the circled finals are not read (the decoded last boxes are marked circled, the
+official set scores decide the end); sanctions are not read (rare; typed); the deciding set's
+third part is read as the left team's boxes. A retraining on the confirmed labels (once there
+are real ones). SS5: a local vision model as a second opinion on doubtful cells; the OpenVolley
+import into the same table.
 
 ### 10.4 Ball tracking
 
@@ -3085,4 +3216,4 @@ from 3. Liga and renamed (16 of 19 players stayed).
 | O11 | Brand | ✓ **Done 15.10.2026**: assets in `docs/brand/`, icons generated, `mark-on-dark.svg` and the ball-only favicon approved (§13.3). |
 | O12 | Repo visibility | Private now; flip to public when you're happy, like Wiedisync. |
 | O13 ⚠ | Guest clubs (§4.5) on prod | Built 17.10.2026. Before inviting a real club: the club board's OK, a written agreement with each guest club (its footage, informing its people, adults only, training yes or no, deletion), and the privacy page text (`/privacy`, a draft) checked by the club's privacy contact. Runbook: `docs/runbooks/guest-club.md`. |
-| O14 | Scoresheet photos (§10.3a) | ✓ **Resolved 18.10.2026 by the owner**: photos allowed, stored only in the WiePlay bucket (`sheets/<video>/`), the dates of birth blacked out on the device before the upload (never stored), no EXIF/GPS, seen by the team's coaches, team managers, sport admins and admins only (names stay readable), every view audited, removed with the sheet or the video and by a coach at any time, no automatic reading until SS4 (club hardware only). **Built 19.10.2026 (SS3, migration 0024).** |
+| O14 | Scoresheet photos (§10.3a) | ✓ **Resolved 18.10.2026 by the owner**: photos allowed, stored only in the WiePlay bucket (`sheets/<video>/`), the dates of birth blacked out on the device before the upload (never stored), no EXIF/GPS, seen by the team's coaches, team managers, sport admins and admins only (names stay readable), every view audited, removed with the sheet or the video and by a coach at any time, no automatic reading until SS4 (club hardware only). **Built 19.10.2026 (SS3, migration 0024); SS4 (migration 0025) reads on the Lenovo's CPU only, and the editor blacks out the officials' licence numbers too.** |

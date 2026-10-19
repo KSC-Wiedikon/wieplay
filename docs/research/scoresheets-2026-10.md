@@ -1,11 +1,17 @@
 # Official scoresheets in WiePlay
 
-Researched and designed 18.10.2026 for `docs/PLAN.md` §10.3a. **Status: SS1, SS2 and SS3 built
-19.10.2026** (what was built, what differs from this design and the measurements: PLAN §10.3a);
-SS4–SS5 not yet. SS3 differs from §5.1 and §6.2 where the owner decided (18.10.2026): the coach
-blacks out the dates of birth (one prefilled box, moved by hand; names may stay), so the photo
-is seen by coaches, team managers, sport admins and admins only; JPEG, PNG or WebP up to 10 MB
-through the API (no HEIC or PDF: the browser's editor makes a JPEG of any photo it can show).
+Researched and designed 18.10.2026 for `docs/PLAN.md` §10.3a. **Status: SS1, SS2, SS3 and SS4
+built 19.10.2026** (what was built, what differs from this design and the measurements: PLAN
+§10.3a); SS5 not yet. SS4 reads on the Lenovo's CPU as §5.3-5.4 propose (registration, cells, a
+small CNN, the rules, "check N cells"), but not yet to its targets on real photos (the reader
+learnt from synthetic handwriting only; the cells it gets wrong are marked to check); it does
+not read the running-score columns, the circled finals or the sanctions (the official
+set scores decide the end). The SS3 editor now starts with a second box over the officials'
+block (their licence numbers are dates of birth on the real sheets) and takes PDF scans. SS3
+differs from §5.1 and §6.2 where the owner decided (18.10.2026): the coach blacks out the
+dates of birth (one prefilled box, moved by hand; names may stay), so the photo is seen by
+coaches, team managers, sport admins and admins only; JPEG, PNG or WebP up to 10 MB through the
+API (no HEIC or PDF: the browser's editor makes a JPEG of any photo it can show).
 
 **The owner's idea** (18.10.2026): "maybe also have the coaches upload the scoresheet? so at
 least we can check side-out etc for points matching. if you check the scoresheet instructions,

@@ -28,3 +28,12 @@ export function parseDigits(raw: string): number | null {
   return digits === '' ? null : Number(digits)
 }
 
+/** Focus a field of a set's panel by its key (the reading's field keys, `data-field`). */
+export function focusField(no: number, key: string): boolean {
+  const el = document.querySelector(`[data-set="${no}"] [data-field="${key}"]`)
+  const target = el instanceof HTMLInputElement || (el instanceof HTMLDivElement && el.tabIndex >= 0) ? el : el?.querySelector('input')
+  if (!(target instanceof HTMLElement)) return false
+  target.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  target.focus({ preventScroll: true })
+  return true
+}
