@@ -35,6 +35,7 @@ import {
   isModel,
   isProposal,
   LOOP_PRE_MS,
+  confidentRallies,
   needsYouRallies,
   nextOpen,
   reviewItems,
@@ -79,6 +80,7 @@ export type ReviewNoticeKey =
   | 'cannotSplit'
   | 'tooShort'
   | 'acceptedSure'
+  | 'acceptedRallies'
   | 'done'
   | 'nothingSelected'
 
@@ -103,6 +105,8 @@ export interface ReviewState {
   rejectedBefore: number
   /** "Accept all sure rallies" waits for its confirmation. */
   confirmSure: boolean
+  /** "Accept the rallies ≥ 90 %" (who won still open) waits for its confirmation. */
+  confirmRallies: boolean
   notice: ReviewNotice | null
 }
 
@@ -142,6 +146,7 @@ export class ReviewController {
       seenGaps: modelIds(segments, EMPTY, 'gap'),
       rejectedBefore,
       confirmSure: false,
+      confirmRallies: false,
       notice: null,
     }
   }
@@ -214,6 +219,11 @@ export class ReviewController {
     return sureRallies(this.store.getView().segments)
   }
 
+  /** Open suggestions the rally finder is at least 90 % sure of, the scoring not: "Accept the rallies". */
+  confident(): Segment[] {
+    return confidentRallies(this.store.getView().segments)
+  }
+
   /** The rallies that need the coach (the scoring is not sure, no winner set). */
   needsYou(): Segment[] {
     return needsYouRallies(this.store.getView().segments)
@@ -232,7 +242,7 @@ export class ReviewController {
   stop = (): void => {
     const leaving = this.state.active && this.changed
     this.changed = false
-    this.set({ active: false, confirmSure: false })
+    this.set({ active: false, confirmSure: false, confirmRallies: false })
     if (leaving) this.onLeave()
   }
 
@@ -517,6 +527,29 @@ export class ReviewController {
     else if (!current) this.go(nextOpen(this.items(), this.state.pending, null))
   }
 
+  // Accept the rallies ≥ 90 % (PLAN §10.1)
+  //
+  // For a match without the board's log or a scoresheet the scoring is sure of no winner, but
+  // the rally finder often is of the rallies: their start and end are confirmed in one step
+  // (training learns from them); who won stays open under "Needs you".
+
+  askAcceptRallies = (): void => {
+    if (this.confident().length > 0) this.set({ confirmRallies: true })
+  }
+
+  cancelAcceptRallies = (): void => this.set({ confirmRallies: false })
+
+  confirmAcceptRallies = (): void => {
+    const found = this.confident()
+    this.set({ confirmRallies: false })
+    if (found.length === 0) return
+    const current = this.current()
+    this.commit(found.map((s) => segmentChange(s, { review: 'confirmed' })))
+    this.set({ notice: this.notify('acceptedRallies', { count: found.length, left: this.needsYou().length }) })
+    if (current && found.some((s) => s.id === current.id)) this.advance(current)
+    else if (!current) this.go(nextOpen(this.items(), this.state.pending, null))
+  }
+
   // Keyboard
 
   onKeyDown = (event: KeyboardEvent): void => {
@@ -532,7 +565,7 @@ export class ReviewController {
   private handle(event: KeyboardEvent): boolean {
     const { key, shiftKey, altKey } = event
     const mod = event.ctrlKey || event.metaKey
-    if (this.state.confirmSure) return false
+    if (this.state.confirmSure || this.state.confirmRallies) return false
 
     if (mod) {
       if (altKey) return false

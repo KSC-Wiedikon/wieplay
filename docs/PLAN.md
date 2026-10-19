@@ -2081,7 +2081,10 @@ the scoresheet's cells.
   scorer's order is wrong, `sheet_log` and `log_score`): 56 against 52 with the log alone. The
   other 19 videos have neither a log nor a sheet: none of their rallies is sure, every one needs
   the coach (74-265 a video, the rallies outside the sets included). A typed or read scoresheet
-  and the board's log are what make a game mostly sure.
+  and the board's log are what make a game mostly sure. For those videos the review keeps a
+  second button (the owner, 19.10.2026): "Accept the rallies WiePlay is 90 % sure of" confirms
+  the start and end of the rally suggestions the rally finder is ≥ 90 % sure of (the old "≥ 90 %"
+  button, rallies only, `confidentRallies`); who won stays under "Needs you".
 
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.

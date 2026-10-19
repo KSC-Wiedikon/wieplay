@@ -15,6 +15,7 @@ import { periodAt } from '../../lib/rallies'
 import { cardTone, courtByRally, issueText, notesAfter, notesToShow, noteText, noteTime, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { fullNameOf, useSideNames, type SideNames } from '../../lib/sides'
 import {
+  ACCEPT_ALL_MIN,
   allProgress,
   effectiveServer,
   effectiveWinner,
@@ -23,6 +24,7 @@ import {
   GAP_KINDS,
   isGap,
   isOpen,
+  confidentRallies,
   needsYou,
   needsYouRallies,
   reviewItems,
@@ -80,6 +82,8 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
       return t('tagging.review.notice.won', { side: sideLabel(t, p.side as Side, names) })
     case 'moved':
       return p.field === 'end' ? t('tagging.review.notice.movedEnd', { time }) : t('tagging.review.notice.movedStart', { time })
+    case 'acceptedRallies':
+      return t('tagging.review.notice.acceptedRallies', { count: Number(p.count) })
     case 'acceptedSure':
       return t('tagging.review.notice.acceptedSure', { count: Number(p.count), left: Number(p.left) })
     case 'done':
@@ -108,6 +112,7 @@ export function ReviewPanel() {
   )
   const sure = useMemo(() => sureRallies(view.segments), [view.segments])
   const waiting = useMemo(() => needsYouRallies(view.segments).length, [view.segments])
+  const confident = useMemo(() => confidentRallies(view.segments), [view.segments])
   const current = items.find((s) => s.id === state.currentId) ?? null
   const gap = current !== null && isGap(current.kind)
   const set = current ? periodAt(view.periods, current.start_ms) : null
@@ -228,7 +233,7 @@ export function ReviewPanel() {
         {state.notice ? noticeText(t, state.notice, taxonomy.sport, names) : t('tagging.review.hint')}
       </p>
 
-      {scored && (
+      {(scored || confident.length > 0) && (
         <div className="flex flex-col gap-2 border-t border-hairline pt-3">
           {sure.length > 0 ? (
             <Button variant="primary" size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptSure)}>
@@ -236,7 +241,13 @@ export function ReviewPanel() {
               {t('tagging.review.acceptSure', { count: sure.length })}
             </Button>
           ) : (
-            waiting > 0 && <p className="text-sm text-muted">{t('tagging.review.sureNone')}</p>
+            scored && waiting > 0 && <p className="text-sm text-muted">{t('tagging.review.sureNone')}</p>
+          )}
+          {confident.length > 0 && (
+            <Button size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptRallies)}>
+              <CheckIcon className="size-4" />
+              {t('tagging.review.acceptRallies', { min: formatPercent(ACCEPT_ALL_MIN), count: confident.length })}
+            </Button>
           )}
         </div>
       )}
@@ -258,6 +269,15 @@ export function ReviewPanel() {
       >
         {t('tagging.review.acceptSureBody')}
         {waiting > 0 && ` ${t('tagging.review.acceptSureLeft', { count: waiting })}`}
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={state.confirmRallies}
+        title={t('tagging.review.acceptRalliesTitle', { count: confident.length })}
+        confirmLabel={t('tagging.review.acceptSureConfirm', { count: confident.length })}
+        onCancel={review.cancelAcceptRallies}
+        onConfirm={review.confirmAcceptRallies}
+      >
+        {t('tagging.review.acceptRalliesBody', { min: formatPercent(ACCEPT_ALL_MIN) })}
       </ConfirmDialog>
     </section>
   )

@@ -163,6 +163,15 @@ export function sureRallies(segments: readonly Segment[]): Segment[] {
   return segments.filter((s) => isSuggestion(s) && s.score_sure === true).sort(byStart)
 }
 
+/**
+ * Open rally suggestions the rally finder is at least `min` sure of that the scoring is not sure of
+ * (a match without the board's log or a scoresheet): "Accept the rallies" confirms their start
+ * and end; who won still needs the coach.
+ */
+export function confidentRallies(segments: readonly Segment[], min = ACCEPT_ALL_MIN): Segment[] {
+  return sureSuggestions(segments, min).filter((s) => s.kind === 'rally' && s.score_sure !== true)
+}
+
 export interface ReviewProgress {
   /** Answered: accepted, corrected or rejected. */
   done: number

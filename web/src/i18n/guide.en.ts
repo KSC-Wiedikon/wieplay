@@ -104,7 +104,7 @@ export const guideEn: Guide = {
     ],
     tips: [
       'Being close is enough: a quarter of a second either way does no harm. A missed or invented rally does.',
-      '“Accept all sure rallies” confirms their start and end; who won stays WiePlay’s suggestion, which follows the evidence. U undoes it in one step.',
+      '“Accept all sure rallies” confirms their start and end; who won stays WiePlay’s suggestion, which follows the evidence. U undoes it in one step. A match without the board’s log or a scoresheet has no sure rallies; there “Accept the rallies WiePlay is 90 % sure of” confirms the rallies’ start and end, and who won stays under “Needs you”.',
       'Sure means sure: on the games WiePlay was checked on, not one rally it was sure of was wrong. A game with only the video and the official result has few sure rallies, one with the scoreboard’s log or the scoresheet many more: that is honest, not a fault.',
       'Not sure? Leave it open and move on with ↓. Someone else can decide later.',
     ],
