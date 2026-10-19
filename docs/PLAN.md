@@ -1961,7 +1961,7 @@ proposes the shot type.
 
 *Owner's idea, 18.10.2026. Research and design:
 [`research/scoresheets-2026-10.md`](research/scoresheets-2026-10.md). **SS1 (typed sheet) and
-SS2 (into the scoring) built 19.10.2026; SS3 (photo) and SS4 (reading the photo on club hardware) built 19.10.2026**; SS5 later.*
+SS2 (into the scoring) built 19.10.2026; SS3 (photo) and SS4 (reading the photo on club hardware) built 19.10.2026; who was on court per rally, the serves' players and the notes as score checks built 19.10.2026**; SS5 later.*
 
 Coaches add the match's official scoresheet (Swiss Volley's paper Matchblatt, compulsory in
 H3's league; every team gets a carbon copy), so WiePlay knows every point in order:
@@ -2239,11 +2239,57 @@ work):
   its 15 timeouts all lie on the path. Game 409's sheet equals its log exactly (the log starts at
   1:4 in set 1).
 
+**Built 19.10.2026: who was on court per rally, the serves' players, numbers per player, the
+notes as score checks** (no migration; `wieplay/ml/on_court.py`, `wieplay/core/lineups.py`,
+`wieplay/core/sheet_notes.py`; the owner's ideas of 19.10.2026: "line-ups, substitutions can
+help with player identification. TO (and subs) with score checking", "sanctions … help for
+cards in case"):
+
+- **Per rally** the scoring lined up with the sheet (`segment.sheet_point`, a late start's
+  offset applied): the point's server (team and number: zone I of the serving team), both
+  teams' six in zones I-VI with the substitutions applied, their rotations, the winner;
+  `GET /api/videos/{id}/scoresheet/court` (whoever may see the sheet), the players job's inputs
+  (`rallies[].sheet`, and the liberos, middles and the sheet's numbers by number; §10.5). The
+  liberos are not on the sheet: they come from the roster snapshot (`is_libero`); no field was
+  added to the typed sheet (the opponent's liberos stay unknown; what the job uses does not
+  need them).
+- **Serves**: a serve (code S) in a lined-up rally whose team served then gets the sheet's
+  server as its player (`event_player.method` "sheet", confidence 0.95), also without a players
+  run: a model's unanswered serve has the number written (`track_ref` "sheet:set.point"), a
+  coach's serve without a number gets it beside it for "apply" (players page), a number a person
+  set is never changed. Typing a serve without a number in such a rally (`aS`) fills the server
+  in at once; a typed number wins. Refreshed after every scoring.
+- **Numbers per player** (`GET …/stats` → `sheet_players`, the stats' players tab, also when
+  nothing is tagged): per shirt number of both teams the points served, won on them, the
+  longest run on one service turn, aces and errors where the rally's serve tag graded the
+  serve, points on court and the plus/minus, per rotation too (ours by the setter's zone,
+  P1-P6, when every set has one). A libero's points count for the player replaced.
+- **Timeouts, substitutions (and returns), sanctions** in the break after the rally of their
+  last point, checked: the score line there and the club scoreboard's log there against the
+  sheet's score, a timeout in a break under 30 s, a penalty point (P, DP) that a rally was lined
+  up with (it has none by the rules), a score not on the path, a point without a rally. The
+  review's "From the scoresheet" lists what disagrees and every card (seek to the break); the
+  rally card says the sheet's server and the notes after the rally; cards (yellow W/DW, red
+  P/DP, darker E/D) and substitutions are markers on the timeline ("Yellow card (Volero) at
+  6:8"). A card names the team only (the sheet's sanctions hold no person; an expulsion's
+  substitution is on the sheet as a substitution). Counts per run in `scoring.sheet.notes`.
+- **Measured** on the two verified transcriptions (`scripts/ml/sheet_players_eval.py`, offline,
+  the scoring as the API runs it, with the board log as on prod): the sheet's points lined up
+  with the rally the log's own score names: 165 of 167 on game 509 (145 without the log), 119
+  of 119 on game 409 (106 without). Notes in the break the log's point times give: game 509
+  timeouts 15 of 15 (the log's own timeout press in that break 11 of 15; the other 4 are the 4
+  flagged "too short"), substitutions and returns 9 of 9; game 409 timeouts 7 of 7 (press 6
+  of 7; 2 flagged short), substitutions 7 of 7. Without the log: 10 of 15 timeouts and 7 of 9
+  substitutions on 509 (3 flagged by the log check), 5 of 7 and 7 of 7 on 409. Neither sheet
+  has a sanction (tested on made-up sets). **As alignment evidence** (a cost for a timeout or
+  substitution placed in a gap shorter than 30 / 15 s, weights 0.5-3): no gain (509 without the
+  log 142-145 of 167 against 145; 409 105-106 against 106), so they only check.
+
 **Not yet:** substitutions as events (`SUB`, research §4.4): they stay on the sheet and the
 page shows where each falls in the video; a "Sheet" column, point strip and `X`/`M` keys in
 the review (§4.5); the opponent's rotations on the stats tabs (they are on the sheet page);
 the sets' clock times as a hint; the sheet's labels for the serve model's training (§4.6);
-who is on court per rally for player tracking (computed, not used). Reading: the running-score
+the opponent's liberos on the typed sheet. Reading: the running-score
 columns and the circled finals are not read (the decoded last boxes are marked circled, the
 official set scores decide the end); sanctions are not read (rare; typed); the deciding set's
 third part is read as the left team's boxes. A retraining on the confirmed labels (once there
@@ -2485,6 +2531,66 @@ of 37 %); without the 20 s stitching pass 187 / 9+6 / 75 %; without "who is miss
 241 / 9+11 / 77 % (70 more cards).
 The shirt-number reader on 80 crops of the Legends game judged by eye (28 with a readable
 number): 17 read right, none wrong, 2 doubtful readings of unreadable ones (v1's reader: 12).
+
+**Players from the official scoresheet (19.10.2026; `wieplay/ml/serve_labels.py`).** With a
+sheet lined up with the rallies (§10.3a) the job gets per rally who served (team and number)
+and both teams' six by zone, and the liberos by number (roster snapshot). The owner's rules of
+19.10.2026: since the 2025 rules the serving team may stand anywhere at the serve (only the
+server is certain, behind the end line); the receiving team keeps its rotational order only
+relative to its neighbours and stands stacked, so its order is soft evidence at most. Measured
+on the Legends game (a GPU detection of the local copy, the job's own stages, the verified
+transcription; the readings the same for every variant; by eye on serve frames) and on H1-H3:
+
+- **The server** ("server", on): behind the serving team's end line during the serve, else the
+  person stepping onto the court from it within 3 s (the camera behind the near end line has
+  the near server below the picture; the far server by the far wall is too small for the
+  detector), the longest piece where the tracker saw them in pieces; a label like a reading of
+  0.9 on that track. Near end, Legends: a server on 77 of 90 near serves, the reading on that
+  track the server's number in 41 of 47; by eye 25 of 25 labelled people were the server, the
+  number legible and the sheet's in 16 of 16. Without a calibration (H1-H3, from the picture's
+  bottom edge): 17 labels, the reading the server's number in 11 of 15. The far end is not
+  used: 20 labels, the 3 with a reading all different, not checkable by eye at 1080p.
+- **Teams from numbers** ("teams", on): a piece reading a number its team does not have on
+  court then (nor as a known libero) while the other team does is the other team's. On Legends
+  our #2, #8 and #22 had sure cards of the other team (blockers whose jumps put the feet past
+  the net); 77 tracks and 9 pieces moved, none of those cards left. On H1-H3 (one club kit)
+  142 tracks and 14 pieces moved.
+- **Who may be read** ("allowed", off): during a rally only the six on court and the liberos
+  (an unknown libero: any number the sheet never names). No better on Legends (readings that
+  agree 80 % against 83 % without), worse on H1-H3 (a team taken for the other loses its own
+  numbers).
+- **The receiving team's zones** ("receivers", off; `on_court.receiving_zones`, a likelihood
+  over the ways to give the people zones, each relation front/back and left/right a logistic of
+  the margin): on the near side the most likely zone's number was the one read on that track
+  for 56 of 132 front-row and 78 of 224 back-row people (42 %, 35 %), 36 of 60 where that
+  zone's probability was 0.7 or more; on the far side 9 of 94. Not used.
+- **The lineup check before a set** (the tracker started 60 s before each set's first rally):
+  no moment where the teams stand still in their places shows (people come and go; most stand
+  still only in the last 10 s, as before any serve); its 91 readings were 2.5 % of the
+  match's, 73 % of them on court. With it the same sure cards and readings that agree 76-77 %
+  against 77-80 % without: dropped (the worker still takes a `lead_ms` per rally, for
+  measuring).
+
+| Legends (calibrated), the same detection | Cards (ours / theirs) | Sure cards (ours / theirs) | Sure cards on the wrong team | Footage on sure cards | Readings that agree with their card |
+|---|---|---|---|---|---|
+| without the sheet | 165 (73 / 92) | 8 / 11 | 3 (our #2, #8, #22) | 42.3 % | 77 % |
+| with the sheet (server, teams) | 168 (79 / 89) | 10 / 7 | 0 | 41.2 % | 83 % |
+| H1-H3 (no calibration; every card to check) | 139 → 132 | – | – | – | 56 % → 61 % |
+
+**Faces, measured and not used (19.10.2026; the owner allowed them where they measurably help,
+processed only on club hardware and only within a video).** A face detector and embedding with
+open weights (OpenCV Zoo's YuNet, MIT, and SFace, Apache-2.0) on the job's crops of the
+Legends game: 667 faces in 20,425 crops, 293 at least 20 px wide; 206 of 5,025 tracks (13 % of
+the footage) show one, 203 of them on the near side, where the shirt numbers are read anyway.
+As one more linking signal (a link between two pieces whose faces differ refused, one whose
+faces match cheaper): 165 cards instead of 168, sure cards 10 + 6 instead of 10 + 7, footage on
+sure cards 40.4 % instead of 41.2 %, readings that agree 83 % either way. Not shipped: nothing
+of it is in the code, no setting, §5.7 unchanged.
+
+The sheet makes the cards right more often, not more of them sure: the far side still has no
+number read and no label. The sure cards with it, ours #1, #2, #4, #6, #7, #8, #10, #12, #17,
+#22 and theirs #4, #5, #7, #9, #10, #12 and their libero #15, all wear numbers the sheet (or
+the roster's liberos) has for that team.
 
 **Automatic run** (`WIEPLAY_PLAYERS_AUTO`): stays off, on demand. The GPU makes it cheap
 (~10 min a match), but only calibrated videos get sure cards (3 of the 22 prod videos had
