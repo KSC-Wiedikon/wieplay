@@ -676,6 +676,10 @@ export interface Tag {
   /** The floor below it in metres, with a calibrated court only. */
   court_x?: number | null
   court_y?: number | null
+  /** Sure: "Accept all sure actions" takes it; else it needs the coach. */
+  model_sure?: boolean | null
+  /** The likeliest other answer: "D:us", "E:them", or "none" (maybe no contact at all). */
+  model_alternative?: string | null
   version: number
   updated_at: string
   /** Null while live; set on a stale change's answer when the server has the tag deleted. */
@@ -910,8 +914,9 @@ export interface ActionsVsCoach {
  */
 export interface ActionGate {
   mode: 'auto' | 'on' | 'off'
+  /** Suggestions are written (always, unless switched off). */
   open: boolean
-  /** on | off | passed | no_training | too_few_games | below_bar */
+  /** auto | on | off */
   reason: string
   finder: string
   /** Games with actions reviewed in the newest training. */
@@ -919,9 +924,21 @@ export interface ActionGate {
   /** Share of suggestions fully right (time ±0.3 s, skill, side) on held-out games. */
   precision: number | null
   contact_recall: number | null
-  min_precision: number
-  min_recall: number
   trained_at: string | null
+  /** How the finder did on hand-checked rallies (the same for every video). */
+  measured?: ActionMeasured
+}
+
+export interface ActionMeasured {
+  rallies?: number
+  contacts?: number
+  /** Share of the contacts with a fully right suggestion (time, skill, side). */
+  found?: number
+  /** Share of the suggestions fully right. */
+  precision?: number
+  /** Suggestions marked sure, and how many of them were wrong. */
+  sure?: number
+  sure_wrong?: number
 }
 
 /** The suggested actions of a video (PLAN §10.4a). */

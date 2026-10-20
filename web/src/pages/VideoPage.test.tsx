@@ -745,14 +745,13 @@ describe('VideoPage', () => {
       expect(screen.getByText('1 of 2')).toBeInTheDocument()
     })
 
-    it('says why there are no suggested actions yet', async () => {
+    it('says when action suggestions are switched off', async () => {
       const gate = {
-        mode: 'auto' as const, open: false, reason: 'too_few_games', finder: 'v0', games: 1, precision: null,
-        contact_recall: null, min_precision: 0.7, min_recall: 0.6, trained_at: null,
+        mode: 'off' as const, open: false, reason: 'off', finder: 'v0', games: 0, precision: null,
+        contact_recall: null, trained_at: null,
       }
       showStats({ stats: { ...stats, suggested: 0, actions_gate: gate } })
-      expect(await screen.findByText(/Action suggestions start once WiePlay gets them right often enough/)).toBeInTheDocument()
-      expect(screen.getByText(/\(now: 1 game\)/)).toBeInTheDocument()
+      expect(await screen.findByText('Action suggestions are switched off.')).toBeInTheDocument()
     })
 
     it('says when there is nothing to count yet', async () => {

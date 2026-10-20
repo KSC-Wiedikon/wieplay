@@ -7,14 +7,18 @@ import {
   actionChange,
   actionItems,
   actionProgress,
+  alternativeOf,
   factTags,
   gateText,
   isReviewedSuggestion,
   isSuggestedTag,
+  measuredText,
+  needsYouActions,
   nextOpenAction,
   openInRally,
   rejectChange,
   suggestedCount,
+  sureActions,
 } from './actions'
 import type { OutboxItem } from './outbox'
 import { mergeView } from './taggingStore'
@@ -113,21 +117,47 @@ describe('the score from facts only', () => {
   })
 })
 
-describe('the bar for suggestions', () => {
+describe('whether suggestions are written, and what is measured', () => {
   const gate = (patch: Partial<ActionGate>): ActionGate => ({
-    mode: 'auto', open: false, reason: 'below_bar', finder: 'v0', games: 2, precision: 0.41,
-    contact_recall: 0.7, min_precision: 0.7, min_recall: 0.6, trained_at: null, ...patch,
+    mode: 'auto', open: true, reason: 'auto', finder: 'v0', games: 0, precision: null,
+    contact_recall: null, trained_at: null,
+    measured: { rallies: 61, contacts: 300, found: 0.3, precision: 0.58, sure: 40, sure_wrong: 0 }, ...patch,
   })
   const t = i18n.getFixedT('en')
 
-  it('says plainly why there are none yet, and nothing once the bar is passed', () => {
-    expect(gateText(t, gate({}))).toBe(
-      'Action suggestions start once WiePlay gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: 2 games, last score 41%).',
-    )
-    expect(gateText(t, gate({ games: 1, precision: null, reason: 'too_few_games' }))).toMatch(/\(now: 1 game\)\.$/)
-    expect(gateText(t, gate({ mode: 'off', reason: 'off' }))).toBe('Action suggestions are switched off.')
-    expect(gateText(t, gate({ open: true, reason: 'passed' }))).toBeNull()
+  it('says only that they are switched off', () => {
+    expect(gateText(t, gate({}))).toBeNull()
+    expect(gateText(t, gate({ mode: 'off', open: false, reason: 'off' }))).toBe('Action suggestions are switched off.')
     expect(gateText(t, null)).toBeNull()
-    expect(gateText(i18n.getFixedT('de'), gate({}))).toMatch(/jetzt: 2 Spiele, letzter Wert 41/)
+  })
+
+  it('shows the measured numbers as they are', () => {
+    expect(measuredText(t, gate({}))).toBe(
+      'Measured on 61 hand-checked rallies: 58% of the suggestions are fully right (time, skill and side) and 30% of the contacts get one. Of 40 sure ones, 0 were wrong.',
+    )
+    expect(measuredText(i18n.getFixedT('de'), gate({}))).toMatch(/^Gemessen an 61 von Hand geprüften Ballwechseln: 58 ?% der Vorschläge/)
+    expect(measuredText(t, gate({ measured: {} }))).toBeNull()
+  })
+})
+
+describe('sure actions', () => {
+  const s = tag({ id: 's', t_ms: 1000, code: 'S', source: 'model', model_sure: true })
+  const r = tag({ id: 'r', t_ms: 2000, code: 'R', source: 'model', model_sure: false, model_alternative: 'D:them' })
+  const e = tag({ id: 'e', t_ms: 3000, code: 'E', source: 'model', model_alternative: 'none' })
+  const done = tag({ id: 'd', t_ms: 4000, code: 'A', source: 'model', model_sure: true, review: 'confirmed' })
+
+  it('waits for "Accept all sure actions"; the walk visits the rest first', () => {
+    const tags = [s, r, e, done]
+    expect(sureActions(tags).map((x) => x.id)).toEqual(['s'])
+    expect(needsYouActions(tags).map((x) => x.id)).toEqual(['r', 'e'])
+    expect(nextOpenAction(actionItems(tags), null)?.id).toBe('r')
+    expect(nextOpenAction(actionItems(tags), e)?.id).toBe('r')
+    expect(nextOpenAction(actionItems([s, done]), null)?.id).toBe('s')
+  })
+
+  it("reads the model's other answer", () => {
+    expect(alternativeOf(r)).toEqual({ code: 'D', side: 'them' })
+    expect(alternativeOf(e)).toBe('none')
+    expect(alternativeOf(s)).toBeNull()
   })
 })

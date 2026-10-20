@@ -6,6 +6,9 @@
 //   a number, then Enter: the player (the action is accepted with it) · Tab the other side
 //   ←/→ one frame earlier or later · Shift+Enter accept the rest of this rally · U undo
 //
+// The suggestions WiePlay is sure of wait for one button, "Accept all sure actions"; the walk
+// visits the ones that need the coach first (like the rally review's "Needs you").
+//
 // Answers are ordinary tag changes through the tagging store and its outbox (offline queue,
 // base versions, undo): accept sets review "confirmed", another skill, side, grade or time
 // "corrected" (the server reads it the same way), reject deletes the tag with review
@@ -22,6 +25,7 @@ import {
   openInRally,
   rejectChange,
   SKILL_KEYS,
+  sureActions,
   type ActionProgress,
 } from '../../lib/actions'
 import type { Change } from '../../lib/outbox'
@@ -42,6 +46,7 @@ export type ActionNoticeKey =
   | 'side'
   | 'moved'
   | 'acceptedRally'
+  | 'acceptedSure'
   | 'noneInRally'
   | 'undone'
   | 'redone'
@@ -69,6 +74,8 @@ export interface ActionReviewState {
   /** Suggestions rejected before this session (the tagging data no longer lists them). */
   rejectedBefore: number
   notice: ActionNotice | null
+  /** "Accept all sure actions" asks first. */
+  confirmSure: boolean
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -98,6 +105,7 @@ export class ActionReviewController {
       seen: modelIds(store.getView().events, EMPTY),
       rejectedBefore,
       notice: null,
+      confirmSure: false,
     }
   }
 
@@ -327,6 +335,31 @@ export class ActionReviewController {
     this.advance(last)
   }
 
+  // Accept all sure actions (PLAN §10.4a): the suggestions WiePlay is sure of, in one step.
+
+  sure(): Tag[] {
+    return sureActions(this.store.getView().events)
+  }
+
+  askAcceptSure = (): void => {
+    if (this.sure().length > 0) this.set({ confirmSure: true })
+  }
+
+  cancelAcceptSure = (): void => this.set({ confirmSure: false })
+
+  confirmAcceptSure = (): void => {
+    const sure = this.sure()
+    this.set({ confirmSure: false })
+    if (sure.length === 0) return
+    const current = this.current()
+    this.commit(sure.map((t) => acceptChange(t)))
+    const left = this.items().filter((t) => t.source === 'model' && t.review === 'unreviewed' && !t.deleted_at).length
+    this.set({ notice: this.notify('acceptedSure', { count: sure.length, left }) })
+    // The action on screen was one of them: on to the next open one.
+    if (current && sure.some((t) => t.id === current.id)) this.advance(current)
+    else if (!current && this.state.active) this.go(nextOpenAction(this.items(), null))
+  }
+
   /** U (and Ctrl+Z here): takes back the last change and goes back to where it was made. */
   undo = (): void => {
     const step = this.store.topStep()
@@ -360,6 +393,7 @@ export class ActionReviewController {
   private handle(event: KeyboardEvent): boolean {
     const { key, shiftKey, altKey } = event
     const mod = event.ctrlKey || event.metaKey
+    if (this.state.confirmSure) return false
     if (mod) {
       if (altKey) return false
       if (key === 'z' || key === 'Z') {

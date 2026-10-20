@@ -11,7 +11,7 @@ import { isSuggestedTag } from './facts'
 import { formatPercent } from './suggestions'
 import { eventToIn } from './taggingStore'
 import type { Change } from './outbox'
-import type { ActionGate, EventIn, Review, Tag } from './types'
+import type { ActionGate, EventIn, Review, Side, Tag } from './types'
 
 export { factTags, isSuggestedTag } from './facts'
 
@@ -42,14 +42,42 @@ export function actionItems(tags: readonly Tag[]): Tag[] {
   return tags.filter(isModelTag).sort((a, b) => a.t_ms - b.t_ms || a.id.localeCompare(b.id))
 }
 
+/** An open suggestion WiePlay is sure of: "Accept all sure actions" takes it. */
+export function isSureAction(tag: Pick<Tag, 'source' | 'review' | 'deleted_at' | 'model_sure'>): boolean {
+  return isSuggestedTag(tag) && tag.model_sure === true
+}
+
+/** The open suggestions WiePlay is sure of, in time order. */
+export function sureActions(tags: readonly Tag[]): Tag[] {
+  return actionItems(tags).filter(isSureAction)
+}
+
+/** The open suggestions that need the coach (not sure), in time order. */
+export function needsYouActions(tags: readonly Tag[]): Tag[] {
+  return actionItems(tags).filter((t) => isSuggestedTag(t) && !isSureAction(t))
+}
+
 /**
  * The next action to answer after `from`: the first open one that comes later, else the first
- * open one from the start (one skipped earlier). Null when everything is answered.
+ * open one from the start (one skipped earlier). The ones that need the coach come first; a
+ * sure one waits for "Accept all sure actions". Null when everything is answered.
  */
 export function nextOpenAction(items: readonly Tag[], from: Pick<Tag, 'id' | 't_ms'> | null): Tag | null {
-  const open = items.filter((t) => isSuggestedTag(t) && t.id !== from?.id)
+  const all = items.filter((t) => isSuggestedTag(t) && t.id !== from?.id)
+  const unsure = all.filter((t) => !isSureAction(t))
+  const open = unsure.length > 0 ? unsure : all
   if (!from) return open[0] ?? null
   return open.find((t) => t.t_ms > from.t_ms) ?? open[0] ?? null
+}
+
+/** The model's likeliest other answer: another skill and side, or no contact at all. */
+export function alternativeOf(tag: Pick<Tag, 'model_alternative'>): { code: string; side: Side } | 'none' | null {
+  const value = tag.model_alternative
+  if (!value) return null
+  if (value === 'none') return 'none'
+  const [code, side] = value.split(':')
+  if (!code || (side !== 'us' && side !== 'them')) return null
+  return { code, side }
 }
 
 export interface ActionProgress {
@@ -103,13 +131,24 @@ export function rejectChange(tag: Tag): Change {
   return { kind: 'event', payload: { ...eventToIn(tag), review: isModelTag(tag) ? 'rejected' : tag.review, deleted: true } }
 }
 
-/**
- * Why there are no suggested actions yet (PLAN §10.4a): WiePlay writes them only once its score on
- * games whose actions a coach reviewed passes the bar. Null while the bar is passed (or unknown).
- */
+/** Why there are no suggested actions (PLAN §10.4a): only when they are switched off. */
 export function gateText(t: TFunction, gate: ActionGate | null | undefined): string | null {
   if (!gate || gate.open) return null
-  if (gate.mode === 'off') return t('actions.gate.off')
-  if (gate.precision == null) return t('actions.gate.closedNoScore', { count: gate.games })
-  return t('actions.gate.closed', { count: gate.games, score: formatPercent(gate.precision) })
+  return t('actions.gate.off')
+}
+
+/**
+ * What is measured, plainly (PLAN §10.4a): on hand-checked rallies, how many suggestions are
+ * fully right, how many contacts get one, and how many sure ones were wrong. Null when unknown.
+ */
+export function measuredText(t: TFunction, gate: ActionGate | null | undefined): string | null {
+  const m = gate?.measured
+  if (!m || !m.rallies || m.precision == null || m.found == null) return null
+  return t('actions.measured', {
+    count: m.rallies,
+    precision: formatPercent(m.precision),
+    found: formatPercent(m.found),
+    sure: m.sure ?? 0,
+    wrong: m.sure_wrong ?? 0,
+  })
 }
