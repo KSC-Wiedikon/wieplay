@@ -340,21 +340,33 @@ def queue_training(db: Session, delay: timedelta, now: datetime | None = None) -
 # --- inputs a worker asks for ---------------------------------------------------------------
 
 
-def current_model(db: Session) -> tuple[ModelRun, AnalysisArtifact] | None:
-    """The newest training whose model beat v0 on held-out games."""
+def current_model(
+    db: Session, lineage_id: uuid.UUID | None = None
+) -> tuple[ModelRun, AnalysisArtifact] | None:
+    """The newest training that wrote a model for the team (`lineage_id`: its own variant,
+    PLAN §10.5b, when that training kept one) or whose model beat v0 on held-out games."""
     runs = db.scalars(
         select(ModelRun)
-        .where(ModelRun.kind == "train_actions", ModelRun.metrics["accepted"].as_boolean())
+        .where(ModelRun.kind == "train_actions")
         .order_by(ModelRun.created_at.desc())
     )
     for run in runs:
-        artifact = db.scalars(
-            select(AnalysisArtifact).where(
-                AnalysisArtifact.model_run_id == run.id, AnalysisArtifact.kind == "action_model"
+        artifacts = list(
+            db.scalars(
+                select(AnalysisArtifact).where(
+                    AnalysisArtifact.model_run_id == run.id, AnalysisArtifact.kind == "action_model"
+                )
             )
-        ).first()
-        if artifact is not None:
-            return run, artifact
+        )
+        if lineage_id is not None:
+            own = next(
+                (a for a in artifacts if (a.stats or {}).get("team") == str(lineage_id)), None
+            )
+            if own is not None:
+                return run, own
+        pooled = next((a for a in artifacts if not (a.stats or {}).get("team")), None)
+        if pooled is not None and (run.metrics or {}).get("accepted"):
+            return run, pooled
     return None
 
 
@@ -441,8 +453,8 @@ def gate(db: Session, settings: Settings | None = None) -> Gate:
     return gate_of(latest_training(db), settings or get_settings())
 
 
-def _model_out(db: Session) -> dict[str, Any] | None:
-    found = current_model(db)
+def _model_out(db: Session, lineage_id: uuid.UUID | None = None) -> dict[str, Any] | None:
+    found = current_model(db, lineage_id)
     if found is None:
         return None
     run, artifact = found
@@ -521,7 +533,7 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         found = video_inputs(db, video)
         if found is None:
             raise ValueError("the video has no signals")
-        return {**found, "model": _model_out(db)}
+        return {**found, "model": _model_out(db, video.lineage_id)}
     if job.kind != "train_actions":
         raise ValueError(f"{job.kind} has no inputs")
     train: list[dict[str, Any]] = []
@@ -549,7 +561,8 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         if not events:
             skipped.append({"video_id": str(video.id), "reason": "no tags"})
             continue
-        train.append({**entry, "events": events})
+        # The team (its lineage): the training weighs a variant of its own (PLAN §10.5b).
+        train.append({**entry, "team": str(video.lineage_id), "events": events})
     return {"model": _model_out(db), "train": train, "skipped": skipped}
 
 
@@ -598,10 +611,24 @@ class ArtifactIn(BaseModel):
     stats: dict[str, Any] = Field(default_factory=dict)
 
 
+class TeamTrainIn(BaseModel):
+    """A team's own variant (PLAN §10.5b): its games boosted, kept when it beats the pooled
+    model and the rules on the team's held-out games."""
+
+    games: int = Field(ge=0)
+    held_out: int = Field(default=0, ge=0)
+    action_f1: dict[str, float] = Field(default_factory=dict)
+    variant: Literal["pooled", "weighted"]
+    boost: float | None = None
+    reason: str | None = Field(default=None, max_length=64)
+    artifact: ArtifactIn | None = None
+
+
 class TrainResult(BaseModel):
     model: ModelIn
     artifact: ArtifactIn | None = None
     accepted: bool
+    teams: dict[str, TeamTrainIn] = Field(default_factory=dict, max_length=1000)
     timing: dict[str, Any] = Field(default_factory=dict)
     # summary (v0/v1 on held-out games, contact recall) and per video {"v0", "v1", ...}
     evaluation: dict[str, Any] = Field(default_factory=dict)
@@ -830,12 +857,30 @@ def complete_train(
                 **result.artifact.model_dump(),
             )
         )
+    own: set[str] = set()  # teams with a model of their own from this training
+    for team, mine in result.teams.items():
+        if mine.artifact is None:
+            continue
+        if mine.variant == "pooled":
+            raise ValueError("a team's own model needs a variant")
+        analysis._check_path(mine.artifact.nas_path, job.params["out_dir"])
+        data = mine.artifact.model_dump()
+        data["stats"] = {**(data.get("stats") or {}), "team": team}
+        db.add(AnalysisArtifact(video_id=None, model_run_id=run.id, kind="action_model", **data))
+        own.add(team)
+    run.metrics = {
+        **run.metrics,
+        "teams": {
+            team: mine.model_dump(exclude={"artifact"}) | {"model": team in own}
+            for team, mine in result.teams.items()
+        },
+    }
     db.flush()
     after = gate_of(run, settings or get_settings())
     run.metrics = {**run.metrics, "gate": after.as_dict()}
-    if after.open and (result.accepted or not before.open):
-        # A new model that is good enough, or the bar passed for the first time: suggestions
-        # for every game nobody has done yet.
+    if after.open and (result.accepted or own or not before.open):
+        # A new model that is good enough (for every team, or a team's own), or the bar passed
+        # for the first time: suggestions for every game nobody has done yet.
         trained = {str(v.get("video_id")) for v in result.dataset}
         for video in db.scalars(
             select(Video).where(
@@ -844,7 +889,8 @@ def complete_train(
                 Video.actions_reviewed_at.is_(None),
             )
         ):
-            if str(video.id) not in trained:
+            changed = result.accepted or not before.open or str(video.lineage_id) in own
+            if str(video.id) not in trained and changed:
                 queue_actions(db, video, reason="train_actions")
     return run
 

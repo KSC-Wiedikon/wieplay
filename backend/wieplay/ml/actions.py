@@ -52,7 +52,7 @@ import itertools
 import math
 import pickle
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -1340,7 +1340,11 @@ class TrainVideo:
         return np.concatenate(Xs), np.array(ys), np.array(sides), np.array(mask, dtype=bool)
 
 
-def fit(videos: Sequence[TrainVideo], threads: int = 4) -> ActionModel | None:
+def fit(
+    videos: Sequence[TrainVideo], threads: int = 4, boost: Mapping[str, float] | None = None
+) -> ActionModel | None:
+    """v1 on these games, each weighing the same; `boost`: a game's weight times this (a
+    team's own games in its per-team variant, PLAN §10.5b)."""
     import sklearn
     from sklearn.ensemble import HistGradientBoostingClassifier
     from threadpoolctl import threadpool_limits
@@ -1354,7 +1358,8 @@ def fit(videos: Sequence[TrainVideo], threads: int = 4) -> ActionModel | None:
         ys.append(y)
         ss.append(s)
         ms.append(m)
-        ws.append(np.full(len(y), 1.0 / len(y)))  # each game weighs the same
+        # Each game weighs the same, times its boost.
+        ws.append(np.full(len(y), float((boost or {}).get(v.video_id, 1.0)) / len(y)))
     if not Xs:
         return None
     X, y = np.concatenate(Xs), np.concatenate(ys)
@@ -1439,3 +1444,63 @@ def counts(actions: Sequence[Action]) -> dict[str, int]:
     for a in actions:
         out[a.code] = out.get(a.code, 0) + 1
     return out
+
+
+# --- per team (PLAN §10.5b) ---------------------------------------------------------------------
+
+# A team's own reviewed games before a variant of its own is weighed; its games weigh this much
+# more in it; kept when its mean action F1 on the team's held-out games beats the pooled
+# model's (and the rules') by TEAM_MARGIN.
+TEAM_MIN_GAMES = 2
+TEAM_BOOST = 3.0
+TEAM_MARGIN = 0.01
+TEAM_MAX_HELD = 8
+
+
+def per_team(
+    videos: Sequence[TrainVideo], teams: Mapping[str, str], threads: int = 4
+) -> dict[str, dict[str, Any]]:
+    """Per team (`teams`: video id → team key) with at least TEAM_MIN_GAMES reviewed games:
+    on each of its games held out (split by match), the rules (v0), the pooled v1 (every other
+    game) and v1 with the team's games boosted; `variant` "weighted" when that beats both."""
+    labelled = [v for v in videos if v.events]
+    by_team: dict[str, list[int]] = {}
+    for i, v in enumerate(labelled):
+        team = teams.get(v.video_id)
+        if team is not None:
+            by_team.setdefault(team, []).append(i)
+    out: dict[str, dict[str, Any]] = {}
+    for team, idx in sorted(by_team.items()):
+        if len(idx) < TEAM_MIN_GAMES:
+            out[team] = {"games": len(idx), "variant": "pooled", "reason": "games"}
+            continue
+        held = idx[:TEAM_MAX_HELD]
+        scores: dict[str, list[float]] = {"v0": [], "pooled": [], "weighted": []}
+        for i in held:
+            train = [v for j, v in enumerate(labelled) if j != i]
+            v = labelled[i]
+            scores["v0"].append(float(_held_out_score(v, None).get("action_f1") or 0.0))
+            pooled = fit(train, threads)
+            scores["pooled"].append(float(_held_out_score(v, pooled).get("action_f1") or 0.0))
+            boost = {labelled[j].video_id: TEAM_BOOST for j in idx if j != i}
+            weighted = fit(train, threads, boost)
+            scores["weighted"].append(float(_held_out_score(v, weighted).get("action_f1") or 0.0))
+        means = {k: round(sum(x) / len(x), 4) for k, x in scores.items()}
+        best_other = max(means["v0"], means["pooled"])
+        variant = "weighted" if means["weighted"] >= best_other + TEAM_MARGIN else "pooled"
+        out[team] = {
+            "games": len(idx),
+            "held_out": len(held),
+            "action_f1": means,
+            "variant": variant,
+            "boost": TEAM_BOOST,
+        }
+    return out
+
+
+def fit_team(
+    videos: Sequence[TrainVideo], teams: Mapping[str, str], team: str, threads: int = 4
+) -> ActionModel | None:
+    """The team's variant on every reviewed game: its own games boosted."""
+    boost = {v.video_id: TEAM_BOOST for v in videos if teams.get(v.video_id) == team}
+    return fit(videos, threads, boost)

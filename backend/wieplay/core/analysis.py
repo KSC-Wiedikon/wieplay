@@ -239,21 +239,33 @@ def latest_features(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, 
     return {a.video_id: a for a in rows if a.video_id is not None}  # the newest wins
 
 
-def current_rally_model(db: Session) -> tuple[ModelRun, AnalysisArtifact] | None:
-    """The newest training that beat v0 and wrote a model."""
+def current_rally_model(
+    db: Session, lineage_id: uuid.UUID | None = None
+) -> tuple[ModelRun, AnalysisArtifact] | None:
+    """The newest training that wrote a model for the team (`lineage_id`: its own variant,
+    PLAN §10.5b, when that training kept one) or that beat v0 (the pooled model)."""
     runs = db.scalars(
         select(ModelRun)
-        .where(ModelRun.kind == "train_rallies", ModelRun.metrics["accepted"].as_boolean())
+        .where(ModelRun.kind == "train_rallies")
         .order_by(ModelRun.created_at.desc())
     )
     for run in runs:
-        artifact = db.scalars(
-            select(AnalysisArtifact).where(
-                AnalysisArtifact.model_run_id == run.id, AnalysisArtifact.kind == "rally_model"
+        artifacts = list(
+            db.scalars(
+                select(AnalysisArtifact).where(
+                    AnalysisArtifact.model_run_id == run.id, AnalysisArtifact.kind == "rally_model"
+                )
             )
-        ).first()
-        if artifact is not None:
-            return run, artifact
+        )
+        if lineage_id is not None:
+            own = next(
+                (a for a in artifacts if (a.stats or {}).get("team") == str(lineage_id)), None
+            )
+            if own is not None:
+                return run, own
+        pooled = next((a for a in artifacts if not (a.stats or {}).get("team")), None)
+        if pooled is not None and (run.metrics or {}).get("accepted"):
+            return run, pooled
     return None
 
 
@@ -295,8 +307,8 @@ def latest_training(db: Session) -> ModelRun | None:
     ).first()
 
 
-def _rally_model_out(db: Session) -> dict[str, Any] | None:
-    found = current_rally_model(db)
+def _rally_model_out(db: Session, lineage_id: uuid.UUID | None = None) -> dict[str, Any] | None:
+    found = current_rally_model(db, lineage_id)
     if found is None:
         return None
     run, artifact = found
@@ -319,7 +331,9 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     rallies and the proposals a coach rejected there, and the other analysed games to
     propose rallies for."""
     if job.kind == "analyse":
-        return {"rally_model": _rally_model_out(db), "serve_model": _serve_model_out(db)}
+        video = db.get(Video, job.video_id) if job.video_id else None
+        lineage = video.lineage_id if video is not None else None
+        return {"rally_model": _rally_model_out(db, lineage), "serve_model": _serve_model_out(db)}
     if job.kind != "train_rallies":
         raise ValueError(f"{job.kind} has no inputs")
     videos = _analysable_videos(db)
@@ -350,6 +364,9 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
             continue
         entry: dict[str, Any] = {
             "video_id": str(video.id),
+            # The team (its lineage): the training weighs a variant of its own per team (PLAN
+            # §10.5b) and proposes with it for the team's other games.
+            "team": str(video.lineage_id),
             "features": _artifact_out(artifact),
             # Series the API already has for it (the worker adds what is missing), and the
             # serve rule its serve track was made with (the worker redoes an older one).
@@ -471,10 +488,26 @@ class ServeTrainIn(BaseModel):
     evaluation: dict[str, Any] = Field(default_factory=dict)
 
 
+class TeamTrainIn(BaseModel):
+    """A team's own variant (PLAN §10.5b): scored on its held-out games against the pooled
+    model, kept when better (`variant` weighted | calibrated), with its model."""
+
+    games: int = Field(ge=0)
+    held_out: int = Field(default=0, ge=0)
+    boundary_f1: dict[str, float] = Field(default_factory=dict)
+    variant: Literal["pooled", "weighted", "calibrated"]
+    boost: float | None = None
+    threshold: float | None = None
+    reason: str | None = Field(default=None, max_length=64)
+    artifact: ArtifactIn | None = None
+
+
 class TrainResult(BaseModel):
     model: ModelIn
     artifact: ArtifactIn | None = None  # the v1 model, when one was trained
     accepted: bool
+    # Per team (lineage id): its own variant, when it has enough reviewed games.
+    teams: dict[str, TeamTrainIn] = Field(default_factory=dict, max_length=1000)
     timing: dict[str, Any] = Field(default_factory=dict)
     # summary (v0/v1 on held-out games) and per training video {"v0": {...}, "v1": {...}}
     evaluation: dict[str, Any] = Field(default_factory=dict)
@@ -680,6 +713,19 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
                 **serve.artifact.model_dump(),
             )
         )
+    own: set[str] = set()  # teams with a model of their own from this training
+    for team, mine in result.teams.items():
+        if mine.artifact is None:
+            continue
+        if mine.variant == "pooled":
+            raise ValueError("a team's own model needs a variant")
+        _check_path(mine.artifact.nas_path, job.params["out_dir"])
+        if mine.artifact.format != "pickle":
+            raise ValueError("rally models are stored as pickle")
+        data = mine.artifact.model_dump()
+        data["stats"] = {**(data.get("stats") or {}), "team": team}
+        db.add(AnalysisArtifact(video_id=None, model_run_id=run.id, kind="rally_model", **data))
+        own.add(team)
     per_video: dict[str, Any] = {}
     for video_id, entry in (result.evaluation.get("videos") or {}).items():
         per_video[str(video_id)] = {"mode": "trained_on", "lovo": entry}
@@ -687,8 +733,9 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
         video = db.get(Video, video_id, with_for_update=True)
         if video is None or video.status != "ready" or video.sport not in SPORTS:
             continue
-        # The proposals come from this run when v1 was accepted, else from v0.
-        if rallies.finder == "v1" and not result.accepted:
+        # The proposals come from this run when v1 was accepted (or the team's own model
+        # from this run), else from v0.
+        if rallies.finder == "v1" and not result.accepted and str(video.lineage_id) not in own:
             raise ValueError("v1 proposals from a model that was not accepted")
         source = run.id if rallies.finder == "v1" else None
         per_video[str(video_id)] = apply_rallies(db, video, run, rallies, source_run=source)
@@ -711,6 +758,10 @@ def complete_train(db: Session, job: Job, payload: dict[str, Any]) -> ModelRun:
         "finder": "v1" if result.accepted else "v0",
         "summary": result.evaluation.get("summary", {}),
         "videos": per_video,
+        "teams": {
+            team: mine.model_dump(exclude={"artifact"}) | {"model": team in own}
+            for team, mine in result.teams.items()
+        },
         "serve": {
             "accepted": bool(serve and serve.accepted),
             "finder": "v1" if serve and serve.accepted else "v0",

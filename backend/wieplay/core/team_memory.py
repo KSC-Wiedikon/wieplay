@@ -647,8 +647,8 @@ def team_scores(db: Session, team: WdTeam, videos: Sequence[Video]) -> dict[str,
         out["rallies"] = {
             "trained_at": run.created_at.isoformat() if run.created_at else None,
             "games": len(held),
-            "v0": _mean((h.get("v0") or {}).get("boundary_f1") for h in held),
-            "v1": _mean((h.get("v1") or {}).get("boundary_f1") for h in held),
+            "v0": _mean(((h.get("v0") or {}).get("boundary") or {}).get("f1") for h in held),
+            "v1": _mean(((h.get("v1") or {}).get("boundary") or {}).get("f1") for h in held),
             "team": team_entry or None,
         }
     run = db.scalars(

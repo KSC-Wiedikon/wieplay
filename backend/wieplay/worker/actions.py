@@ -312,6 +312,28 @@ def train(ctx: Context) -> dict[str, Any]:
         _write(target, data=model.dumps())
         artifact = _artifact(root, target, "pickle", {"games": len(videos)})
         artifact["schema_version"] = ac.MODEL_FORMAT
+    # Per team (PLAN §10.5b): its own games boosted, where its held-out games say it helps.
+    teams = {
+        str(e["video_id"]): str(e["team"])
+        for e in entries
+        if e.get("team") and str(e["video_id"]) in {v.video_id for v in videos}
+    }
+    ctx.report(0.93, "per team")
+    team_eval = ac.per_team(videos, teams, threads) if len(videos) >= 2 else {}
+    for team, entry in team_eval.items():
+        if entry.get("variant") != "weighted":
+            continue
+        team_model = ac.fit_team(videos, teams, team, threads)
+        if team_model is None:
+            entry.update(variant="pooled", reason="no model")
+            continue
+        target = out / f"actions-v1-{team[:8]}-{ctx.job.id[:8]}.pkl"
+        _write(target, data=team_model.dumps())
+        found_artifact = _artifact(root, target, "pickle", {"games": len(videos)})
+        found_artifact["schema_version"] = ac.MODEL_FORMAT
+        entry["artifact"] = found_artifact
+    if ctx.cancel.is_set():
+        raise ffmpeg.Cancelled()
     return {
         "model": {
             "name": TRAIN_MODEL,
@@ -320,6 +342,7 @@ def train(ctx: Context) -> dict[str, Any]:
         },
         "artifact": artifact,
         "accepted": accepted,
+        "teams": team_eval,
         "timing": {
             "wall_s": round(time.perf_counter() - started, 1),
             "games": len(videos),
