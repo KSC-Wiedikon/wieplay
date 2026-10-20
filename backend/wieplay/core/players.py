@@ -12,8 +12,8 @@ gives it a number; the number reader only suggests one. Identity is the number i
 video's roster snapshot (`video_roster`), as for hand-made tags.
 
 Attribution rules (like every model output, PLAN §11):
-- a model's suggested action (source "model", unreviewed) gets the player written into it
-  (`number`, `member_id`, `track_ref`), as a suggestion the coach reviews with the action;
+- WiePlay's action (source "model", nobody answered it: auto or to check) gets the player
+  written into it (`number`, `member_id`, `track_ref`), a tag like the action's own;
   a number a person set is never overwritten, and a number WiePlay wrote is taken back when
   the gallery no longer supports it;
 - a coach's tag without a number is never changed: its suggestion stays beside it
@@ -263,10 +263,13 @@ def _rendition(video: Video) -> Any:
 
 
 def after_court(db: Session, video: Video | None, job: Job, auto: bool = False) -> None:
-    """The ball's path and the court (its setups) are there: the players follow, when they
-    are switched on (`players_auto`, off by default: a beta at ~2 h of CPU a match); once per
-    video unless asked again (a rerun replaces the clusters)."""
-    if not auto or video is None or job.kind != "court" or job.status != "succeeded":
+    """The ball's path and the court (its setups) are there, or the court job failed for good
+    (the players run on the nominal camera then): the players follow, when they are switched
+    on (`players_auto`, on since 20.10.2026: the GPU worker takes the job, its busy guard
+    only makes it wait); once per video unless asked again (a rerun replaces the clusters)."""
+    if not auto or video is None or job.kind != "court":
+        return
+    if job.status not in ("succeeded", "failed", "cancelled"):
         return
     if can_run(video) is not None or video.meets_standard is False:
         return
@@ -1145,8 +1148,8 @@ def attribute_event(
 
 
 def _model_owned(ev: Event) -> bool:
-    """A model's action nobody has answered: WiePlay may write its player."""
-    return ev.source == "model" and ev.review == "unreviewed" and ev.deleted_at is None
+    """WiePlay's action nobody has answered (auto or to check): WiePlay may write its player."""
+    return ev.source == "model" and ev.review in tagging.MODEL_OWN and ev.deleted_at is None
 
 
 # The official scoresheet's server for a serve (PLAN §10.3a, §10.5): as sure as this, so a

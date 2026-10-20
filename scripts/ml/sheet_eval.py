@@ -219,7 +219,7 @@ def dump(game_id: int) -> None:
                 "serve_tags": [
                     [int(t), side]
                     for t, side, source, review in serves
-                    if not (source == "model" and review in ("unreviewed", "rejected", "merged"))
+                    if source != "model" or review in ("confirmed", "corrected")
                 ],
             }
     json.dump(out, sys.stdout)

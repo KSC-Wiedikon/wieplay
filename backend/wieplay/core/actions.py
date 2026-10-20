@@ -1,9 +1,10 @@
-"""Suggested actions, API side (PLAN §10.4a): serve, reception, set, attack, block, dig and
-freeball per rally, as events a coach reviews, and the loop that learns from the answers.
+"""WiePlay's actions, API side (PLAN §10.4a): serve, reception, set, attack, block, dig and
+freeball per rally, as tags that count from the start, and the loop that learns from the
+coaches' answers.
 
     trajectory done, a training, rallies done, a set or serve changed ──actions job──▶
-        suggested events (source "model", review "unreviewed") in every rally nobody tagged;
-        in the rallies a coach tagged, only their score against the coach's tags
+        tags (source "model", review "auto" when sure, else "check": to check) in every rally
+        nobody tagged; in the rallies a coach tagged, only their score against the coach's
     coach marks the actions done ──train_actions (debounced)──▶ v1 learned from every
         reviewed game, kept only when it beats v0 on held-out games; new suggestions for
         every game nobody has done yet
@@ -12,13 +13,14 @@ The worker (wieplay/worker/actions.py, wieplay/ml/actions.py) works in the camer
 and far); the sides of the rallies (which end we play at, PLAN §10.3) turn them into us and
 them here, when the suggestions are written.
 
-Suggestion rules (like the rally proposals', §10.1): a model never writes into a rally that
-has a person's tags (made by hand, imported, or a suggestion a person accepted or
-corrected); suggestions nobody touched are replaced on the next run; a new suggestion within
-±0.3 s of one a coach rejected, or of a tag that is there, is dropped. Stats, smart reels and
-the score ignore a suggestion until it is accepted (tagging.event_stands).
+Rules for writing (like the rallies', §10.1): a model never writes into a rally that has a
+person's tags (made by hand, imported, or one of WiePlay's a person accepted or corrected);
+WiePlay's tags nobody touched are replaced on the next run; a new one within ±0.3 s of one a
+coach rejected, or of a tag that is there, is dropped. Stats and smart reels count them like a
+person's (tagging.event_stands; "sure only" leaves out those to check); the automatic scoring
+never takes them as facts (tagging.event_fact).
 
-What a suggestion carries for the player attribution that follows (§10.5): the contact's
+What an action carries for the player attribution that follows (§10.5): the contact's
 time (`t_ms`, `frame`, `time_precision` "frame" when the analysis ran at the video's rate,
 else "adjusted"), the side, the ball at the contact (`ball_x`, `ball_y`, normalised image
 coordinates) and, with a calibrated court, the floor below it (`court_x`, `court_y`, metres).
@@ -66,7 +68,7 @@ AFTER_SCORING = timedelta(seconds=90)
 SCORING_REASONS = frozenset({"train", "rallies_reviewed", "request", "changes", "cli"})
 TOLERANCE_MS = action_eval.TOLERANCE_MS
 MAX_ACTIONS = tagging.MAX_EVENTS
-HUMAN_REVIEWS = ("confirmed", "corrected")
+HUMAN_REVIEWS = tagging.HUMAN_REVIEWS
 SURE_SIDE = 0.97  # a coach's server or winner, in the camera's terms
 
 
@@ -81,41 +83,53 @@ def coach_event_filter() -> Any:
     )
 
 
+def label_event_filter() -> Any:
+    """The tags of a game a coach marked done (training labels): the coach's and WiePlay's
+    sure ones ("done" is refused while any is still to check)."""
+    return coach_event_filter() | (
+        Event.deleted_at.is_(None) & (Event.source == "model") & (Event.review == "auto")
+    )
+
+
 def _untouched() -> Any:
     return (
         (Event.source == "model")
-        & (Event.review == "unreviewed")
+        & Event.review.in_(tagging.MODEL_OWN)
         & Event.updated_by.is_(None)
         & Event.deleted_at.is_(None)
     )
 
 
-def open_suggestions(db: Session, video_id: uuid.UUID) -> int:
-    """Suggested actions nobody has accepted, corrected or rejected yet."""
+def actions_to_check(db: Session, video_id: uuid.UUID) -> int:
+    """WiePlay's actions that wait for a person (review "check")."""
     return int(
         db.scalar(
             select(func.count())
             .select_from(Event)
             .where(
                 Event.video_id == video_id,
-                Event.source == "model",
-                Event.review == "unreviewed",
                 Event.deleted_at.is_(None),
+                tagging.event_to_check(),
             )
         )
         or 0
     )
 
 
+REVIEW_KEYS = ("auto", "check", "confirmed", "corrected", "rejected")
+
+
 def suggestion_counts(db: Session, video_id: uuid.UUID) -> dict[str, int]:
+    """WiePlay's actions by review state (a deleted one counts as rejected)."""
     rows = db.execute(
         select(Event.review, Event.deleted_at.is_(None), func.count())
         .where(Event.video_id == video_id, Event.source == "model")
         .group_by(Event.review, Event.deleted_at.is_(None))
     ).all()
-    counts = {"unreviewed": 0, "confirmed": 0, "corrected": 0, "rejected": 0}
+    counts = dict.fromkeys(REVIEW_KEYS, 0)
     for review, live, n in rows:
-        key = review if live and review in counts else "rejected"
+        key = "check" if review == "unreviewed" else review  # older rows: to check
+        key = key if live and key in counts else "rejected"
         counts[key] += int(n)
     return counts
 
@@ -212,12 +226,18 @@ def rally_inputs(db: Session, video: Video) -> list[dict[str, Any]]:
     return out
 
 
-def coach_events(db: Session, video: Video, rallies: list[Segment]) -> dict[uuid.UUID, list[Event]]:
-    """The coach's tags per rally (a serve up to 2 s before the rally belongs to it)."""
+def coach_events(
+    db: Session, video: Video, rallies: list[Segment], *, labels: bool = False
+) -> dict[uuid.UUID, list[Event]]:
+    """The coach's tags per rally (a serve up to 2 s before the rally belongs to it); with
+    `labels`, a done game's training labels (label_event_filter)."""
     events = list(
         db.scalars(
             select(Event)
-            .where(Event.video_id == video.id, coach_event_filter())
+            .where(
+                Event.video_id == video.id,
+                label_event_filter() if labels else coach_event_filter(),
+            )
             .order_by(Event.t_ms)
         )
     )
@@ -240,9 +260,9 @@ def _features(db: Session, video: Video) -> AnalysisArtifact | None:
 def can_propose(db: Session, video: Video) -> str | None:
     """Why a video gets no suggested actions, or None."""
     if video.sport not in SPORTS:
-        return f"No suggested actions for {video.sport} yet"
+        return f"No automatic actions for {video.sport} yet"
     if video.status != "ready":
-        return "Suggest actions once the video is ready"
+        return "Find the actions once the video is ready"
     if _features(db, video) is None:
         return "Analyse the video first"
     return None
@@ -479,7 +499,7 @@ def _training_events(db: Session, video: Video) -> list[list[Any]]:
     rallies = _live_rallies(db, video)
     sides = near_is_us(db, video, rallies)
     out: list[list[Any]] = []
-    for rally_id, events in coach_events(db, video, rallies).items():
+    for rally_id, events in coach_events(db, video, rallies, labels=True).items():
         near_us = sides.get(rally_id)
         if near_us is None:
             continue
@@ -522,8 +542,8 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
         entry = video_inputs(db, video)
         if entry is None:
             continue
-        if open_suggestions(db, video.id):
-            skipped.append({"video_id": str(video.id), "reason": "open suggestions"})
+        if actions_to_check(db, video.id):
+            skipped.append({"video_id": str(video.id), "reason": "to check"})
             continue
         events = _training_events(db, video)
         if not events:
@@ -705,7 +725,7 @@ def apply_actions(
                 confidence=round(item.confidence, 3),
                 model_sure=item.sure,
                 model_alternative=_alternative(item.alternative, near_us),
-                review="unreviewed",
+                review=tagging.model_state(item.sure),
                 version=1,
             )
         )
@@ -851,9 +871,9 @@ def complete(
 # --- the coach's side ------------------------------------------------------------------------
 
 
-class OpenSuggestions(Exception):
+class ToCheck(Exception):
     def __init__(self, count: int) -> None:
-        super().__init__(f"{count} suggested actions are still open")
+        super().__init__(f"{count} actions are still to check")
         self.count = count
 
 
@@ -861,11 +881,12 @@ def mark_reviewed(
     db: Session, video: Video, actor: int, reviewed: bool, train_delay: timedelta
 ) -> dict[str, Any]:
     """The coach says the video's actions are complete and right (or takes that back). Not
-    while suggestions are open: each one is answered first, so every label is a person's.
-    Either way the training set changed: a (debounced) training is queued."""
+    while actions are still to check: each one is answered first, so the coach stands behind
+    every label (WiePlay's sure ones included). Either way the training set changed: a
+    (debounced) training is queued."""
     if reviewed:
-        if count := open_suggestions(db, video.id):
-            raise OpenSuggestions(count)
+        if count := actions_to_check(db, video.id):
+            raise ToCheck(count)
         video.actions_reviewed_at = datetime.now(UTC)
         video.actions_reviewed_by = actor
     else:

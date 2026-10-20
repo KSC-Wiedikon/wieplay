@@ -18,10 +18,11 @@ What it writes, always next to the coach's work and never in its place (PLAN §1
   (`score_confidence`), "check" (`score_conflict`, `score_note`), the serve side
   (`serving_court`, `serve_confidence`); `tagging.rescore` then fills the score line with
   the model's winners where the coach has none (`score_source` "model");
-- sets (`period`, source "model", review "unreviewed") when the video has no coach's sets;
-  the model's first server and our side per set (`model_first_serve`, `model_court_side`);
+- sets (`period`, source "model", review "auto" when sure, else "check") when the video has no
+  coach's sets; the model's first server and our side per set (`model_first_serve`,
+  `model_court_side`);
 - gap labels (segments warmup / set_break / timeout / stoppage / other_dead, source
-  "model", review "unreviewed"), replaced on every run unless a coach answered them;
+  "model", review "auto" or "check"), replaced on every run unless a coach answered them;
 - a `model_run` (kind "score") with the metrics: per set the official score, the score line's
   and the evidence's final; flagged rallies; gaps; on the coach's rallies, how often the
   model (scored blind to them) gets the serve side and the winner right;
@@ -35,7 +36,9 @@ What it writes, always next to the coach's work and never in its place (PLAN §1
   winners as a hint, a draft read from the photo as soft evidence (its boxes the decode is sure
   of are resolved in the draft);
 - per rally whether the joint decode is sure (`score_sure`) and why the coach is asked
-  (`score_reasons`, the first one also as `score_note`; PLAN §10.1 "Needs you").
+  (`score_reasons`, the first one also as `score_note`), the likeliest other answer
+  (`model_alternative`); WiePlay's rallies nobody answered follow it: "auto" when sure, else
+  "check" (PLAN §10: everything WiePlay assigns counts, the unsure part is "to check").
 """
 
 from __future__ import annotations
@@ -191,7 +194,7 @@ def _serve_calls(db: Session, video: Video, rallies: Sequence[Segment]) -> list[
                 Event.video_id == video.id,
                 Event.code == "S",
                 Event.deleted_at.is_(None),
-                tagging.event_stands(),  # a suggested serve is no fact
+                tagging.event_fact(),  # WiePlay's serve is its output, not a fact
             )
             .order_by(Event.t_ms)
         ).all()
@@ -297,7 +300,7 @@ def _propose_periods(
                 start_ms=start,
                 end_ms=end,
                 source="model",
-                review="unreviewed",
+                review=tagging.model_state(confidence >= tagging.SET_SURE),
                 confidence=confidence,
                 model_run_id=run.id,
                 version=1,
@@ -315,7 +318,7 @@ def _obs(
     call: str | None,
     gap: gaps.GapEvidence | None,
 ) -> sc.RallyObs:
-    open_proposal = rally.source == "model" and rally.review == "unreviewed"
+    open_proposal = rally.source == "model" and rally.review in tagging.MODEL_OWN
     return sc.RallyObs(
         key=str(rally.id),
         start_ms=rally.start_ms,
@@ -472,6 +475,7 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
         # Outside every set (a warm-up burst, after the match): the coach says what it is.
         rally.score_sure = False if set_ins else None
         rally.score_reasons = [{"code": "no_set"}] if set_ins else None
+        rally.model_alternative = None
         if o.p_near is None:
             rally.serving_court = rally.serve_confidence = None
         else:
@@ -487,8 +491,12 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
             rally.score_reasons = [r.as_json() for r in out.reasons]
             rally.score_note = out.reasons[0].code if out.reasons else out.note
             rally.score_conflict = rally.score_note is not None
+            rally.model_alternative = _alternative(out)
             if out.missed != (0, 0):
                 rally.model_missed_us, rally.model_missed_them = out.missed
+    for rally in rallies:
+        # WiePlay's rallies nobody answered: sure ones count as they are, the rest is to check.
+        tagging.keep_model_state(rally, rally.score_sure)
     for period in periods:
         period.model_missed_us = period.model_missed_them = None
     for period, so in zip(scored, match.sets, strict=True):
@@ -498,6 +506,8 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
             period.model_missed_us, period.model_missed_them = so.missed_after
         if period.source == "model":
             period.model_run_id = run.id
+    for period in periods:
+        tagging.keep_model_state(period, tagging.period_sure(period))
 
     if sheet is not None:
         # A draft read from the photo: the boxes the joint decode is sure of resolve on their
@@ -583,6 +593,14 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     actions.after_scoring(db, video, reason)
     return run
+
+
+def _alternative(out: sc.RallyOut) -> str | None:
+    """The decode's likeliest other answer for a rally: the other winner, or no point."""
+    answers = {"us": out.p_us, "them": out.p_them, "none": out.p_none}
+    answers.pop(out.won_by if out.point and out.won_by else "none", None)
+    best = max(answers, key=lambda k: answers[k])
+    return best if answers[best] > 0 else None
 
 
 def _shown_confidence(out: sc.RallyOut) -> float:
@@ -813,8 +831,8 @@ def _sheet_timeouts(
     blocked = [
         (int(s), int(e))
         for s, e, source, review, deleted in others
-        # a coach's break, or one of these a coach removed; the model's open ones are replaced
-        if (deleted is None and not (source == "model" and review == "unreviewed"))
+        # a coach's break, or one of these a coach removed; WiePlay's untouched ones are replaced
+        if (deleted is None and not (source == "model" and review in tagging.MODEL_OWN))
         or (deleted is not None and source == "import")
     ]
     for start, end, team, ref in found:
@@ -860,7 +878,7 @@ def _label_gaps(
                 Segment.video_id == video.id,
                 Segment.kind.in_(GAP_KINDS),
                 Segment.source == "model",
-                Segment.review == "unreviewed",
+                Segment.review.in_(tagging.MODEL_OWN),
                 Segment.updated_by.is_(None),
                 Segment.deleted_at.is_(None),
             )
@@ -902,6 +920,8 @@ def _label_gaps(
             same.start_ms, same.end_ms = span
             same.confidence = label.confidence
             same.model_run_id = run.id
+            same.model_alternative = _gap_alternative(label)
+            tagging.keep_model_state(same, label.confidence >= tagging.GAP_SURE)
             continue
         db.add(
             Segment(
@@ -913,7 +933,8 @@ def _label_gaps(
                 source="model",
                 model_run_id=run.id,
                 confidence=label.confidence,
-                review="unreviewed",
+                model_alternative=_gap_alternative(label),
+                review=tagging.model_state(label.confidence >= tagging.GAP_SURE),
                 version=1,
             )
         )
@@ -921,6 +942,13 @@ def _label_gaps(
         db.delete(gone)
     db.flush()
     return counts
+
+
+def _gap_alternative(label: gaps.GapLabel) -> str | None:
+    """A timeout WiePlay is unsure of may be another stoppage, and the other way round."""
+    if label.confidence >= tagging.GAP_SURE:
+        return None
+    return {"timeout": "stoppage", "stoppage": "timeout"}.get(label.kind)
 
 
 def _same_stretch(span: tuple[int, int], segment: Segment) -> bool:

@@ -325,7 +325,7 @@ def main() -> None:
     open_keys = {
         r["id"]
         for r in dump["rallies"]
-        if r["deleted_at"] is None and r["source"] == "model" and r["review"] == "unreviewed"
+        if r["deleted_at"] is None and r["source"] == "model" and r["review"] in ("unreviewed", "auto", "check")
     }
     print(
         "mix  sure>=  rallies  sure (share)  wrong among sure  needs coach  (open sugg.)  "

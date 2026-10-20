@@ -9,10 +9,11 @@
 Workers hold no database access: they ask for their inputs (`job_inputs`), compute, and
 send a result that is validated and written here, in the worker's request transaction.
 
-Proposal rules: a model never overwrites or duplicates a coach's rally. A video whose
-rallies a person made, confirmed or corrected gets no proposals, only metrics. Proposals
-nobody touched are replaced on the next run; a new proposal that overlaps a rally that is
-there, or one a coach rejected, is dropped.
+Rules for WiePlay's rallies (PLAN §10: they are tags from the start, "auto" when the joint
+decode is sure of them, else "check"): a model never overwrites or duplicates a person's
+rally. A video whose rallies a person made, confirmed or corrected gets no new ones, only
+metrics. WiePlay's rallies nobody answered are replaced on the next run; a new one that
+overlaps a rally that is there, or one a person rejected, is dropped.
 """
 
 from __future__ import annotations
@@ -53,7 +54,7 @@ MAX_PROPOSALS = 1000
 # A proposal is dropped when it covers this much of a rally a coach rejected.
 REJECTED_OVERLAP = 0.5
 NAS_PATH = re.compile(r"[A-Za-z0-9._/-]+")
-HUMAN_REVIEWS = ("confirmed", "corrected")
+HUMAN_REVIEWS = tagging.HUMAN_REVIEWS
 
 Finder = Literal["v0", "v1"]
 
@@ -81,6 +82,23 @@ def human_rallies(db: Session, video_id: uuid.UUID) -> list[tuple[int, int]]:
     return [(int(s), int(e)) for s, e in rows]
 
 
+def label_rallies(db: Session, video_id: uuid.UUID) -> list[tuple[int, int]]:
+    """The rallies of a game a coach marked done (training labels, PLAN §11): every rally that
+    stands, a person's and WiePlay's sure ones alike ("done" is refused while any is still to
+    check, so the coach stands behind all of them)."""
+    rows = db.execute(
+        select(Segment.start_ms, Segment.end_ms)
+        .where(
+            Segment.video_id == video_id,
+            Segment.kind == "rally",
+            Segment.deleted_at.is_(None),
+            tagging.stands(),
+        )
+        .order_by(Segment.start_ms)
+    ).all()
+    return [(int(s), int(e)) for s, e in rows]
+
+
 def rejected_rallies(db: Session, video_id: uuid.UUID) -> list[tuple[int, int]]:
     """The model's rally proposals a coach rejected ("not a rally"): the hard negatives the
     finder learns most from. A merged proposal is not one (the rally it went into covers
@@ -102,7 +120,7 @@ def _untouched_proposals() -> Any:
     return (
         (Segment.kind == "rally")
         & (Segment.source == "model")
-        & (Segment.review == "unreviewed")
+        & Segment.review.in_(tagging.MODEL_OWN)
         & Segment.updated_by.is_(None)
         & Segment.deleted_at.is_(None)
     )
@@ -338,13 +356,13 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
             "tracks": sorted(have_tracks.get(video.id, set())),
             "serve_rule": serve_rule.get(video.id),
         }
-        rallies = human_rallies(db, video.id) if video.rallies_reviewed_at else []
+        rallies = label_rallies(db, video.id) if video.rallies_reviewed_at else []
         if rallies and video.lineage_id in no_training:
-            # Reviewed, but not ours to learn from: no labels, and no new proposals either.
+            # Reviewed, but not ours to learn from: no labels, and no new rallies either.
             skipped.append({**entry, "reason": "guest club, no training"})
-        elif rallies and open_proposals(db, video.id):
+        elif rallies and rallies_to_check(db, video.id):
             # Reopened after "done": not complete now, so no labels from it until it is.
-            skipped.append({**entry, "reason": "open proposals"})
+            skipped.append({**entry, "reason": "to check"})
         elif rallies:
             train.append(
                 {
@@ -525,7 +543,7 @@ def apply_rallies(
     live = [
         (int(s), int(e))
         for s, e, deleted, review in rallies_now
-        if deleted is None and review not in ("rejected", "merged")
+        if deleted is None and review not in tagging.GONE
     ]
     rejected = [  # a merged proposal is not "no rally": the one it went into covers it
         (int(s), int(e))
@@ -558,7 +576,7 @@ def apply_rallies(
                 source="model",
                 model_run_id=run.id,
                 confidence=confidence,
-                review="unreviewed",
+                review="check",  # the scoring that follows makes the sure ones "auto"
                 version=1,
             )
         )
@@ -723,27 +741,26 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 # --- the coach's side ------------------------------------------------------------------------
 
 
-def open_proposals(db: Session, video_id: uuid.UUID) -> int:
-    """Model rallies nobody has accepted, corrected, rejected or merged yet."""
+def rallies_to_check(db: Session, video_id: uuid.UUID) -> int:
+    """Rallies that wait for a person (tagging.rally_to_check): WiePlay's unsure ones and the
+    rallies whose winner nobody gave while the scoring is unsure of it."""
     return int(
         db.scalar(
             select(func.count())
             .select_from(Segment)
             .where(
                 Segment.video_id == video_id,
-                Segment.kind == "rally",
-                Segment.source == "model",
-                Segment.review == "unreviewed",
                 Segment.deleted_at.is_(None),
+                tagging.rally_to_check(),
             )
         )
         or 0
     )
 
 
-class OpenProposals(Exception):
+class ToCheck(Exception):
     def __init__(self, count: int) -> None:
-        super().__init__(f"{count} proposals are still open")
+        super().__init__(f"{count} rallies are still to check")
         self.count = count
 
 
@@ -751,12 +768,12 @@ def mark_reviewed(
     db: Session, video: Video, actor: int, reviewed: bool, train_delay: timedelta
 ) -> dict[str, Any]:
     """The coach says the rally list is complete and right (or takes that back). Not while
-    proposals are open (OpenProposals): the coach answers each one first, so every label
-    is a person's. Either way the training set changed, so a (debounced) training is
-    queued."""
+    rallies are still to check (ToCheck): the coach answers each one first, so the coach
+    stands behind every label (WiePlay's sure rallies included). Either way the training set
+    changed, so a (debounced) training is queued."""
     if reviewed:
-        if count := open_proposals(db, video.id):
-            raise OpenProposals(count)
+        if count := rallies_to_check(db, video.id):
+            raise ToCheck(count)
         video.rallies_reviewed_at = datetime.now(UTC)
         video.rallies_reviewed_by = actor
     else:
@@ -767,16 +784,22 @@ def mark_reviewed(
     return {"training_job_id": str(job.id) if job else None}
 
 
+REVIEW_KEYS = ("auto", "check", "confirmed", "corrected", "rejected", "merged")
+
+
 def proposal_counts(db: Session, video_id: uuid.UUID) -> dict[str, int]:
+    """WiePlay's rallies by review state (a deleted one is rejected or merged)."""
     rows = db.execute(
         select(Segment.review, Segment.deleted_at.is_(None), func.count())
         .where(Segment.video_id == video_id, Segment.kind == "rally", Segment.source == "model")
         .group_by(Segment.review, Segment.deleted_at.is_(None))
     ).all()
-    counts = {"unreviewed": 0, "confirmed": 0, "corrected": 0, "rejected": 0, "merged": 0}
+    counts = dict.fromkeys(REVIEW_KEYS, 0)
     for review, live, n in rows:
-        # A deleted proposal is rejected or merged; one deleted otherwise counts as rejected.
-        key = review if live or review in ("rejected", "merged") else "rejected"
+        # A deleted one is rejected or merged; one deleted otherwise counts as rejected.
+        key = review if live or review in tagging.GONE else "rejected"
+        if key == "unreviewed":  # older rows: WiePlay's, to check
+            key = "check"
         counts[key] = counts.get(key, 0) + int(n)
     return counts
 
