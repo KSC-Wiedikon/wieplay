@@ -263,3 +263,60 @@ def test_a_second_game_s_cards_the_memory_recognises_are_named_in_one_step(
     with app.state.sessionmaker() as db:
         back = db.get(PlayerCluster, ids[1])
         assert back is not None and back.number is None
+
+
+def test_the_memory_measured_on_a_game_with_a_sheet(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, analyser: TestClient
+) -> None:
+    from wieplay.core.models import Period
+
+    # The earlier game: no sheet, the coach typed the starting six of each set (Sets bar).
+    earlier = make_ready(app, club, store, k=1)
+    played, _ = match()
+    analysed(analyser, played)
+    with app.state.sessionmaker() as db:
+        for p in db.scalars(select(Period).where(Period.video_id == uuid.UUID(earlier["id"]))):
+            p.start_lineup = LINEUP_US
+        db.commit()
+    # The game measured: its typed sheet is the truth, hidden from the memory.
+    measured = game_with_sheet(app, club, store, analyser)
+    with app.state.sessionmaker() as db:
+        video = db.get(Video, uuid.UUID(measured["id"]))
+        assert video is not None
+        found = team_memory.evaluate(db, video)
+        db.rollback()
+    assert found["memory"]["games"] == 1 and found["memory"]["sets"] == 4
+    zone = found["servers"]["setter zone"]
+    assert zone["serves"] > 0 and zone["right"] == zone["serves"]  # the same six every set
+    assert found["servers"]["memory only"]["serves"] == zone["serves"]
+    assert found["picks"]["serves_with_a_pick"] == 0  # no players run
+    assert found["recognised"]["cards"] == 0
+    with app.state.sessionmaker() as db:
+        other = db.get(Video, uuid.UUID(earlier["id"]))
+        assert other is not None
+        assert "error" in team_memory.evaluate(db, other)  # no sheet: nothing to check against
+
+
+def test_the_cli_learns_and_measures_the_memory(
+    app: FastAPI,
+    club: dict[str, TestClient],
+    store: FakeStore,
+    analyser: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from tests.conftest import TEST_DB
+    from wieplay import cli
+    from wieplay.core.config import get_settings
+
+    video = game_with_sheet(app, club, store, analyser)
+    monkeypatch.setenv("WIEPLAY_DATABASE_URL", TEST_DB)
+    get_settings.cache_clear()
+    try:
+        assert cli.main(["team-memory", "--all"]) == 0
+        out = capsys.readouterr().out
+        assert "1 games named numbers" in out and "4.0 sets" in out
+        assert cli.main(["team-memory", "--eval", video["id"]]) == 0
+        assert '"servers"' in capsys.readouterr().out
+    finally:
+        get_settings.cache_clear()

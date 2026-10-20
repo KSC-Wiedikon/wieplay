@@ -324,7 +324,7 @@ class PriorLineups:
         return found[0] if found is not None and found[1] >= at_least else None
 
 
-def _serving(seg: Segment) -> str | None:
+def serving_of(seg: Segment) -> str | None:
     found = seg.serving_manual or seg.serving or seg.model_serving
     return found if found in ("us", "them") else None
 
@@ -336,7 +336,7 @@ def rally_rotations(rallies: Sequence[Segment]) -> list[int]:
     r = 0
     before: str | None = None
     for seg in rallies:
-        now = _serving(seg)
+        now = serving_of(seg)
         if now == "us" and before == "them":
             r += 1
         if now is not None:
@@ -435,7 +435,7 @@ def prior_for_video(
         if period.end_ms is not None and seg.start_ms > period.end_ms:
             continue
         by_period.setdefault(period.id, []).append(seg)
-    ours = {s.id for s in rallies if _serving(s) == "us"}
+    ours = {s.id for s in rallies if serving_of(s) == "us"}
     seen_at = serve_observations(db, video, ours, numbers) if ours else {}
     out = PriorLineups()
     for period in todo:
@@ -446,7 +446,7 @@ def prior_for_video(
         seen = [
             tp.Seen(r, n, right)
             for seg, r in zip(segs, rots, strict=True)
-            if _serving(seg) == "us"
+            if serving_of(seg) == "us"
             for n, right in seen_at.get(seg.id, [])
         ]
         lineup = (
@@ -475,7 +475,7 @@ def prior_for_video(
             if start is not None:
                 six = tuple(start[0][(r + z) % 6] for z in range(6))
                 out.six[seg.id] = (six, start[1])
-            if _serving(seg) == "us":
+            if serving_of(seg) == "us":
                 best = post.best(r)
                 if best is not None:
                     out.servers[seg.id] = (best[0], round(best[1], 3))

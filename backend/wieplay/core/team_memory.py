@@ -24,6 +24,7 @@ named cards and tags, roster, fixes and trainings), so no other module has to ca
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import uuid
@@ -893,3 +894,177 @@ def relink_videos(db: Session, team: WdTeam, number: int, member_id: int | None)
         changed += 1
     db.flush()
     return changed
+
+
+# --- measured on a game with a typed sheet (the CLI's `team-memory --eval`) ----------------------
+
+
+def evaluate(db: Session, video: Video, read: Any = None) -> dict[str, Any]:
+    """How well the memory names our server per rally of a game whose typed sheet is the truth,
+    the sheet hidden: the memory learnt from the team's other games only (another video, never
+    this one), the rallies' serving and rotations from the scoring, anchored by nothing, the
+    sets' setter zone (as a coach types it in the Sets bar), and the players run's picks at our
+    serves (the image attribution: a card the coach named, else the number read on it with the
+    team's number prior; `read`: the bucket reader, None skips them). Also the cards the memory
+    would offer as recognised, checked against the sheet's server where one served. Reads only;
+    the caller rolls back."""
+    from wieplay.core import lineups as lu
+    from wieplay.core import players as pl
+    from wieplay.core.models import Segment
+
+    truth = lu.for_video(db, video)
+    out: dict[str, Any] = {"video": str(video.id), "title": video.title}
+    if truth is None or not truth.by_rally:
+        out["error"] = "no typed sheet lined up with the rallies"
+        return out
+    team = db.get(WdTeam, video.team_id)
+    assert team is not None
+    setters = setters_of(db, team.id)
+    others = [game_facts(db, v, setters) for v in team_videos(db, team) if v.id != video.id]
+    earlier = [game_facts(db, v, setters) for v in earlier_videos(db, team)]
+    starts = [s for f in others for s in f.starts]
+    starts += [
+        tp.SetStart(s.lineup, s.setter, s.weight * EARLIER_SEASON)
+        for f in earlier
+        for s in f.starts
+    ]
+    prior = tp.learn(starts)
+    named_games = sum(1 for f in others if f.named)
+    known: dict[int, int] = {}
+    for f in others:
+        for n in f.named:
+            known[n] = known.get(n, 0) + 1
+    numbers = tp.number_prior((tp.NumberFacts(n, games=g) for n, g in known.items()), named_games)
+    out["memory"] = {"games": len(others), "named_games": named_games, "sets": prior.sets}
+
+    # Image picks at our serves (as the attribution would make them without the sheet).
+    picks: dict[uuid.UUID, tuple[int, float, str]] = {}  # rally → (number, right, kind)
+    card_of_rally: dict[uuid.UUID, Any] = {}
+    run = pl.latest_run(db, video.id)
+    index = pl.load_index(db, run, read) if run is not None and read is not None else None
+    if index is not None and run is not None:
+        ball = pl.load_ball(db, video.id, read)
+        rows = pl.clusters(db, video.id)
+        mapping = pl.Mapping.of(rows)
+        events = db.scalars(
+            select(Event).where(
+                Event.video_id == video.id,
+                Event.code == "S",
+                Event.side == "us",
+                Event.deleted_at.is_(None),
+                Event.segment_id.is_not(None),
+            )
+        )
+        for ev in events:
+            pick, card, _ = pl.attribute_event(ev, index, ball, mapping)
+            if pick is None or card is None or card.not_player or ev.segment_id is None:
+                continue
+            card_of_rally[ev.segment_id] = card
+            if card.number is not None and card.assigned_by is not None:
+                picks[ev.segment_id] = (int(card.number), lu.NAMED_SEEN, "named")
+            elif card.ocr_number is not None and card.kind == pl.PERSON:
+                p = numbers.get(int(card.ocr_number), 0.0) if numbers else 0.5
+                right = min(lu.READ_SEEN_MAX, tp.reading_confidence(card.ocr_confidence or 0.0, p))
+                if right > 0.3:
+                    picks[ev.segment_id] = (int(card.ocr_number), right, "read")
+    out["picks"] = {
+        "serves_with_a_pick": len(picks),
+        "pick_right": sum(
+            1
+            for rid, (n, _, _) in picks.items()
+            if (found := truth.of(rid)) is not None and found.serving == "us" and found.server == n
+        ),
+    }
+
+    periods = list(
+        db.scalars(
+            select(Period)
+            .where(Period.video_id == video.id, Period.deleted_at.is_(None))
+            .order_by(Period.start_ms)
+        )
+    )
+    starts_ms = [p.start_ms for p in periods]
+    segs = list(
+        db.scalars(
+            select(Segment)
+            .where(
+                Segment.video_id == video.id,
+                Segment.kind == "rally",
+                Segment.deleted_at.is_(None),
+                Segment.review.not_in(("rejected", "merged")),
+            )
+            .order_by(Segment.start_ms, Segment.id)
+        )
+    )
+    by_period: dict[uuid.UUID, list[Segment]] = {}
+    for seg in segs:
+        k = bisect.bisect_right(starts_ms, seg.start_ms) - 1
+        if k >= 0:
+            by_period.setdefault(periods[k].id, []).append(seg)
+    modes = ("memory only", "setter zone", "picks", "picks, no memory", "setter zone + picks")
+    scores = {m: {"serves": 0, "right": 0, "sure": 0, "sure_right": 0} for m in modes}
+    for period in periods:
+        rallies = by_period.get(period.id, [])
+        rots = lu.rally_rotations(rallies)
+        seen = [
+            tp.Seen(r, picks[seg.id][0], picks[seg.id][1])
+            for seg, r in zip(rallies, rots, strict=True)
+            if seg.id in picks and lu.serving_of(seg) == "us"
+        ]
+        zone = period.start_rotation if period.start_rotation in (1, 2, 3, 4, 5, 6) else None
+        posts = {
+            "memory only": tp.posterior(prior),
+            "setter zone": tp.posterior(prior, setter_zone=zone) if zone else None,
+            "picks": tp.posterior(prior, seen),
+            "picks, no memory": tp.posterior(tp.OrderPrior(), seen),
+            "setter zone + picks": tp.posterior(prior, seen, setter_zone=zone) if zone else None,
+        }
+        for seg, r in zip(rallies, rots, strict=True):
+            found = truth.of(seg.id)
+            if found is None or found.serving != "us" or found.server is None:
+                continue
+            for mode, post in posts.items():
+                s = scores[mode]
+                s["serves"] += 1
+                best = post.best(r) if post is not None else None
+                if best is None:
+                    continue
+                s["right"] += int(best[0] == found.server)
+                if best[1] >= lu.MEMORY_APPLY:
+                    s["sure"] += 1
+                    s["sure_right"] += int(best[0] == found.server)
+    out["servers"] = scores
+
+    # The cards the memory would offer as recognised, against the sheet's server where the
+    # card was WiePlay's pick at one of our serves.
+    rows_all = pl.clusters(db, video.id) if run is not None else []
+    rec = [
+        c
+        for c in rows_all
+        if c.team == "us"
+        and c.kind == pl.PERSON
+        and not c.not_player
+        and c.ocr_number is not None
+        and (c.confidence or 0) < pl.UNCERTAIN
+        and known.get(int(c.ocr_number))
+        and tp.recognised(c.ocr_confidence, numbers.get(int(c.ocr_number)))
+    ]
+    ours = [c for c in rows_all if c.team == "us" and not c.not_player and c.merged_into is None]
+    total = sum(c.detections for c in ours) or 1
+    checked = right = 0
+    rec_ids = {c.id for c in rec}
+    for rid, card in card_of_rally.items():
+        found = truth.of(rid)
+        if card.id in rec_ids and found is not None and found.serving == "us":
+            checked += 1
+            right += int(found.server == card.ocr_number)
+    out["recognised"] = {
+        "cards": len(rec),
+        "footage_share": round(sum(c.detections for c in rec) / total, 4),
+        "sure_share_before": round(
+            sum(c.detections for c in ours if (c.confidence or 0) >= pl.UNCERTAIN) / total, 4
+        ),
+        "checked_at_serves": checked,
+        "right_at_serves": right,
+    }
+    return out
