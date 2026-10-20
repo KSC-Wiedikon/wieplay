@@ -283,8 +283,8 @@ function SmartBuilder({ reel, initial }: { reel: Reel | null; initial: Initial }
               <Field label={t('reels.builder.side')} htmlFor={`${id}-side`}>
                 <Select id={`${id}-side`} value={side ?? ''} onChange={(e) => setSide(e.target.value ? (e.target.value as Side) : null)}>
                   <option value="">{t('reels.builder.bothSides')}</option>
-                  <option value="us">{t('tagging.us')}</option>
-                  <option value="them">{t('tagging.them')}</option>
+                  <option value="us">{detail?.name ?? t('tagging.us')}</option>
+                  <option value="them">{t('reels.builder.opponents')}</option>
                 </Select>
               </Field>
             )}

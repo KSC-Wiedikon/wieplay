@@ -86,6 +86,7 @@ function parseNumber(value: string): number | null {
 /** Numbers, liberos and opponent numbers of this video (PUT /roster). Only the team's people can be added. */
 function RosterEditor({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
+  const names = useSideNames()
   const id = useId()
   const client = useQueryClient()
   const toast = useToast()
@@ -194,7 +195,7 @@ function RosterEditor({ onClose }: { onClose: () => void }) {
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted">{t('tagging.roster.editorHint')}</p>
-        <Table caption={t('tagging.us')}>
+        <Table caption={sideLabel(t, 'us', names)}>
           <THead>
             <tr>
               <Th className="w-20">{t('tagging.roster.number')}</Th>

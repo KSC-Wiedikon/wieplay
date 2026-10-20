@@ -250,6 +250,9 @@ interface PieceText {
   number: number | null
   player_name: string | null
   video_title: string | null
+  /** The teams' short names in the piece's video; "Us" and "Them" without them. */
+  us_name?: string | null
+  them_name?: string | null
 }
 
 /**
@@ -260,13 +263,15 @@ export function pieceLabel(t: TFunction, piece: PieceText, skill: Pick<TaxonomyS
   if (piece.caption) return piece.caption
   if (!piece.code) return piece.video_title ?? ''
   const side = piece.side ?? 'us'
+  const us = piece.us_name || t('tagging.us')
+  const them = piece.them_name || t('tagging.them')
   const player =
     side === 'them'
       ? piece.number === null
-        ? t('tagging.them')
-        : t('tagging.themNumber', { number: piece.number, team: t('tagging.them') })
+        ? them
+        : t('tagging.themNumber', { number: piece.number, team: them })
       : piece.number === null
-        ? t('tagging.us')
+        ? us
         : piece.player_name
           ? `#${piece.number} ${piece.player_name}`
           : `#${piece.number}`

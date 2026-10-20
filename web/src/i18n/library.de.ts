@@ -163,6 +163,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
       anyone: 'Alle',
       side: 'Seite',
       bothSides: 'Beide',
+      opponents: 'Gegner',
       skills: 'Elemente',
       grades: 'Bewertungen',
       noGrade: 'Ohne Bewertung',
