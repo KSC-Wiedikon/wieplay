@@ -78,7 +78,7 @@ describe('CourtSetupDialog', () => {
     expect(video.pause).toHaveBeenCalled()
     expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 1920, 1080)
     expect(within(dialog).getByText(/Found automatically/)).toBeInTheDocument()
-    expect(within(dialog).getAllByText('placed')).toHaveLength(4)
+    expect(within(dialog).getAllByText('Placed')).toHaveLength(4)
     // Four corners: the server fits them; four points always fit exactly.
     expect(await within(dialog).findByText(/Four points always fit/)).toBeInTheDocument()
     expect(within(dialog).getAllByTestId('court-line')).toHaveLength(2)
@@ -86,7 +86,7 @@ describe('CourtSetupDialog', () => {
     // Next to place: the centre line's left end; a click on the picture puts it there.
     fireEvent.click(within(dialog).getByRole('button', { name: /Centre line, left end/ }))
     fireEvent.pointerDown(area(), { clientX: 250, clientY: 281.25, pointerId: 1 })
-    expect(within(dialog).getAllByText('placed')).toHaveLength(5)
+    expect(within(dialog).getAllByText('Placed')).toHaveLength(5)
     expect(await within(dialog).findByText(/Fit: ± 6.2 cm \(worst 9.5 cm\) · Good fit/)).toBeInTheDocument()
     const last = solves.at(-1) as { points: { landmark: string; u: number; v: number }[] }
     expect(last.points.find((p) => p.landmark === 'net_left')).toEqual({ landmark: 'net_left', u: 0.25, v: 0.5 })
@@ -209,8 +209,8 @@ describe('CourtSetupDialog', () => {
     const [first, second] = within(setups).getAllByRole('button')
     if (!first || !second) throw new Error('two setups')
     expect(first).toHaveAttribute('aria-pressed', 'true') // the main setup
-    expect(second).toHaveTextContent('1:12:30 – end')
-    expect(second).toHaveTextContent('set automatically')
+    expect(second).toHaveTextContent('1:12:30 – End')
+    expect(second).toHaveTextContent('Set automatically')
     // The second setup: the video goes there, its own points come up.
     fireEvent.click(second)
     expect(second).toHaveAttribute('aria-pressed', 'true')

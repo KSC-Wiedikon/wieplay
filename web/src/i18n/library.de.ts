@@ -24,7 +24,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
     watch: 'Anschauen',
     watchFor: '{{title}} anschauen',
     nowPlaying: 'Läuft: {{title}}',
-    by: 'von {{name}}',
+    by: 'Von {{name}}',
     queuePosition: '{{n}} von {{total}}',
     stop: 'Stopp',
     columns: {
@@ -101,7 +101,7 @@ export const libraryDe: Messages<typeof libraryEn> = {
     toPerson: 'An {{name}}',
     someone: 'jemand',
     unknownAuthor: 'Jemand',
-    edited: 'bearbeitet',
+    edited: 'Bearbeitet',
     edit: 'Kommentar bearbeiten',
     delete: 'Kommentar löschen',
     deleteTitle: 'Diesen Kommentar löschen?',

@@ -581,7 +581,7 @@ export function reelLink(team: { id: number; season: string }, filter: RowFilter
   }
   params.set('codes', column.codes.join(','))
   if (column.grades !== null) params.set('grades', column.grades.map((g) => g ?? NO_GRADE).join(','))
-  // The words of a search on top (the season's search bar, a zone: "set 3 from 4").
+  // The words of a search on top (the season's search bar, a zone: "Set 3 From 4").
   if (search?.trim()) params.set('q', search.trim())
   return `/reels/new?${params.toString()}`
 }

@@ -4,7 +4,7 @@
 export const searchEn = {
   search: {
     label: 'Search',
-    placeholder: 'e.g. #3 attack #, or set 3 rotation 2 reception -',
+    placeholder: 'E.g. #3 Attack #, or Set 3 Rotation 2 Reception -',
     hintsLabel: 'Suggestions',
     understood: 'Searching for',
     unknown: 'Not understood: {{words}}',

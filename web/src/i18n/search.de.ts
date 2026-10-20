@@ -3,7 +3,7 @@ import type { searchEn } from './search.en'
 export const searchDe: typeof searchEn = {
   search: {
     label: 'Suche',
-    placeholder: 'z. B. #3 Angriff #, oder Satz 3 Rotation 2 Annahme -',
+    placeholder: 'Z. B. #3 Angriff #, oder Satz 3 Rotation 2 Annahme -',
     hintsLabel: 'Vorschläge',
     understood: 'Gesucht wird',
     unknown: 'Nicht verstanden: {{words}}',

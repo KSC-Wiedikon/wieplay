@@ -3,6 +3,7 @@ import type { Tag } from './types'
 import { period, rally, roster, tag, volleyball } from '../test/tagging'
 import {
   applyHint,
+  SEARCH_KEYWORDS,
   compactSearch,
   formatTerms,
   isEmptySearch,
@@ -69,7 +70,26 @@ describe('parseSearch', () => {
         expect(again.search).toEqual(first.search)
       }
     }
-    expect(formatTerms(parse('them attack #7').terms, 'de', volleyball)).toBe('a7 gegner angriff')
+    // Capitalised, as the hints write them; they read back the same.
+    expect(formatTerms(parse('them attack #7').terms, 'de', volleyball)).toBe('a7 Gegner Angriff')
+    expect(formatTerms(parse('set 3 from 4 in play break').terms, 'en', volleyball)).toBe('Set 3 From 4 In play Break')
+  })
+
+  it('reads every word the hints offer, as they write it', () => {
+    for (const lang of ['en', 'de'] as const) {
+      for (const [keyword, kind] of SEARCH_KEYWORDS[lang]) {
+        expect(keyword.charAt(0)).toBe(keyword.charAt(0).toUpperCase())
+        // A keyword waiting for its number is read with one.
+        const out = parse(keyword.endsWith(' ') ? `${keyword}3` : keyword)
+        expect(out.unknown, `${lang} "${keyword}"`).toEqual([])
+        const want = { skill: 'skill', skillGrade: 'skill', grade: 'grade', side: 'side', outcome: 'outcome', won: 'won', serving: 'serving', set: 'set', rotation: 'rotation', zoneFrom: 'zone', zoneTo: 'zone', zone: 'zone', player: 'player' }[kind]
+        expect(out.terms[0]?.kind, `${lang} "${keyword}"`).toBe(want)
+      }
+    }
+    // "Set" the skill, "Set 3" the set number.
+    expect(compactSearch(parse('Set').search)).toEqual({ codes: ['E'] })
+    expect(compactSearch(parse('Set 3').search)).toEqual({ sets: [3] })
+    expect(compactSearch(parse('Attack Set 3 Im Spiel').search)).toEqual({ codes: ['A'], sets: [3], outcomes: ['play'] })
   })
 })
 
@@ -132,9 +152,14 @@ describe('matching', () => {
 
 describe('searchHints', () => {
   it('suggests words, numbers after a keyword, and players', () => {
-    expect(searchHints('att', { lang: 'en' }).map((h) => h.label)).toEqual(['attack'])
-    expect(searchHints('rot', { lang: 'en' }).map((h) => [h.label, h.insert])).toEqual([['rotation …', 'rotation ']])
-    expect(searchHints('set 3 rotation ', { lang: 'en' }).map((h) => h.label)).toEqual(['rotation 1', 'rotation 2', 'rotation 3', 'rotation 4', 'rotation 5', 'rotation 6'])
+    expect(searchHints('att', { lang: 'en' }).map((h) => h.label)).toEqual(['Attack'])
+    expect(searchHints('rot', { lang: 'en' }).map((h) => [h.label, h.insert])).toEqual([['Rotation …', 'Rotation ']])
+    expect(searchHints('set 3 rotation ', { lang: 'en' }).map((h) => h.label)).toEqual(['Rotation 1', 'Rotation 2', 'Rotation 3', 'Rotation 4', 'Rotation 5', 'Rotation 6'])
+    expect(searchHints('se', { lang: 'en' }).map((h) => [h.label, h.insert])).toEqual([
+      ['Serve', 'Serve'],
+      ['Set', 'Set'],
+      ['Set …', 'Set '],
+    ])
     expect(searchHints('Satz ', { lang: 'de', sets: [1, 2, 3] }).map((h) => h.insert)).toEqual(['1', '2', '3'])
     expect(searchHints('#', { lang: 'en', roster }).map((h) => [h.label, h.detail])).toEqual([
       ['#3', 'Mia Keller'],
@@ -143,14 +168,14 @@ describe('searchHints', () => {
     ])
     expect(searchHints('1', { lang: 'en', roster }).map((h) => h.label)).toEqual(['#11'])
     // The app's language first, the other one too.
-    expect(searchHints('an', { lang: 'de' }).map((h) => h.label)).toEqual(['angriff', 'annahme'])
-    expect(searchHints('a', { lang: 'en' }).map((h) => h.label)).toEqual(['attack', 'ace', 'angriff', 'aufschlag', 'annahme', 'abwehr', 'ass'])
+    expect(searchHints('an', { lang: 'de' }).map((h) => h.label)).toEqual(['Angriff', 'Annahme'])
+    expect(searchHints('A', { lang: 'en' }).map((h) => h.label)).toEqual(['Attack', 'Ace', 'Angriff', 'Aufschlag', 'Annahme', 'Abwehr', 'Ass'])
     expect(searchHints('', { lang: 'en' })).toHaveLength(6)
   })
 
   it('puts a hint in place of the word being typed', () => {
-    expect(applyHint('#3 att', { insert: 'attack' })).toBe('#3 attack ')
-    expect(applyHint('set 2, rot', { insert: 'rotation ' })).toBe('set 2, rotation ')
-    expect(applyHint('rotation ', { insert: '2' })).toBe('rotation 2 ')
+    expect(applyHint('#3 att', { insert: 'Attack' })).toBe('#3 Attack ')
+    expect(applyHint('Set 2, rot', { insert: 'Rotation ' })).toBe('Set 2, Rotation ')
+    expect(applyHint('Rotation ', { insert: '2' })).toBe('Rotation 2 ')
   })
 })

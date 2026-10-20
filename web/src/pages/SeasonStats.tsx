@@ -17,6 +17,7 @@ import { SuggestedHint, type StatsTab } from '../components/VideoStats'
 import { ZoneStats } from '../components/ZoneStats'
 import { formatDate } from '../lib/format'
 import { useTaxonomy } from '../lib/library'
+import { capitalize } from '../lib/labels'
 import { formatTerms, parseSearch, searchParam } from '../lib/search'
 import { CSV_PART, reelLink, teamCsvUrl, useTeamStats, useTeamZones, type MatchLine } from '../lib/stats'
 import type { TeamDetail } from '../lib/types'
@@ -168,7 +169,7 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
                 team={() => null}
                 // Our serves, receptions and attacks in a rotation open as a reel (the search names it).
                 skill={(line, column) => {
-                  const to = reelLink(team, { side: 'us' }, column, `${words} rotation ${line.rotation}`)
+                  const to = reelLink(team, { side: 'us' }, column, `${words} Rotation ${line.rotation}`)
                   return to ? { kind: 'link', to } : null
                 }}
                 playable={false}
@@ -185,7 +186,7 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
                 target={(row, _skill, end, cell, code) => {
                   // A zone opens the reel builder with its query; "no zone" is not a search word.
                   if (cell.zone === null) return null
-                  const to = reelLink(team, row.filter, { codes: [code], grades: null }, `${words} ${end} ${cell.zone}`)
+                  const to = reelLink(team, row.filter, { codes: [code], grades: null }, `${words} ${capitalize(end)} ${cell.zone}`)
                   return to ? { kind: 'link', to } : null
                 }}
               />
