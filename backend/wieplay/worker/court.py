@@ -6,7 +6,9 @@ Minutes of CPU; queued after each trajectory job, on the worker's background lan
         ─▶ the hall's memory: calibrated pictures of earlier videos (the team's first,
            then everyone's), matched to this one (court_register.py) ─▶ their court here
         ─▶ the court finder for a hall seen for the first time (court_find.py)
-        ─▶ the best court, carried to the other setups through their pictures
+        ─▶ the best court and whether it is sure (the chain uses a sure court by itself;
+           an unsure one waits for a coach's look), carried to the other setups through
+           their pictures
     the empty hall, as a JPEG on the NAS: this video's picture for the hall's memory
 
 Writes only below the job's analysis folder; the API decides what becomes the video's
@@ -47,6 +49,11 @@ JPEG_QUALITY = 92
 GRAB_TIMEOUT_S = 120
 # The hall's memory: a transfer this sure is taken over the finder.
 HALL_MIN_INLIERS = 30
+# A court carried over from the hall's memory is sure from this confidence (matches spread
+# over the floor and its lines on paint here), unless the finder is sure of another court.
+HALL_SURE = 0.75
+# Two courts within this (px at SIZE, near corners and the net's ends) are the same court.
+SAME_COURT_PX = 20.0
 
 
 def _nice() -> None:
@@ -272,28 +279,69 @@ def _median(
     return out
 
 
+def _near_points(h_px: np.ndarray) -> np.ndarray:
+    names = ("near_left", "near_right", "net_left", "net_right")
+    return reg.apply(h_px, np.array([court.LANDMARKS[n] for n in names]))
+
+
+def same_court(a: np.ndarray, b: np.ndarray) -> bool:
+    """Two court → pixels homographies put the near corners and the net's ends within
+    SAME_COURT_PX of each other."""
+    d = np.linalg.norm(_near_points(a) - _near_points(b), axis=1)
+    return bool(np.all(np.isfinite(d)) and d.max() <= SAME_COURT_PX)
+
+
+def hall_sure_confidence(confidence: float) -> tuple[bool, float]:
+    """A hall-memory court's confidence on the finder's scale: court_find.SURE_CONFIDENCE and
+    above exactly when sure."""
+    if confidence >= HALL_SURE:
+        top = court_find.SURE_CONFIDENCE
+        return True, round(top + (1 - top) * (confidence - HALL_SURE) / (1 - HALL_SURE), 4)
+    return False, round(min(confidence, court_find.SURE_CONFIDENCE - 0.01), 4)
+
+
 def best_court(
     hall_courts: list[dict[str, Any]], guess: court_detect.CourtGuess | None, size: tuple[int, int]
 ) -> dict[str, Any] | None:
-    """The hall's memory unless the finder is clearly surer."""
-    best: dict[str, Any] | None = None
+    """The hall's memory unless the finder is sure and the memory is not (or the finder is
+    clearly surer); sure only when the chosen court is and no other sure court disagrees."""
+    hall: dict[str, Any] | None = None
     if hall_courts:
         c = hall_courts[0]
-        best = {
+        sure, confidence = hall_sure_confidence(float(c["confidence"]))
+        hall = {
             "method": "auto-hall",
             "h": c["h"],
-            "confidence": c["confidence"],
+            "confidence": confidence,
+            "sure": sure,
             "reference": c["reference"],
             "stats": c["stats"],
         }
-    if guess is not None and (best is None or guess.confidence > float(best["confidence"]) + 0.15):
-        best = {
+    found: dict[str, Any] | None = None
+    if guess is not None:
+        found = {
             "method": "auto",
             "h": reg.to_pixels(np.array(guess.court_to_image, float), size),
-            "confidence": guess.confidence,
+            "confidence": float(guess.confidence),
+            "sure": bool(guess.sure),
             "reference": None,
             "stats": guess.stats,
         }
+    if hall is None or found is None:
+        return hall or found
+    agree = same_court(hall["h"], found["h"])
+    if found["sure"] and not hall["sure"]:
+        best, other = found, hall
+    elif hall["sure"] or hall["confidence"] + 0.15 >= found["confidence"]:
+        best, other = hall, found
+    else:
+        best, other = found, hall
+    best = dict(best)
+    best["stats"] = {**best["stats"], "agrees_with_" + other["method"]: agree}
+    if best["sure"] and other["sure"] and not agree:  # two sure courts: a coach decides
+        best["sure"] = False
+        best["confidence"] = min(float(best["confidence"]), court_find.SURE_CONFIDENCE - 0.01)
+        best["stats"]["conflict"] = True
     return best
 
 
@@ -338,6 +386,7 @@ def run(ctx: Context) -> dict[str, Any]:
         if image is not None:
             references.append((ref, image))
     track = params.get("track")
+    net_tops = tuple(float(t) for t in (params.get("net_tops") or court_find.NET_TOPS))
     view_main: dict[int, int] = {}
     view_court: dict[int, dict[str, Any] | None] = {}
     candidates: dict[str, Any] = {}
@@ -381,7 +430,7 @@ def run(ctx: Context) -> dict[str, Any]:
         hall_s += time.perf_counter() - clock
         clock = time.perf_counter()
         bounces = load_bounces(root, track, (setups[vm].from_ms, setups[vm].to_ms))
-        guess = court_find.detect(hall, bounces=bounces)
+        guess = court_find.detect(hall, bounces=bounces, net_tops=net_tops)
         find_s += time.perf_counter() - clock
         view_court[view] = best_court(hall_courts, guess, size)
         candidates[str(view)] = {
@@ -424,13 +473,18 @@ def run(ctx: Context) -> dict[str, Any]:
             court_out = {
                 "method": best["method"],
                 "confidence": round(float(best["confidence"]), 4),
+                "sure": bool(best["sure"]),
                 "reference": best["reference"],
                 "setups": per_setup,
                 "stats": {
                     **best["stats"],
                     "views": {
                         str(v): (
-                            {"method": c["method"], "confidence": round(float(c["confidence"]), 4)}
+                            {
+                                "method": c["method"],
+                                "confidence": round(float(c["confidence"]), 4),
+                                "sure": bool(c["sure"]),
+                            }
                             if c is not None
                             else None
                         )
@@ -465,6 +519,8 @@ def run(ctx: Context) -> dict[str, Any]:
                 "shift_px": court_segments.SHIFT_PX,
                 "bump_px": court_segments.BUMP_PX,
                 "references": len(params.get("references") or []),
+                "finder": "v3",
+                "net_tops": list(net_tops),
             },
         },
         "frames": {

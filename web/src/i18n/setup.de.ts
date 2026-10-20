@@ -46,6 +46,8 @@ export const setupDe: Messages<typeof setupEn> = {
       none: 'Nicht eingerichtet. Mit dem Spielfeld zählen die Aufpralle des Balls in den Tendenzen.',
       busy: 'WiePlay sucht das Spielfeld…',
       auto: 'Automatisch gesetzt: prüf, ob die Linien auf dem Feld liegen.',
+      sure: 'Von WiePlay gefunden, sicher.',
+      found: 'WiePlay hat ein Spielfeld gefunden, ist aber nicht sicher: Prüf es.',
       done: 'Eingerichtet.',
       open: 'Spielfeld einrichten',
       check: 'Spielfeld prüfen',

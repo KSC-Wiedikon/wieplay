@@ -151,30 +151,62 @@ def test_a_still_camera_is_one_setup_and_short_ones_merge() -> None:
 # --- the finder for a new hall ------------------------------------------------------------
 
 
+def max_error_px(guess: court_find.CourtGuess, truth: dict[str, tuple[float, float]]) -> float:
+    return max(
+        float(np.hypot((guess.points[k][0] - u) * SIZE[1], (guess.points[k][1] - v) * SIZE[0]))
+        for k, (u, v) in truth.items()
+        if k in guess.points
+    )
+
+
 @pytest.mark.parametrize(
     "view",
     [
         {"center": (4.5, -6.0, 5.0), "focal": 1.1},
         {"center": (3.0, -5.0, 6.0), "focal": 1.3},
         {"center": (6.0, -4.0, 3.5), "focal": 0.8},
+        {"center": (4.5, -4.0, 2.8), "focal": 0.7},  # the filming guide's camera, a wide lens
     ],
 )
-def test_the_finder_takes_the_courts_colour_on_a_multi_sport_floor(view: dict[str, object]) -> None:
+def test_the_finder_is_sure_of_the_court_on_a_multi_sport_floor(view: dict[str, object]) -> None:
     """Yellow volleyball lines among white, black and red ones (one sport's at the court's
-    own spacing): the court of the yellow lines, the net above its centre line."""
+    own spacing), the net above the centre line: the volleyball court, sure."""
     img, truth = render(net=True, **HALL, **view)  # type: ignore[arg-type]
     guess = court_find.detect(img)
     assert guess is not None
-    assert guess.stats["colour"].startswith("hue")
-    err = max(
-        np.hypot((guess.points[k][0] - u) * SIZE[1], (guess.points[k][1] - v) * SIZE[0])
-        for k, (u, v) in truth.items()
-        if k in guess.points
-    )
-    assert err < 6.0
+    assert guess.sure and guess.confidence >= court_find.SURE_CONFIDENCE
+    assert guess.stats["finder"] == "v3" and abs(guess.stats["net_height_m"] - 2.43) <= 0.06
+    assert max_error_px(guess, truth) < 6.0
 
 
-def test_bounces_off_the_court_lower_the_finders_confidence() -> None:
+def test_the_net_must_stand_where_the_court_puts_it() -> None:
+    """The finder looks for the net's two tapes above the centre line: found at the men's
+    height on a men's court; told to expect the women's net, the net it sees is elsewhere and
+    the court is not sure."""
+    img, truth = render(net=True, **HALL)
+    pic = court_find.picture(img)
+    found, _ = court_find.finalists(pic)
+    best = found[0]
+    assert best.cam is not None and not best.net_off and best.net >= 0.8
+    lm = court_find.landmarks_of(best.cam)
+    for name, (u, v) in truth.items():
+        assert np.hypot(lm[name][0] - u * SIZE[1], lm[name][1] - v * SIZE[0]) < 6.0
+    women = court_find.detect(img, net_tops=(2.24,))
+    assert women is None or not women.sure
+
+
+def test_a_picture_without_a_court_finds_none_or_is_unsure() -> None:
+    rng = np.random.default_rng(3)
+    noise = rng.integers(0, 255, (*SIZE, 3), dtype=np.uint8)
+    guess = court_find.detect(noise)
+    assert guess is None or not guess.sure
+    # A floor of another sport only (no volleyball court, no net): never sure.
+    img, _ = render(**{**HALL, "court_colour": HALL["floor"]})  # type: ignore[arg-type]
+    guess = court_find.detect(img)
+    assert guess is None or not guess.sure
+
+
+def test_the_finder_reports_the_bounces_and_fits_the_lens() -> None:
     img, truth = render(net=True, **HALL)
     on = np.array([truth["near_left"], truth["far_right"], truth["net_left"]] * 10)
     on = (on + np.array(truth["near_right"])) / 2  # inside the court
@@ -183,23 +215,62 @@ def test_bounces_off_the_court_lower_the_finders_confidence() -> None:
     with_off = court_find.detect(img, bounces=off)
     assert with_on is not None and with_off is not None
     assert with_on.stats["bounces_inside"] == 1.0 and with_off.stats["bounces_inside"] == 0.0
-    assert with_on.confidence > with_off.confidence
+    assert abs(with_on.stats["k1"]) < 0.05  # a pinhole render: no distortion found
+    plain = court_find.camera_of(court_to_image(), SIZE)
+    assert plain is not None
+    lens = court_find.Camera(plain.rvec, plain.centre, plain.focal, -0.2, SIZE)
+    corners3 = np.array([[4.5, 9.0, 0.0], [0.0, 0.0, 0.0]])
+    p, q = lens.project(corners3), plain.project(corners3)
+    centre = np.array([SIZE[1] / 2, SIZE[0] / 2])
+    # Barrel distortion pulls points towards the centre, the more the further out.
+    assert np.linalg.norm(p[1] - centre) < np.linalg.norm(q[1] - centre)
 
 
-def test_the_camera_family_holds_the_true_court() -> None:
-    """Two side lines and the near end line fix the court up to the focal length; at the
-    true one, the family's homography is the camera's."""
+def test_the_cameras_of_many_courts_are_the_courts_cameras() -> None:
     for center, focal in (((4.5, -6.0, 5.0), 1.1), ((6.5, -3.0, 3.0), 0.7)):
         h = court_to_image(center=center, focal=focal, target=(5.0, 10.0, 0.0))
+        c, f = court_find.cameras(h[None], SIZE)
+        assert np.allclose(c[0], center, atol=1e-6) and f[0] == pytest.approx(focal)
+        assert court_find.plausible(h[None], SIZE)[0]
+    above = court_to_image(center=(4.5, 9.0, 30.0), focal=1.0, target=(4.5, 9.5, 0.0))
+    assert not court_find.plausible(above[None], SIZE)[0]  # a camera on the ceiling
 
-        def line(p: tuple[float, float], q: tuple[float, float], h: np.ndarray = h) -> np.ndarray:
-            a, b = h @ np.array([*p, 1.0]), h @ np.array([*q, 1.0])
-            ln = np.cross(a, b)
-            return ln / np.linalg.norm(ln[:2])
 
-        left, right = line((0, 0), (0, 18)), line((9, 0), (9, 18))
-        for near_y in (0.0, 6.0):
-            across = line((0, near_y), (9, near_y))
-            [(f, found)] = court_find.family(left, right, across, near_y, SIZE, np.array([focal]))
-            assert f == focal
-            assert np.abs(found - h / h[2, 2]).max() < 1e-6
+# --- the job's choice ------------------------------------------------------------------------
+
+
+def _guess(h: np.ndarray, sure: bool, confidence: float) -> court_find.CourtGuess:
+    to_image = reg.to_normalised(h, SIZE)
+    return court_find.CourtGuess(
+        points={},
+        court_to_image=tuple(tuple(float(v) for v in row) for row in to_image),  # type: ignore[arg-type]
+        confidence=confidence,
+        stats={"finder": "v3"},
+        sure=sure,
+    )
+
+
+def _hall(h: np.ndarray, confidence: float) -> dict[str, object]:
+    return {"h": h, "confidence": confidence, "reference": {"video_id": "v"}, "stats": {}}
+
+
+def test_the_job_takes_a_sure_court_and_lets_a_coach_decide_a_conflict() -> None:
+    h = court_to_image()
+    other = court_to_image(center=(3.0, -6.0, 5.0))  # another court in the picture
+    # The finder alone: its verdict.
+    best = job.best_court([], _guess(h, True, 0.9), SIZE)
+    assert best is not None and best["method"] == "auto" and best["sure"]
+    # The hall's memory sure and the finder agreeing: the memory, sure.
+    best = job.best_court([_hall(h, 0.9)], _guess(h, True, 0.9), SIZE)
+    assert best is not None and best["method"] == "auto-hall" and best["sure"]
+    assert best["confidence"] >= court_find.SURE_CONFIDENCE
+    # Both sure of different courts: unsure, a coach decides.
+    best = job.best_court([_hall(other, 0.9)], _guess(h, True, 0.9), SIZE)
+    assert best is not None and not best["sure"] and best["stats"]["conflict"]
+    assert best["confidence"] < court_find.SURE_CONFIDENCE
+    # The finder sure, the memory not: the finder's.
+    best = job.best_court([_hall(other, 0.65)], _guess(h, True, 0.85), SIZE)
+    assert best is not None and best["method"] == "auto" and best["sure"]
+    # Neither sure: the memory unless the finder is clearly surer, unsure either way.
+    best = job.best_court([_hall(other, 0.65)], _guess(h, False, 0.5), SIZE)
+    assert best is not None and best["method"] == "auto-hall" and not best["sure"]

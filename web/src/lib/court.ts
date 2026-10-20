@@ -116,6 +116,10 @@ export interface Calibration extends Solution {
   updated_at: string
   /** False: the court job set it and no coach has checked it yet. */
   checked?: boolean
+  /** The court job was sure of it: WiePlay uses it without a coach's look. */
+  sure?: boolean
+  /** Checked by a coach or sure: the analysis uses it. */
+  usable?: boolean
   at_ms?: number | null
   /** The camera's setups when it moved during the match; absent or null: one for the whole video. */
   segments?: CalibrationSegment[] | null
@@ -134,6 +138,8 @@ export interface Suggestion {
   source: 'auto' | 'auto-hall' | 'team'
   points: CourtPoint[]
   confidence: number | null
+  /** The court job's own court, and it was sure. */
+  sure?: boolean
   video_id: string
   video_title: string | null
   recorded_on: string | null
@@ -200,6 +206,41 @@ export function useSaveCourt(videoId: string) {
       void client.invalidateQueries({ queryKey: courtKey(videoId) })
     },
   })
+}
+
+/** POST …/court/confirm: the court WiePlay found is right (its own court becomes checked, or its proposal the video's court). */
+export function useConfirmCourt(videoId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => apiRequest<Calibration>(`/api/videos/${videoId}/court/confirm`, { method: 'POST' }),
+    onSuccess: (calibration) => {
+      client.setQueryData<CourtState>(courtKey(videoId), (old) => (old ? { ...old, calibration, suggestions: [] } : old))
+      void client.invalidateQueries({ queryKey: courtKey(videoId) })
+    },
+  })
+}
+
+/** The court WiePlay found and nobody has checked yet: the one it set by itself (sure), else its proposal (not sure). */
+export interface FoundCourt {
+  points: CourtPoint[]
+  /** Already drawn by the server (a set court); a proposal's lines come from …/court/solve. */
+  lines: [number, number][][] | null
+  sure: boolean
+  confidence: number | null
+  method: 'auto' | 'auto-hall'
+  /** set: the video's court already (to confirm); proposal: not used until a coach confirms it. */
+  kind: 'set' | 'proposal'
+}
+
+export function foundCourt(state: CourtState | undefined): FoundCourt | null {
+  const calibration = state?.calibration
+  if (calibration) {
+    if (calibration.checked !== false || (calibration.method !== 'auto' && calibration.method !== 'auto-hall')) return null
+    return { points: calibration.points, lines: calibration.lines, sure: calibration.sure === true, confidence: calibration.confidence, method: calibration.method, kind: 'set' }
+  }
+  const proposal = state?.suggestions.find((s) => s.source === 'auto' || s.source === 'auto-hall')
+  if (!proposal || proposal.source === 'team') return null
+  return { points: proposal.points, lines: null, sure: proposal.sure === true, confidence: proposal.confidence, method: proposal.source, kind: 'proposal' }
 }
 
 export function useRemoveCourt(videoId: string) {

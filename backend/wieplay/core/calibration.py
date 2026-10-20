@@ -49,7 +49,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from wieplay.core import court, jobs
 from wieplay.core.db import Base
-from wieplay.core.models import AnalysisArtifact, Job, ModelRun, TeamLineage, Video, WdGame
+from wieplay.core.models import AnalysisArtifact, Job, ModelRun, TeamLineage, Video, WdGame, WdTeam
 
 KINDS = frozenset({"trajectory", "court"})
 CAPS = ("analyse", "nas")
@@ -57,15 +57,23 @@ PRIORITY = jobs.FOLLOW_UP_PRIORITY  # quick: before the next analysis
 TRACK_FORMAT = "json"
 TRACK_SCHEMA = 1
 NAS_PATH = re.compile(r"[A-Za-z0-9._/-]+")
-# The dialog is pre-filled with a court the finder found at or above this confidence.
-AUTO_CONFIDENT = 0.6
-# The court job sets the video's court by itself at or above these (the hall's memory is
-# surer than the finder in a hall it never saw); below, its best guess pre-fills the dialog
-# from GUESS_MIN.
+# The court job is *sure* of a court at or above this confidence (worker/court.py and
+# wieplay/ml/court_find.py, whose SURE_CONFIDENCE it equals: the API image has no OpenCV):
+# it sets the video's court by itself then, `checked` false, and the chain may use it
+# without a coach (`usable`). An unsure court is the video's proposal: a coach confirms or
+# fixes it ("Check the court").
+SURE_CONFIDENCE = 0.8
+# Results of court jobs before the sure flag (finder v2): the old bars.
 AUTO_SET = {"auto-hall": 0.6, "auto": 0.7}
-GUESS_MIN = 0.45
-# A court set by the job this sure serves the hall's memory too (a coach's always does).
-REFERENCE_MIN = 0.75
+# The dialog is pre-filled with the court job's court at or above this confidence (before the
+# team's last calibration); below, from GUESS_MIN, after it.
+AUTO_CONFIDENT = 0.5
+GUESS_MIN = 0.35
+# A court set by the job serves the hall's memory too when it is sure (a coach's always does).
+REFERENCE_MIN = SURE_CONFIDENCE
+# The net's height the finder looks for (court_find.NET_TOPS): men, women.
+NET_TOP_MEN = 2.43
+NET_TOP_WOMEN = 2.24
 MAX_REFERENCES = 16
 COURT_FRAMES_FORMAT = "npz"
 DEFAULT_ASPECT = 16 / 9
@@ -378,6 +386,7 @@ def queue_court(db: Session, video: Video, out_dir: str) -> Job | None:
                 {"nas_path": track.nas_path, "sha256": track.sha256} if track is not None else None
             ),
             "references": references(db, video),
+            "net_tops": net_tops_of(db, video),
         },
     )
 
@@ -505,6 +514,8 @@ class SetupCourtIn(BaseModel):
 class CourtFoundIn(BaseModel):
     method: Literal["auto-hall", "auto"]
     confidence: float = Field(ge=0, le=1)
+    # None: a worker from before the sure flag (its confidence against AUTO_SET decides)
+    sure: bool | None = None
     reference: dict[str, Any] | None = None
     setups: list[SetupCourtIn] = Field(min_length=1, max_length=64)
     stats: dict[str, Any] = Field(default_factory=dict)
@@ -526,6 +537,39 @@ class CourtResult(BaseModel):
     court: CourtFoundIn | None = None
     candidates: dict[str, Any] = Field(default_factory=dict)
     timing: dict[str, Any] = Field(default_factory=dict)
+
+
+def court_sure(found: CourtFoundIn) -> bool:
+    """Whether the court job is sure of its court (older results: their confidence against
+    the bars of their time)."""
+    if found.sure is not None:
+        return found.sure
+    return found.confidence >= AUTO_SET[found.method]
+
+
+def is_sure(row: Calibration) -> bool:
+    """The court job set or proposed this court and was sure of it."""
+    return row.method in ("auto", "auto-hall") and (row.confidence or 0.0) >= SURE_CONFIDENCE
+
+
+def usable(row: Calibration | None) -> bool:
+    """A court the chain may use without asking: a person set or checked it, or the court
+    job was sure of it."""
+    return row is not None and row.status == "confirmed" and (row.checked or is_sure(row))
+
+
+def net_tops_of(db: Session, video: Video) -> list[float]:
+    """The net's height(s) for the court finder: from the team's league or name (Herren,
+    Männer, H1 → 2.43 m; Frauen, Damen, D1 → 2.24 m), both when it does not say."""
+    team = db.get(WdTeam, video.team_id)
+    text = f"{team.league or ''} {team.name}".lower() if team is not None else ""
+    men = re.search(r"\b(herren|männer|maenner|men)\b|^h\d|\sh\d", text) is not None
+    women = re.search(r"\b(frauen|damen|women)\b|^d\d|\sd\d", text) is not None
+    if men and not women:
+        return [NET_TOP_MEN]
+    if women and not men:
+        return [NET_TOP_WOMEN]
+    return [NET_TOP_MEN, NET_TOP_WOMEN]
 
 
 def complete_court(db: Session, video: Video | None, job: Job, payload: dict[str, Any]) -> None:
@@ -565,6 +609,7 @@ def complete_court(db: Session, video: Video | None, job: Job, payload: dict[str
                 {
                     "method": result.court.method,
                     "confidence": result.court.confidence,
+                    "sure": court_sure(result.court),
                     "reference": result.court.reference,
                     **result.court.stats,
                 }
@@ -611,16 +656,22 @@ def complete_court(db: Session, video: Video | None, job: Job, payload: dict[str
             confidence=confidence,
             model_run_id=run.id,
         )
-        if (active is None or not active.checked) and confidence >= AUTO_SET[method]:
-            save_segments(
-                db,
-                video,
-                found,
-                status="confirmed",
-                method=method,
-                confidence=confidence,
-                model_run_id=run.id,
-            )
+        if active is None or not active.checked:
+            if court_sure(result.court):
+                save_segments(
+                    db,
+                    video,
+                    found,
+                    status="confirmed",
+                    method=method,
+                    confidence=max(confidence, SURE_CONFIDENCE),
+                    model_run_id=run.id,
+                )
+            elif active is not None:
+                # An earlier job's court that this one is not sure of: back to a proposal
+                # (the chain must not go on using it unchecked).
+                db.delete(active)
+                db.flush()
     if active is not None and active.checked and len(setups) > 1 and not active.segments:
         _extend(active, setups, main)
     jobs.succeed(job, {"model_run_id": str(run.id), "setups": len(setups)})
@@ -844,6 +895,55 @@ def save_segments(
         segments=found.segments if len(found.segments) > 1 else None,
         checked=False,
     )
+
+
+def confirm(db: Session, video: Video, actor: int | None) -> Calibration:
+    """A coach confirms the court job's court as it is ("Check the court" → Confirm): the
+    court it set by itself becomes checked, or its proposal becomes the video's court, with
+    the camera's setups. CourtError when there is neither."""
+    row = current(db, video.id)
+    if row is not None and row.checked:
+        return row
+    if row is None:
+        proposal = current(db, video.id, "proposed")
+        if proposal is None or proposal.method not in ("auto", "auto-hall"):
+            raise court.CourtError("no court found by WiePlay to confirm")
+        row = Calibration(
+            id=uuid.uuid4(),
+            video_id=video.id,
+            status="confirmed",
+            created_by=actor,
+            **{
+                key: getattr(proposal, key)
+                for key in (
+                    "lineage_id",
+                    "hall_name",
+                    "method",
+                    "landmarks",
+                    "image_points",
+                    "court_points",
+                    "image_aspect",
+                    "homography",
+                    "camera",
+                    "reproj_error_cm",
+                    "max_error_cm",
+                    "confidence",
+                    "model_run_id",
+                    "segments",
+                    "at_ms",
+                )
+            },
+        )
+        db.add(row)
+    row.checked = True
+    row.updated_by = actor
+    if row.segments:
+        row.segments = [
+            {**seg, "checked": True} if seg.get("homography") else seg for seg in row.segments
+        ]
+        flag_modified(row, "segments")
+    db.flush()
+    return row
 
 
 def segments_of(row: Calibration) -> list[dict[str, Any]]:
@@ -1101,6 +1201,7 @@ class Suggestion:
     video_title: str | None
     recorded_on: date | None
     calibration_id: uuid.UUID
+    sure: bool = False  # the court job's, and it was sure
 
 
 def suggestions(db: Session, video: Video) -> list[Suggestion]:
@@ -1114,7 +1215,9 @@ def suggestions(db: Session, video: Video) -> list[Suggestion]:
         "auto-hall" if auto is not None and auto.method == "auto-hall" else "auto"
     )
     guess = (
-        Suggestion(source, auto.points(), auto.confidence, video.id, None, None, auto.id)
+        Suggestion(
+            source, auto.points(), auto.confidence, video.id, None, None, auto.id, is_sure(auto)
+        )
         if auto is not None
         else None
     )

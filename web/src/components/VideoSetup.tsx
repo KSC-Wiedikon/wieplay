@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { useTranslation } from 'react-i18next'
 import { useAnalysis } from '../lib/analysis'
 import { ApiError } from '../lib/api'
-import { useCourt, type CourtState } from '../lib/court'
+import { foundCourt, useCourt, type CourtState } from '../lib/court'
 import { cx } from '../lib/cx'
 import { useFindPlayers, useSearchTime, type PlayersSummary } from '../lib/players'
 import { keys } from '../lib/queryClient'
@@ -29,6 +29,7 @@ import type { Video } from '../lib/types'
 import { AnalysisStatus } from './AnalysisStatus'
 import { Badge } from './Badge'
 import { Button, ButtonLink } from './Button'
+import { CourtCheckDialog } from './CourtCheckDialog'
 import { CourtSetupDialog } from './CourtSetupDialog'
 import { Field, TextInput } from './Field'
 import { AlertIcon, ChevronDownIcon, CircleCheckIcon, CircleIcon, SlidersIcon } from './icons'
@@ -222,16 +223,27 @@ function BallStep({ state, court }: { state: StepState; court: CourtState | unde
 
 function CourtStep({ state, video, court, element }: { state: StepState; video: Video; court: CourtState | undefined; element: HTMLVideoElement | null }) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState<'setup' | 'check' | null>(null)
   const calibration = court?.calibration ?? null
+  // The court WiePlay found and nobody has looked at: Check (Confirm or Fix) comes first.
+  const found = foundCourt(court)
   const status = calibration
     ? calibration.checked === false
-      ? t('setup.court.auto')
+      ? calibration.sure
+        ? t('setup.court.sure')
+        : t('setup.court.auto')
       : t('setup.court.done')
     : state === 'busy'
       ? t('setup.court.busy')
-      : t('setup.court.none')
-  const label = calibration ? (calibration.checked === false ? t('setup.court.check') : t('setup.court.edit')) : t('setup.court.open')
+      : found
+        ? t('setup.court.found')
+        : t('setup.court.none')
+  const label = found ? t('setup.court.check') : calibration ? t('setup.court.edit') : t('setup.court.open')
+  // Fix: the set-up dialog starts from the court WiePlay found.
+  const setupState =
+    court && found && found.kind === 'proposal'
+      ? { ...court, suggestions: [...court.suggestions.filter((s) => s.source !== 'team'), ...court.suggestions.filter((s) => s.source === 'team')] }
+      : court
   return (
     <Step
       title={t('setup.court.title')}
@@ -240,10 +252,13 @@ function CourtStep({ state, video, court, element }: { state: StepState; video: 
       actions={
         court?.can_edit ? (
           <>
-            <Button variant={state === 'attention' || state === 'todo' ? 'primary' : 'secondary'} onClick={() => setOpen(true)} aria-haspopup="dialog">
+            <Button variant={state === 'attention' || state === 'todo' ? 'primary' : 'secondary'} onClick={() => setOpen(found ? 'check' : 'setup')} aria-haspopup="dialog">
               {label}
             </Button>
-            {open && <CourtSetupDialog open videoId={video.id} state={court} element={element} onClose={() => setOpen(false)} />}
+            {open === 'check' && found && (
+              <CourtCheckDialog open videoId={video.id} state={court} found={found} element={element} onClose={() => setOpen(null)} onFix={() => setOpen('setup')} />
+            )}
+            {open === 'setup' && setupState && <CourtSetupDialog open videoId={video.id} state={setupState} element={element} onClose={() => setOpen(null)} />}
           </>
         ) : null
       }

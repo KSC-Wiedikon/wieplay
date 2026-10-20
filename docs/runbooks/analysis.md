@@ -93,14 +93,17 @@ reads a key frame every 30 s of the originals and finds:
 - **the empty hall** of the longest setup (median of 15 key frames), kept as
   `court-<job8>.npz` next to the signals (a JPEG inside; the hall's memory for later videos);
 - **the court**: through the *hall's memory* (other videos' calibrated pictures — a coach's
-  always, the job's own from confidence 0.75 — the team's and the hall's first, at most 16;
-  matched with SIFT and RANSAC, the court's lines then fitted to this picture), else the
-  *finder v2* (paint colours, the net, the bounces). Every setup gets the court through its
-  picture's homography onto the main setup's.
+  always, the job's own when it was sure — the team's and the hall's first, at most 16;
+  matched with SIFT and RANSAC, the court's lines then fitted to this picture), and the
+  *finder v3* (painted lines of any colour, a camera with a lens term, the net at the team's
+  height; [research note](../research/court-auto-2026-10.md)). Every setup gets the court
+  through its picture's homography onto the main setup's.
 
-The API keeps the court as the video's proposal and, **when sure** (hall memory ≥ 0.6,
-finder ≥ 0.7) and no coach set the court, as its calibration with `checked` false: the
-video page says "Court set automatically: check", Tendencies already uses it. A coach's
+The API keeps the court as the video's proposal and, **when sure** (confidence ≥ 0.8: a hall
+memory transfer from 0.75 of its own confidence, the finder's sure verdict; two sure courts
+that disagree are not) and no coach set the court, as its calibration with `checked` false:
+the video page says "Found by WiePlay, sure", the chain and Tendencies use it (`usable`). An
+unsure court stays a proposal: the video page asks to "Check the court" (Confirm or Fix). A coach's
 calibration always wins: a later court job only adds the setups to it (the coach's points
 hold for the setup where the video was paused). In the dialog the coach checks or fixes one
 setup at a time on a frame of its own; the setups nobody set follow the fix. Saving also
@@ -112,14 +115,15 @@ python -m wieplay.cli court --all-ready --dry-run   # what would be queued
 python -m wieplay.cli court --all-ready             # videos without a court job result
 python -m wieplay.cli court --video <id> --force    # again, e.g. after a coach calibrated a
                                                   # first video in that hall
-python -m wieplay.cli court-eval                    # per video: method, confidence, setups,
-                                                  # and against the coach's calibration
+python -m wieplay.cli court-eval                    # per video: method, confidence, sure,
+                                                  # setups, and against the coach's
+                                                  # calibration (wrong among sure)
 ```
 
-Start a hall's memory by setting up the court by hand on one video of each hall (the
-finder v2 does not find the court on the real halls yet), then `court --all-ready --force`
-for the others. Timing (Lenovo, under load): 240 key frames in 20–180 s depending on the NAS,
-the hall's memory ~1 s a reference, the finder 10–15 s. Real check (17.10.2026, H3 games):
+A hall where WiePlay is not sure (no volleyball paint, a gallery camera, a side view): a coach
+confirms or fixes the court once ("Check the court"), then `court --all-ready --force` carries it
+to the hall's other videos. Timing (Lenovo, under load): 240 key frames in 20–180 s depending on the NAS,
+the hall's memory ~1 s a reference, the finder 1–2 s. Real check (17.10.2026, H3 games):
 Stäfa calibrated by hand (2.9 cm RMS) → Uster set automatically at 0.92, 2.2 cm RMS against
 a hand calibration of Uster; Legends and Volero H4 (other floors) correctly not matched;
 Legends' bump found at 1:11:30 (25 px), its court carried over to the setup after it.

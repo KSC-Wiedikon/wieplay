@@ -114,7 +114,8 @@ def render(
     for x1, y1, x2, y2 in court.LINES:
         line(x1, y1, x2, y2, court_colour, 1)
     if net:
-        for z in (2.43, 1.43):
+        # The net's bands: 7 cm at the top (2.43 m), 5 cm at the bottom, a metre of mesh.
+        for z in (2.395, 1.455):
             line(-0.5, court.NET_Y, court.WIDTH_M + 0.5, court.NET_Y, (250, 250, 250), 1, z, z)
         for x in (-0.6, court.WIDTH_M + 0.6):
             line(x, court.NET_Y, x, court.NET_Y, (230, 230, 230), 2, 0.0, 2.55)

@@ -3136,7 +3136,8 @@ reviews makes WiePlay better for that team.
   last calibration in the same hall. Runs on the Lenovo server (CPU). For basketball footage
   filmed with a mild wide-angle setting (§7.1), the calibration also estimates lens distortion
   and undistorts before the homography.
-- Later: automatic line/keypoint detection initialised from the hall's last calibration.
+- Later: automatic line/keypoint detection initialised from the hall's last calibration
+  (done: hall memory 17.10, finder v3 with the sure flag 20.10, below).
 - **Bar**: reprojection error < 15 cm on held-out landmarks.
 - **Built 16.10.2026** (migration `0008`, `calibration` per video and status): the coach
   clicks 4–10 landmarks (corners; centre and attack lines' ends stand in for corners out of
@@ -3186,6 +3187,28 @@ reviews makes WiePlay better for that team.
     fixing one setup carries the fix to the setups nobody set, and becomes the hall's
     memory. Metrics per run: method, confidence, setups and bumps, the court against the
     coach's (`vs_coach`, held out); `python -m wieplay.cli court-eval`.
+- **Found by itself, and sure, 20.10.2026** ([research note](research/court-auto-2026-10.md)):
+  the finder v3 (`wieplay/ml/court_find.py`) replaces v2. Painted lines of any colour as ridges
+  of the image's curvature (Hessian), their paint against the floor; side lines through the
+  hall's vanishing point and lines across, every pair as every pair of the court's cross lines;
+  courts a match camera could see, judged line by line on one paint with no paint beyond the
+  corners; the best eight refined with a camera that has a lens term, then the net: its two
+  bands where the camera puts a net of the team's height (2.43 m men, 2.24 m women) above the
+  centre line; the filming guide's camera preferred. **Sure** = a high score and a clear lead
+  over every other court the picture allows (confidence ≥ 0.8). On the 21 analysed prod halls:
+  v2 found 1 of 14 labelled courts and was never sure; v3 finds 13 of 14 and is sure on 12 of
+  21, none wrong (landmarks a median 2 px, 20 cm RMS from hand labels). Not sure: a hall
+  without volleyball paint (H1–H3's, KWI A with the climbing wall: badminton lines only),
+  cameras on a gallery, side views, floors with many lines of similar paint.
+  - The court job takes the hall's memory unless the finder is sure and the memory is not;
+    a memory transfer is sure from 0.75; two sure courts that disagree make it unsure.
+  - The job sets the video's court only when sure (`checked` false); the API gives every
+    calibration `sure` and `usable` (checked or sure), and the chain uses a usable court only.
+    A rerun that is no longer sure takes an unchecked court back to a proposal; only sure or
+    checked courts serve the hall's memory.
+  - Unsure: "Check the court" on the video page shows the found court over the paused frame,
+    Confirm (`POST /api/videos/{id}/court/confirm`, the proposal with its setups becomes the
+    court, checked) or Fix (the set-up dialog, pre-filled with it).
 
 ### 10.7 Serve placement
 

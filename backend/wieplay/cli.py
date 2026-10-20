@@ -490,6 +490,7 @@ def court_eval(as_json: bool) -> int:
                     "date": f"{recorded_on:%d.%m.%Y}" if recorded_on else None,
                     "method": found.get("method"),
                     "confidence": found.get("confidence"),
+                    "sure": found.get("sure"),
                     "setups": len(m.get("setups") or []),
                     "bumps": sum(1 for s in m.get("setups") or [] if s.get("start") == "bump"),
                     "vs_coach": m.get("vs_coach"),
@@ -502,14 +503,19 @@ def court_eval(as_json: bool) -> int:
         vs = r["vs_coach"]
         print(
             f"{r['date'] or '-':>10}  {(r['title'] or '')[:36]:36}  {r['method'] or 'none':9}  "
-            f"{_pct(r['confidence'])} %  setups {r['setups']} (bumps {r['bumps']})  "
+            f"{_pct(r['confidence'])} % {'sure  ' if r['sure'] else 'unsure'}  "
+            f"setups {r['setups']} (bumps {r['bumps']})  "
             f"vs coach {f'{vs["rms_cm"]} cm rms, {vs["max_cm"]} max' if vs else '-'}"
         )
     found = [r for r in out if r["method"]]
     held = [r for r in out if r["vs_coach"]]
     good = [r for r in held if r["vs_coach"]["rms_cm"] <= 15]
+    sure = [r for r in out if r["sure"]]
+    # Wrong: a coach's corner more than a metre off the job's court.
+    wrong = [r for r in held if r["sure"] and r["vs_coach"]["max_cm"] > 100]
     print(
-        f"{len(found)} of {len(out)} videos with a court; {len(good)} of {len(held)} within 15 cm"
+        f"{len(found)} of {len(out)} videos with a court, {len(sure)} sure; "
+        f"{len(good)} of {len(held)} within 15 cm; {len(wrong)} wrong among the sure ones"
     )
     return 0
 

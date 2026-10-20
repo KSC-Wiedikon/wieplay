@@ -6,7 +6,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { proposalsToCheck, proposalTotal } from './analysis'
 import { apiRequest } from './api'
-import type { CourtState } from './court'
+import { foundCourt, type CourtState } from './court'
 import type { PlayersSummary } from './players'
 import type { Scoresheet } from './scoresheet'
 import { keys } from './queryClient'
@@ -43,11 +43,17 @@ export function ballState(court: CourtState | undefined): StepState {
   return track.job === 'failed' ? 'attention' : 'waiting'
 }
 
+/**
+ * The court (docs/PLAN.md §10.6): done when a coach set or checked it, or WiePlay was sure of
+ * the court it found; needs you when WiePlay found a court but is not sure of it (Check: Confirm
+ * or Fix).
+ */
 export function courtState(court: CourtState | undefined): StepState {
   if (!court) return 'waiting'
   const calibration = court.calibration
-  if (calibration) return calibration.checked === false ? 'attention' : 'done'
-  return BUSY_JOBS.includes(court.court_job ?? '') ? 'busy' : 'todo'
+  if (calibration) return calibration.checked === false && calibration.sure !== true ? 'attention' : 'done'
+  if (BUSY_JOBS.includes(court.court_job ?? '')) return 'busy'
+  return foundCourt(court) ? 'attention' : 'todo'
 }
 
 export function scoreboardState(board: ScoreboardState | undefined, noScoreboard: boolean, sheetTrusted = false): StepState {
