@@ -287,7 +287,7 @@ def test_csv_cells_and_lines() -> None:
     rows = list(csv.reader(io.StringIO(text)))
     head = rows[0]
     assert head[:5] == ["Set", "Number", "Player", "Points", "Serve attempts"]
-    assert head[-1] == "Break-point %"
+    assert head[-2:] == ["Break-point %", "To check"]
     player, team, opponent = (dict(zip(head, r, strict=True)) for r in rows[1:])
     assert (player["Player"], player["Number"], player["Kills"]) == ("Alex Müller", "7", "1")
     assert player["Hitting %"] == "0.0" and player["Kill %"] == "50.0"

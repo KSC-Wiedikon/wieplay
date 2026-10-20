@@ -192,9 +192,10 @@ class RallyFacts:
 
 
 def _period_fact(period: Period, official: list[tuple[int, int]] | None) -> bool:
-    """A set that is a fact: a coach's (made, accepted or corrected), one WiePlay is sure of,
-    or one whose final score is Wiedisync's official score of that set."""
-    if period.source != "model" or period.review in ("confirmed", "corrected", "auto"):
+    """A set that is a fact: a coach's (made, accepted or corrected), or one whose final
+    score is Wiedisync's official score of that set (the bug never guesses: a set WiePlay is
+    sure of by its breaks alone may still carry the wrong number)."""
+    if period.source != "model" or period.review in ("confirmed", "corrected"):
         return True
     if not official or not 1 <= period.no <= len(official):
         return False

@@ -742,8 +742,9 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 
 
 def rallies_to_check(db: Session, video_id: uuid.UUID) -> int:
-    """Rallies that wait for a person (tagging.rally_to_check): WiePlay's unsure ones and the
-    rallies whose winner nobody gave while the scoring is unsure of it."""
+    """WiePlay's rallies still to check (review "check"): what "rallies done" waits for. The
+    rally list is the finder's label; a winner still to check (tagging.rally_to_check) is the
+    scoring's and does not hold it up."""
     return int(
         db.scalar(
             select(func.count())
@@ -751,7 +752,8 @@ def rallies_to_check(db: Session, video_id: uuid.UUID) -> int:
             .where(
                 Segment.video_id == video_id,
                 Segment.deleted_at.is_(None),
-                tagging.rally_to_check(),
+                Segment.kind == "rally",
+                Segment.review == "check",
             )
         )
         or 0

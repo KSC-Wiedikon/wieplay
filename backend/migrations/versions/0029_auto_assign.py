@@ -79,8 +79,7 @@ OWN_SWITCH = """IF TG_OP = 'UPDATE' THEN
 NOW = REVISION_FUNCTION.replace("{extra}", ", 'model_alternative'").replace("{own}", OWN_SWITCH)
 BEFORE = REVISION_FUNCTION.replace("{extra}", "").replace("{own}", "")
 
-GAPS = "('warmup', 'set_break', 'timeout', 'stoppage', 'substitution', 'other_dead')"
-SURE = 0.9  # tagging.GAP_SURE and SET_SURE
+# Breaks and sets are sure from confidence 0.9 (tagging.GAP_SURE, SET_SURE).
 
 
 def upgrade() -> None:
@@ -102,11 +101,12 @@ def upgrade() -> None:
         "AND won_by IS NULL AND score_sure IS FALSE AND deleted_at IS NULL"
     )
     op.execute(
-        f"UPDATE segment SET review = CASE WHEN confidence >= {SURE} THEN 'auto' ELSE 'check' END "
-        f"WHERE source = 'model' AND kind IN {GAPS} AND review = 'unreviewed'"
+        "UPDATE segment SET review = CASE WHEN confidence >= 0.9 THEN 'auto' ELSE 'check' END "
+        "WHERE source = 'model' AND review = 'unreviewed' AND kind IN ('warmup', 'set_break', "
+        "'timeout', 'stoppage', 'substitution', 'other_dead')"
     )
     op.execute(
-        f"UPDATE period SET review = CASE WHEN confidence >= {SURE} THEN 'auto' ELSE 'check' END "
+        "UPDATE period SET review = CASE WHEN confidence >= 0.9 THEN 'auto' ELSE 'check' END "
         "WHERE source = 'model' AND review = 'unreviewed'"
     )
     op.drop_index("ix_event_video_open_model", table_name="event")
@@ -131,7 +131,7 @@ def downgrade() -> None:
     )
     for table in ("event", "segment", "period"):
         op.execute(
-            f"UPDATE {table} SET review = 'unreviewed' "
+            f"UPDATE {table} SET review = 'unreviewed' "  # noqa: S608 (fixed table names)
             "WHERE source = 'model' AND review IN ('auto', 'check')"
         )
     op.execute(BEFORE)

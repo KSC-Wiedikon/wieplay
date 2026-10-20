@@ -428,7 +428,7 @@ def complete(
     jobs.succeed(job, {k: v for k, v in payload.items() if k != "playlist"})
 
 
-def on_failed(db: Session, video: Video | None, job: Job) -> None:
+def on_failed(db: Session, video: Video | None, job: Job, settings: Settings | None = None) -> None:
     """A job failed for good: the video failed, its other jobs stop. A failed export only
     fails that export. Failed analysis leaves the video as it is: it plays without it."""
     from wieplay.core import actions, analysis, calibration, players, scoreboard, sheet_reading
@@ -444,7 +444,7 @@ def on_failed(db: Session, video: Video | None, job: Job) -> None:
         # The video plays without it; the chain goes on where it can (core/chain.py).
         from wieplay.core import chain
 
-        chain.after_failed(db, video, job)
+        chain.after_failed(db, video, job, settings)
         return
     if job.kind in scoreboard.KINDS:
         return  # the scoring goes on without the board

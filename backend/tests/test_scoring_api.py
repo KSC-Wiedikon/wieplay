@@ -140,7 +140,7 @@ def test_an_analysis_scores_the_match(
     # Four sets proposed from the breaks and the official points, as suggestions.
     periods = sorted(data["periods"], key=lambda p: p["no"])
     assert [(p["no"], p["source"], p["review"]) for p in periods] == [
-        (n, "model", "unreviewed") for n in (1, 2, 3, 4)
+        (n, "model", "auto") for n in (1, 2, 3, 4)
     ]
     assert [(p["final_us"], p["final_them"]) for p in periods] == OFFICIAL
     assert [(p["model_court_side"], p["model_first_serve"]) for p in periods] == [
@@ -166,7 +166,9 @@ def test_an_analysis_scores_the_match(
     assert [g["kind"] for g in gaps] == [
         "warmup", "set_break", "set_break", "set_break", "other_dead"
     ]  # fmt: skip
-    assert all(g["source"] == "model" and g["review"] == "unreviewed" for g in gaps)
+    # Sure from 0.9 (a set break), else to check (a short warm-up, after the match).
+    assert [g["review"] for g in gaps] == ["check", "auto", "auto", "auto", "check"]
+    assert all(g["source"] == "model" for g in gaps)
     assert gaps[0]["end_ms"] == played[0][0] and gaps[-1]["start_ms"] == last_end
     assert data["first_serve_ms"] == played[0][0]
     state = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()
@@ -180,8 +182,8 @@ def test_an_analysis_scores_the_match(
     }  # fmt: skip
     assert [s["official"] for s in scoring["sets"]] == [list(s) for s in OFFICIAL]
     assert scoring["vs_coach"] is None  # nothing a coach decided yet
-    # Stats count a model set only once a coach accepts it.
-    assert club["coach"].get(f"/api/videos/{ready['id']}/stats").json()["sets"] == []
+    # WiePlay's sets count from the start (PLAN §10.0).
+    assert len(club["coach"].get(f"/api/videos/{ready['id']}/stats").json()["sets"]) == 4
 
 
 def test_an_official_result_that_comes_later_scores_again(
@@ -297,7 +299,7 @@ def test_a_winner_set_in_review_is_a_fact_and_scores_again(
     # Undo (U): the proposal is open again, the model's winner back, scored again.
     back = change(club["coach"], ready, {**_seg_in(seg), "won_by": None, "review": "unreviewed"})
     seg = next(s for s in back["segments"] if s["id"] == first["id"])
-    assert (seg["won_by"], seg["review"], seg["model_won_by"]) == (None, "unreviewed", right)
+    assert (seg["won_by"], seg["review"], seg["model_won_by"]) == (None, "check", right)
     assert score_runs(app, ready) == [*before, "changes", "changes"]
     # A moved boundary scores again too (the gaps around it change, PLAN §10.1); a change that
     # leaves the rally as it is does not.
@@ -338,7 +340,7 @@ def test_first_serve_and_sides_from_the_sets_bar(
     out = club["coach"].post(url, json={"periods": [told]})
     assert out.status_code == 200, out.text
     periods = {p["no"]: p for p in out.json()["periods"]}
-    assert periods[1]["first_serve"] == "them" and periods[1]["review"] == "unreviewed"
+    assert periods[1]["first_serve"] == "them" and periods[1]["review"] == "auto"
     # The rules carry the click to the other sets.
     assert (periods[2]["model_first_serve"], periods[2]["model_court_side"]) == ("us", "near")
     rallies = rallies_of(out.json())
@@ -365,7 +367,7 @@ def test_model_sets_and_gaps_are_answered_like_proposals(
     assert out.status_code == 200, out.text
     got = {p["no"]: p for p in out.json()["periods"]}
     assert got[1]["review"] == "confirmed" and got[2]["review"] == "corrected"
-    assert got[3]["review"] == "unreviewed" and got[3]["start_rotation"] == 4
+    assert got[3]["review"] == "auto" and got[3]["start_rotation"] == 4
     # Rejected gap labels are not proposed again; a coach's own timeout blocks the model's.
     gaps = [s for s in out.json()["segments"] if s["kind"] == "set_break"]
     reject = {**_seg_in(gaps[0]), "review": "rejected", "deleted": True}
@@ -381,7 +383,7 @@ def test_model_sets_and_gaps_are_answered_like_proposals(
     assert sources == [
         (1, "model", "confirmed"),
         (2, "model", "corrected"),
-        (3, "model", "unreviewed"),  # the coach set its starting rotation: kept
+        (3, "model", "auto"),  # the coach set its starting rotation: kept
         (4, "manual", "unreviewed"),
     ]
 
@@ -397,7 +399,7 @@ def test_gap_labels_keep_their_ids_from_one_scoring_to_the_next(
         return {
             s["id"]: (s["kind"], s["start_ms"], s["end_ms"])
             for s in segments
-            if s["kind"] != "rally" and s["source"] == "model" and s["review"] == "unreviewed"
+            if s["kind"] != "rally" and s["source"] == "model" and s["review"] in ("auto", "check")
         }
 
     before = labels()

@@ -301,7 +301,7 @@ def complete(
         job = _running(db, job_id, worker)
         video = db.get(Video, job.video_id) if job.video_id else None
         jobs.fail(job, f"invalid result: {exc}", retryable=False)
-        pipeline.on_failed(db, video, job)
+        pipeline.on_failed(db, video, job, settings)
         db.commit()
         raise HTTPException(422, f"Invalid result: {exc}") from exc
     if job.kind == "ingest" and video is not None and video.status == "processing":
@@ -325,7 +325,9 @@ def complete(
 
 
 @router.post("/jobs/{job_id}/fail", status_code=204)
-def fail(job_id: uuid.UUID, body: FailIn, worker: WorkerDep, db: DbDep) -> Response:
+def fail(
+    job_id: uuid.UUID, body: FailIn, worker: WorkerDep, db: DbDep, settings: SettingsDep
+) -> Response:
     job = _running(db, job_id, worker)
     delay = timedelta(seconds=body.retry_after_s) if body.retry_after_s else None
     if body.given_back:
@@ -339,7 +341,7 @@ def fail(job_id: uuid.UUID, body: FailIn, worker: WorkerDep, db: DbDep) -> Respo
         jobs.hold(db, "import", datetime.now(UTC) + delay)
     if final:
         video = db.get(Video, job.video_id) if job.video_id else None
-        pipeline.on_failed(db, video, job)
+        pipeline.on_failed(db, video, job, settings)
     log.warning("job %s (%s) failed on %s: %s", job.id, job.kind, worker.name, body.error[:200])
     db.commit()
     return Response(status_code=204)
