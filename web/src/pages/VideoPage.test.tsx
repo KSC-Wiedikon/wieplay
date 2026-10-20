@@ -325,9 +325,9 @@ describe('VideoPage', () => {
   describe('automatic rallies', () => {
     const set1 = period({ no: 1, start_ms: 0, first_serve: 'us' })
     const r1 = rally({ start_ms: 10_000, end_ms: 20_000, won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0 })
-    const open = rally({ start_ms: 40_000, end_ms: 48_000, source: 'model', confidence: 0.81 })
+    const open = rally({ start_ms: 40_000, end_ms: 48_000, source: 'model', review: 'check', score_sure: false, confidence: 0.81 })
     const accepted = rally({ start_ms: 60_000, end_ms: 70_000, source: 'model', review: 'confirmed', confidence: 0.93 })
-    const counts = (patch: Partial<Analysis['proposals']> = {}) => ({ unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0, ...patch })
+    const counts = (patch: Partial<Analysis['proposals']> = {}) => ({ auto: 0, check: 0, confirmed: 0, corrected: 0, rejected: 0, ...patch })
     const analysis = (patch: Partial<Analysis> = {}): Analysis => ({ status: 'done', model_run: null, proposals: counts(), metrics_vs_human: null, ...patch })
 
     function showAnalysis(state: { analysis: Analysis }, { canTag = true, segments = [r1, open, accepted], reviewedAt = null as string | null } = {}) {
@@ -357,30 +357,34 @@ describe('VideoPage', () => {
       return { ...view, posts }
     }
 
-    it("keeps open suggestions out of the rallies and links coaches to their review", async () => {
-      showAnalysis({ analysis: analysis({ proposals: counts({ unreviewed: 1, confirmed: 1, rejected: 1 }) }) })
-      expect(await screen.findByText('WiePlay suggested 3 rallies.')).toBeInTheDocument()
-      expect(screen.getByText('1 still to review.')).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Review suggestions (1)' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
-      // Nothing is shown as fact until it is reviewed (PLAN §10): the accepted one is a rally, the open one not.
-      expect(screen.getByText('0 tags · 2 rallies')).toBeInTheDocument()
+    it("counts WiePlay's rallies, marks those to check and links coaches to To check", async () => {
+      showAnalysis({ analysis: analysis({ proposals: counts({ check: 1, confirmed: 1, rejected: 1 }) }) })
+      expect(await screen.findByText('WiePlay found 3 rallies.')).toBeInTheDocument()
+      expect(screen.getByText('1 still to check.')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'To check (1)' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
+      // Every rally counts, WiePlay's too (PLAN §10): the one to check is marked in the list.
+      expect(screen.getByText('0 tags · 3 rallies')).toBeInTheDocument()
       const list = screen.getByRole('table', { name: 'Rallies' })
       const rows = within(list).getAllByRole('row').slice(1)
-      // Two rallies, and where the open suggestion lies: the score counts it, so it jumps there.
-      expect(rows.map((r) => r.getAttribute('data-open-suggestions'))).toEqual([null, '1', null])
-      expect(rows[1]).toHaveTextContent('1 suggestion to review here: the score counts it')
-      expect(screen.getByText(/1 suggestion still to review isn’t in the list yet\./)).toHaveTextContent(
-        'Skip dead time plays the 2 rallies in the list: 0:27 of 1:32:10. 1 suggestion still to review isn’t in the list yet. Review it',
-      )
-      expect(screen.getByRole('link', { name: 'Review it' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
-      // Marking the rallies reviewed now accepts the open suggestion: asked first.
+      expect(rows.map((r) => r.getAttribute('data-to-check'))).toEqual([null, 'true', null])
+      expect(within(rows[1] as HTMLElement).getByText('To check')).toBeInTheDocument()
+      expect(screen.getByText(/^Skip dead time plays the 3 rallies/)).toHaveTextContent(/^Skip dead time plays the 3 rallies in the list: .* 1 still to check\. Check it$/)
+      expect(screen.getByRole('link', { name: 'Check it' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
+      // "Rallies reviewed" waits until nothing is left to check.
       const reviewed = screen.getByRole('switch', { name: 'Rallies reviewed' })
-      expect(reviewed).toHaveAccessibleDescription(/the open suggestion is then accepted as it is/)
-      fireEvent.click(reviewed)
-      const dialog = screen.getByRole('alertdialog', { name: 'Mark the rallies reviewed?' })
-      expect(dialog).toHaveTextContent('The suggestion still open is accepted as it is')
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-      expect(reviewed).toHaveAttribute('aria-checked', 'false')
+      expect(reviewed).toHaveAccessibleDescription(/Check the 1 rally left first/)
+      expect(reviewed).toBeDisabled()
+    })
+
+    it('says where the analysis chain is: "Analysing: 4 of 7 steps", then "Analysed"', async () => {
+      const items = (['rallies', 'score', 'ball', 'court', 'actions', 'players', 'attribution'] as const).map((key, i) => ({ key, status: i < 4 ? ('done' as const) : ('queued' as const) }))
+      const state = { analysis: analysis({ proposals: counts({ auto: 2 }), steps: { done: 4, total: 7, running: true, items } }) }
+      const { queryClient } = showAnalysis(state)
+      expect(await screen.findByText('Analysing: 4 of 7 steps')).toBeInTheDocument()
+      state.analysis = analysis({ proposals: counts({ auto: 2 }), steps: { done: 7, total: 7, running: false, items: items.map((x) => ({ ...x, status: 'done' as const })) } })
+      await queryClient.invalidateQueries()
+      expect(await screen.findByText('Analysed')).toBeInTheDocument()
+      expect(screen.getByText('WiePlay found 2 rallies. Nothing left to check.')).toBeInTheDocument()
     })
 
     it('analyses on request, and shows the analysis queued, running and failed', async () => {
@@ -395,7 +399,7 @@ describe('VideoPage', () => {
 
       state.analysis = analysis({ status: 'running' })
       await queryClient.invalidateQueries()
-      expect(await screen.findByText('WiePlay is finding the rallies…')).toBeInTheDocument()
+      expect(await screen.findByText('WiePlay is analysing the video…')).toBeInTheDocument()
 
       state.analysis = analysis({ status: 'failed' })
       await queryClient.invalidateQueries()
@@ -410,13 +414,13 @@ describe('VideoPage', () => {
         { segments: [r1] },
       )
       expect(await screen.findByText('WiePlay compared its rally finder with your rallies.')).toBeInTheDocument()
-      expect(screen.getByText('Suggestions matched your rallies: F1 94% at ±1 s')).toBeInTheDocument()
+      expect(screen.getByText('WiePlay’s rallies matched yours: F1 94% at ±1 s')).toBeInTheDocument()
       expect(screen.getByText('Precision 95%, recall 93%. WiePlay: 181 rallies, you: 185.')).toBeInTheDocument()
     })
 
-    it('asks to mark the rallies reviewed once every suggestion is answered, and can take it back', async () => {
+    it('asks to mark the rallies reviewed once nothing is left to check, and can take it back', async () => {
       const { posts } = showAnalysis({ analysis: analysis({ proposals: counts({ confirmed: 1, rejected: 1 }) }) }, { segments: [r1, accepted] })
-      expect(await screen.findByText('Every suggestion is reviewed.')).toBeInTheDocument()
+      expect(await screen.findByText('Every rally is checked.')).toBeInTheDocument()
       fireEvent.click(screen.getByRole('button', { name: 'Mark rallies reviewed' }))
       const reviewed = await screen.findByRole('switch', { name: 'Rallies reviewed' })
       expect(reviewed).toHaveAttribute('aria-checked', 'true')
@@ -426,7 +430,7 @@ describe('VideoPage', () => {
 
       fireEvent.click(reviewed)
       await waitFor(() => expect(posts.at(-1)).toEqual({ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: false } }))
-      expect(await screen.findByText('Every suggestion is reviewed.')).toBeInTheDocument()
+      expect(await screen.findByText('Every rally is checked.')).toBeInTheDocument()
     })
 
     it('lets a coach mark a game tagged by hand reviewed (training data without suggestions)', async () => {
@@ -437,15 +441,15 @@ describe('VideoPage', () => {
       await waitFor(() => expect(posts).toEqual([{ path: `/api/videos/${ID}/rallies-reviewed`, body: { reviewed: true } }]))
     })
 
-    it('shows players neither the analysis nor open suggestions', async () => {
-      showAnalysis({ analysis: analysis({ proposals: counts({ unreviewed: 1 }) }) }, { canTag: false })
+    it('shows players every rally but not the analysis or the way to To check', async () => {
+      showAnalysis({ analysis: analysis({ proposals: counts({ check: 1 }) }) }, { canTag: false })
       expect(await screen.findByRole('table', { name: 'Rallies' })).toBeInTheDocument()
-      expect(screen.queryByText(/WiePlay suggested/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/WiePlay found/)).not.toBeInTheDocument()
       const rows = within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row').slice(1)
-      expect(rows.filter((r) => !r.hasAttribute('data-open-suggestions'))).toHaveLength(2)
-      // Why the score jumps is said to players too, without a way to the review.
-      expect(screen.getByText(/1 suggestion still to review isn’t in the list yet\./)).toBeInTheDocument()
-      expect(screen.queryByRole('link', { name: 'Review it' })).not.toBeInTheDocument()
+      expect(rows).toHaveLength(3)
+      // How much is still to check is said to players too, without a way to the review.
+      expect(screen.getByText(/^Skip dead time plays the 3 rallies/)).toHaveTextContent(/1 still to check\.$/)
+      expect(screen.queryByRole('link', { name: 'Check it' })).not.toBeInTheDocument()
     })
   })
 
@@ -469,7 +473,7 @@ describe('VideoPage', () => {
       const list = await screen.findByRole('table', { name: 'Rallies' })
       expect(within(list).getByRole('columnheader', { name: 'Score: KSCW H3 – Volley Näfels' })).toBeInTheDocument()
       const rows = within(list).getAllByRole('row').slice(1)
-      expect(rows.map((r) => r.textContent)).toEqual(['110:101:0KSCW H3', '211:001:1 (suggested)Volley Näfels (suggested)'])
+      expect(rows.map((r) => r.textContent)).toEqual(['110:101:0KSCW H3', '211:001:1 (WiePlay)Volley Näfels (WiePlay)'])
       // Players see who won; they don't set it.
       expect(within(list).queryByRole('combobox')).not.toBeInTheDocument()
       const box = await screen.findByRole('table', { name: 'Box score' })
@@ -736,22 +740,30 @@ describe('VideoPage', () => {
       expect(within(team).queryByRole('button', { name: /Side-outs: rallies we received and won/ })).not.toBeInTheDocument()
     })
 
-    it('counts facts only and says how many suggested actions wait', async () => {
-      // WiePlay suggested a third attack of #7; nobody has accepted it: not a number, not a play.
-      const suggested = tag({ t_ms: 40_000, code: 'A', number: 7, source: 'model', review: 'unreviewed', confidence: 0.7 })
-      showStats({ tagging: { ...tagging, events: [kill, suggested, error] }, stats: { ...stats, suggested: 1 } })
-      expect(await screen.findByText('Suggested, not reviewed: 1 action. It counts once a coach accepts it.')).toBeInTheDocument()
-      fireEvent.click(await screen.findByRole('button', { name: 'Play #7 Luca Brunner, Attacks: 2' }))
-      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+    it('counts every tag, says how many are still to check, and shows sure ones only on request', async () => {
+      // WiePlay tagged a third attack of #7 it is unsure of: it counts, and it is to check.
+      const check = tag({ t_ms: 40_000, code: 'A', number: 7, source: 'model', review: 'check', confidence: 0.7 })
+      const { fetch } = showStats({
+        tagging: { ...tagging, events: [kill, check, error] },
+        stats: { ...stats, to_check: 1 },
+        routes: { [`/api/videos/${ID}/stats?sure=true`]: { body: { ...stats, to_check: 1, sure_only: true } } },
+      })
+      expect(await screen.findByText('1 still to check')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/videos/${ID}/stats.csv?lang=en`)
+      fireEvent.click(screen.getByRole('switch', { name: 'Sure only' }))
+      expect(await screen.findByText('1 still to check, left out')).toBeInTheDocument()
+      expect(fetch).toHaveBeenCalledWith(`/api/videos/${ID}/stats?sure=true`, expect.anything())
+      expect(screen.getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/videos/${ID}/stats.csv?lang=en&sure=true`)
     })
 
-    it('says when action suggestions are switched off', async () => {
+    it("says when WiePlay's action tagging is switched off", async () => {
       const gate = {
         mode: 'off' as const, open: false, reason: 'off', finder: 'v0', games: 0, precision: null,
         contact_recall: null, trained_at: null,
       }
-      showStats({ stats: { ...stats, suggested: 0, actions_gate: gate } })
-      expect(await screen.findByText('Action suggestions are switched off.')).toBeInTheDocument()
+      showStats({ stats: { ...stats, to_check: 0, actions_gate: gate } })
+      expect(await screen.findByText('WiePlay’s action tagging is switched off.')).toBeInTheDocument()
+      expect(screen.getByText('Nothing left to check.')).toBeInTheDocument()
     })
 
     it('says when there is nothing to count yet', async () => {
@@ -773,7 +785,7 @@ describe('VideoPage', () => {
 
   describe('automatic scoring', () => {
     const set1 = period({ no: 1, start_ms: 300_000, end_ms: 1_800_000, first_serve: 'us' })
-    const set2 = period({ no: 2, start_ms: 2_000_000, source: 'model', review: 'unreviewed', confidence: 0.7 })
+    const set2 = period({ no: 2, start_ms: 2_000_000, source: 'model', review: 'check', confidence: 0.7 })
     const r1 = rally({ start_ms: 300_000, end_ms: 310_000, won_by: 'us', period_id: set1.id, score_us_after: 1, score_them_after: 0, score_source: 'tags' })
     const r2 = rally({
       start_ms: 320_000,
@@ -786,7 +798,7 @@ describe('VideoPage', () => {
       score_them_after: 1,
       score_source: 'model',
     })
-    const warmup = rally({ kind: 'warmup', start_ms: 0, end_ms: 290_000, source: 'model', confidence: 0.9 })
+    const warmup = rally({ kind: 'warmup', start_ms: 0, end_ms: 290_000, source: 'model', review: 'check', confidence: 0.6 })
     const timeout = rally({ kind: 'timeout', start_ms: 600_000, end_ms: 630_000 })
     const tagged = (patch: Partial<Tagging> = {}): Tagging =>
       bundle({ can_tag: false, periods: [set1, set2], segments: [warmup, r1, r2, timeout], first_serve_ms: 300_000, ...patch })
@@ -811,32 +823,32 @@ describe('VideoPage', () => {
       expect(screen.queryByRole('button', { name: 'Start at first serve' })).not.toBeInTheDocument()
     })
 
-    it("marks breaks and set starts below the player, WiePlay's suggestions lighter", async () => {
+    it('marks breaks and set starts below the player, those to check outlined', async () => {
       show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
       const strip = await screen.findByTestId('moments-strip')
-      const marks = [...strip.querySelectorAll('[data-marker]')].map((m) => [m.getAttribute('data-marker'), m.getAttribute('title'), m.hasAttribute('data-suggested')])
+      const marks = [...strip.querySelectorAll('[data-marker]')].map((m) => [m.getAttribute('data-marker'), m.getAttribute('title'), m.hasAttribute('data-to-check')])
       expect(marks).toEqual([
-        ['warmup', 'Warm-up (suggested)', true],
+        ['warmup', 'Warm-up (to check)', true],
         ['timeout', 'Timeout', false],
         ['set-start', 'Set 1 starts', false],
-        ['set-start', 'Set 2 starts (suggested)', true],
+        ['set-start', 'Set 2 starts (to check)', true],
       ])
       // The breaks are never played: skipping dead time plays the rallies only.
-      expect(screen.getByText('Skip dead time plays the 2 rallies in the list: 0:27 of 1:32:10.')).toBeInTheDocument()
+      expect(screen.getByText(/^Skip dead time plays the 2 rallies/)).toHaveTextContent('Skip dead time plays the 2 rallies in the list: 0:27 of 1:32:10. 2 still to check.')
     })
 
-    it("shows WiePlay's winners as suggestions in the rally list", async () => {
+    it("shows WiePlay's winners as WiePlay's in the rally list", async () => {
       show(video({}), 200, { [`/api/videos/${ID}/tagging`]: { body: tagged() } })
       const list = await screen.findByRole('table', { name: 'Rallies' })
       const rows = within(list).getAllByRole('row').slice(1)
-      expect(rows.map((r) => [...r.querySelectorAll('[data-suggested]')].map((e) => e.textContent))).toEqual([[], ['1:1 (suggested)', 'Them (suggested)']])
+      expect(rows.map((r) => [...r.querySelectorAll('[data-suggested]')].map((e) => e.textContent))).toEqual([[], ['1:1 (WiePlay)', 'Them (WiePlay)']])
     })
 
     it('sums up the automatic score in the analysis card', async () => {
       const analysis: Analysis = {
         status: 'done',
         model_run: null,
-        proposals: { unreviewed: 0, confirmed: 1, corrected: 0, rejected: 0 },
+        proposals: { auto: 0, check: 0, confirmed: 1, corrected: 0, rejected: 0 },
         metrics_vs_human: null,
         scoring: {
           run_id: 'score-1',

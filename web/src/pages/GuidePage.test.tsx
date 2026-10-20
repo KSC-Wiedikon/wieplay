@@ -31,7 +31,7 @@ describe('GuidePage', () => {
     const why = screen.getByRole('region', { name: 'Why it matters' })
     expect(within(why).getByText(/it learns from people/)).toBeInTheDocument()
 
-    const review = screen.getByRole('region', { name: 'Review rally suggestions' })
+    const review = screen.getByRole('region', { name: 'Check the rallies' })
     const keys = within(review).getByRole('table', { name: 'Keys while reviewing' })
     const rows = within(keys).getAllByRole('row').map((row) => row.textContent)
     for (const expected of [
@@ -71,7 +71,7 @@ describe('GuidePage', () => {
     await i18n.changeLanguage('de')
     renderRoute(<GuidePage />, { path: '/how-to-help', url: '/how-to-help' })
     expect(await screen.findByRole('heading', { level: 1, name: 'So hilfst du' })).toBeInTheDocument()
-    const review = screen.getByRole('region', { name: 'Vorgeschlagene Ballwechsel prüfen' })
+    const review = screen.getByRole('region', { name: 'Ballwechsel prüfen' })
     expect(within(review).getByText('Wer hat den Ballwechsel gewonnen: 3 wir, 4 sie')).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Die Grundlagen taggen' })).toBeInTheDocument()
   })
