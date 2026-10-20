@@ -184,7 +184,7 @@ export const guestsEn = {
       sections: {
         what: {
           title: 'What WiePlay keeps',
-          body: 'The videos of your team’s matches; names, shirt numbers and roles of the team’s people; tags of actions (skill, grade, zone, time); comments, clips and reels; logins and an audit log. No address, no phone number, no birthdate. Guest clubs: the email you log in with and your password, stored as a hash.',
+          body: 'The videos of your team’s matches; names, shirt numbers and roles of the team’s people; tags of actions (skill, grade, zone, time); comments, clips and reels; logins and an audit log. Per team, which shirt numbers its games named and its usual lineups, so its next games recognise them: numbers only, no faces or looks of anyone, nothing about the opponents. No address, no phone number, no birthdate. Guest clubs: the email you log in with and your password, stored as a hash.',
         },
         sheets: {
           title: 'Scoresheet photos',

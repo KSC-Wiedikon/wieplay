@@ -184,7 +184,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
       sections: {
         what: {
           title: 'Was WiePlay speichert',
-          body: 'Die Videos der Spiele deines Teams; Namen, Trikotnummern und Rollen der Personen im Team; Tags von Aktionen (Element, Bewertung, Zone, Zeit); Kommentare, Clips und Reels; Logins und ein Protokoll. Keine Adresse, keine Telefonnummer, kein Geburtsdatum. Gastvereine: die E-Mail, mit der du dich anmeldest, und dein Passwort, gespeichert als Hash.',
+          body: 'Die Videos der Spiele deines Teams; Namen, Trikotnummern und Rollen der Personen im Team; Tags von Aktionen (Element, Bewertung, Zone, Zeit); Kommentare, Clips und Reels; Logins und ein Protokoll. Pro Team, welche Trikotnummern seine Spiele genannt haben und seine üblichen Aufstellungen, damit seine nächsten Spiele sie erkennen: nur Nummern, von niemandem Gesichter oder Aussehen, nichts über die Gegner. Keine Adresse, keine Telefonnummer, kein Geburtsdatum. Gastvereine: die E-Mail, mit der du dich anmeldest, und dein Passwort, gespeichert als Hash.',
         },
         sheets: {
           title: 'Fotos des Matchblatts',

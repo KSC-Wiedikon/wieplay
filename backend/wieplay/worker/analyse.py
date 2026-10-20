@@ -260,6 +260,39 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
         artifact = _artifact(
             root, target, "pickle", {"games": len(videos), "features": len(model.names)}
         )
+    # Per team (PLAN §10.5b): a variant of its own where its held-out games say it helps.
+    teams = {
+        str(e["video_id"]): str(e["team"])
+        for e in found.get("train", [])
+        if e.get("team") and str(e["video_id"]) in {v.video_id for v in videos}
+    }
+    ctx.report(0.76, "per team")
+    team_eval = rallies.per_team(videos, teams, p, threads=threads, cancel=ctx.cancel)
+    if ctx.cancel.is_set():
+        raise ffmpeg.Cancelled()
+    team_models: dict[str, rallies.RallyModel] = {}
+    v0_of = {
+        vid: float(((m.get("v0") or {}).get("boundary") or {}).get("f1", 0.0))
+        for vid, m in evaluation["videos"].items()
+    }
+    for team, entry in team_eval.items():
+        variant = str(entry.get("variant"))
+        if variant == "pooled":
+            continue
+        mine = [vid for vid, t in teams.items() if t == team]
+        v0 = sum(v0_of.get(vid, 0.0) for vid in mine) / max(len(mine), 1)
+        if float(entry["boundary_f1"][variant]) <= v0:
+            entry.update(variant="pooled", reason="v0")  # the rules do better for this team
+            continue
+        team_model = rallies.fit_team(videos, teams, team, entry, p, threads=threads)
+        if team_model is None:
+            continue
+        target = out / f"rally-v1-{team[:8]}-{ctx.job.id[:8]}.pkl"
+        _write(target, data=team_model.dumps())
+        entry["artifact"] = _artifact(
+            root, target, "pickle", {"games": len(videos), "variant": variant}
+        )
+        team_models[team] = team_model
     ctx.report(0.78, "the serve model")
     serve_eval = serve.cross_validate(serve_videos, threads=threads)
     serve_accepted = bool(serve_eval["v1_better"])
@@ -293,7 +326,8 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
             if (k == "serve" and (serve_model is not None or stale))
             or k not in entry.get("tracks", [])
         )  # fmt: skip
-        propose = accepted and model is not None and entry in others
+        own = team_models.get(str(entry.get("team")))
+        propose = (own is not None or (accepted and model is not None)) and entry in others
         if not kinds and not propose:
             continue
         ctx.report(0.8 + 0.19 * n / max(len(everyone), 1), "proposing rallies and serves")
@@ -305,10 +339,11 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
                 log.warning("skipping %s: %s", entry["video_id"], exc)
                 continue
         if propose:
-            assert model is not None
+            use = own if own is not None else model
+            assert use is not None
             predictions[entry["video_id"]] = {
                 "finder": "v1",
-                "proposals": _proposals(model.predict(sig_found)),
+                "proposals": _proposals(use.predict(sig_found)),
             }
         if kinds:
             new_series[entry["video_id"]] = series(sig_found, finder, kinds)
@@ -326,6 +361,7 @@ def train_rallies(ctx: Context) -> dict[str, Any]:
         },
         "artifact": artifact,
         "accepted": accepted,
+        "teams": team_eval,
         "timing": {
             "wall_s": round(time.perf_counter() - started, 1),
             "games": len(videos),

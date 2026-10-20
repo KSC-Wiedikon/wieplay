@@ -696,6 +696,51 @@ def chain_cmd(video: str | None, all_ready: bool, limit: int, dry_run: bool) -> 
     return 0
 
 
+def team_memory_cmd(team: int | None, all_teams: bool, evaluate: list[str]) -> int:
+    """Learn the teams' memories now (PLAN §10.5b; they refresh by themselves on use), or
+    measure the memory on games whose typed sheet is the truth (`--eval`, read-only: the
+    sheet hidden, the memory from the team's other games; nothing is written)."""
+    import json
+
+    from wieplay.core import team_memory
+    from wieplay.core.models import Video, WdTeam
+    from wieplay.core.storage import make_store
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        if evaluate:
+            store = make_store(settings)
+            for vid in evaluate:
+                video = db.get(Video, uuid.UUID(vid))
+                if video is None:
+                    print(f"no video {vid}", file=sys.stderr)
+                    continue
+                found = team_memory.evaluate(db, video, store.read if store else None)
+                print(json.dumps(found, indent=2, default=str))
+            db.rollback()
+            return 0
+        query = select(WdTeam).where(WdTeam.sport.in_(team_memory.SPORTS))
+        if team is not None:
+            query = query.where(WdTeam.id == team)
+        elif not all_teams:
+            print("name --team or --all", file=sys.stderr)
+            return 2
+        for row in db.scalars(query.order_by(WdTeam.id)):
+            if not team_memory.team_videos(db, row):
+                continue
+            mem = team_memory.refresh(db, row)
+            players = team_memory.players(db, row.id)
+            named = sum(1 for p in players if p.games)
+            print(
+                f"{row.name} {row.season} ({row.id}): {mem.games} games named numbers, "
+                f"{named} numbers named, {float((mem.rotations or {}).get('sets') or 0):.1f} sets "
+                f"of lineups, check {(mem.rotations or {}).get('check')}"
+            )
+        db.commit()
+    return 0
+
+
 def _pct(value: Any) -> str:
     return f"{100 * float(value):5.1f}" if isinstance(value, int | float) else "    -"
 
@@ -822,9 +867,18 @@ def main(argv: list[str] | None = None) -> int:
     which_chain.add_argument("--all-ready", action="store_true", help="every ready video")
     chain_parser.add_argument("--limit", type=int, default=50, help="jobs to queue at most")
     chain_parser.add_argument("--dry-run", action="store_true")
+    memory_cmd = sub.add_parser("team-memory", help="what WiePlay knows per team (PLAN §10.5b)")
+    which_teams = memory_cmd.add_mutually_exclusive_group(required=True)
+    which_teams.add_argument("--team", type=int, help="one team row id")
+    which_teams.add_argument("--all", action="store_true", help="every volleyball team")
+    which_teams.add_argument(
+        "--eval", nargs="+", default=[], metavar="VIDEO", help="measure on games with a sheet"
+    )
     args = parser.parse_args(argv)
     if args.command == "chain":
         return chain_cmd(args.video, args.all_ready, args.limit, args.dry_run)
+    if args.command == "team-memory":
+        return team_memory_cmd(args.team, args.all, args.eval)
     if args.command == "players":
         return players(args.video, args.all_ready, args.force, args.dry_run)
     if args.command == "actions":

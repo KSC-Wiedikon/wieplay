@@ -17,8 +17,8 @@ import hashlib
 import io
 import pickle
 import threading
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -462,7 +462,14 @@ class RallyModel:
         )
 
 
-def fit(videos: Sequence[TrainVideo], p: V1Params | None = None, threads: int = 4) -> RallyModel:
+def fit(
+    videos: Sequence[TrainVideo],
+    p: V1Params | None = None,
+    threads: int = 4,
+    boost: Mapping[str, float] | None = None,
+) -> RallyModel:
+    """v1 on these games, each counting the same; `boost`: a game's weight times this (a
+    team's own games in its per-team variant, PLAN §10.5b)."""
     import sklearn
     from sklearn.ensemble import HistGradientBoostingClassifier
     from threadpoolctl import threadpool_limits
@@ -474,7 +481,8 @@ def fit(videos: Sequence[TrainVideo], p: V1Params | None = None, threads: int = 
         X, names, y, _ = v.data()
         Xs.append(X)
         ys.append(y)
-        ws.append(v.weights(p.hard_negative))  # each game sums to 1: each counts the same
+        # Each game sums to 1 (each counts the same), times its boost.
+        ws.append(v.weights(p.hard_negative) * float((boost or {}).get(v.video_id, 1.0)))
     X = np.concatenate(Xs)
     # A column that is empty in every game (no sound in any of them) cannot be binned.
     X[:, np.isnan(X).all(axis=0)] = 0.0
@@ -548,3 +556,111 @@ def cross_validate(
         "v1_better": bool(better),
         "held_out": held_out,
     }
+
+
+# --- per team (PLAN §10.5b: a team's halls, ball, camera and style) -----------------------------
+
+# A team's own reviewed games before a variant of its own is weighed; its games weigh this much
+# more in the "weighted" variant; a variant is kept when its mean boundary F1 on the team's
+# held-out games beats the pooled model's by this much.
+TEAM_MIN_GAMES = 2
+TEAM_BOOST = 3.0
+TEAM_MARGIN = 0.01
+TEAM_MAX_HELD = 8
+# The "calibrated" variant: the pooled model with the team's own threshold (`on`; `off` this
+# much below it), chosen on the team's other held-out games.
+THRESHOLDS = (0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7)
+OFF_BELOW = 0.15
+
+
+def with_threshold(p: V1Params, on: float) -> V1Params:
+    return replace(p, on=on, off=max(0.05, on - OFF_BELOW))
+
+
+def _f1(prob: Arr, v: TrainVideo, p: V1Params) -> float:
+    found = segments_from_prob(prob, p)
+    return float(metrics.evaluate([q.span for q in found], v.rallies)["boundary"]["f1"])
+
+
+def per_team(
+    videos: Sequence[TrainVideo],
+    teams: Mapping[str, str],
+    p: V1Params | None = None,
+    threads: int = 4,
+    cancel: threading.Event | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Per team (`teams`: video id → team key) with at least TEAM_MIN_GAMES reviewed games:
+    on each of its games held out (split by match), the pooled model (every other game), the
+    team's games boosted (`weighted`), and the pooled model with the team's own threshold
+    (`calibrated`, chosen on its other held-out games); the variant kept is the best when it
+    beats the pooled one by TEAM_MARGIN. Every game trains the pooled model as before: a
+    guest club's games are here only when the club agreed to training (the API's inputs)."""
+    p = p or V1Params()
+    by_team: dict[str, list[int]] = {}
+    for i, v in enumerate(videos):
+        team = teams.get(v.video_id)
+        if team is not None:
+            by_team.setdefault(team, []).append(i)
+    out: dict[str, dict[str, Any]] = {}
+    for team, idx in sorted(by_team.items()):
+        if len(idx) < TEAM_MIN_GAMES or len(videos) < 2:
+            out[team] = {"games": len(idx), "variant": "pooled", "reason": "games"}
+            continue
+        held = idx[:TEAM_MAX_HELD]
+        probs: dict[int, Arr] = {}
+        scores: dict[str, list[float]] = {"pooled": [], "weighted": [], "calibrated": []}
+        for i in held:
+            if cancel is not None and cancel.is_set():
+                return out
+            train = [v for j, v in enumerate(videos) if j != i]
+            X, _, _, _ = videos[i].data()
+            pooled = fit(train, p, threads)
+            probs[i] = pooled.classifier.predict_proba(X)[:, 1]
+            scores["pooled"].append(_f1(probs[i], videos[i], p))
+            boost = {videos[j].video_id: TEAM_BOOST for j in idx if j != i}
+            weighted = fit(train, p, threads, boost)
+            scores["weighted"].append(_f1(weighted.classifier.predict_proba(X)[:, 1], videos[i], p))
+        for i in held:
+            others = [j for j in held if j != i]
+            best = max(
+                THRESHOLDS,
+                key=lambda t: sum(_f1(probs[j], videos[j], with_threshold(p, t)) for j in others),
+            )
+            scores["calibrated"].append(_f1(probs[i], videos[i], with_threshold(p, best)))
+        threshold = max(
+            THRESHOLDS,
+            key=lambda t: sum(_f1(probs[j], videos[j], with_threshold(p, t)) for j in held),
+        )
+        means = {k: round(sum(v) / len(v), 4) for k, v in scores.items() if v}
+        variant = max(means, key=lambda k: means[k])
+        if variant != "pooled" and means[variant] < means["pooled"] + TEAM_MARGIN:
+            variant = "pooled"
+        out[team] = {
+            "games": len(idx),
+            "held_out": len(held),
+            "boundary_f1": means,
+            "variant": variant,
+            "boost": TEAM_BOOST,
+            "threshold": threshold,
+        }
+    return out
+
+
+def fit_team(
+    videos: Sequence[TrainVideo],
+    teams: Mapping[str, str],
+    team: str,
+    found: Mapping[str, Any],
+    p: V1Params | None = None,
+    threads: int = 4,
+) -> RallyModel | None:
+    """The team's variant on every reviewed game, as `per_team` chose it (None: pooled)."""
+    p = p or V1Params()
+    variant = found.get("variant")
+    if variant == "weighted":
+        boost = {v.video_id: TEAM_BOOST for v in videos if teams.get(v.video_id) == team}
+        return fit(videos, p, threads, boost)
+    if variant == "calibrated":
+        model = fit(videos, with_threshold(p, float(found["threshold"])), threads)
+        return model
+    return None

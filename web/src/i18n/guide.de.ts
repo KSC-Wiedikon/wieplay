@@ -221,7 +221,7 @@ export const guideDe: Guide = {
     ],
     tips: [
       'Jede Antwort ist eine Tatsache: Karten, auf deren Trikot die gegebene Nummer gelesen wird, kommen von selbst dazu.',
-      'Du erkennst die Person mit eigenen Augen; WiePlay nutzt keine Gesichter, und nichts verlässt dieses Video.',
+      'Du erkennst die Person mit eigenen Augen; WiePlay nutzt keine Gesichter. Nur die Nummern, die du nennst, zählen für die nächsten Spiele des Teams: keine Bilder, kein Aussehen.',
       'Spieler auf der fernen Seite sind bei 1080p oft zu klein: Überspring sie, die nahe Seite zählt am meisten.',
     ],
   },

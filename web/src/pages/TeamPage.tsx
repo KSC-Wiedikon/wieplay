@@ -24,6 +24,8 @@ import { FilmingSection, VideosSection } from './TeamSections'
 
 // The season's numbers are a wide table with strings of their own: loaded when shown.
 const SeasonStats = lazy(() => import('./SeasonStats').then((m) => ({ default: m.SeasonStats })))
+// What WiePlay learnt about the team (players, rotations, the models' scores): on demand too.
+const TeamMemorySection = lazy(() => import('./TeamMemory').then((m) => ({ default: m.TeamMemorySection })))
 
 export function TeamPage() {
   const { id } = useParams()
@@ -99,6 +101,11 @@ function TeamView({ teamId }: { teamId: number }) {
 
       {guest && !seasonOver && <NextSeasonSection team={team.data} />}
       {guest && <PeopleSection team={team.data} />}
+      {sport === 'volleyball' && (
+        <Suspense fallback={<Spinner />}>
+          <TeamMemorySection team={team.data} />
+        </Suspense>
+      )}
       {team.data.can_grant && <HelpersSection team={team.data} />}
     </div>
   )

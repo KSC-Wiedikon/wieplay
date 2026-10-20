@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, select, text
 
 from tests.fakes import FakeStore
 from tests.media_helpers import (
@@ -23,6 +23,7 @@ from tests.media_helpers import (
     worker_client,
 )
 from wieplay.core.config import Settings
+from wieplay.core.models import ModelRun, Video
 
 ANALYSE_CAPS = ["analyse", "nas"]
 KINDS = ["analyse", "train_rallies"]
@@ -657,3 +658,59 @@ def test_a_reopened_game_does_not_train_until_it_is_done_again(
     inputs = analyser.post(f"/api/worker/jobs/{train['id']}/inputs", json={}).json()
     assert inputs["train"] == [] and inputs["others"] == []
     assert [(e["video_id"], e["reason"]) for e in inputs["skipped"]] == [(ready["id"], "to check")]
+
+
+def test_a_team_s_own_rally_model_is_used_for_its_videos_only(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, analyser: TestClient
+) -> None:
+    """PLAN §10.5b: the training keeps a team's own variant where its held-out games say so;
+    that team's videos are proposed for and analysed with it, the pooled model lost to v0."""
+    games = [make_ready(app, club, store, k=k) for k in (0, 1, 2)]
+    for n in range(len(games)):
+        job = claim_kind(analyser, "analyse")
+        complete(analyser, job, payload(job, [] if n < 2 else [(1_000, 9_000)], name=f"s{n}.npz"))
+    for video in games[:2]:
+        change(club["coach"], video, rally(10_000, 20_000), rally(30_000, 42_000))
+        assert (
+            club["coach"].post(f"/api/videos/{video['id']}/rallies-reviewed", json={}).status_code
+            == 200
+        )
+    train = claim_kind(analyser, "train_rallies")
+    inputs = analyser.post(f"/api/worker/jobs/{train['id']}/inputs", json={}).json()
+    with app.state.sessionmaker() as db:
+        lineage = str(db.get(Video, uuid.UUID(games[0]["id"])).lineage_id)  # type: ignore[union-attr]
+    assert {v["team"] for v in [*inputs["train"], *inputs["others"]]} == {lineage}
+    own = {
+        "games": 2, "held_out": 2, "variant": "calibrated", "threshold": 0.4, "boost": 3.0,
+        "boundary_f1": {"pooled": 0.6, "weighted": 0.6, "calibrated": 0.8},
+        "artifact": {
+            "nas_path": "models/rallies/rally-v1-team.pkl", "sha256": "e" * 64, "bytes": 99,
+            "format": "pickle", "schema_version": 1, "stats": {"games": 2},
+        },
+    }  # fmt: skip
+    body = {
+        "model": {"name": "rallies-v1-hgb", "version": "abc123"},
+        "accepted": False,  # the pooled model lost to v0
+        "teams": {lineage: own},
+        "evaluation": {"summary": {"v0": {"videos": 2}, "v1": {"videos": 2}}, "videos": {}},
+        "predictions": {
+            games[2]["id"]: {"finder": "v1", "proposals": [{"start_ms": 2_000, "end_ms": 9_500,
+                                                            "confidence": 0.9}]},
+        },
+    }  # fmt: skip
+    complete(analyser, train, body)
+    [proposal] = segments(club["coach"], games[2])
+    assert proposal["start_ms"] == 2_000
+    club["coach"].post(f"/api/videos/{games[2]['id']}/analyse")
+    job = claim_kind(analyser, "analyse")
+    model = analyser.post(f"/api/worker/jobs/{job['id']}/inputs", json={}).json()["rally_model"]
+    assert model["nas_path"] == "models/rallies/rally-v1-team.pkl"
+    with app.state.sessionmaker() as db:
+        run = db.scalars(select(ModelRun).where(ModelRun.kind == "train_rallies")).one()
+        assert run.metrics["teams"][lineage]["variant"] == "calibrated"
+        assert run.metrics["teams"][lineage]["model"] is True
+    # Another team's variant may not be "pooled" with a model.
+    club["coach"].post(f"/api/videos/{games[0]['id']}/rallies-reviewed", json={"reviewed": True})
+    train = claim_kind(analyser, "train_rallies")
+    bad = {**body, "predictions": {}, "teams": {lineage: {**own, "variant": "pooled"}}}
+    complete(analyser, train, bad, status=422)

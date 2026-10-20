@@ -108,8 +108,9 @@ rallies in each volleyball match by itself (`docs/PLAN.md` §10.1).
 | Retention | Signals as long as the video: deleted with it. Models until they are retired |
 
 What WiePlay never does: no face recognition, no face embeddings, no recognising a person
-across videos. A player is linked to an action only through the shirt number in the team's
-roster (`docs/PLAN.md` §5.7).
+across videos by their looks. A player is linked to an action only through the shirt number in
+the team's roster (`docs/PLAN.md` §5.7); across a team's games only its shirt numbers and
+lineups carry over (the team's memory, below).
 
 **Players in a match** (`docs/PLAN.md` §10.5, since 17.10.2026): on the same server, WiePlay
 finds the people on the court during the rallies, follows them from frame to frame and
@@ -120,11 +121,27 @@ say once which roster number each card is; WiePlay then links the actions to the
 | | |
 |---|---|
 | Purpose | Tag who made each action without a coach typing every number |
-| What is used | Position on court, the colour of the kit and the number on the shirt. **No faces, no face embeddings, no person re-identification model, nothing across videos**: each video starts from zero, and a card is anonymous until a coach gives it a roster number (the number reader only suggests one) |
+| What is used | Position on court, the colour of the kit and the number on the shirt. **No faces, no face embeddings, no person re-identification model, no looks across videos**: each video's cards start from zero, and a card is anonymous until a coach gives it a roster number (the number reader only suggests one; since 20.10.2026 a number the team's earlier games named is offered as recognised, for a coach to accept) |
 | Data kept | Boxes per frame (numbers), the crops (JPEG), the clusters and the coach's numbers |
 | Where | On the club NAS next to the signals, and the crops in the video's own storage |
 | Who sees it | The crops: those who may watch the video (they show what the video shows). Naming, merging and splitting: the team's coaches |
 | Retention | As the video: deleted with it |
+
+**The team's memory** (`docs/PLAN.md` §10.5b, since 20.10.2026): per season's team, WiePlay
+keeps which of **our shirt numbers** its games named (in a typed sheet's lineups and
+substitutions, a coach's starting six, a card or a tag a coach named), how often, the member
+wearing each number (the roster's link, or a coach's fix on the team page), and the team's
+usual service orders and starting rotations, as numbers. A new game of the team uses them: a
+card whose shirt reads a number the team plays is offered as recognised (a coach accepts it),
+and where the sheet is missing our likely server per rally comes from the usual rotation.
+
+| | |
+|---|---|
+| Purpose | A team's second game needs fewer answers than its first; serves get their player without a sheet |
+| What is used | Shirt numbers, the roster, the sheets' and the coaches' facts. **No faces, no face or body embeddings, no picture, no colour or look of a person** is stored or compared across videos. **Nothing about the opponents** (their numbers stay in their video). A guest team's memory is its own |
+| Data kept | Per number: the member, games and sets counted, the last game's date; per team: the orders and starting rotations (numbers), the models' scores |
+| Who sees it | The team page: whoever sees the team. Fixing a number: its coaches and helpers |
+| Retention | Learnt anew from the team's games whenever they change: a deleted video drops out of it |
 
 **The club scoreboard's log** (`docs/PLAN.md` §10.10, since 18.10.2026): for a video of a
 Wiedisync game, WiePlay asks Wiedisync for what the club's LED scoreboard showed during that

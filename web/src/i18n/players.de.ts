@@ -7,7 +7,7 @@ export const playersDe: typeof playersEn = {
     title: 'Spieler in diesem Video',
     back: 'Zurück zum Video',
     intro:
-      'WiePlay hat diese Personen auf dem Feld gefunden. Gib jeder Karte einmal die Trikotnummer aus dem Kader; die Aktionen bekommen dann ihren Spieler. WiePlay erkennt keine Gesichter, und nichts wird in andere Videos übernommen: Die Nummer ist die einzige Identität.',
+      'WiePlay hat diese Personen auf dem Feld gefunden. Gib jeder Karte einmal die Trikotnummer aus dem Kader; die Aktionen bekommen dann ihren Spieler. WiePlay erkennt keine Gesichter: Die Nummer ist die einzige Identität, und nur die Nummern, die das Team spielt, gehen in seine anderen Spiele mit.',
     status: {
       none: 'WiePlay hat die Spieler noch nicht gesucht.',
       queued: 'Wartet auf die Spielersuche…',
@@ -159,6 +159,15 @@ export const playersDe: typeof playersEn = {
       near: 'Nahe Seite (bei der Kamera)',
       far: 'Ferne Seite',
       ours: 'Das sind unsere',
+    },
+    recognised: {
+      title: 'Aus früheren Spielen erkannt',
+      body_one: 'Die Nummer auf dieser Karte spielt das Team: Seine früheren Spiele haben sie genannt. Schau dir die Bilder an und übernimm sie.',
+      body_other: 'Die Nummern auf diesen {{count}} Karten spielt das Team: Seine früheren Spiele haben sie genannt. Schau dir die Bilder an und übernimm sie in einem Schritt.',
+      games_one: 'In {{count}} Spiel genannt',
+      games_other: 'In {{count}} Spielen genannt',
+      accept_one: 'Übernehmen',
+      accept_other: 'Alle {{count}} übernehmen',
     },
     tap: {
       button: 'Spieler benennen',

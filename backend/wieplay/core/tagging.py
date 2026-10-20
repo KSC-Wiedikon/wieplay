@@ -23,9 +23,7 @@ from wieplay.core.models import (
     Segment,
     Video,
     VideoRoster,
-    WdMember,
     WdTeam,
-    WdTeamMember,
 )
 from wieplay.core.taxonomy import Taxonomy
 
@@ -273,26 +271,19 @@ def ensure_roster(db: Session, video: Video) -> list[VideoRoster]:
         return rows
     team = db.get(WdTeam, video.team_id)
     assert team is not None
-    players = db.execute(
-        select(WdMember)
-        .join(WdTeamMember, WdTeamMember.member_id == WdMember.id)
-        .where(WdTeamMember.team_id == team.id, WdTeamMember.rel == "player")
-        .distinct()
-    ).scalars()
-    seen: set[int] = set()
-    for member in players:
-        if member.number is None or member.number in seen:
-            continue  # without a unique number a tag cannot name them; the coach adds it
-        seen.add(member.number)
-        positions = [str(p).lower() for p in (member.positions or [])]
+    from wieplay.core import team_memory
+
+    # The roster's numbers; one member per number (a guest or staff member sharing a player's
+    # number gives way), and the coaches' fixes on the team page (PLAN §10.5b).
+    for link in team_memory.roster_links(db, team):
         rows.append(
             VideoRoster(
                 video_id=video.id,
                 side="us",
-                number=member.number,
-                member_id=member.id,
-                position=positions[0] if positions else None,
-                is_libero="libero" in positions,
+                number=link.number,
+                member_id=link.member_id,
+                position=link.position,
+                is_libero=link.libero,
             )
         )
     db.add_all(rows)

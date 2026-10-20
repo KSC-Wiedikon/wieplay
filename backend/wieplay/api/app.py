@@ -32,6 +32,7 @@ from wieplay.api import (
     scoresheet,
     stats,
     tagging,
+    team_memory,
     teams,
     videos,
     worker,
@@ -184,6 +185,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(guests.auth_router)
     app.include_router(teams.router)
+    app.include_router(team_memory.router)
     app.include_router(guests.router)
     app.include_router(helpers.router)
     app.include_router(admin.router)

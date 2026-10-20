@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import bisect
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -341,21 +341,28 @@ def on_court_numbers(
     rows: Sequence[PlayerCluster],
     sheet: lineups.VideoLineups | None,
     spans: Sequence[tuple[int, int, uuid.UUID]],
+    prior: lineups.PriorLineups | None = None,
 ) -> list[int]:
-    """The numbers the sheet has on court for the card's team in the rallies it is seen in,
-    the most often first, those of named cards seen at the same time last; then its liberos."""
-    if sheet is None or c.team not in ("us", "them"):
+    """The numbers the sheet has on court for the card's team in the rallies it is seen in
+    (where it has none, our six the team's memory expects, weighed by how sure it is), the
+    most often first, those of named cards seen at the same time last; then its liberos."""
+    if (sheet is None and prior is None) or c.team not in ("us", "them"):
         return []
     starts = [s for s, _, _ in spans]
     mine = intervals(c)
-    weights: Counter[int] = Counter()
+    weights: dict[int, float] = defaultdict(float)
     for t0, t1 in mine:
         k = bisect.bisect_right(starts, t1) - 1
         while k >= 0 and spans[k][1] >= t0:
-            lu = sheet.of(spans[k][2])
+            lu = sheet.of(spans[k][2]) if sheet is not None else None
             if lu is not None:
                 for n in lu.numbers(c.team):  # type: ignore[arg-type]
                     weights[n] += 1
+            elif prior is not None and c.team == "us" and spans[k][2] in prior.six:
+                six, p = prior.six[spans[k][2]]
+                for m in six:
+                    if m is not None:
+                        weights[m] += p
             k -= 1
     taken = {
         o.number
@@ -364,7 +371,7 @@ def on_court_numbers(
         and overlap(mine, intervals(o))
     }  # fmt: skip
     ordered = sorted(weights, key=lambda n: (n in taken, -weights[n], n))
-    for n in sorted(sheet.liberos.get(c.team, ())):
+    for n in sorted(sheet.liberos.get(c.team, ()) if sheet is not None else ()):
         if n not in ordered:
             ordered.append(n)
     return ordered

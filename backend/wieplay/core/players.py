@@ -177,7 +177,7 @@ class EventPlayer(Base):
     track_id: Mapped[int | None] = mapped_column(BigInteger)
     number: Mapped[int | None] = mapped_column(Integer)
     member_id: Mapped[int | None] = mapped_column(Integer)
-    method: Mapped[str | None] = mapped_column(String(8))  # court | image
+    method: Mapped[str | None] = mapped_column(String(8))  # court | image | sheet | memory
     distance: Mapped[float | None] = mapped_column(Float)  # metres (court), box heights (image)
     confidence: Mapped[float | None] = mapped_column(Float)
     contact_ms: Mapped[int | None] = mapped_column(BigInteger)
@@ -311,11 +311,15 @@ def near_team(seg: Segment, period: Period | None) -> str | None:
 
 
 def rallies_with_sides(
-    db: Session, video: Video, sheet: lineups.VideoLineups | None = None
+    db: Session,
+    video: Video,
+    sheet: lineups.VideoLineups | None = None,
+    prior: lineups.PriorLineups | None = None,
 ) -> list[dict[str, Any]]:
     """The rallies the job looks at, with the team at the camera's end in each and, where the
     official scoresheet was lined up with it, what the sheet says (`sheet`: who served, both
-    teams' six by zone; wieplay/core/lineups.py)."""
+    teams' six by zone; wieplay/core/lineups.py); elsewhere our server where the team's
+    memory is sure of it (`prior`: a label weighed by its probability, PLAN §10.5b)."""
     periods = list(
         db.scalars(
             select(Period)
@@ -348,6 +352,11 @@ def rallies_with_sides(
         found = sheet.of(seg.id) if sheet is not None else None
         if found is not None:
             item["sheet"] = lineups.job_entry(found)
+        elif prior is not None and seg.id in prior.servers:
+            number, p = prior.servers[seg.id]
+            if p >= lineups.MEMORY_LABEL:
+                set_no, _ = prior.rotation.get(seg.id, (0, 0))
+                item["prior"] = {"serving": "us", "server": number, "p": p, "set": set_no}
         out.append(item)
     return out
 
@@ -441,18 +450,33 @@ def roster_for_job(db: Session, video: Video) -> dict[str, list[int]]:
     return {"us": us} if us else {}
 
 
+def roster_with_memory(db: Session, video: Video) -> dict[str, list[int]]:
+    """`roster_for_job` and the team's memory (PLAN §10.5b): the numbers its games named that
+    the roster lacks are ours too; a number a coach marked as none of ours is not."""
+    from wieplay.core import team_memory
+
+    out = roster_for_job(db, video)
+    rows = team_memory.players(db, video.team_id) if team_memory.get(db, video.team_id) else []
+    if not rows:
+        return out
+    us = set(out.get("us") or [])
+    us |= {r.number for r in rows if r.games > 0 and not r.hidden}
+    us -= {r.number for r in rows if r.hidden}
+    return {**out, "us": sorted(us)} if us else {k: v for k, v in out.items() if k != "us"}
+
+
 def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     video = db.get(Video, job.video_id) if job.video_id else None
     if video is None:
         raise ValueError("job has no video")
     sheet = lineups.for_video(db, video)
     out = {
-        "rallies": rallies_with_sides(db, video, sheet),
+        "rallies": rallies_with_sides(db, video, sheet, lineups.prior_for_video(db, video, sheet)),
         # Older workers read `calibration` only; newer ones pick the setup of each window.
         "calibration": calibration_for(db, video),
         "setups": setups_for(db, video),
         "rendition": rendition_segments(video),
-        "roster": roster_for_job(db, video),
+        "roster": roster_with_memory(db, video),
     }
     if sheet is not None:
         # The official scoresheet (PLAN §10.5): its liberos, middles and numbers, by number.
@@ -1213,18 +1237,86 @@ def _sheet_pick(
     _write_into_model_event(ev, ep, f"sheet:{ref}")
 
 
+def memory_servers(
+    db: Session,
+    video: Video,
+    prior: lineups.PriorLineups | None,
+    skip: set[uuid.UUID] | frozenset[uuid.UUID] = frozenset(),
+) -> dict[uuid.UUID, tuple[int, float, str]]:
+    """Our serves (code S) in rallies the team's memory is sure enough of the server
+    (`lineups.MEMORY_APPLY`), except those in `skip` (the sheet's): event id → (number, its
+    probability, a reference "memory:set.rotation")."""
+    if prior is None or not prior.servers:
+        return {}
+    rows = db.execute(
+        select(Event.id, Event.segment_id, Event.t_ms).where(
+            Event.video_id == video.id,
+            Event.code == "S",
+            Event.side == "us",
+            Event.deleted_at.is_(None),
+        )
+    ).all()
+    spans = db.execute(
+        select(Segment.start_ms, Segment.end_ms, Segment.id)
+        .where(Segment.video_id == video.id, Segment.id.in_(list(prior.servers)))
+        .order_by(Segment.start_ms)
+    ).all()
+    starts = [int(a) for a, _, _ in spans]
+    out: dict[uuid.UUID, tuple[int, float, str]] = {}
+    for event_id, segment_id, t_ms in rows:
+        if event_id in skip:
+            continue
+        if segment_id is None:
+            k = bisect.bisect_right(starts, int(t_ms) + tagging.SERVE_SLACK_MS) - 1
+            if k >= 0 and spans[k][1] >= t_ms:
+                segment_id = spans[k][2]
+        found = prior.servers.get(segment_id) if segment_id is not None else None
+        if found is None or found[1] < lineups.MEMORY_APPLY:
+            continue
+        set_no, r = prior.rotation.get(segment_id, (0, 0)) if segment_id else (0, 0)
+        out[event_id] = (found[0], found[1], f"{set_no}.{r}")
+    return out
+
+
+def _memory_pick(
+    ep: EventPlayer,
+    ev: Event,
+    server: tuple[int, float, str],
+    roster: dict[int, int | None],
+    run: ModelRun | None,
+    pick: Pick | None = None,
+    cluster: PlayerCluster | None = None,
+    contact: int | None = None,
+) -> None:
+    """A serve's player from the team's memory (its usual rotation, PLAN §10.5b): the number
+    with its probability; the person WiePlay saw at the ball stays beside it (the card is the
+    image's, so the next run sees what the video showed, not this guess)."""
+    number, p, ref = server
+    ep.model_run_id = run.id if run is not None else None
+    ep.cluster_id = cluster.id if cluster is not None else None
+    ep.track_id = pick.track_id if pick is not None else None
+    ep.number = number
+    ep.member_id = roster.get(number)
+    ep.method = "memory"
+    ep.distance = pick.distance if pick is not None else None
+    ep.confidence = p
+    ep.contact_ms = contact
+    _write_into_model_event(ev, ep, f"memory:{ref}")
+
+
 def attribute_serves(db: Session, video: Video) -> int:
     """Only the serves, from the sheet (no players run needed): after a scoring lined the
     sheet up anew. Returns how many serves were attributed."""
     sheet = lineups.for_video(db, video)
     servers = sheet_servers(db, video, sheet)
+    remembered = memory_servers(db, video, lineups.prior_for_video(db, video, sheet), set(servers))
     existing = {
         ep.event_id: ep
         for ep in db.scalars(select(EventPlayer).where(EventPlayer.video_id == video.id))
     }
     run = latest_run(db, video.id)
     rows = _current_clusters(db, video.id) if servers else []
-    roster = roster_numbers(db, video) if servers else {}
+    roster = roster_numbers(db, video) if servers or remembered else {}
     done = 0
     events = db.scalars(
         select(Event).where(
@@ -1234,9 +1326,17 @@ def attribute_serves(db: Session, video: Video) -> int:
     for ev in events:
         ep = existing.get(ev.id)
         server = servers.get(ev.id)
+        if server is None and ev.id in remembered:
+            if ep is None:
+                ep = EventPlayer(event_id=ev.id, video_id=video.id, event_version=ev.version)
+                db.add(ep)
+            _memory_pick(ep, ev, remembered[ev.id], roster, run)
+            ep.event_version = ev.version
+            done += 1
+            continue
         if server is None:
-            if ep is not None and ep.method == "sheet":
-                # The sheet no longer says it (moved, removed): take back what it wrote.
+            if ep is not None and ep.method in ("sheet", "memory"):
+                # The sheet (or the memory) no longer says it: take back what it wrote.
                 ep.number = ep.member_id = ep.cluster_id = None
                 ep.confidence = None
                 ep.method = None
@@ -1273,7 +1373,8 @@ def attribute(
         return None
     sheet = lineups.for_video(db, video)
     servers = sheet_servers(db, video, sheet)
-    roster = roster_numbers(db, video) if servers else {}
+    remembered = memory_servers(db, video, lineups.prior_for_video(db, video, sheet), set(servers))
+    roster = roster_numbers(db, video) if servers or remembered else {}
     ball = load_ball(db, video.id, read)
     geometries = Geometries(calibration_row(db, video))
     rows = _current_clusters(db, video.id)
@@ -1304,6 +1405,13 @@ def attribute(
             done += 1
             continue
         pick, cluster, contact = attribute_event(ev, index, ball, mapping, geometries.at)
+        named = cluster is not None and pick is not None and cluster.number is not None
+        if ev.id in remembered and not named:
+            # Our serve, nobody named at the ball: the team's usual rotation says who.
+            _memory_pick(ep, ev, remembered[ev.id], roster, run, pick, cluster, contact)
+            ep.event_version = ev.version
+            done += 1
+            continue
         number = cluster.number if cluster is not None and pick is not None else None
         ep.model_run_id = run.id
         ep.cluster_id = cluster.id if cluster is not None else None
@@ -1350,9 +1458,11 @@ def stale(db: Session, video_id: uuid.UUID) -> bool:
     a players run, serves (the sheet names their server) not attributed yet."""
     run = latest_run(db, video_id)
     if run is None:
-        from wieplay.core import scoresheet
+        from wieplay.core import scoresheet, team_memory
 
-        if scoresheet.stored(db, video_id) is None:
+        video = db.get(Video, video_id)
+        remembered = video is not None and team_memory.has_rotations(db, video.team_id)
+        if scoresheet.stored(db, video_id) is None and not remembered:
             return False
         return bool(
             db.scalar(

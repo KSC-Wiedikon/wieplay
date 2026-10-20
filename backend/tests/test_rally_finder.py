@@ -293,3 +293,63 @@ def test_labels_cover_the_steps_inside_rallies() -> None:
     y = rallies.labels_for(10, [(1_000, 2_000), (3_200, 3_900)])
     assert y.tolist() == [0, 0, 1, 1, 0, 0, 1, 1, 0, 0]  # step centres 3.25 s, 3.75 s
     assert pytest.approx(512 / 22050) == AUDIO_HOP_S
+
+
+# --- per team (PLAN §10.5b) ------------------------------------------------------------------
+
+
+def team_games(seed: int = 0) -> tuple[list[rallies.TrainVideo], dict[str, str]]:
+    """Team "a" plays in a hall where the ball goes back to the server after every rally and
+    nobody whistles; team "b" in halls with a referee."""
+    out, teams = [], {}
+    for k in range(5):
+        hall_a = k < 3
+        true, duration = league_rallies(14, seed=seed + k)
+        sig = synthetic_signals(
+            true, duration, whistles=not hall_a, audio=not hall_a, throws=hall_a, seed=seed + 20 + k
+        )
+        vid = f"game-{k}"
+        out.append(rallies.TrainVideo(vid, sig, to_ms(true)))
+        teams[vid] = "a" if hall_a else "b"
+    return out, teams
+
+
+def test_a_team_s_own_variant_is_weighed_on_its_held_out_games() -> None:
+    games, teams = team_games()
+    p = rallies.V1Params(max_iter=30)
+    found = rallies.per_team(games, teams, p, threads=2)
+    a, b = found["a"], found["b"]
+    assert a["games"] == 3 and a["held_out"] == 3 and b["games"] == 2
+    assert set(a["boundary_f1"]) == {"pooled", "weighted", "calibrated"}
+    assert a["threshold"] in rallies.THRESHOLDS and a["boost"] == rallies.TEAM_BOOST
+    for entry in (a, b):
+        best = max(entry["boundary_f1"].values())
+        pooled = entry["boundary_f1"]["pooled"]
+        if entry["variant"] == "pooled":
+            assert best < pooled + rallies.TEAM_MARGIN or best == pooled
+        else:
+            assert entry["boundary_f1"][entry["variant"]] >= pooled + rallies.TEAM_MARGIN
+    # A team with one reviewed game keeps the pooled model.
+    one = rallies.per_team(games[:4], {**teams, "game-3": "c"}, p, threads=2)
+    assert one["c"] == {"games": 1, "variant": "pooled", "reason": "games"}
+    # Its variant is a model of its own: boosted, or with its threshold.
+    model = rallies.fit_team(games, teams, "a", {"variant": "calibrated", "threshold": 0.4}, p, 2)
+    assert model is not None and model.params.on == 0.4 and model.params.off == 0.25
+    assert rallies.fit_team(games, teams, "a", {"variant": "pooled"}, p, 2) is None
+
+
+def test_a_team_s_games_weigh_more_in_its_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    from sklearn.ensemble import HistGradientBoostingClassifier
+
+    seen: dict[str, np.ndarray] = {}
+    original = HistGradientBoostingClassifier.fit
+
+    def spy(self: Any, X: Any, y: Any, **kw: Any) -> Any:
+        seen["w"] = np.asarray(kw["sample_weight"])
+        return original(self, X, y, **kw)
+
+    monkeypatch.setattr(HistGradientBoostingClassifier, "fit", spy)
+    a, b = two_games(seed=9)
+    rallies.fit([a, b], rallies.V1Params(max_iter=5), threads=1, boost={a.video_id: 3.0})
+    n_a = len(a.data()[0])
+    assert seen["w"][:n_a].sum() == pytest.approx(3 * seen["w"][n_a:].sum())

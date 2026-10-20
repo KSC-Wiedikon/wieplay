@@ -82,6 +82,10 @@ class RallySheet:
     zones: Mapping[Side, tuple[int | None, ...] | None]
     set_no: int = 0
     first: bool = False
+    # 1 for the sheet; the probability of the team memory's server (`prior`, PLAN §10.5b),
+    # which knows our server only (no zones).
+    weight: float = 1.0
+    source: str = "sheet"  # sheet | memory
 
     def numbers(self, side: Side) -> set[int]:
         return {n for n in self.zones.get(side) or () if n is not None}
@@ -92,6 +96,9 @@ def from_inputs(rallies: Sequence[Mapping[str, Any]]) -> list[RallySheet | None]
     out: list[RallySheet | None] = []
     for r in rallies:
         s = r.get("sheet")
+        if not s and r.get("prior"):
+            out.append(_from_prior(r))
+            continue
         if not s or s.get("serving") not in ("us", "them"):
             out.append(None)
             continue
@@ -111,6 +118,25 @@ def from_inputs(rallies: Sequence[Mapping[str, Any]]) -> list[RallySheet | None]
             )
         )
     return out
+
+
+def _from_prior(r: Mapping[str, Any]) -> RallySheet | None:
+    """Our server from the team's memory (core/lineups.py `prior_for_video`): a label weighed
+    by its probability; nobody's zones."""
+    p = r["prior"]
+    server = p.get("server")
+    if p.get("serving") != "us" or not isinstance(server, int):
+        return None
+    return RallySheet(
+        start_ms=int(r["start_ms"]),
+        end_ms=int(r["end_ms"]),
+        serving="us",
+        server=server,
+        zones={"us": None, "them": None},
+        set_no=int(p.get("set") or 0),
+        weight=min(max(float(p.get("p") or 0.0), 0.0), 1.0),
+        source="memory",
+    )
 
 
 @dataclass
@@ -298,7 +324,9 @@ def serve_labels(
                     found.info["servers_entering"] += 1
             if at is not None:
                 found.labels.append(
-                    Label(at[0], at[1], rs.server, SERVER_WEIGHT, "server", rs.serving, 1)
+                    Label(
+                        at[0], at[1], rs.server, SERVER_WEIGHT * rs.weight, "server", rs.serving, 1
+                    )
                 )
                 found.info["servers"] += 1
         # The receiving team: its zones from the rotational order (calibrated only).
