@@ -215,3 +215,40 @@ def test_off_writes_nothing(
     )
     assert suggested(club["coach"], ready) == []
     assert gate_of(club["coach"], ready)["reason"] == "off"
+
+
+def test_a_team_s_own_action_model_suggests_for_its_games(
+    app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
+) -> None:
+    """PLAN §10.5b: a training that keeps a team's own variant (the pooled model lost to the
+    rules) brings it to that team's games nobody reviewed; their actions job gets it."""
+    from wieplay.core.models import Video
+
+    job = through_trajectory(analyser, store)
+    complete(
+        analyser, job, body([a for r in inputs(analyser, job)["rallies"][:2] for a in plan(r)])
+    )
+    with app.state.sessionmaker() as db:
+        video = db.get(Video, uuid.UUID(ready["id"]))
+        assert video is not None
+        lineage = str(video.lineage_id)
+    queue_training(app)
+    payload = training(accepted=False, precision=0.3, recall=0.8, games=3)
+    payload["teams"] = {
+        lineage: {
+            "games": 3, "held_out": 3, "variant": "weighted", "boost": 3.0,
+            "action_f1": {"v0": 0.3, "pooled": 0.28, "weighted": 0.45},
+            "artifact": {
+                "nas_path": "models/actions/actions-v1-team.pkl", "sha256": "f" * 64,
+                "bytes": 9, "format": "pickle", "schema_version": 1,
+            },
+        }
+    }  # fmt: skip
+    train(analyser, payload)
+    job = claim(analyser, "actions")
+    assert job is not None and job["params"]["reason"] == "train_actions"
+    assert inputs(analyser, job)["model"]["nas_path"] == "models/actions/actions-v1-team.pkl"
+    with app.state.sessionmaker() as db:
+        found = actions.current_model(db, uuid.UUID(lineage))
+        assert found is not None and found[1].stats["team"] == lineage
+        assert actions.current_model(db) is None  # the pooled model lost: nobody else's
