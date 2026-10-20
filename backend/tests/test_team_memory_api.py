@@ -21,7 +21,7 @@ from tests.test_scoresheet_api import LINEUP_THEM, LINEUP_US, put, sheet_sets
 from tests.test_scoring_api import analysed, match, rallies_of, tagging
 from wieplay.core import team_memory
 from wieplay.core.config import Settings
-from wieplay.core.models import AuditLog, Video, VideoRoster
+from wieplay.core.models import AuditLog, Event, Video, VideoRoster
 from wieplay.core.players import EventPlayer
 from wieplay.core.team_memory import TeamPlayer
 
@@ -118,6 +118,48 @@ def test_a_coach_fixes_who_wears_a_number_and_the_season_follows(
     assert player.put(f"/api/teams/{H3}/memory/players/5", json={"member_id": 1}).status_code == 403
     r = coach.put(f"/api/teams/{H3}/memory/players/5", json={"member_id": 999_999})
     assert r.status_code == 422
+
+
+def test_a_fix_keeps_a_game_that_named_someone_else_for_the_number(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, analyser: TestClient
+) -> None:
+    video = game_with_sheet(app, club, store, analyser)
+    coach = club["coach"]
+    t = tag(rallies_of(tagging(coach, video))[0]["start_ms"] + 2000, number=5)
+    assert coach.post(f"/api/videos/{video['id']}/changes", json={"events": [t]}).status_code == 200
+    body = memory(coach)
+    five = next(p for p in body["players"] if p["number"] == 5)
+    guest, other = [m["id"] for m in body["members"] if m["id"] != five["member_id"]][:2]
+    # That day #5 was worn by someone else (the coach's answer for this game).
+    with app.state.sessionmaker() as db:
+        snap = db.scalars(
+            select(VideoRoster).where(
+                VideoRoster.video_id == uuid.UUID(video["id"]),
+                VideoRoster.side == "us",
+                VideoRoster.number == 5,
+            )
+        ).first()
+        if snap is None:
+            db.add(
+                VideoRoster(video_id=uuid.UUID(video["id"]), side="us", number=5, member_id=guest)
+            )
+        else:
+            snap.member_id = guest
+        ev = db.get(Event, uuid.UUID(t["id"]))
+        assert ev is not None
+        ev.member_id = guest
+        db.commit()
+
+    r = coach.put(f"/api/teams/{H3}/memory/players/5", json={"member_id": other})
+    assert r.status_code == 200, r.text
+    with app.state.sessionmaker() as db:
+        snap = db.scalars(
+            select(VideoRoster).where(
+                VideoRoster.video_id == uuid.UUID(video["id"]), VideoRoster.number == 5
+            )
+        ).one()
+        assert snap.member_id == guest
+    assert event(app, t["id"]).member_id == guest
 
 
 def test_a_second_game_without_a_sheet_takes_its_servers_from_the_memory(

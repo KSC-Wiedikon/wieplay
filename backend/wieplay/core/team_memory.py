@@ -830,6 +830,9 @@ def fix(
     if row is None:
         row = TeamPlayer(team_id=team.id, lineage_id=team.lineage_id, number=number)
         db.add(row)
+        previous, _ = resolve(roster_by_number(db, team.id).get(number, []))
+    else:
+        previous = row.member_id
     row.fixed = not hidden
     row.hidden = hidden
     row.member_id = None if hidden else member_id
@@ -839,7 +842,7 @@ def fix(
     row.fixed_at = datetime.now(UTC)
     db.flush()
     if not hidden:
-        relink_videos(db, team, number, member_id)
+        relink_videos(db, team, number, member_id, previous)
     refresh(db, team)
     return row
 
@@ -853,7 +856,7 @@ def unfix(db: Session, team: WdTeam, number: int, actor: int) -> None:
     ).first()
     if row is None or not (row.fixed or row.hidden):
         return
-    was_fixed = row.fixed
+    was_fixed, previous = row.fixed, row.member_id
     row.fixed = row.hidden = False
     row.fixed_by = actor
     row.fixed_at = datetime.now(UTC)
@@ -862,14 +865,19 @@ def unfix(db: Session, team: WdTeam, number: int, actor: int) -> None:
     row.source = "roster" if number in roster_by_number(db, team.id) else "learned"
     db.flush()
     if was_fixed:
-        relink_videos(db, team, number, member_id)
+        relink_videos(db, team, number, member_id, previous)
     refresh(db, team)
 
 
-def relink_videos(db: Session, team: WdTeam, number: int, member_id: int | None) -> int:
+def relink_videos(
+    db: Session, team: WdTeam, number: int, member_id: int | None, previous: int | None
+) -> int:
     """The season's games name `member_id` for our `number`: the roster snapshots (a row added
-    where the snapshot lacks the number), our tags and cards with it. Returns the videos
-    changed."""
+    where the snapshot lacks the number), our tags and cards with it. Only the link being
+    corrected moves (nobody, or `previous`): a game whose snapshot names someone else for the
+    number (a guest wearing it that day, a coach's answer for that game) keeps its own.
+    Returns the videos changed."""
+    replaceable = {None, previous}
     from wieplay.core.players import PlayerCluster
 
     member = db.get(WdMember, member_id) if member_id is not None else None
@@ -893,7 +901,7 @@ def relink_videos(db: Session, team: WdTeam, number: int, member_id: int | None)
                     is_libero="libero" in positions,
                 )
             )
-        elif found.member_id == member_id:
+        elif found.member_id == member_id or found.member_id not in replaceable:
             continue
         else:
             found.member_id = member_id
@@ -905,7 +913,7 @@ def relink_videos(db: Session, team: WdTeam, number: int, member_id: int | None)
                 Event.deleted_at.is_(None),
             )
         ):
-            if ev.member_id != member_id:
+            if ev.member_id != member_id and ev.member_id in replaceable:
                 ev.member_id = member_id
                 ev.version = (ev.version or 0) + 1
         for c in db.scalars(
@@ -915,7 +923,8 @@ def relink_videos(db: Session, team: WdTeam, number: int, member_id: int | None)
                 PlayerCluster.number == number,
             )
         ):
-            c.member_id = member_id
+            if c.member_id in replaceable:
+                c.member_id = member_id
         changed += 1
     db.flush()
     return changed
