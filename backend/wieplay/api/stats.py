@@ -26,17 +26,16 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from wieplay.api.access import visible_team
 from wieplay.api.analysis import ActionGateOut, gate_out
 from wieplay.api.deps import DbDep, SettingsDep, ViewerDep
 from wieplay.api.tagging import _readable
-from wieplay.core import guests, lineups, names, stats, stats_input
+from wieplay.core import guests, lineups, names, stats, stats_input, tagging
 from wieplay.core.config import Settings
 from wieplay.core.models import (
-    Event,
     Video,
     VideoRoster,
     WdGame,
@@ -54,6 +53,8 @@ Part = Literal["box", "rotations", "setter", "zones"]
 Number = int | float | None
 # ?search= : a TagSearch as JSON (the web's search bar, saved filters).
 SearchParam = Query(default=None, max_length=4000)
+# ?sure=true : "Sure only", without what is still to check (PLAN §10, wieplay/core/stats_input.py).
+SureParam = Query(default=False)
 
 
 class ColumnOut(BaseModel):
@@ -76,6 +77,7 @@ class RowOut(BaseModel):
     filter: dict[str, Any]
     values: dict[str, Number]
     matches: int | None = None  # season: matches with a tag of this row
+    to_check: int = 0  # of the row's tags, WiePlay's still to check
 
 
 class TeamLineOut(BaseModel):
@@ -222,9 +224,11 @@ class VideoStatsOut(BaseModel):
     sets: list[SetOut]
     # The numbers of our tags shown per rotation (`RotationOut.values`).
     rotation_columns: list[ColumnOut] = Field(default_factory=list)
-    # Suggested actions nobody has accepted or rejected yet: not counted above.
-    suggested: int = 0
-    # Whether WiePlay suggests actions yet (PLAN §10.4a); null for older servers.
+    # What is still to check (PLAN §10: rallies, breaks, sets and actions WiePlay is unsure
+    # of): counted above, marked; with ?sure=true left out of the numbers.
+    to_check: int = 0
+    sure_only: bool = False
+    # How WiePlay finds the actions (PLAN §10.4a); null for older servers.
     actions_gate: ActionGateOut | None = None
     # With ?search=: the tags it kept (`tags` stays the match's count); null without one.
     selected: int | None = None
@@ -253,8 +257,9 @@ class TeamStatsOut(BaseModel):
     season_box: BoxOut
     matches: list[MatchOut]
     rotation_columns: list[ColumnOut] = Field(default_factory=list)
-    # Suggested actions nobody has accepted or rejected yet, over the matches: not counted.
-    suggested: int = 0
+    # What is still to check over the matches (counted above; left out with ?sure=true).
+    to_check: int = 0
+    sure_only: bool = False
     actions_gate: ActionGateOut | None = None
     # With ?search=: the tags it kept over the matches; null without one.
     selected: int | None = None
@@ -388,25 +393,6 @@ def _setter(
     return SetterOut(sets=setter.sets, attacks=setter.attacks, plays=plays, **lines)
 
 
-def _suggested(db: Session, video_ids: list[uuid.UUID]) -> int:
-    """Suggested actions nobody has answered yet: not in the numbers (PLAN §10.4a)."""
-    if not video_ids:
-        return 0
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(Event)
-            .where(
-                Event.video_id.in_(video_ids),
-                Event.source == "model",
-                Event.review == "unreviewed",
-                Event.deleted_at.is_(None),
-            )
-        )
-        or 0
-    )
-
-
 def _names(db: Session, member_ids: set[int]) -> dict[int, str]:
     if not member_ids:
         return {}
@@ -459,6 +445,7 @@ def _row(row: stats.Row, cols: list[stats.Column], season: bool) -> RowOut:
         filter=row.filter,
         values=stats.values(cols, row.counts),
         matches=len(row.matches) if season else None,
+        to_check=row.to_check,
     )
 
 
@@ -544,14 +531,19 @@ def _zone_rows(box: stats.BoxScore, codes: dict[str, str]) -> list[ZoneRowOut]:
 
 
 def _video_stats(
-    db: Session, viewer: Viewer, video_id: uuid.UUID, search: TagSearch | None = None
+    db: Session,
+    viewer: Viewer,
+    video_id: uuid.UUID,
+    search: TagSearch | None = None,
+    sure_only: bool = False,
 ) -> tuple[Video, stats.VideoStats, list[stats.Column], int]:
-    """The match's numbers (with a search: what it keeps) and its count of tags."""
+    """The match's numbers (with a search: what it keeps; "sure only": without what is still
+    to check) and its count of tags."""
     video, _ = _readable(db, viewer, video_id)
     _check_sport(video.sport)
-    tags = stats_input.load_tags(db, [video.id])[video.id]
-    rallies = stats_input.load_rallies(db, [video.id])[video.id]
-    sets = stats_input.load_sets(db, [video.id])[video.id]
+    tags = stats_input.load_tags(db, [video.id], sure_only)[video.id]
+    rallies = stats_input.load_rallies(db, [video.id], sure_only)[video.id]
+    sets = stats_input.load_sets(db, [video.id], sure_only)[video.id]
     tax = load("volleyball")
     result = stats.video_stats(
         tags, rallies, sets, _roster(db, video), tax, select=selector(search, tax)
@@ -566,9 +558,10 @@ def video_stats(
     db: DbDep,
     settings: SettingsDep,
     search: str | None = SearchParam,
+    sure: bool = SureParam,
 ) -> VideoStatsOut:
     query = _search(search)
-    video, result, cols, total = _video_stats(db, viewer, video_id, query)
+    video, result, cols, total = _video_stats(db, viewer, video_id, query, sure)
     rot_cols = stats.rotation_columns(load("volleyball"))
     set_no = {s.set.id: s.set.no for s in result.sets}
     return VideoStatsOut(
@@ -600,7 +593,8 @@ def video_stats(
             for s in result.sets
         ],
         rotation_columns=_columns(rot_cols),
-        suggested=_suggested(db, [video.id]),
+        to_check=tagging.to_check_total(db, [video.id]),
+        sure_only=sure,
         actions_gate=gate_out(db, settings),
         selected=result.tags if query is not None else None,
         sheet_players=_sheet_players(db, video),
@@ -625,10 +619,14 @@ def _sheet_players(db: Session, video: Video) -> SheetPlayersOut | None:
 
 @router.get("/videos/{video_id}/stats/zones", response_model=ZonesOut)
 def video_zones(
-    video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, search: str | None = SearchParam
+    video_id: uuid.UUID,
+    viewer: ViewerDep,
+    db: DbDep,
+    search: str | None = SearchParam,
+    sure: bool = SureParam,
 ) -> ZonesOut:
     """The match's serves and attacks per zone: the match and each set, per row."""
-    _, result, _, _ = _video_stats(db, viewer, video_id, _search(search))
+    _, result, _, _ = _video_stats(db, viewer, video_id, _search(search), sure)
     codes = stats.zone_codes(load("volleyball"))
     return ZonesOut(
         codes=codes,
@@ -658,8 +656,9 @@ def video_stats_csv(
     lang: Lang = "en",
     part: Part = "box",
     search: str | None = SearchParam,
+    sure: bool = SureParam,
 ) -> Response:
-    video, result, cols, _ = _video_stats(db, viewer, video_id, _search(search))
+    video, result, cols, _ = _video_stats(db, viewer, video_id, _search(search), sure)
     words = stats.HEADERS[lang]
     match, sets = words["all"], [(str(s.set.no), s) for s in result.sets]
     if part == "rotations":
@@ -675,8 +674,12 @@ def video_stats_csv(
     else:
         scopes = [(match, result.box, result.team), *((no, s.box, s.team) for no, s in sets)]
         body = stats.to_csv(cols, scopes, lang, labels=_labels(db, video, settings, words))
-    name = f"wieplay-{_PART_NAME[part]}-{video.recorded_on.isoformat()}-{_slug(video.title)}.csv"
-    return _csv(body, name)
+    name = f"wieplay-{_PART_NAME[part]}-{video.recorded_on.isoformat()}-{_slug(video.title)}"
+    return _csv(body, f"{name}{SURE_SUFFIX if sure else ''}.csv")
+
+
+# A file of the numbers without what is still to check says so in its name.
+SURE_SUFFIX = "-sure-only"
 
 
 _PART_NAME: dict[str, str] = {
@@ -688,7 +691,11 @@ _PART_NAME: dict[str, str] = {
 
 
 def _season(
-    db: Session, viewer: Viewer, team_id: int, search: TagSearch | None = None
+    db: Session,
+    viewer: Viewer,
+    team_id: int,
+    search: TagSearch | None = None,
+    sure_only: bool = False,
 ) -> tuple[WdTeam, stats.SeasonStats, list[stats.Column], list[uuid.UUID]]:
     access = visible_team(db, viewer, team_id)
     team = access.team
@@ -701,9 +708,9 @@ def _season(
         )
     )
     ids = [v.id for v in videos]
-    tags = stats_input.load_tags(db, ids)
-    rallies = stats_input.load_rallies(db, ids)
-    sets = stats_input.load_sets(db, ids)
+    tags = stats_input.load_tags(db, ids, sure_only)
+    rallies = stats_input.load_rallies(db, ids, sure_only)
+    sets = stats_input.load_sets(db, ids, sure_only)
     game_ids = [v.game_id for v in videos if v.game_id is not None]
     games = (
         {g.id: g for g in db.scalars(select(WdGame).where(WdGame.id.in_(game_ids)))}
@@ -735,9 +742,10 @@ def team_stats(
     db: DbDep,
     settings: SettingsDep,
     search: str | None = SearchParam,
+    sure: bool = SureParam,
 ) -> TeamStatsOut:
     query = _search(search)
-    team, result, cols, ids = _season(db, viewer, team_id, query)
+    team, result, cols, ids = _season(db, viewer, team_id, query, sure)
     rot_cols = stats.rotation_columns(load("volleyball"))
     return TeamStatsOut(
         team_id=team.id,
@@ -766,7 +774,8 @@ def team_stats(
             )
             for m in result.matches
         ],
-        suggested=_suggested(db, ids),
+        to_check=tagging.to_check_total(db, ids),
+        sure_only=sure,
         actions_gate=gate_out(db, settings),
         selected=sum(result.box.team.counts.values()) + sum(result.box.opponent.counts.values())
         if query is not None
@@ -776,10 +785,14 @@ def team_stats(
 
 @router.get("/teams/{team_id}/stats/zones", response_model=ZonesOut)
 def team_zones(
-    team_id: int, viewer: ViewerDep, db: DbDep, search: str | None = SearchParam
+    team_id: int,
+    viewer: ViewerDep,
+    db: DbDep,
+    search: str | None = SearchParam,
+    sure: bool = SureParam,
 ) -> ZonesOut:
     """The season's serves and attacks per zone, per row."""
-    _, result, _, _ = _season(db, viewer, team_id, _search(search))
+    _, result, _, _ = _season(db, viewer, team_id, _search(search), sure)
     codes = stats.zone_codes(load("volleyball"))
     scope = ZoneScopeOut(set_no=None, rows=_zone_rows(result.box, codes))
     return ZonesOut(codes=codes, scopes=[scope])
@@ -793,8 +806,9 @@ def team_stats_csv(
     lang: Lang = "en",
     part: Part = "box",
     search: str | None = SearchParam,
+    sure: bool = SureParam,
 ) -> Response:
-    team, result, cols, _ = _season(db, viewer, team_id, _search(search))
+    team, result, cols, _ = _season(db, viewer, team_id, _search(search), sure)
     words = stats.HEADERS[lang]
     scope = words["season"]
     if part == "rotations":
@@ -808,4 +822,5 @@ def team_stats_csv(
     else:
         body = stats.to_csv(cols, [(scope, result.box, result.team)], lang, True)
     season = team.season.replace("/", "-")
-    return _csv(body, f"wieplay-{_PART_NAME[part]}-{_slug(team.name)}-{season}.csv")
+    name = f"wieplay-{_PART_NAME[part]}-{_slug(team.name)}-{season}"
+    return _csv(body, f"{name}{SURE_SUFFIX if sure else ''}.csv")

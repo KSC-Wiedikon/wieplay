@@ -124,6 +124,8 @@ class TagIn:
     id: uuid.UUID | None = None
     zone_from: int | None = None
     zone_to: int | None = None
+    # WiePlay's tag, unsure: it counts, marked "to check" (PLAN §10).
+    check: bool = False
 
 
 @dataclass(frozen=True)
@@ -291,9 +293,11 @@ class Row:
     matches: set[uuid.UUID] = field(default_factory=set)  # season: videos with a tag
     # Where its tags started and went: (code, zone from, zone to, grade), for the zone maps.
     places: Places = field(default_factory=Counter)
+    to_check: int = 0  # of its tags, WiePlay's still to check
 
     def add(self, tag: TagIn, video_id: uuid.UUID | None = None) -> None:
         self.counts[(tag.code, tag.grade)] += 1
+        self.to_check += int(tag.check)
         self.places[(tag.code, tag.zone_from, tag.zone_to, tag.grade)] += 1
         if video_id is not None:
             self.matches.add(video_id)
@@ -1150,6 +1154,7 @@ HEADERS: dict[str, dict[str, str]] = {
         "zone_right": "Right (2)", "zone_back": "Back row", "zone_unknown": "Zone not tagged",
         "kills": "Kills", "errors": "Errors", "blocked": "Blocked", "kill_pct": "Kill %",
         "hit_pct": "Hitting %",
+        "to_check": "To check",
         "by_attacker": "Attacker", "by_zone": "Zone", "by_rotation": "Rotation",
         "by_reception": "First contact", "by_setter": "Setter",
         "rotation_no": "Rotation {n}", "rotation_unknown": "Rotation not known",
@@ -1188,6 +1193,7 @@ HEADERS: dict[str, dict[str, str]] = {
         "zone_right": "Rechts (2)", "zone_back": "Hinten", "zone_unknown": "Zone nicht erfasst",
         "kills": "Punkte", "errors": "Fehler", "blocked": "Geblockt", "kill_pct": "Punkte %",
         "hit_pct": "Angriffseffizienz %",
+        "to_check": "Noch zu prüfen",
         "by_attacker": "Angreifer", "by_zone": "Zone", "by_rotation": "Rotation",
         "by_reception": "Erster Ballkontakt", "by_setter": "Passeur",
         "rotation_no": "Rotation {n}", "rotation_unknown": "Rotation unbekannt",
@@ -1241,6 +1247,7 @@ def to_csv(
     if with_matches:
         head.append(words["matches"])
     head += [words[c.key] for c in cols] + [words[k] for k in TEAM_KEYS]
+    head.append(words["to_check"])
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\r\n")
     writer.writerow(head)
@@ -1253,6 +1260,8 @@ def to_csv(
             nums = values(cols, row.counts)
             line += [csv_cell(nums[c.key], c.format) for c in cols]
             line += _team_cells(team) if row.kind == "team" else [""] * len(TEAM_KEYS)
+            # How many of the row's tags WiePlay is unsure of (PLAN §10: they count, marked).
+            line.append(str(row.to_check))
             writer.writerow(line)
     return out.getvalue()
 
