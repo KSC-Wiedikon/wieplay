@@ -1980,7 +1980,8 @@ the scoresheet's cells.
   rally: the serve read in the video, the board in the picture, the club scoreboard's log (who
   won, "no point", **the score after the rally**, the points it saw without a rally), a coach's
   serve or winner; per set: the official set score (hard), a typed or confirmed sheet as its
-  exact path (as before), a sheet read from the photo as soft evidence (each service box costs
+  exact path (strong soft evidence since 20.10.2026, below), a sheet read from the photo as soft
+  evidence (each service box costs
   `W_READ` x -log p of the reader's calibrated probability for the value the path implies, the
   boxes it leaves blank -log p(blank); a box a coach corrected in the draft counts as typed;
   the receiving team's X and the S/R crosses weigh in on who served first), the sheet's
@@ -2088,6 +2089,91 @@ the scoresheet's cells.
   the start and end of the rally suggestions the rally finder is ≥ 90 % sure of (the old "≥ 90 %"
   button, rallies only, `confidentRallies`); who won stays under "Needs you".
 
+**The typed sheet as strong evidence, not a fact (built 20.10.2026).** The owner, 20.10.2026,
+after switching off set 4 of game 509: "why WHOLE scoresheet off for only 4 points?" A scorer's
+slip that still adds up (there: our side-out at 3:2 missed, their three points written under the
+server before it, caught up at 7:6; the set consistent and ending 23:25) made the sheet's path
+wrong on four points, and as the exact path it overruled the log and six sure serve readings.
+
+- **The decode** (`wieplay/ml/scoring.py`): a typed or confirmed set is no longer lined up as an
+  exact path (the separate alignment is gone): it is evidence in the same joint decode as every
+  other source. A path pays, per point, `C_SHEET_WON` where its winner differs from the sheet's at
+  that point and `C_SHEET_SCORE` where the score after it differs from the sheet's: the log's own
+  costs (`C_LOG`, `C_LOG_SCORE`) times `W_SHEET`. On a rally the log names, both are times the
+  log's weight there, so the two records of the same point weigh about alike and where they
+  disagree the video decides; where the log is silent the sheet weighs as a sure log, far more
+  than the serves (at most ~3.5 a rally) or the board in the picture (9). Like the log's, the
+  sheet's costs are not tempered in the posteriors. The sheet still fixes who served first, its
+  penalty points come without a rally and its cancelled points make a rally free; a rally right
+  after another is cheaper as no point (as in the alignment it replaces); without an official
+  score the sheet's final stands in for it. The decode keeps a coach's facts absolute (a winner
+  or serve costs `C_FACT_SHEET` 500 to contradict in a set with the sheet, and a rally with a
+  coach's winner cannot be "no point") and the official final hard. Also fixed on the way: a rally
+  the log pressed a point for that the decode calls "no point" now pays the log's score evidence
+  too (the score stays, so it is off): without it, a path could route the sheet's points through
+  the log's "no point" rallies and dodge the log's score.
+- **The weight** (`W_SHEET` 0.96), measured on game 509's one real disagreement
+  (`scripts/ml/fused_eval.py --sheet-weight`; mixes e with the video, e0 without): from 0.92 the
+  log alone loses to the sheet (e0 keeps the sheet's points), up to 1.01 the log with the video
+  beats it (e follows the log); 0.96 is the middle, about one sure serve reading either way. Below
+  1 because a path along the sheet lines the rallies up a little more freely than the log's.
+  Without that score fix the window was 0.84-0.94.
+- **Never sure where they disagree** (`sheet_disputes`, `judge`): every rally where the typed
+  sheet and the log disagree on who won or on the score after it needs the coach, with the reason
+  `sheet_log`: what each says, the side the serves read in the video take over the stretch
+  (`video`: "log", "sheet", or null below 90 %, `VIDEO_SIDES`) and which one the score line
+  follows ("The scoresheet and the board log disagree here (log: KSCW H3, sheet: Volero). The
+  video sides with the board log."; on the score only: "… disagree on the score here (log 4:3,
+  sheet 3:4)"). A rally where the score line leaves the sheet for another reason (a coach's
+  call) says so (`sheet`: "The score line leaves the scoresheet here (the sheet: Volero, 3:3)");
+  the video against the sheet at ≥ 90 % stays `video` (vs "sheet"). Per rally the decode keeps
+  what the sheet says about its point (`sheet_won`, `sheet_score`, `sheet_serving`); `sheet_point`
+  (and the lineups and serves from it) only where the decode keeps to the sheet.
+- **The repair** (`wieplay/ml/sheet.py` `correction`, `wieplay/core/scoresheet.py`
+  `correction_for`): where the decoded path departs from a typed set, the boxes a scorer writes
+  for the decoded points (`encode`) against the typed ones: a point sequence has exactly one set
+  of boxes, so the boxes that differ are the smallest edit. Kept in the score run's metrics per set
+  (`sheet.sets[n].correction`: the boxes as repairs, from which score to which, on whose word:
+  "log", "video", "coach", "board"; a digest of the set's boxes so a changed set drops it).
+
+Measured (`scripts/ml/fused_eval.py`, the two games with trusted logs, prod's rallies as they are
+on 20.10.2026; the typed sheets are the verified transcriptions, game 509's with the paper's
+set-4 slip; the reference is the log). Before is main at f9b335f (the sheet as exact path), after
+is this change. c0 and e0: the same without the video's evidence (no serve readings, no board in
+the picture; the rallies are still the finder's):
+
+| Game 509 | Sure before → after | Wrong among sure | Need the coach | Winner right | Score line right |
+|---|---|---|---|---|---|
+| c: + typed sheet | 24 → 25 | 0 → 0 | 167 → 166 | 156 → 157 /173 | 143 → 144 /173 |
+| e: + typed sheet + log | 135 → 136 | 0 → 0 | 56 → 55 | 171 → **173** /173 | 166 → **173** /173 |
+| c0: typed sheet, no video | 0 → 0 | 0 | 191 → 191 | 147 → 147 /173 | 119 → 119 /173 |
+| e0: typed sheet + log, no video | 0 → 0 | 0 | 191 → 191 | 171 → 171 /173 | 166 → 166 /173 |
+| d: log, no sheet (unchanged) | 139 → 139 | 0 | 52 | 173 | 173 |
+
+| Game 409 | Sure before → after | Wrong among sure | Need the coach | Winner right | Score line right |
+|---|---|---|---|---|---|
+| c: + typed sheet | 2 → 3 | 0 → 0 | 133 → 132 | 110 → 110 /119 | 107 → 107 /119 |
+| e: + typed sheet + log | 103 → 103 | 0 → 0 | 32 → 32 | 119 → 119 /119 | 119 → 119 /119 |
+| c0 / e0 (no video), unchanged | 0 / 0 | 0 | 135 / 135 | 98 / 119 of 119 | 78 / 119 of 119 |
+
+On game 509 with the log the score line now follows the log and the video on the four points
+(173 of 173, from 166), and the eight rallies from 3:2 to 7:6 (the four points and the ones
+between them, where the score differs) need the coach with `sheet_log` ("the video sides with
+the board log"): that is why "sure" rose by one only, not to the 141 of the sheet read from its
+photo (e', which never flagged the slip: its boxes were weak evidence). Without the video (e0)
+the sheet keeps its points there and the same rallies need the coach ("the video can't tell").
+The repair found for set 4 is exactly Volero's box III/1 2, not 5, and IV/1 5, not 6, "from the
+board log and the video". The read-sheet mixes (b, e') were not measured again: the photos'
+readings are not on prod (the photos were development only), and the change does not touch a
+read set apart from the log's score on "no point". Timing: 0.03-0.14 s per game with a typed
+sheet (0.08-0.7 s with the old alignment).
+
+Synthetic (`tests/test_sheet_soft.py`): the same slip in a made-up set is outvoted by the log and
+the video (score line right everywhere, the stretch never sure, the repair exactly the two boxes,
+applied it decodes to the real points); against the video alone the sheet's points stand; with
+the log and no video the stretch needs the coach; a coach's winner wins against the sheet, the
+log and the video together.
+
 Basketball scoring later via scoreboard OCR (score + clock): a jump of +1/+2/+3 also
 proposes the shot type.
 
@@ -2109,9 +2195,12 @@ H3's league; every team gets a carbon copy), so WiePlay knows every point in ord
   inconsistent set gets the cheapest single repair as a suggestion (a typo model: swapped
   digits, a neighbouring key, a missing or extra box) for the coach to accept, or is used only
   as a hint.
-- **Ranked** below the coach's facts and above the scoreboard log and the model: it is the
-  signed official record, but it has no times, so which video rally is which point is
-  inferred.
+- **Ranked** below the coach's facts, strong evidence (20.10.2026: no longer an exact path): it
+  is the signed official record, but a scorer's slip that still adds up is possible, it has no
+  times (which video rally is which point is inferred), and its interior is checked by nobody
+  during the match, unlike the board everyone watches. It wins against the video alone; it and
+  the club scoreboard's log weigh about alike, so where they disagree the video decides (§10.3,
+  "The typed sheet as strong evidence").
 
 **Built (SS1, SS2; migration `0023`):**
 
@@ -2151,8 +2240,10 @@ H3's league; every team gets a carbon copy), so WiePlay knows every point in ord
   browser. The setup card has a "Scoresheet" step (type it in, or "No scoresheet"), and a sheet
   whose every set fits the official result completes the score step ("Score from the official
   scoresheet"). The video page links the sheet; the guide (`/how-to-help`) explains it.
-- **Scoring** (`wieplay/ml/scoring.py`, `wieplay/core/scoresheet.py`): a consistent set's
-  points are lined up with the set's rallies by a dynamic programme over the sheet point index:
+- **Scoring** (`wieplay/ml/scoring.py`, `wieplay/core/scoresheet.py`; since 20.10.2026 the
+  sheet is strong soft evidence in the joint decode instead of this exact alignment, §10.3): a
+  consistent set's points are lined up with the set's rallies by a dynamic programme over the
+  sheet point index:
   a rally is the next point (its serve evidence for that point's server, the board and the log
   for its winner, a coach's serve or winner at 12 to contradict, a penalty point at 4), no point
   (as before; a proposal followed within 8 s by the next is 1.5 cheaper as no point: the first
@@ -2424,6 +2515,29 @@ cards in case"):
   19.10.2026 in the joint decode (a long break as positive evidence too, §10.3): no consistent
   gain either; they are evidence at a low weight and ask the coach about the rally next to one
   that does not fit ("a timeout at 14:12 doesn't fit here").
+
+**Built 20.10.2026: the sheet page names the suspect boxes and offers the fix** (no migration;
+the owner's "why WHOLE scoresheet off for only 4 points?"):
+
+- Where the newest scoring departs from a typed set it used (§10.3: the board log and the video
+  outvote the paper on a stretch), the set's check carries the correction (`GET …/scoresheet` →
+  `checks[n].correction`: the boxes, from which score to which, on whose word; dropped as soon as
+  the set's boxes change). The page shows it above the check line: "Between 3:2 and 7:6, the board
+  log and the video say Volero's box III/1 is 2, not 5, and IV/1 is 5, not 6.", marks those boxes
+  in red with what the records say ("the board log and the video: 2"), jumps to the first.
+- **"Apply the correction"** (after a confirmation; whoever may type the sheet): `POST
+  …/scoresheet/correct` `{set, base_version}` changes exactly those boxes (the circled finals
+  follow where they were marked), notes each change in the set (`corrections`: the box, the
+  paper's value, the new one, on whose word) and saves a new version: the revision trigger keeps
+  the paper's version in `scoresheet_revision`. Audited as `scoresheet_corrected` (the set, the
+  boxes with the paper's and the new values, the sources, the span). The match is scored again:
+  the set keeps to the corrected sheet everywhere, its rallies lined up again (lineups, serves'
+  players), and "From the scoresheet" counts the corrected points. A stale request (another
+  version, a set changed since, no correction) is refused with 409. The page then says
+  "Corrected from the paper on the word of the board log and the video: Volero III/1 5 → 2, IV/1
+  6 → 5."
+- "In the score line" says how many rallies leave the sheet and how many the log disputes.
+- The per-set "use" switch stays as a manual override; the guide says it is rarely needed now.
 
 **Not yet:** substitutions as events (`SUB`, research §4.4): they stay on the sheet and the
 page shows where each falls in the video; a "Sheet" column, point strip and `X`/`M` keys in
