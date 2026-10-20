@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from wieplay.core import imports, jobs, sheet_photos
-from wieplay.core.config import Settings
+from wieplay.core.config import Settings, get_settings
 from wieplay.core.media import (
     CODECS,
     SEGMENT_NAME,
@@ -384,7 +384,7 @@ def complete(
         calibration.complete_court(db, video, job, payload)
         actions.after_trajectory(db, video, job)  # the actions' floor positions follow
         # The players, on that court (PLAN §10.5), when they are switched on (players_auto).
-        players.after_court(db, video, job, auto=bool(settings and settings.players_auto))
+        players.after_court(db, video, job, auto=(settings or get_settings()).players_auto)
         return
     if job.kind in calibration.KINDS:
         calibration.complete(db, video, job, payload)
@@ -441,6 +441,10 @@ def on_failed(db: Session, video: Video | None, job: Job) -> None:
         or job.kind in actions.KINDS
         or job.kind in players.KINDS
     ):
+        # The video plays without it; the chain goes on where it can (core/chain.py).
+        from wieplay.core import chain
+
+        chain.after_failed(db, video, job)
         return
     if job.kind in scoreboard.KINDS:
         return  # the scoring goes on without the board

@@ -36,7 +36,7 @@ from wieplay.api import (
     videos,
     worker,
 )
-from wieplay.core import scorelog, scoring, sheet_photos
+from wieplay.core import chain, scorelog, scoring, sheet_photos
 from wieplay.core.config import Settings, get_settings
 from wieplay.core.db import make_engine, make_sessionmaker
 from wieplay.core.retention import run_housekeeping
@@ -228,6 +228,8 @@ def _sync_once(sessionmaker: sessionmaker[Session], factory: Callable[[], Bridge
 
 HOUSEKEEPING_EVERY = timedelta(hours=24)
 _last_housekeeping: list[datetime] = []
+CHAIN_EVERY = timedelta(hours=1)
+_last_chain: list[datetime] = []
 
 
 def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -> None:
@@ -240,6 +242,17 @@ def _reap_once(sessionmaker: sessionmaker[Session], store: ObjectStore | None) -
             library.sweep_exports(session, store)
             sheet_photos.sweep(session, store, datetime.now(UTC))
         now = datetime.now(UTC)
+        if not _last_chain or now - _last_chain[-1] >= CHAIN_EVERY:
+            # The automatic chain of every ready video (PLAN §10): a step nobody queued.
+            _last_chain[:] = [now]
+            try:
+                resumed = chain.resume_all(session)
+                session.commit()
+                if resumed:
+                    log.info("chain: queued %s", ", ".join(resumed))
+            except Exception:
+                session.rollback()
+                log.exception("chain sweep failed")
         if not _last_housekeeping or now - _last_housekeeping[-1] >= HOUSEKEEPING_EVERY:
             _last_housekeeping[:] = [now]
             done = run_housekeeping(session, now)

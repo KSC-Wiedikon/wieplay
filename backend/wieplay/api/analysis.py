@@ -1,17 +1,17 @@
 """Automatic analysis of a video (PLAN §10.1): its state, a rerun, "rallies done".
 
-GET  /api/videos/{id}/analysis          status, latest model run, proposal counts, the
-                                        model's score against the coach's rallies, the
-                                        automatic scoring (PLAN §10.3), the suggested
-                                        actions (§10.4a)
+GET  /api/videos/{id}/analysis          status, the chain's steps, what is still to check,
+                                        latest model run, WiePlay's rallies by review state,
+                                        the model's score against the coach's rallies, the
+                                        automatic scoring (PLAN §10.3), the actions (§10.4a)
 POST /api/videos/{id}/analyse           (re)run the analysis (whoever may tag)
 POST /api/videos/{id}/scoring           score the video again now (whoever may tag)
 POST /api/videos/{id}/rallies-reviewed  the rally list is complete and right (or not)
-POST /api/videos/{id}/actions           suggest the actions again (whoever may tag)
+POST /api/videos/{id}/actions           find the actions again (whoever may tag)
 POST /api/videos/{id}/actions-reviewed  the video's actions are complete and right (or not)
 
-The proposals themselves are ordinary segments in GET /api/videos/{id}/tagging with
-source "model", a confidence and a review state.
+WiePlay's rallies, breaks, sets and actions are ordinary tags in GET /api/videos/{id}/tagging
+with source "model", a confidence and a review state ("auto" when sure, else "check").
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from sqlalchemy import select
 
 from wieplay.api.access import TeamAccess, visible_video
 from wieplay.api.deps import DbDep, SettingsDep, ViewerDep, audit
-from wieplay.core import actions, analysis, guests, identify, players, scoring, tagging
+from wieplay.core import actions, analysis, chain, guests, identify, players, scoring, tagging
 from wieplay.core.config import Settings
 from wieplay.core.models import Job, ModelRun, Segment, Video
 from wieplay.core.permissions import (
@@ -234,7 +234,7 @@ class ActionsOut(BaseModel):
     run_id: uuid.UUID | None
     created_at: datetime | None
     finder: str | None  # v0 | v1: who labelled the newest suggestions
-    # Suggestions by review state (rejected: deleted ones).
+    # WiePlay's actions by review state: auto, check, confirmed, corrected, rejected (deleted).
     suggestions: dict[str, int]
     # The newest run: written per skill, rallies with sides, rallies a coach tagged.
     counts: dict[str, int]
@@ -247,13 +247,41 @@ class ActionsOut(BaseModel):
     gate: ActionGateOut | None = None
 
 
+class ToCheckOut(BaseModel):
+    """What still waits for a person in this video (PLAN §10: "To check"), in the order the
+    review walks it: rallies (and breaks and sets), then actions, then players (the identify
+    queue's cards)."""
+
+    rallies: int = 0
+    breaks: int = 0
+    sets: int = 0
+    actions: int = 0
+    players: int = 0
+    total: int = 0
+
+
+class StepOut(BaseModel):
+    # rallies | score | ball | court | actions | players | attribution
+    key: str
+    status: str  # none | queued | running | done | failed | skipped
+
+
+class StepsOut(BaseModel):
+    """The automatic chain (core/chain.py): "Analysing: 4 of 7 steps" while `running`."""
+
+    done: int
+    total: int
+    running: bool
+    items: list[StepOut]
+
+
 class AnalysisOut(BaseModel):
     video_id: uuid.UUID
     # none | queued | running | done | failed (the newest analyse job of the video)
     status: str
     model_run: ModelRunOut | None
-    # Model rally proposals by review state: unreviewed, confirmed, corrected, rejected,
-    # merged (deleted ones are rejected or merged).
+    # WiePlay's rallies by review state: auto, check, confirmed, corrected, rejected, merged
+    # (deleted ones are rejected or merged).
     proposals: dict[str, int]
     metrics_vs_human: MetricsVsHumanOut | None
     available: bool  # the sport has automatic analysis
@@ -267,6 +295,8 @@ class AnalysisOut(BaseModel):
     scoring: ScoringOut | None = None
     actions: ActionsOut | None = None
     players: PlayersSummaryOut | None = None
+    to_check: ToCheckOut = Field(default_factory=ToCheckOut)
+    steps: StepsOut | None = None
 
 
 class ReviewedIn(BaseModel):
@@ -457,6 +487,23 @@ def _players(db: DbDep, video: Video, minutes: int = 120) -> PlayersSummaryOut |
     )
 
 
+def steps_out(found: chain.Steps | None) -> StepsOut | None:
+    if found is None:
+        return None
+    return StepsOut(
+        done=found.done,
+        total=found.total,
+        running=found.running,
+        items=[StepOut(key=s.key, status=s.status) for s in found.items],
+    )
+
+
+def to_check_out(db: DbDep, video: Video, players_out: PlayersSummaryOut | None) -> ToCheckOut:
+    counts = tagging.to_check_counts(db, [video.id])[video.id]
+    cards = players_out.uncertain if players_out is not None else 0
+    return ToCheckOut(**counts, players=cards, total=sum(counts.values()) + cards)
+
+
 def analysis_out(
     db: DbDep, video: Video, viewer: Viewer, access: TeamAccess, settings: Settings
 ) -> AnalysisOut:
@@ -468,6 +515,7 @@ def analysis_out(
         .limit(1)
     ).first()
     model_run = vs_human = None
+    found_players = _players(db, video, settings.players_minutes)
     if (found := analysis.latest_rally_result(db, video.id)) is not None:
         run, entry = found
         signals = None
@@ -520,7 +568,9 @@ def analysis_out(
         rally_model=_rally_model(db),
         scoring=_scoring(db, video),
         actions=_actions(db, video, settings),
-        players=_players(db, video, settings.players_minutes),
+        players=found_players,
+        to_check=to_check_out(db, video, found_players),
+        steps=steps_out(chain.steps(db, video, settings)),
     )
 
 
@@ -593,8 +643,8 @@ def rallies_reviewed(
 ) -> ReviewedOut:
     """The coach marks the video's rally list complete and right: its rallies become
     training data and the finder retrains (debounced). Refused (409, detail
-    {"message", "open_proposals": n}) while model proposals are still unreviewed: the coach
-    answers each one first. `reviewed: false` takes it back."""
+    {"message", "to_check": n}) while rallies are still to check: the coach answers each one
+    first. `reviewed: false` takes it back."""
     video, _ = _taggable(db, viewer, video_id)
     if video.status != "ready":
         raise HTTPException(409, "Review rallies once the video is ready")
@@ -614,13 +664,10 @@ def rallies_reviewed(
             body.reviewed,
             timedelta(seconds=settings.analysis_train_delay_seconds),
         )
-    except analysis.OpenProposals as exc:
+    except analysis.ToCheck as exc:
         raise HTTPException(
             409,
-            {
-                "message": "Accept, correct, merge or reject the open proposals first",
-                "open_proposals": exc.count,
-            },
+            {"message": "Check the rallies still to check first", "to_check": exc.count},
         ) from exc
     audit(
         db,
@@ -645,8 +692,8 @@ class ActionsReviewedOut(BaseModel):
 def suggest_actions(
     video_id: uuid.UUID, viewer: ViewerDep, db: DbDep, settings: SettingsDep
 ) -> AnalysisOut:
-    """Suggest the actions again: untouched suggestions are replaced, nothing a coach tagged
-    or answered is changed."""
+    """Find the actions again: WiePlay's actions nobody answered are replaced, nothing a coach
+    tagged or answered is changed."""
     _runner(db, viewer, video_id)
     video, access = _taggable(db, viewer, video_id)
     reason = actions.can_propose(db, video)
@@ -664,14 +711,13 @@ def actions_reviewed(
     video_id: uuid.UUID, body: ReviewedIn, viewer: ViewerDep, db: DbDep, settings: SettingsDep
 ) -> ActionsReviewedOut:
     """The coach marks the video's actions complete and right: its tags become training data
-    and the action proposer retrains (debounced). Refused (409, detail {"message",
-    "open_suggestions": n}) while suggested actions are still unanswered. `reviewed: false`
-    takes it back."""
+    and the action finder retrains (debounced). Refused (409, detail {"message",
+    "to_check": n}) while actions are still to check. `reviewed: false` takes it back."""
     video, _ = _taggable(db, viewer, video_id)
     if video.status != "ready":
         raise HTTPException(409, "Review actions once the video is ready")
     if video.sport not in actions.SPORTS:
-        raise HTTPException(409, f"No suggested actions for {video.sport}")
+        raise HTTPException(409, f"No automatic actions for {video.sport}")
     try:
         out = actions.mark_reviewed(
             db,
@@ -680,13 +726,10 @@ def actions_reviewed(
             body.reviewed,
             timedelta(seconds=settings.analysis_train_delay_seconds),
         )
-    except actions.OpenSuggestions as exc:
+    except actions.ToCheck as exc:
         raise HTTPException(
             409,
-            {
-                "message": "Accept, correct or reject the open suggestions first",
-                "open_suggestions": exc.count,
-            },
+            {"message": "Check the actions still to check first", "to_check": exc.count},
         ) from exc
     audit(
         db,
