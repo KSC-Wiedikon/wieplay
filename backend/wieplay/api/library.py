@@ -26,7 +26,8 @@ from sqlalchemy.orm import Session
 
 from wieplay.api.access import TeamAccess, team_refs, visible_team, visible_video
 from wieplay.api.deps import DbDep, SettingsDep, StoreDep, ViewerDep, audit
-from wieplay.core import guests, pipeline, recap, reels, tagging
+from wieplay.core import guests, names, pipeline, recap, reels, tagging
+from wieplay.core.config import get_settings
 from wieplay.core.models import (
     Clip,
     Comment,
@@ -150,6 +151,10 @@ class PieceOut(BaseModel):
     number: int | None
     member_id: int | None
     player_name: str | None
+    # The teams' short names in the piece's video ("KSCW H3", "Volero"); them_name None when
+    # the opponent isn't known (the app then says "Opponent").
+    us_name: str | None = None
+    them_name: str | None = None
     # The score after the rally the moment belongs to, when tagged.
     score_us: int | None
     score_them: int | None
@@ -260,6 +265,21 @@ def _names(db: Session, member_ids: set[int]) -> dict[int, str]:
     }
 
 
+def _side_names(db: Session, video_ids: set[uuid.UUID]) -> dict[uuid.UUID, names.Names]:
+    """Each video's names for us and them (wieplay/core/names.py), as the recap works them out."""
+    settings = get_settings()
+    out = {}
+    for video in db.scalars(select(Video).where(Video.id.in_(video_ids))):
+        team = db.get(WdTeam, video.team_id)
+        club_short, club_name = (
+            guests.club_names(team, settings.club_short_name, settings.club_name)
+            if team
+            else (settings.club_short_name, settings.club_name)
+        )
+        out[video.id] = names.for_video(db, video, team.name if team else "", club_short, club_name)
+    return out
+
+
 def _pieces_out(db: Session, pieces: list[reels.Piece]) -> list[PieceOut]:
     """Pieces with their tag (a manual item names only the event), the player's name and
     the score after the rally. An event counts only inside the piece's own video, which
@@ -293,9 +313,11 @@ def _pieces_out(db: Session, pieces: list[reels.Piece]) -> list[PieceOut]:
                 member_id=event.member_id,
             )
         filled.append((p, tag))
-    names = _names(db, {p.member_id for p, _ in filled if p.member_id})
+    players = _names(db, {p.member_id for p, _ in filled if p.member_id})
+    sides = _side_names(db, {p.video_id for p, _ in filled})
     out = []
     for p, tag in filled:
+        side_names = sides.get(p.video_id)
         out.append(
             PieceOut(
                 video_id=p.video_id,
@@ -311,7 +333,9 @@ def _pieces_out(db: Session, pieces: list[reels.Piece]) -> list[PieceOut]:
                 side=p.side,
                 number=p.number,
                 member_id=p.member_id,
-                player_name=names.get(p.member_id) if p.member_id else None,
+                player_name=players.get(p.member_id) if p.member_id else None,
+                us_name=side_names.us if side_names else None,
+                them_name=side_names.them if side_names else None,
                 score_us=tag[1] if tag else None,
                 score_them=tag[2] if tag else None,
             )
@@ -365,8 +389,8 @@ def video_clips(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[ClipO
         .order_by(Clip.start_ms)
     )
     clips = list(rows)
-    names = _names(db, {c.owner for c in clips})
-    return [_clip_out(c, video, viewer, names.get(c.owner)) for c in clips]
+    owners = _names(db, {c.owner for c in clips})
+    return [_clip_out(c, video, viewer, owners.get(c.owner)) for c in clips]
 
 
 @router.get("/clips/mine", response_model=list[ClipOut])
@@ -687,7 +711,7 @@ def list_comments(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[Com
         .order_by(Comment.t_ms.nulls_first(), Comment.created_at)
     )
     visible = [c for c in rows if _comment_visible(c, viewer, manager)]
-    names = _names(db, {c.author for c in visible} | {c.recipient for c in visible if c.recipient})
+    people = _names(db, {c.author for c in visible} | {c.recipient for c in visible if c.recipient})
     return [
         CommentOut(
             id=c.id,
@@ -696,12 +720,12 @@ def list_comments(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> list[Com
             target_id=c.target_id,
             t_ms=c.t_ms,
             author=c.author,
-            author_name=names.get(c.author),
+            author_name=people.get(c.author),
             body=c.body,
             mentions=list(c.mentions or []),
             audience=c.audience,
             recipient=c.recipient,
-            recipient_name=names.get(c.recipient) if c.recipient else None,
+            recipient_name=people.get(c.recipient) if c.recipient else None,
             created_at=c.created_at,
             edited_at=c.edited_at,
             mine=c.author == viewer.member_id,

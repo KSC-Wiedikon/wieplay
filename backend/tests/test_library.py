@@ -262,6 +262,10 @@ def test_reel_pieces_name_the_player_and_the_score(tagged: dict[str, Any], as_: 
         ("Alex Muster", 1, 0),
         ("Alex Muster", 1, 1),
     ]
+    # ... and the teams the way the video names them ("KSCW H3" for "Us").
+    names = as_("player-h3").get(f"/api/videos/{tagged['id']}").json()["names"]
+    assert {(p["us_name"], p["them_name"]) for p in pieces} == {(names["us"], names["them"])}
+    assert names["us"]
 
 
 def test_single_reel_and_append(
