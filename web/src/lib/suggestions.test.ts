@@ -18,6 +18,7 @@ import {
   logMatches,
   logVerdict,
   loopRestart,
+  openBetween,
   needsYou,
   needsYouRallies,
   nextOpen,
@@ -175,5 +176,21 @@ describe('the joint decode: needs you, sure (docs/PLAN.md §10.1, §10.3)', () =
     expect(nextOpen(items, new Set(), { id: 'n', start_ms: 20_000 })?.id).toBe('x')
     // Only sure ones left open: then those.
     expect(nextOpen(segments.slice(0, 1), new Set(), null)?.id).toBe('s')
+  })
+})
+
+describe('openBetween', () => {
+  it('says how many open suggestions lie before each rally of a list, and after the last', () => {
+    const a = rally({ id: 'a', start_ms: 10_000, end_ms: 18_000 })
+    const b = rally({ id: 'b', start_ms: 60_000, end_ms: 68_000 })
+    const open = (start_ms: number) => rally({ start_ms, end_ms: start_ms + 5_000, source: 'model' })
+    const out = openBetween([a, b], [open(70_000), open(1_000), open(30_000), open(40_000)])
+    expect([...out.before.entries()]).toEqual([
+      ['a', 1],
+      ['b', 2],
+    ])
+    expect(out.after).toBe(1)
+    // A filtered list says nothing: the gaps there are the filter's.
+    expect(openBetween([], [open(1_000)])).toEqual({ before: new Map(), after: 0 })
   })
 })

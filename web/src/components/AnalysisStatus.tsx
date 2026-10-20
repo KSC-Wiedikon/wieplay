@@ -149,7 +149,7 @@ function ScoringSummary({ scoring }: { scoring: Scoring }) {
   const { t } = useTranslation()
   const score = (pair: [number, number] | null) => (pair ? `${pair[0]}:${pair[1]}` : '–')
   const gaps = GAP_KINDS.filter((kind) => (scoring.gaps[kind] ?? 0) > 0).map((kind) =>
-    t(`tagging.analysis.scoring.gap.${kind}`, { count: scoring.gaps[kind] }),
+    t(`tagging.analysis.scoring.gap.${kind}`, { count: scoring.gaps[kind] ?? 0 }),
   )
   const vs = scoring.vs_coach
   return (

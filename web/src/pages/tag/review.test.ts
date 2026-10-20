@@ -5,7 +5,7 @@ import { TaggingStore } from '../../lib/taggingStore'
 import type { ChangesIn, ChangesOut, Segment } from '../../lib/types'
 import { bundle, rally, volleyball } from '../../test/tagging'
 import { TagController } from './controller'
-import { NUDGE_MS, ReviewController } from './review'
+import { BREAK_BUTTONS, GAP_KEYS, NUDGE_MS, ReviewController } from './review'
 
 const VIDEO = '00000000-0000-4000-8000-0000000000dd'
 const suggestion = (id: string, start_ms: number, confidence: number, patch: Partial<Segment> = {}) =>
@@ -483,7 +483,8 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     press('t')
     expect(segment('s1')).toBeUndefined() // rejected: the rally finder learns from it
     expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'confirmed' })
-    expect(review.getState().notice).toMatchObject({ key: 'relabelled', params: { kind: 'timeout' } })
+    // The notice names the rally that went (its time), not the break's start.
+    expect(review.getState().notice).toMatchObject({ key: 'toBreak', params: { kind: 'timeout', time: 10_000 } })
     expect(await sent()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 's1', review: 'rejected', deleted: true }),
@@ -504,6 +505,98 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     expect(store.getView().segments.find((s) => s.id === 's2')).toBeUndefined()
     expect(await sent()).toEqual(expect.arrayContaining([expect.objectContaining({ id: 's2', review: 'rejected', deleted: true })]))
     expect(review.getState().currentId).toBe('s4') // the next open suggestion
+  })
+
+  it('offers every break key as a button, timeout first', () => {
+    expect(BREAK_BUTTONS).toEqual(['timeout', 'substitution', 'set_break', 'warmup', 'stoppage', 'other_dead'])
+    // Every key has its button; "Sub" is a button only.
+    expect(BREAK_BUTTONS.filter((k) => k !== 'substitution').sort()).toEqual(Object.values(GAP_KEYS).sort())
+  })
+
+  it('the break buttons answer like their keys: a substitution on a rally, a timeout on a break', async () => {
+    // The buttons call relabel, as the keys do. s4 is the last rally: its break runs from s3's end to its own end.
+    const rallyCase = await setup()
+    rallyCase.review.select('s4')
+    rallyCase.review.relabel('substitution')
+    expect(rallyCase.segment('s4')).toBeUndefined()
+    expect(rallyCase.store.getView().segments.find((s) => s.kind === 'substitution')).toMatchObject({ start_ms: 58_000, end_ms: 78_000 })
+    expect(rallyCase.review.getState().notice).toMatchObject({ key: 'toBreak', params: { kind: 'substitution', time: 70_000 } })
+    expect(await rallyCase.sent()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 's4', review: 'rejected', deleted: true }),
+        expect.objectContaining({ kind: 'substitution', start_ms: 58_000, end_ms: 78_000 }),
+      ]),
+    )
+    rallyCase.outbox.close()
+
+    const { review, segment, sent } = await setup(scored())
+    review.select('w')
+    review.relabel('timeout')
+    expect(segment('w')).toMatchObject({ kind: 'timeout', review: 'corrected' })
+    expect(review.getState().notice).toMatchObject({ key: 'relabelled', params: { kind: 'timeout' } })
+    expect(await sent()).toEqual([expect.objectContaining({ id: 'w', kind: 'timeout', review: 'corrected' })])
+  })
+
+  it('keeps its place when the scoring replaces the break on screen with a new one (no "every suggestion is reviewed")', async () => {
+    const { review, store } = await setup(scored())
+    review.select('g')
+    const before = review.progress()
+    // The server's scoring labelled the gaps again: the same timeout under a new id.
+    const replaced = store.getView().segments.map((s) => (s.id === 'g' ? { ...s, id: 'g2' } : s))
+    store.applySynced({ events: [], segments: replaced, periods: [], stale: [] })
+    expect(review.getState().currentId).toBe('g2')
+    expect(review.current()?.kind).toBe('timeout')
+    // The old id was never answered: it no longer counts, the new one does, open as before.
+    expect(review.progress()).toEqual(before)
+    // Gone without a successor: the next open item from where it was, not the end of the list.
+    store.applySynced({ events: [], segments: replaced.filter((s) => s.id !== 'g2'), periods: [], stale: [] })
+    expect(review.getState().currentId).toBe('s2')
+    expect(review.progress()).toEqual({ done: before.done, total: before.total - 1 })
+  })
+
+  it('counts a break it rejected as done once it leaves the view', async () => {
+    const { review, press, store } = await setup(scored())
+    review.select('g')
+    const before = review.progress()
+    press('x')
+    store.applySynced({ events: [], segments: store.getView().segments, periods: [], stale: [] })
+    expect(review.progress()).toEqual({ done: before.done + 1, total: before.total })
+  })
+
+  it('R on a break: play after all, a rally made and on screen in one undo step', async () => {
+    const { review, press, store, segment, sent } = await setup(scored())
+    // A long break (30 s): 8 s from 2 s before the playhead.
+    review.select('g')
+    video.currentTime = 31
+    press('r')
+    expect(segment('g')).toBeUndefined()
+    const made = review.current()
+    expect(made).toMatchObject({ kind: 'rally', start_ms: 29_000, end_ms: 37_000 })
+    expect(review.getState().notice).toMatchObject({ key: 'toRally', params: { start: 29_000, end: 37_000 } })
+    expect(review.progress().done).toBeLessThan(review.progress().total) // it waits for an answer
+    expect(await sent()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'g', review: 'rejected', deleted: true }),
+        expect.objectContaining({ id: made?.id, kind: 'rally', start_ms: 29_000, end_ms: 37_000 }),
+      ]),
+    )
+    // Answered like a split-off part.
+    press('Enter')
+    expect(review.getState().currentId).toBe('s2')
+    // One undo takes the rally back and brings the break back on screen (accepting a part of
+    // this session's own is no change of its own).
+    press('u')
+    expect(review.getState().notice?.key).toBe('undone')
+    expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'unreviewed' })
+    expect(store.getView().segments.some((s) => s.id === made?.id)).toBe(false)
+    expect(review.getState().currentId).toBe('g')
+    // A short break (the 9 s warm-up) becomes a rally over all of it; a rally is one already.
+    review.select('w')
+    press('R')
+    expect(review.current()).toMatchObject({ kind: 'rally', start_ms: 0, end_ms: 9_000 })
+    review.select('s1')
+    press('r')
+    expect(review.getState().notice).toMatchObject({ key: 'rallyAlready', tone: 'error' })
   })
 
   it('merges a rally with the next rally, past a break between them', async () => {

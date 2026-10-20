@@ -332,6 +332,8 @@ function Ready({ video }: { video: Video }) {
     [tagging.data],
   )
   const rallyCount = data?.segments.filter((s) => s.kind === 'rally').length ?? 0
+  // The rally suggestions still to review: the rally list says it doesn't hold them yet.
+  const openSuggestions = useMemo(() => (tagging.data?.segments ?? []).filter(isSuggestion), [tagging.data])
   const tagCount = data?.events.length ?? 0
   const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
   const duration = video.duration_ms ?? playhead.getState().duration_ms
@@ -529,6 +531,8 @@ function Ready({ video }: { video: Video }) {
                 suspended={current !== null}
                 editVideoId={data.can_tag && volleyball ? video.id : null}
                 filterTeam={{ id: video.team_id, canShare: video.can_share, label: `${video.team_name} ${video.team_season}` }}
+                openSuggestions={openSuggestions}
+                reviewHref={data.can_tag && volleyball ? `/videos/${video.id}/tag?mode=review` : null}
               />
             </div>
           )}

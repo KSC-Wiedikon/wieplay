@@ -109,6 +109,7 @@ export function Cheatsheet() {
               [['1', '2'], t('tagging.keys.review.serve', teams)],
               [['3', '4'], t('tagging.keys.review.won', teams)],
               [['W', 'B', 'T', 'D', 'O'], t('tagging.keys.review.label')],
+              [['R'], t('tagging.keys.review.rally')],
               [['M'], t('tagging.keys.review.merge')],
               [['S'], t('tagging.keys.review.split')],
               [['U'], t('tagging.keys.review.undo')],

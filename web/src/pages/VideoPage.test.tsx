@@ -255,7 +255,7 @@ describe('VideoPage', () => {
       const toggle = await screen.findByRole('switch', { name: 'Skip dead time' })
       expect(toggle).toHaveAttribute('aria-checked', 'true')
       expect(screen.getByText('2 tags · 2 rallies')).toBeInTheDocument()
-      expect(screen.getByText('Plays only the rallies: 0:27 of 1:32:10.')).toBeInTheDocument()
+      expect(screen.getByText('Skip dead time plays the 2 rallies in the list: 0:27 of 1:32:10.')).toBeInTheDocument()
 
       const player = document.querySelector('video') as HTMLVideoElement
       player.currentTime = 0
@@ -271,7 +271,7 @@ describe('VideoPage', () => {
 
       fireEvent.click(toggle)
       expect(toggle).toHaveAttribute('aria-checked', 'false')
-      expect(screen.getByText('Plays the whole video.')).toBeInTheDocument()
+      expect(screen.getByText('Skip dead time is off: the whole video plays.')).toBeInTheDocument()
       player.currentTime = 30
       fireEvent(player, new Event('timeupdate'))
       expect(player.currentTime).toBe(30)
@@ -365,7 +365,14 @@ describe('VideoPage', () => {
       // Nothing is shown as fact until it is reviewed (PLAN §10): the accepted one is a rally, the open one not.
       expect(screen.getByText('0 tags · 2 rallies')).toBeInTheDocument()
       const list = screen.getByRole('table', { name: 'Rallies' })
-      expect(within(list).getAllByRole('row').slice(1)).toHaveLength(2)
+      const rows = within(list).getAllByRole('row').slice(1)
+      // Two rallies, and where the open suggestion lies: the score counts it, so it jumps there.
+      expect(rows.map((r) => r.getAttribute('data-open-suggestions'))).toEqual([null, '1', null])
+      expect(rows[1]).toHaveTextContent('1 suggestion to review here: the score counts it')
+      expect(screen.getByText(/1 suggestion still to review isn’t in the list yet\./)).toHaveTextContent(
+        'Skip dead time plays the 2 rallies in the list: 0:27 of 1:32:10. 1 suggestion still to review isn’t in the list yet. Review it',
+      )
+      expect(screen.getByRole('link', { name: 'Review it' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
       // Marking the rallies reviewed now accepts the open suggestion: asked first.
       const reviewed = screen.getByRole('switch', { name: 'Rallies reviewed' })
       expect(reviewed).toHaveAccessibleDescription(/the open suggestion is then accepted as it is/)
@@ -434,7 +441,11 @@ describe('VideoPage', () => {
       showAnalysis({ analysis: analysis({ proposals: counts({ unreviewed: 1 }) }) }, { canTag: false })
       expect(await screen.findByRole('table', { name: 'Rallies' })).toBeInTheDocument()
       expect(screen.queryByText(/WiePlay suggested/)).not.toBeInTheDocument()
-      expect(within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row').slice(1)).toHaveLength(2)
+      const rows = within(screen.getByRole('table', { name: 'Rallies' })).getAllByRole('row').slice(1)
+      expect(rows.filter((r) => !r.hasAttribute('data-open-suggestions'))).toHaveLength(2)
+      // Why the score jumps is said to players too, without a way to the review.
+      expect(screen.getByText(/1 suggestion still to review isn’t in the list yet\./)).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Review it' })).not.toBeInTheDocument()
     })
   })
 
@@ -812,7 +823,7 @@ describe('VideoPage', () => {
         ['set-start', 'Set 2 starts (suggested)', true],
       ])
       // The breaks are never played: skipping dead time plays the rallies only.
-      expect(screen.getByText('Plays only the rallies: 0:27 of 1:32:10.')).toBeInTheDocument()
+      expect(screen.getByText('Skip dead time plays the 2 rallies in the list: 0:27 of 1:32:10.')).toBeInTheDocument()
     })
 
     it("shows WiePlay's winners as suggestions in the rally list", async () => {
@@ -852,10 +863,10 @@ describe('VideoPage', () => {
       })
       const card = await screen.findByRole('region', { name: 'Automatic score' })
       expect(within(card).getByText('Set 1: official 25:27 · WiePlay 25:27')).toBeInTheDocument()
-      expect(within(card).getByText('matches')).toBeInTheDocument()
+      expect(within(card).getByText('Matches')).toBeInTheDocument()
       // Against the official score: where the serve evidence alone ends the set.
       expect(within(card).getByText('Set 2: official 25:20 · WiePlay 24:20')).toBeInTheDocument()
-      expect(within(card).getByText('differs')).toBeInTheDocument()
+      expect(within(card).getByText('Differs')).toBeInTheDocument()
       expect(within(card).getByText('12 rallies to check')).toBeInTheDocument()
       expect(within(card).getByText('Breaks found: 1 warm-up · 3 set breaks · 5 timeouts')).toBeInTheDocument()
       expect(within(card).getByText('Serving side right: 96% of 50 rallies you decided')).toBeInTheDocument()

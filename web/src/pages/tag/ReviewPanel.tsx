@@ -1,6 +1,6 @@
 import '../../i18n/pages'
 import type { TFunction } from 'i18next'
-import { useMemo, type MouseEvent, type ReactNode } from 'react'
+import { useId, useMemo, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
@@ -10,7 +10,7 @@ import { ProgressBar } from '../../components/ProgressBar'
 import { SuggestionChip } from '../../components/SuggestionChip'
 import { useSetRalliesReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
-import { formatClock, reasonText, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
+import { aSegmentKind, formatClock, reasonText, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { periodAt } from '../../lib/rallies'
 import { cardTone, courtByRally, issueText, notesAfter, notesToShow, noteText, noteTime, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { fullNameOf, useSideNames, type SideNames } from '../../lib/sides'
@@ -21,7 +21,6 @@ import {
   effectiveWinner,
   formatPercent,
   formatSeconds,
-  GAP_KINDS,
   isGap,
   isOpen,
   confidentRallies,
@@ -34,7 +33,7 @@ import {
 import type { GapKind, Segment, Side } from '../../lib/types'
 import { useReview, useView, useWorkspace } from './context'
 import { GuideLink } from './GuideLink'
-import { GAP_KEYS, type ReviewNotice } from './review'
+import { BREAK_BUTTONS, GAP_KEYS, type ReviewNotice } from './review'
 
 /**
  * A pointer click leaves the focus on the button, where Enter and Space would press it again;
@@ -61,8 +60,8 @@ function Kbd({ children, hidden }: { children: ReactNode; hidden?: boolean }) {
   )
 }
 
-/** The key of each break label (W B T D O). */
-const KEY_OF = Object.fromEntries(Object.entries(GAP_KEYS).map(([key, kind]) => [kind, key.toUpperCase()])) as Record<GapKind, string>
+/** The key of each break label (W B T D O; "Sub" has none). */
+const KEY_OF = Object.fromEntries(Object.entries(GAP_KEYS).map(([key, kind]) => [kind, key.toUpperCase()])) as Partial<Record<GapKind, string>>
 
 function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: SideNames | null): string {
   const p = notice.params ?? {}
@@ -72,10 +71,15 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
     case 'rejected':
     case 'split':
       return t(`tagging.review.notice.${notice.key}`, { time })
+    case 'toRally':
+      return t('tagging.review.notice.toRally', { start: formatClock(Number(p.start)), end: formatClock(Number(p.end)) })
     case 'gapAccepted':
     case 'gapRejected':
-    case 'relabelled':
       return t(`tagging.review.notice.${notice.key}`, { time, kind: segmentKindLabel(t, p.kind as GapKind, sport) })
+    // Inside the sentence: "Now a timeout", "the suggestion at 30:41.5 is a timeout".
+    case 'relabelled':
+    case 'toBreak':
+      return t(`tagging.review.notice.${notice.key}`, { time, kind: aSegmentKind(t, p.kind as GapKind, sport) })
     case 'serve':
       return t('tagging.review.notice.serve', { side: sideLabel(t, p.side as Side, names) })
     case 'won':
@@ -95,7 +99,8 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
 
 /**
  * The review of WiePlay's suggestions (PLAN §10.1): the suggestion on screen, its boundaries,
- * the answers as big buttons (tablets) with their keys, the progress, and one button: "Accept all
+ * the answers as big buttons (tablets) with their keys (on a rally also "not a rally, it's a
+ * timeout …", on a break which one it is), the progress, and one button: "Accept all
  * sure rallies" (the joint decode is sure of them, §10.3). The rest needs the coach, each with
  * its reason.
  */
@@ -106,9 +111,11 @@ export function ReviewPanel() {
   const view = useView()
   const state = useReview()
   const items = useMemo(() => reviewItems(view.segments, state.pending), [view.segments, state.pending])
+  // What the walk still visits: "Every suggestion is reviewed" only when nothing is.
+  const open = useMemo(() => items.filter((s) => isOpen(s, state.pending)).length, [items, state.pending])
   const progress = useMemo(
-    () => allProgress(view.segments, state.seen, state.seenGaps, state.rejectedBefore),
-    [view.segments, state.seen, state.seenGaps, state.rejectedBefore],
+    () => allProgress(view.segments, state.seen, state.seenGaps, state.rejectedBefore, state.pending),
+    [view.segments, state.seen, state.seenGaps, state.rejectedBefore, state.pending],
   )
   const sure = useMemo(() => sureRallies(view.segments), [view.segments])
   const waiting = useMemo(() => needsYouRallies(view.segments).length, [view.segments])
@@ -175,7 +182,7 @@ export function ReviewPanel() {
                 )
               })}
             </div>
-            {gap ? <GapLabels gap={current} /> : <RallyFacts rally={current} />}
+            {!gap && <RallyFacts rally={current} />}
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -189,7 +196,13 @@ export function ReviewPanel() {
               {t('tagging.review.reject')}
               <Kbd hidden={narrow}>X</Kbd>
             </Button>
-            {/* A break is not merged or split: it is labelled (above). */}
+            {/* A break is not merged or split: it is labelled (below), or it is play after all. */}
+            {gap && (
+              <Button size="touch" className="col-span-2" onClick={press(review.toRally)}>
+                {t('tagging.review.toRally')}
+                <Kbd hidden={narrow}>R</Kbd>
+              </Button>
+            )}
             {!gap && (
               <>
                 <Button size="touch" onClick={press(review.merge)}>
@@ -205,6 +218,7 @@ export function ReviewPanel() {
               </>
             )}
           </div>
+          <BreakButtons segment={current} />
           <div className="flex flex-wrap items-center gap-1">
             <Button variant="ghost" size="touch" disabled={!view.canUndo} onClick={press(review.undo)}>
               <UndoIcon className="size-4" />
@@ -221,6 +235,19 @@ export function ReviewPanel() {
             </span>
           </div>
         </>
+      ) : open > 0 ? (
+        <EmptyState
+          icon={<SparkleIcon />}
+          title={t('tagging.review.stillOpen', { count: open })}
+          action={
+            <Button variant="primary" size="touch" onClick={press(review.resume)}>
+              {t('tagging.review.next')}
+              <ChevronDownIcon />
+            </Button>
+          }
+        >
+          {t('tagging.review.stillOpenBody')}
+        </EmptyState>
       ) : progress.total > 0 ? (
         <Done videoId={video.id} reviewed={Boolean(video.rallies_reviewed_at)} />
       ) : (
@@ -545,29 +572,41 @@ function CallButtons({
   )
 }
 
-/** A break's label: what WiePlay thinks it is, and the keys (W B T D O) to say what it is. */
-function GapLabels({ gap }: { gap: Segment }) {
+/**
+ * The breaks as buttons with their keys (T B W D O), under Accept and Reject, short names ("Sub",
+ * "Other"; the full one as the tooltip). On a rally they say "not a rally, it's a timeout …": the
+ * rally is rejected and the dead time around it becomes that break. On a break they say which one
+ * it is (the current label pressed: it accepts it). Two columns, like Accept and Reject above.
+ */
+function BreakButtons({ segment }: { segment: Segment }) {
   const { t } = useTranslation()
   const { review, narrow, taxonomy } = useWorkspace()
+  const id = useId()
+  const gap = isGap(segment.kind)
+  const basketball = taxonomy.sport === 'basketball'
   return (
-    <div className="flex flex-col gap-1 border-t border-hairline pt-2">
-      <span className="text-xs font-semibold text-muted">{t('tagging.review.label')}</span>
-      <div role="group" aria-label={t('tagging.review.label')} className="flex flex-wrap gap-1">
-        {GAP_KINDS.map((kind) => {
-          const name = segmentKindLabel(t, kind, taxonomy.sport)
-          const on = gap.kind === kind
+    <div className="flex flex-col gap-1">
+      <span id={`${id}-label`} className="text-xs font-semibold text-muted">
+        {gap ? t('tagging.review.breakIs') : t('tagging.review.notARally')}
+      </span>
+      <div role="group" aria-labelledby={`${id}-label`} className="grid grid-cols-2 gap-2">
+        {BREAK_BUTTONS.map((kind) => {
+          const on = gap && segment.kind === kind
+          const full = segmentKindLabel(t, kind, taxonomy.sport)
+          const short = basketball && kind === 'set_break' ? full : t(`tagging.review.breaks.${kind}`)
+          const key = KEY_OF[kind]
           return (
             <Button
               key={kind}
               size="touch"
               variant={on ? 'primary' : 'secondary'}
-              aria-pressed={on}
-              aria-label={t('tagging.review.labelAs', { kind: name })}
+              aria-pressed={gap ? on : undefined}
+              title={short === full ? undefined : full}
               className="px-3"
               onClick={press(() => review.relabel(kind))}
             >
-              {name}
-              <Kbd hidden={narrow}>{KEY_OF[kind]}</Kbd>
+              {short}
+              {key && <Kbd hidden={narrow}>{key}</Kbd>}
             </Button>
           )
         })}
@@ -610,6 +649,7 @@ function KeyLegend() {
     ['1 2', t('tagging.keys.review.serve', teams)],
     ['3 4', t('tagging.keys.review.won', teams)],
     ['W B T D O', t('tagging.keys.review.label')],
+    ['R', t('tagging.keys.review.rally')],
     ['↑ ↓', t('tagging.keys.review.move')],
     ['Space', t('tagging.keys.review.space')],
     ['?', t('tagging.review.allKeys')],

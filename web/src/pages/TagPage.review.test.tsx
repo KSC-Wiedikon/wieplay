@@ -280,6 +280,40 @@ describe('TagPage, suggestions', () => {
     expect(server.sent().get(S2)).toMatchObject({ review: 'merged', merged_into: S1, deleted: true })
   })
 
+  it('says "not a rally, it’s a timeout" (or a sub) with a visible button, by touch too', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }))
+    const { server } = show()
+    await screen.findByRole('region', { name: 'Review suggestions' })
+    expect(within(panel()).getByRole('heading', { name: /Rally at 0:10\.0/ })).toBeInTheDocument()
+    const breaks = within(panel()).getByRole('group', { name: 'Not a rally, it’s a:' })
+    // Short names, each with its key as Accept and Reject show theirs (hidden on touch); "Sub" has none.
+    expect(within(breaks).getAllByRole('button').map((b) => [b.textContent, b.querySelector('kbd')?.textContent ?? null])).toEqual([
+      ['TimeoutT', 'T'],
+      ['Sub', null],
+      ['Set breakB', 'B'],
+      ['Warm-upW', 'W'],
+      ['StoppageD', 'D'],
+      ['OtherO', 'O'],
+    ])
+    // On a rally the buttons are answers, not a state: none is pressed. The full name is the tooltip.
+    expect(within(breaks).getByRole('button', { name: 'Timeout' })).not.toHaveAttribute('aria-pressed')
+    expect(within(breaks).getByRole('button', { name: 'Sub' })).toHaveAttribute('title', 'Substitution')
+    expect(within(breaks).getByRole('button', { name: 'Other' })).toHaveAttribute('title', 'Other break')
+
+    fireEvent.click(within(breaks).getByRole('button', { name: 'Timeout' }))
+    expect(within(panel()).getByText('Not a rally: the suggestion at 0:10.0 is a timeout.')).toBeInTheDocument()
+    expect(within(panel()).getByRole('heading', { name: /Rally at 0:30\.0/ })).toBeInTheDocument()
+    await waitFor(() => expect(server.sent().get(S1)).toBeDefined(), { timeout: 3000 })
+    expect(server.sent().get(S1)).toMatchObject({ review: 'rejected', deleted: true })
+    // The dead time from the rally before to the one after is now a timeout.
+    expect([...server.sent().values()].find((s) => s.kind === 'timeout')).toMatchObject({ start_ms: 7_000, end_ms: 30_000 })
+    // A substitution has its own label.
+    fireEvent.click(within(within(panel()).getByRole('group', { name: 'Not a rally, it’s a:' })).getByRole('button', { name: 'Sub' }))
+    expect(within(panel()).getByText('Not a rally: the suggestion at 0:30.0 is a substitution.')).toBeInTheDocument()
+    await waitFor(() => expect([...server.sent().values()].some((s) => s.kind === 'substitution')).toBe(true), { timeout: 3000 })
+    expect(server.sent().get(S2)).toMatchObject({ review: 'rejected', deleted: true })
+  })
+
   it('still asks for a bigger screen on a phone when there is nothing to review', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }))
     show(`/videos/${ID}/tag`, bundle({ periods: [set1], segments: [rally({ start_ms: 2_000, end_ms: 7_000 })] }))

@@ -33,6 +33,7 @@ import {
   allProgress,
   isGap,
   isModel,
+  isOpen,
   isProposal,
   LOOP_PRE_MS,
   confidentRallies,
@@ -57,12 +58,22 @@ export const MIN_RALLY_MS = 200
 /** The label keys for a break. */
 export const GAP_KEYS: Readonly<Record<string, GapKind>> = { w: 'warmup', b: 'set_break', t: 'timeout', d: 'stoppage', o: 'other_dead' }
 
+/**
+ * The breaks as buttons under Accept and Reject, the most frequent first: on a rally they say
+ * "not a rally, it's that break", on a break which one it is. "Sub" (a substitution, a coach's
+ * label only) has no key.
+ */
+export const BREAK_BUTTONS: readonly GapKind[] = ['timeout', 'substitution', 'set_break', 'warmup', 'stoppage', 'other_dead']
+
 export type ReviewNoticeKey =
   | 'accepted'
   | 'rejected'
   | 'gapAccepted'
   | 'gapRejected'
   | 'relabelled'
+  | 'toBreak'
+  | 'toRally'
+  | 'rallyAlready'
   | 'serve'
   | 'serveCleared'
   | 'won'
@@ -117,6 +128,13 @@ interface Mark {
   pending: ReadonlySet<string>
 }
 
+/** A break WiePlay labelled that the coach says is play: up to this long, the rally takes it all. */
+export const RALLY_FROM_BREAK_MS = 20_000
+/** A longer one: a rally from this long before the playhead … */
+const RALLY_LEAD_MS = 2000
+/** … this long (the coach then moves its start and end). */
+const RALLY_LENGTH_MS = 8000
+
 export class ReviewController {
   private state: ReviewState
   private readonly listeners = new Set<() => void>()
@@ -129,6 +147,12 @@ export class ReviewController {
   private unsubscribe: () => void = () => {}
   /** Something was changed since the review started (the scoring is then run again on leaving). */
   private changed = false
+  /** Inside one of the review's own commits: an item it answers leaves the view on purpose. */
+  private committing = false
+  /** The item on screen as it was last seen, to find the walk again when the item disappears. */
+  private shown: Pick<Segment, 'id' | 'kind' | 'start_ms' | 'end_ms'> | null = null
+  /** Gap labels this session answered (a rejected one leaves the view, but it counts as done). */
+  private readonly answeredGaps = new Set<string>()
   private readonly onLeave: () => void
 
   /** `onLeave`: the review ends after changes (the page asks the server to score again). */
@@ -151,14 +175,19 @@ export class ReviewController {
     }
   }
 
-  /** Follows the tagging data: proposals that show up count for the progress. */
+  /**
+   * Follows the tagging data: proposals that show up count for the progress, gap labels the
+   * server took away unanswered no longer do, and when the item on screen disappears (the
+   * server's scoring replaced it, someone else answered it) the walk goes on from where it was.
+   */
   attach(): () => void {
     this.unsubscribe()
     this.unsubscribe = this.store.subscribe(() => {
       const segments = this.store.getView().segments
       const seen = modelIds(segments, this.state.seen, 'rally')
-      const seenGaps = modelIds(segments, this.state.seenGaps, 'gap')
+      const seenGaps = withoutVanished(modelIds(segments, this.state.seenGaps, 'gap'), segments, this.answeredGaps)
       if (seen !== this.state.seen || seenGaps !== this.state.seenGaps) this.set({ seen, seenGaps })
+      if (!this.committing) this.findAgain()
     })
     return () => {
       this.unsubscribe()
@@ -248,10 +277,41 @@ export class ReviewController {
 
   /** Shows an item: the player jumps to 1 s before it and plays (the loop is useLoopPlayback). */
   private go(segment: Segment | null, { play = true } = {}): void {
+    this.shown = segment
     this.set({ currentId: segment?.id ?? null })
     if (!segment) return
     this.tag.seek(segment.start_ms - LOOP_PRE_MS)
     if (play) this.playhead.play()
+  }
+
+  /**
+   * The item on screen left the view without an answer from here: the open item over the same
+   * stretch (the scoring's new label for it), else the next open one from its start.
+   */
+  private findAgain(): void {
+    const gone = this.shown
+    if (!this.state.active || gone === null || this.state.currentId !== gone.id) return
+    const items = this.items()
+    const still = items.find((s) => s.id === gone.id)
+    if (still) {
+      this.shown = still
+      return
+    }
+    const open = items.filter((s) => isOpen(s, this.state.pending))
+    const same = open.find((s) => s.kind === gone.kind && s.start_ms < gone.end_ms && s.end_ms > gone.start_ms)
+    if (same) {
+      // The same place: the loop goes on as it was.
+      this.shown = same
+      this.set({ currentId: same.id })
+      return
+    }
+    const playing = this.playhead.video ? !this.playhead.video.paused : false
+    this.go(nextOpen(items, this.state.pending, { id: gone.id, start_ms: gone.start_ms - 1 }), { play: playing })
+  }
+
+  /** "Next" when nothing is on screen but items are still open (none skipped for good). */
+  resume = (): void => {
+    this.go(nextOpen(this.items(), this.state.pending, null))
   }
 
   select = (id: string): void => {
@@ -284,13 +344,26 @@ export class ReviewController {
   /** One undo step, remembering where the review was. */
   private commit(changes: readonly Change[], pending: ReadonlySet<string> = this.state.pending): void {
     const mark: Mark = { currentId: this.state.currentId, pending: this.state.pending }
+    for (const change of changes) {
+      if (change.kind === 'segment' && isGap(change.payload.kind)) this.answeredGaps.add(change.payload.id)
+    }
     if (changes.length > 0) {
       this.changed = true
-      const step = this.store.commit(changes)
+      const step = this.quietly(() => this.store.commit(changes))
       this.marks.set(step, mark)
       if (this.marks.size > 200) this.marks.delete(this.marks.keys().next().value as number)
     }
     if (pending !== this.state.pending) this.set({ pending })
+  }
+
+  /** The review's own change to the store: it moves on by itself (no `findAgain`). */
+  private quietly<T>(run: () => T): T {
+    this.committing = true
+    try {
+      return run()
+    } finally {
+      this.committing = false
+    }
   }
 
   /** Enter: accept the suggestion as it is (a corrected one stays corrected) and go on. */
@@ -371,8 +444,38 @@ export class ReviewController {
       const created: SegmentIn = { id: newId(), base_version: 0, kind, start_ms: start, end_ms: end, won_by: null }
       this.commit([rejection(segment), { kind: 'segment', payload: created }], pending)
     }
-    this.set({ notice: this.notify('relabelled', { time: start, kind }) })
+    this.set({ notice: this.notify('toBreak', { time: segment.start_ms, kind }) })
     this.advance(segment)
+  }
+
+  /**
+   * R on a break WiePlay labelled: no break, play. The label is rejected and a rally made in one
+   * step: over the whole break when it is short (up to 20 s), else 8 s from 2 s before the
+   * playhead. It comes on screen to answer like a split-off part: move its start and end, accept.
+   */
+  toRally = (): void => {
+    const segment = this.current()
+    if (!segment) {
+      this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
+      return
+    }
+    if (!isGap(segment.kind)) {
+      this.set({ notice: this.notify('rallyAlready', undefined, 'error') })
+      return
+    }
+    let start_ms = segment.start_ms
+    let end_ms = segment.end_ms
+    if (end_ms - start_ms > RALLY_FROM_BREAK_MS) {
+      const at = Math.min(Math.max(this.tag.now(), segment.start_ms), segment.end_ms)
+      start_ms = Math.max(segment.start_ms, Math.min(at - RALLY_LEAD_MS, segment.end_ms - RALLY_LENGTH_MS))
+      end_ms = Math.min(segment.end_ms, start_ms + RALLY_LENGTH_MS)
+    }
+    const rally: SegmentIn = { id: newId(), base_version: 0, kind: 'rally', start_ms, end_ms, won_by: null }
+    const pending = new Set(this.state.pending)
+    pending.add(rally.id)
+    this.commit([rejection(segment), { kind: 'segment', payload: rally }], pending)
+    this.set({ notice: this.notify('toRally', { start: start_ms, end: end_ms }) })
+    this.go(this.store.getView().segments.find((s) => s.id === rally.id) ?? null)
   }
 
   /** 1 / 2: we or they served this rally (the coach's call); the same key again takes the call back. */
@@ -485,7 +588,7 @@ export class ReviewController {
   /** U (and Ctrl+Z here): takes back the last change and goes back to where it was made. */
   undo = (): void => {
     const step = this.store.topStep()
-    if (!this.store.undo()) {
+    if (!this.quietly(() => this.store.undo())) {
       this.set({ notice: this.notify('nothingToUndo', undefined, 'error') })
       return
     }
@@ -499,7 +602,7 @@ export class ReviewController {
   }
 
   redo = (): void => {
-    this.set({ notice: this.notify(this.store.redo() ? 'redone' : 'nothingToRedo') })
+    this.set({ notice: this.notify(this.quietly(() => this.store.redo()) ? 'redone' : 'nothingToRedo') })
   }
 
   // Accept all sure rallies (PLAN §10.1, §10.3)
@@ -644,6 +747,9 @@ export class ReviewController {
       case 'u':
         this.undo()
         return true
+      case 'r':
+        this.toRally()
+        return true
       default:
         return false
     }
@@ -662,6 +768,21 @@ function modelIds(segments: readonly Segment[], seen: ReadonlySet<string>, which
     if (!kind || !isModel(s) || seen.has(s.id)) continue
     out ??= new Set(seen)
     out.add(s.id)
+  }
+  return out ?? seen
+}
+
+/**
+ * `seen` without the gap labels that left the view unanswered (the server's scoring replaced or
+ * dropped them): they were never done. Those answered here stay (a rejected one leaves too).
+ */
+function withoutVanished(seen: ReadonlySet<string>, segments: readonly Segment[], answered: ReadonlySet<string>): ReadonlySet<string> {
+  let out: Set<string> | null = null
+  const live = new Set(segments.map((s) => s.id))
+  for (const id of seen) {
+    if (live.has(id) || answered.has(id)) continue
+    out ??= new Set(seen)
+    out.delete(id)
   }
   return out ?? seen
 }

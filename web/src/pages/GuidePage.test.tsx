@@ -50,7 +50,7 @@ describe('GuidePage', () => {
 
     expect(screen.getByRole('region', { name: 'Mark the rallies reviewed' })).toHaveTextContent('Mark rallies reviewed')
     const tag = screen.getByRole('region', { name: 'Tag the basics' })
-    expect(within(tag).getByText('[a] number · skill · [grade]')).toBeInTheDocument()
+    expect(within(tag).getByText('[a] Number · Skill · [Grade]')).toBeInTheDocument()
     for (const entry of ['7A#', 'a12S=', 'aS']) expect(within(tag).getByText(entry)).toBeInTheDocument()
     expect(within(within(tag).getByRole('table', { name: 'Skills' })).getAllByRole('row')).toHaveLength(8)
     expect(within(within(tag).getByRole('table', { name: 'Grades' })).getAllByRole('row')).toHaveLength(7)
@@ -63,8 +63,8 @@ describe('GuidePage', () => {
     }
 
     const rights = screen.getByRole('region', { name: 'What helpers can and can’t do' })
-    expect(within(rights).getByText('download videos')).toBeInTheDocument()
-    expect(within(rights).getByText('add other helpers')).toBeInTheDocument()
+    expect(within(rights).getByText('Download videos')).toBeInTheDocument()
+    expect(within(rights).getByText('Add other helpers')).toBeInTheDocument()
   })
 
   it('is in German for German readers', async () => {
