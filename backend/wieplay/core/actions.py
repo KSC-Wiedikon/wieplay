@@ -206,6 +206,7 @@ def rally_inputs(db: Session, video: Video) -> list[dict[str, Any]]:
                 "end_ms": rally.end_ms,
                 "serve_near": None if serve_near is None else round(serve_near, 4),
                 "won_near": None if won_near is None else round(won_near, 4),
+                "serve_sure": bool(rally.score_sure),
             }
         )
     return out
@@ -351,12 +352,14 @@ def latest_training(db: Session) -> ModelRun | None:
 # How the finder did on hand-checked rallies (docs/research/actions-2026-10.md): two matches
 # filmed from behind the end line, every contact labelled by eye. Shown to the coach as it
 # is; the numbers on a coach's own games (vs_coach, the training's held-out score) follow.
+# Measured 20.10.2026 on 54 rallies (353 contacts); the pose cue's weights fitted on one match
+# and scored on the other; the sure rule set on these same rallies.
 MEASURED: dict[str, Any] = {
-    "rallies": 0,
-    "contacts": 0,
-    "found": 0.0,  # the contacts with a suggestion fully right (time, skill, side)
-    "precision": 0.0,  # the suggestions fully right
-    "sure": 0,  # suggestions marked sure ...
+    "rallies": 54,
+    "contacts": 353,
+    "found": 0.26,  # the contacts with a suggestion fully right (time ±0.3 s, skill, side)
+    "precision": 0.54,  # the suggestions fully right
+    "sure": 19,  # suggestions marked sure ...
     "sure_wrong": 0,  # ... and how many of them were wrong
 }
 

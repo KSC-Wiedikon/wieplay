@@ -37,6 +37,7 @@ def _rallies(entry: dict[str, Any]) -> list[ac.RallyIn]:
             end_ms=int(r["end_ms"]),
             serve_near=None if r.get("serve_near") is None else float(r["serve_near"]),
             won_near=None if r.get("won_near") is None else float(r["won_near"]),
+            serve_sure=bool(r.get("serve_sure")),
         )
         for r in entry.get("rallies", [])
     ]

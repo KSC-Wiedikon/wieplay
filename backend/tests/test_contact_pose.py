@@ -104,25 +104,28 @@ def test_the_serve_is_the_first_toss_when_the_server_is_known() -> None:
 
 def test_posteriors_and_the_sure_flag() -> None:
     r = rally(serve="near", sure=0.97)
+    r.serve_sure = True
     cands = [
         cand(0.6, "near", kind=ac.TOSS),
-        cand(2.0, "far", kind=ac.LOW),
+        cand(1.6, "far", kind=ac.LOW),
         cand(3.0, "far"),
         cand(3.9, "far", s_out=12.0, vy_out=4.0),
     ]
+    cands[1].pose = 2.0  # someone's hands at the reception
     first = ac.label_posterior(r, cands, FPS, VIEW)
     again = ac.label_posterior(r, cands, FPS, VIEW)
     assert [a.posterior for a in first] == [a.posterior for a in again]  # seeded by the rally
     assert [a.code for a in first][:2] == ["S", "R"]
     assert all(a.posterior is not None and 0 <= a.posterior <= 1 for a in first)
-    assert all(
-        a.alternative == "" or a.alternative == "none" or ":" in a.alternative for a in first
-    )
-    sure = ac.label_sure(r, cands, FPS, VIEW)
-    serve = sure[0]
-    assert serve.code == "S" and serve.sure == (
-        serve.posterior is not None and serve.posterior >= ac.SURE_P
-    )
-    assert not any(a.sure for a in sure[1:] if a.code not in ac.SURE_SKILLS)
-    # Without a known server the serve is never sure.
-    assert not any(a.sure for a in ac.label_sure(rally(serve="near", sure=0.5), cands, FPS, VIEW))
+    assert all(a.alternative in ("", "none") or ":" in a.alternative for a in first)
+    serve, reception, *rest = ac.label_sure(r, cands, FPS, VIEW)
+    assert serve.sure  # a toss, the server sure
+    assert reception.sure == (reception.posterior is not None and reception.posterior >= 0.85)
+    assert not any(a.sure for a in rest)  # sets and attacks are never sure
+    # Without the rally's server for sure, nothing is.
+    r.serve_sure = False
+    assert not any(a.sure for a in ac.label_sure(r, cands, FPS, VIEW))
+    # Nobody at the reception's ball: not sure.
+    r.serve_sure = True
+    cands[1].pose = -1.0
+    assert not ac.label_sure(r, cands, FPS, VIEW)[1].sure

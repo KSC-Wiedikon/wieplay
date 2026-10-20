@@ -468,6 +468,7 @@ class RallyIn:
     end_ms: int
     serve_near: float | None = None  # P(the server stood at the near end line)
     won_near: float | None = None  # P(the near side won the rally)
+    serve_sure: bool = False  # the joint decode is sure of the rally, so of its server
 
 
 @dataclass
@@ -968,8 +969,8 @@ def label(
     return actions
 
 
-TEMPERATURE = 2.0  # the rules' costs are not calibrated log-odds: flattened like the scoring's
-SAMPLES = 400
+TEMPERATURE = 0.5  # the rules' costs as log-odds, sharpened (set on hand-labelled rallies)
+SAMPLES = 300
 
 
 def label_posterior(
@@ -1009,30 +1010,42 @@ def label_posterior(
     return actions
 
 
-SURE_P = 0.9  # a sure action: its posterior at least this ...
-SURE_SERVE_SIDE = 0.95  # ... a serve: from a toss, the server's side known this well
-SURE_POSE = 1.0  # ... any other: someone's hands at the ball (contact_pose log-likelihood ratio)
-SURE_SKILLS = frozenset({"S"})
+# A sure action (PLAN §10.4a, "Accept all sure actions"): set on hand-labelled rallies of two
+# matches (docs/research/actions-2026-10.md) so that none of the sure ones was wrong there.
+# Only two kinds pass: a near serve seen as a toss, and the reception right after a serve.
+# Every other skill was wrong too often at any posterior.
+SURE_SKILLS = frozenset({"S", "R"})
+SURE_RECEPTION_P = 0.85  # the reception's posterior at least this ...
+SURE_RECEPTION_POSE = 1.0  # ... someone's hands at the ball (contact_pose log-likelihood ratio)
+SURE_RECEPTION_AFTER_S = (0.6, 1.6)  # ... this long after the serve (later: a missed reception)
 
 
-def is_sure(a: Action, c: Candidate, rally: RallyIn) -> bool:
-    """Whether an action is right without a look (PLAN §10.4a), for "Accept all sure actions".
-    Set on hand-labelled rallies so that none of the sure ones was wrong
-    (docs/research/actions-2026-10.md)."""
-    if a.posterior is None or a.posterior < SURE_P or a.code not in SURE_SKILLS:
+def is_sure(a: Action, c: Candidate, prev: Action | None, rally: RallyIn, fps: float) -> bool:
+    """Whether a suggested action is right without a look. Both need the rally's server for
+    sure (the joint decode is sure of the rally, PLAN §10.3)."""
+    if not rally.serve_sure or a.posterior is None or a.code not in SURE_SKILLS:
         return False
     if a.code == "S":
-        side = rally.serve_near
-        return c.kind == TOSS and side is not None and max(side, 1 - side) >= SURE_SERVE_SIDE
-    return c.pose is not None and c.pose >= SURE_POSE
+        # The toss times a near serve within ±0.3 s; a far serve's time is a guess.
+        server = NEAR if (rally.serve_near or 0.5) >= 0.5 else FAR
+        return c.kind == TOSS and a.side == server
+    if prev is None or prev.code != "S" or prev.side == a.side:
+        return False
+    after = (a.frame - prev.frame) / fps
+    return (
+        a.posterior >= SURE_RECEPTION_P
+        and c.pose is not None
+        and c.pose >= SURE_RECEPTION_POSE
+        and SURE_RECEPTION_AFTER_S[0] <= after <= SURE_RECEPTION_AFTER_S[1]
+    )
 
 
 def label_sure(rally: RallyIn, cands: Sequence[Candidate], fps: float, view: View) -> list[Action]:
     """v0 with posteriors and the "sure" flag."""
     actions = label_posterior(rally, cands, fps, view)
     by_frame = {c.frame: c for c in cands}
-    for a in actions:
-        a.sure = is_sure(a, by_frame[a.frame], rally)
+    for n, a in enumerate(actions):
+        a.sure = is_sure(a, by_frame[a.frame], actions[n - 1] if n else None, rally, fps)
     return actions
 
 
