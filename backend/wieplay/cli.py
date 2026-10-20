@@ -503,7 +503,8 @@ def court_eval(as_json: bool) -> int:
         vs = r["vs_coach"]
         print(
             f"{r['date'] or '-':>10}  {(r['title'] or '')[:36]:36}  {r['method'] or 'none':9}  "
-            f"{_pct(r['confidence'])} % {'sure  ' if r['sure'] else 'unsure'}  setups {r['setups']} (bumps {r['bumps']})  "
+            f"{_pct(r['confidence'])} % {'sure  ' if r['sure'] else 'unsure'}  "
+            f"setups {r['setups']} (bumps {r['bumps']})  "
             f"vs coach {f'{vs["rms_cm"]} cm rms, {vs["max_cm"]} max' if vs else '-'}"
         )
     found = [r for r in out if r["method"]]
