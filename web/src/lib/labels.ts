@@ -102,8 +102,20 @@ export function reasonText(t: TFunction, reason: ScoreReason, names?: SideNames 
       return t(`tagging.scoring.reason.${reason.code}`, { team: team(reason.team) })
     case 'log_score':
       return t('tagging.scoring.reason.log_score', { score: scoreText(reason.score) })
-    case 'sheet_log':
-      return t('tagging.scoring.reason.sheet_log', { log: team(reason.log), sheet: team(reason.sheet) })
+    case 'sheet_log': {
+      // The typed sheet and the board log disagree on the winner, or on the score after it; the
+      // video takes a side or cannot tell.
+      const sameWinner = reason.log === reason.sheet && reason.log_score && reason.sheet_score
+      const what = sameWinner
+        ? t('tagging.scoring.reason.sheet_log_score', { log: scoreText(reason.log_score), sheet: scoreText(reason.sheet_score) })
+        : t('tagging.scoring.reason.sheet_log', { log: team(reason.log), sheet: team(reason.sheet) })
+      if (reason.video === undefined) return what
+      return `${what} ${t(`tagging.scoring.reason.sheet_video.${reason.video ?? 'none'}`)}`
+    }
+    case 'sheet':
+      return reason.team
+        ? t('tagging.scoring.reason.sheet_departs', { team: team(reason.team), score: scoreText(reason.score) })
+        : t('tagging.scoring.reason.sheet')
     case 'video':
       return t(`tagging.scoring.reason.video.${reason.vs ?? 'score'}`)
     case 'sheet_box': {
@@ -126,7 +138,6 @@ export function reasonText(t: TFunction, reason: ScoreReason, names?: SideNames 
     case 'serve':
     case 'sides':
     case 'no_set':
-    case 'sheet':
     case 'unsure':
       return t(`tagging.scoring.reason.${reason.code}`)
   }

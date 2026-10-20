@@ -27,11 +27,13 @@ What it writes, always next to the coach's work and never in its place (PLAN §1
   model (scored blind to them) gets the serve side and the winner right;
 - per rally, what the club scoreboard's log says (`log_won_by`, `log_score_*`, `log_at_ms`;
   PLAN §10.10, wieplay/core/scorelog.py), in the sets where the log ends on the official score;
-- with the official scoresheet (PLAN §10.3a, wieplay/core/scoresheet.py): a consistent set's
-  points lined up with the rallies (`sheet_point`, `sheet_won_by`, `sheet_serving`), its first
-  server and lineups on the set where empty, its timeouts as `timeout` breaks with their team
-  (source "import"), a doubtful set's winners as a hint, a draft read from the photo as soft
-  evidence (its boxes the decode is sure of are resolved in the draft);
+- with the official scoresheet (PLAN §10.3a, wieplay/core/scoresheet.py): a consistent set as
+  strong evidence, its points lined up with the rallies where the decode keeps to it
+  (`sheet_point`, `sheet_won_by`, `sheet_serving`; where the board log and the video outvote it,
+  the sheet page offers the boxes to change), its first server and lineups on the set where
+  empty, its timeouts as `timeout` breaks with their team (source "import"), a doubtful set's
+  winners as a hint, a draft read from the photo as soft evidence (its boxes the decode is sure
+  of are resolved in the draft);
 - per rally whether the joint decode is sure (`score_sure`) and why the coach is asked
   (`score_reasons`, the first one also as `score_note`; PLAN §10.1 "Needs you").
 """
@@ -439,8 +441,8 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     scored = [p for p in periods if by_period.get(p.id)]
     set_ins = [_set_in(p, [obs[i] for i in by_period[p.id]], official) for p in scored]
-    # The sheet: ranked below the coach, above the log and everything else; a draft read from the
-    # photo as soft evidence.
+    # The sheet: strong evidence below the coach, about as strong as the log (the video decides
+    # where they disagree); a draft read from the photo as weaker soft evidence.
     if sheet is not None and set_ins:
         set_ins = scoresheet.apply(sheet, set_ins)
     # The scoreboard, when it was read: it wins over the serve evidence (PLAN §10.3, step 5).
@@ -619,7 +621,7 @@ def decide(
 
     if not set_ins:
         return Decision([], sc.MatchOut([], 1.0))
-    # The club scoreboard's log: the strongest evidence after a coach's and the sheet (§10.10).
+    # The club scoreboard's log (§10.10): with the sheet, the strongest after a coach's facts.
     if log_ev is not None:
         set_ins = scorelog.apply(log_ev, set_ins)
     if board is not None:

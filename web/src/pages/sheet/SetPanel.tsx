@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { AlertIcon, CheckIcon, CircleIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { Segmented } from '../../components/Segmented'
 import { Switch } from '../../components/Switch'
@@ -14,6 +15,7 @@ import {
   isDeciding,
   normalised,
   SANCTION_KINDS,
+  type CorrectionOut,
   type Decoded,
   type SanctionKind,
   type SetCheckOut,
@@ -25,7 +27,7 @@ import type { SideNames } from '../../lib/sides'
 import type { Side } from '../../lib/types'
 import { boxKey, focusBox, focusField, parseDigits, type BoxMark } from './boxes'
 import { ScorePair, TeamBoxes, type ReadView } from './ServiceGrid'
-import { issueText, repairText } from './text'
+import { correctedText, correctionText, issueText, repairText, sourcesText } from './text'
 
 interface SetPanelProps {
   set: SheetSetDoc
@@ -49,6 +51,14 @@ interface SetPanelProps {
   focusAsk?: { key: string; seq: number } | null
   /** The photos (for whoever may see them): a doubtful cell shows its crop. */
   photos?: SheetPhoto[] | null
+  /**
+   * Where the newest scoring departs from this saved set (the board log and the video against
+   * the paper), the action that applies it, and whether the form has unsaved changes.
+   */
+  correction?: CorrectionOut | null
+  onCorrect?: () => void
+  correcting?: boolean
+  dirty?: boolean
 }
 
 /** The live check's marks on the boxes: the one a check doubts, the next one to type. */
@@ -85,6 +95,10 @@ export function SetPanel({
   confirming = false,
   focusAsk = null,
   photos = null,
+  correction = null,
+  onCorrect,
+  correcting = false,
+  dirty = false,
 }: SetPanelProps) {
   const { t } = useTranslation()
   const prefix = useId().replace(/:/g, '')
@@ -138,6 +152,18 @@ export function SetPanel({
   const setFirst = (first: Side) => onChange({ ...set, first_serve: first })
   const issue = firstIssue(decoded.issues)
   const warnings = decoded.issues.filter((i) => i !== issue && i.code !== 'empty')
+  // The boxes the board log and the video say otherwise: marked with what they say (only while
+  // the form shows the saved set the scoring looked at).
+  const suggest = useMemo(() => {
+    const out: Record<string, { value: string; title: string }> = {}
+    if (!correction || dirty) return out
+    const who = sourcesText(t, correction.sources)
+    for (const b of correction.boxes) {
+      const value = b.new === null ? '–' : String(b.new)
+      out[boxKey(b.box.side, b.box.position, b.box.box)] = { value, title: t('sheet.fix.suggested', { sources: who, value }) }
+    }
+    return out
+  }, [correction, dirty, t])
   const repair = server?.repair ?? null
   const noRepair = server !== null && server.status === 'inconsistent' && !repair && decoded.issues.some((i) => i.severity === 'error')
   const score = `${decoded.final[0]}:${decoded.final[1]}`
@@ -225,6 +251,25 @@ export function SetPanel({
         />
       )}
 
+      {correction && (
+        <CorrectionCard
+          no={set.no}
+          correction={correction}
+          names={names}
+          readOnly={readOnly}
+          dirty={dirty}
+          busy={correcting}
+          onApply={() => onCorrect?.()}
+          onGo={(b) => jumpTo(b.side, b.position, b.box)}
+        />
+      )}
+      {!correction && (set.corrections?.length ?? 0) > 0 && (
+        <p className="flex items-start gap-2 rounded-xl border border-hairline bg-sunken p-3 text-sm">
+          <CheckIcon className="mt-0.5 size-4 shrink-0 text-on-accent-soft" />
+          <span>{correctedText(t, set.corrections ?? [], names)}</span>
+        </p>
+      )}
+
       <CheckLine
         decoded={decoded}
         official={official}
@@ -264,6 +309,7 @@ export function SetPanel({
               names={names}
               prefix={prefix}
               marks={marks}
+              suggest={suggest}
               readOnly={readOnly}
               onChange={onChange}
               onOther={toOther(side)}
@@ -325,6 +371,74 @@ export function SetPanel({
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * The newest scoring departs from this set where the board log and the video (or a coach's
+ * calls) outvote the paper: which boxes they say otherwise, and the one action that changes them
+ * (a new version; the paper's stays in the sheet's history).
+ */
+function CorrectionCard({
+  no,
+  correction,
+  names,
+  readOnly,
+  dirty,
+  busy,
+  onApply,
+  onGo,
+}: {
+  no: number
+  correction: CorrectionOut
+  names: SideNames | null
+  readOnly: boolean
+  dirty: boolean
+  busy: boolean
+  onApply: () => void
+  onGo: (box: CorrectionOut['boxes'][number]['box']) => void
+}) {
+  const { t } = useTranslation()
+  const [ask, setAsk] = useState(false)
+  const first = correction.boxes[0]?.box
+  return (
+    <section aria-labelledby={`fix-${no}`} className="flex flex-col gap-2 rounded-xl border-2 border-danger bg-danger/5 p-3 text-sm">
+      <div className="flex items-start gap-2">
+        <AlertIcon className="mt-0.5 size-5 shrink-0 text-danger" />
+        <div className="flex min-w-0 flex-col gap-1">
+          <h3 id={`fix-${no}`} className="font-semibold">
+            {t('sheet.fix.title')}
+          </h3>
+          <p className="font-semibold">{correctionText(t, correction, names)}</p>
+          <p className="text-muted">{t('sheet.fix.why')}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:pl-7">
+        {!readOnly && (
+          <Button variant="primary" disabled={dirty || busy} onClick={() => setAsk(true)}>
+            {busy ? t('sheet.fix.applying') : t('sheet.fix.apply')}
+          </Button>
+        )}
+        {first && (
+          <Button variant="ghost" onClick={() => onGo(first)}>
+            {t('sheet.check.goTo')}
+          </Button>
+        )}
+        {!readOnly && dirty && <span className="text-xs text-muted">{t('sheet.fix.unsaved')}</span>}
+      </div>
+      <ConfirmDialog
+        open={ask}
+        title={t('sheet.fix.confirmTitle', { no })}
+        confirmLabel={t('sheet.fix.apply')}
+        onCancel={() => setAsk(false)}
+        onConfirm={() => {
+          setAsk(false)
+          onApply()
+        }}
+      >
+        {t('sheet.fix.confirmBody', { sources: sourcesText(t, correction.sources) })}
+      </ConfirmDialog>
+    </section>
   )
 }
 
@@ -587,6 +701,8 @@ function ScoringLine({ saved }: { saved: SetCheckOut }) {
   else if (!m || m.aligned === null || m.aligned === undefined) lines = [t('sheet.scoring.notYet')]
   else {
     lines = [t('sheet.scoring.path', { aligned: n('aligned'), points: n('points') })]
+    if (n('departs')) lines.push(t('sheet.scoring.departs', { count: n('departs') }))
+    if (n('disputed')) lines.push(t('sheet.scoring.disputed', { count: n('disputed') }))
     if (n('missed')) lines.push(t('sheet.scoring.missed', { count: n('missed') }))
     if (n('penalties')) lines.push(t('sheet.scoring.penalties', { count: n('penalties') }))
     if (n('extra')) lines.push(t('sheet.scoring.extra', { count: n('extra') }))

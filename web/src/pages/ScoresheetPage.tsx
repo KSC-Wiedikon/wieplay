@@ -25,6 +25,7 @@ import {
   normalised,
   other,
   scoresheetKey,
+  useCorrectScoresheet,
   useDeleteScoresheet,
   useSaveScoresheet,
   useScoresheet,
@@ -192,6 +193,7 @@ function SheetEditor({
   const client = useQueryClient()
   const save = useSaveScoresheet(video.id)
   const remove = useDeleteScoresheet(video.id)
+  const correct = useCorrectScoresheet(video.id)
   const start = useMemo(() => ({ sets: initialSets(sheet), use: sheet.use_in_scoring }), [sheet])
   const [sets, setSets] = useState<SheetSetDoc[]>(start.sets)
   const [useAll, setUseAll] = useState(start.use)
@@ -288,6 +290,22 @@ function SheetEditor({
     setSets(rest)
     onTab(rest[rest.length - 1]?.no ?? 1)
   }
+
+  /** The scoring's correction of a set (the board log and the video against the paper). */
+  const onCorrect = (no: number) =>
+    correct.mutate(
+      { set: no, base_version: sheet.version },
+      {
+        onSuccess: () => {
+          clearDraft(video.id)
+          toast.success(t('sheet.fix.applied', { no }))
+        },
+        onError: (error) => {
+          if (error instanceof ApiError && error.status === 409) setStale(true)
+          else toast.error(t('sheet.saveFailed', { detail: error instanceof ApiError ? error.detail : t('common.error') }))
+        },
+      },
+    )
 
   const onSave = () => {
     save.mutate(
@@ -460,6 +478,10 @@ function SheetEditor({
                 confirming={confirmSets.isPending}
                 focusAsk={focusAsk && focusAsk.no === current.no ? focusAsk : null}
                 photos={photos}
+                correction={savedChecks.get(current.no)?.correction ?? null}
+                onCorrect={() => onCorrect(current.no)}
+                correcting={correct.isPending}
+                dirty={dirty && sheet.exists}
               />
             </TabPanel>
           )}

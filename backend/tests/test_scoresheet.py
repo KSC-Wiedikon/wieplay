@@ -350,13 +350,18 @@ def test_a_penalty_point_needs_no_rally_and_is_not_flagged() -> None:
     assert out.penalties == 1 and out.missed == 0
 
 
-def test_a_coach_who_disagrees_with_the_sheet_is_flagged() -> None:
+def test_a_coach_who_disagrees_with_the_sheet_wins_and_its_neighbours_are_flagged() -> None:
     played, first = played_set()
     rallies, servers = rallies_for(played, first)
     wrong: sc.Side = "them" if played[5] == "us" else "us"
     rallies[5] = replace(rallies[5], won_fact=wrong)
     out = one_set(rallies, sheet_set(played, servers), first)
-    assert out.rallies[5].note == "sheet" and out.rallies[5].won_by == played[5]
+    # The coach's fact is absolute; the rallies next to it are lined up with the sheet otherwise
+    # (here: one is no point, a point has no rally), and say so.
+    assert out.rallies[5].won_by == wrong
+    assert {r.note for r in out.rallies[2:8]} & {"extra", "missing_before", "sheet"}
+    # The rest of the set follows the sheet again.
+    assert all(x.sheet_point is not None for x in out.rallies[12:])
 
 
 def test_cancelled_points_make_their_rallies_free() -> None:
@@ -368,10 +373,11 @@ def test_cancelled_points_make_their_rallies_free() -> None:
     assert by_key["x20"].point is False and by_key["x20"].note is None
 
 
-def test_a_sheet_that_cannot_be_lined_up_becomes_a_hint() -> None:
+def test_a_sheet_the_rallies_cannot_hold_is_followed_as_far_as_they_go() -> None:
     played, first = played_set()
     rallies, servers = rallies_for(played, first)
-    # Short gaps hold no missed rally: ten more points than rallies cannot be lined up.
+    # Short gaps hold no missed rally: ten more points than rallies cannot be lined up (a video
+    # that stops early). The sheet is still the evidence for the points the video has.
     rallies = [
         replace(r, start_ms=k * 13_000, end_ms=k * 13_000 + 8_000) for k, r in enumerate(rallies)
     ]
@@ -379,7 +385,9 @@ def test_a_sheet_that_cannot_be_lined_up_becomes_a_hint() -> None:
     path = sc.SheetPath(tuple(longer), tuple(servers + ["them"] * 10), (False,) * len(longer))
     st = sc.SetIn(1, rallies, official=None, our_side="near", first_serve=first, sheet=path)
     out = sc.score_match([st]).sets[0]
-    assert out.sheet == "hint"
+    assert out.sheet == "path"
+    assert [r.won_by for r in out.rallies] == played
+    assert [r.sheet_point for r in out.rallies] == list(range(1, len(played) + 1))
 
 
 def test_the_sheet_says_who_served_first() -> None:

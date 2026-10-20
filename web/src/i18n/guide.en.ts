@@ -193,6 +193,7 @@ export const guideEn: Guide = {
       'Mark each team’s circled final with *. Type the timeouts (the score with the team that asked first) and the substitutions (the number in, the score then, the score when the starting player came back).',
       'Watch the check above the boxes: it shows the score as it grows and names the first box that doesn’t fit. If a single box is off, WiePlay suggests the fix; check it against your copy before you apply it.',
       'Save. The match is scored again: each set that fits the official result lines up with the rallies; a rally WiePlay missed, a replay, or a rally where your winner differs from the sheet is flagged in the review.',
+      'If the club scoreboard’s log and the video show that the scorer slipped (a missed side-out, a run written under the wrong server, caught up later: the set still adds up), the score line follows them on those few points and the rest of the set follows the sheet. Those rallies wait for you under “Needs you” (“the scoresheet and the board log disagree here; the video sides with the board log”), and the sheet page names the boxes they say otherwise (“Volero’s box III/1 is 2, not 5”), marks them in red and offers “Apply the correction”: a new version of the sheet, the paper’s kept in its history.',
     ],
     keysTitle: 'Keys in the service boxes',
     keys: [
@@ -224,8 +225,9 @@ export const guideEn: Guide = {
     ],
     tips: [
       'The typed sheet takes shirt numbers and scores only; names, dates of birth and licence numbers stay on paper (and on the photo they are black).',
-      'A set that doesn’t fit is kept and used only as a hint. A set you don’t trust can be switched off; the rest still counts.',
-      'Your own winners always win over the sheet: where they differ, the rally is flagged so you can look again.',
+      'The sheet is strong evidence, not the last word: it wins against the video alone, it and the board log weigh about alike, and where they disagree the video decides. Every rally where they disagree needs you, whichever way the score line went.',
+      'A set that doesn’t fit is kept and used only as a hint. A set you don’t trust can still be switched off (“Use this set for the score”), but that is rarely needed now: where the log and the video disagree with the sheet, they win those points anyway.',
+      'Your own winners always win, over the sheet too: the rallies next to one that differs from the sheet are flagged so you can look again.',
       'A serve you tag without a number in a rally the sheet is lined up with gets the server the sheet names (aS for theirs); a number you type always wins. “Apply” on the players page fills the serves you tagged before.',
       'The statistics show the sheet’s numbers per player even without a single tag: serves, points won on them, the longest run, aces and errors where a serve tag graded them, and the plus/minus on court, per rotation too.',
       'Timeouts, substitutions and cards are checked at their break in the video: the review’s “From the scoresheet” lists those where the score line or the scoreboard’s log says otherwise, and the cards are marked on the timeline (the team only, never a person).',

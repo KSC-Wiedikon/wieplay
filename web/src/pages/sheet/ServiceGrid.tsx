@@ -52,6 +52,8 @@ interface TeamBoxesProps {
   /** Id prefix of this set's boxes (both teams). */
   prefix: string
   marks: Record<string, BoxMark>
+  /** Boxes the board log and the video say otherwise (the scoring's correction): what they say. */
+  suggest?: Record<string, { value: string; title: string }>
   readOnly: boolean
   onChange: (set: SheetSetDoc) => void
   /** Enter on an empty box: this team's boxes are done, go to the other team. */
@@ -66,7 +68,7 @@ interface TeamBoxesProps {
  * deciding set), then the timeouts and the substitutions. Typing follows the sheet's order (box 1
  * of positions I-VI, then box 2, ...), which is the order of the service turns.
  */
-export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange, onOther, onFocusBox, read }: TeamBoxesProps) {
+export function TeamBoxes({ set, side, names, prefix, marks, suggest, readOnly, onChange, onOther, onFocusBox, read }: TeamBoxesProps) {
   const { t } = useTranslation()
   const deciding = isDeciding(set)
   const per = boxesFor(deciding)
@@ -194,11 +196,20 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
                     const value = valueAt(set, side, position, box)
                     const isCircled = circled?.[0] === position && circled[1] === box
                     const mark = marks[key]
+                    const other = suggest?.[key]
                     return (
-                      <div key={key} className="relative">
+                      <div key={key} className="relative" title={other?.title}>
                         <span aria-hidden="true" className="pointer-events-none absolute top-0.5 left-1 text-[9px] leading-none text-muted">
                           {box}
                         </span>
+                        {other && (
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute -top-2 -right-1.5 z-10 rounded-full bg-danger px-1.5 font-mono text-[11px] leading-4 font-bold text-white tabular-nums shadow-sm"
+                          >
+                            {other.value}
+                          </span>
+                        )}
                         {isCircled && (
                           <span aria-hidden="true" className="pointer-events-none absolute inset-1 rounded-full border-2 border-fg/70" />
                         )}
@@ -207,8 +218,8 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
                           id={boxId(prefix, side, position, box)}
                           inputMode="numeric"
                           autoComplete="off"
-                          aria-label={`${t('sheet.box', { team, box: boxName({ position, box }) })}${isCircled ? `, ${t('sheet.circled')}` : ''}`}
-                          aria-invalid={mark === 'error' || undefined}
+                          aria-label={`${t('sheet.box', { team, box: boxName({ position, box }) })}${isCircled ? `, ${t('sheet.circled')}` : ''}${other ? `, ${other.title}` : ''}`}
+                          aria-invalid={mark === 'error' || Boolean(other) || undefined}
                           value={value ?? ''}
                           disabled={readOnly}
                           onChange={onInput(position, box)}
@@ -223,7 +234,9 @@ export function TeamBoxes({ set, side, names, prefix, marks, readOnly, onChange,
                             'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring',
                             mark === 'error'
                               ? 'border-danger bg-danger/10 text-danger'
-                              : br.mark
+                              : other
+                                ? 'border-2 border-danger bg-danger/5'
+                                : br.mark
                                 ? readClass(br.mark)
                                 : mark === 'next'
                                   ? 'border-dashed border-accent'
