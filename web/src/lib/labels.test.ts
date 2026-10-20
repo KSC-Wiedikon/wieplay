@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import i18n from '../i18n'
 import '../i18n/pages'
-import { gradeLabel, periodLabel, pieceFacts, pieceLabel, segmentKindLabel, skillLabel } from './labels'
+import { gradeLabel, periodLabel, pieceFacts, pieceLabel, reasonText, segmentKindLabel, skillLabel } from './labels'
 import type { Piece } from './types'
 import { basketball, volleyball } from '../test/tagging'
 
@@ -86,5 +86,32 @@ describe('basketball labels', () => {
     expect(segmentKindLabel(t, 'set_break', 'volleyball')).toBe('Set break')
     expect(segmentKindLabel(t, 'timeout', 'basketball')).toBe('Timeout')
     expect(skillLabel(t, volleyball.skills[0])).toBe('Serve')
+  })
+})
+
+describe('reasonText: the typed sheet against the board log', () => {
+  const names = { us: 'KSCW H3', them: 'Volero', usFull: 'KSC Wiedikon H3', themFull: 'VBC Voléro Zürich' }
+  const de = i18n.getFixedT('de')
+
+  it('says who says what, and the side the video takes', () => {
+    const reason = { code: 'sheet_log' as const, log: 'us' as const, sheet: 'them' as const, log_score: [4, 2] as [number, number], sheet_score: [3, 3] as [number, number], video: 'log' as const, follows: 'log' as const }
+    expect(reasonText(t, reason, names)).toBe('The scoresheet and the board log disagree here (log: KSCW H3, sheet: Volero). The video sides with the board log.')
+    expect(reasonText(de, reason, names)).toBe('Matchblatt und Anzeigetafel-Protokoll sind hier uneins (Protokoll: KSCW H3, Matchblatt: Volero). Das Video gibt dem Anzeigetafel-Protokoll recht.')
+    expect(reasonText(t, { ...reason, video: null }, names)).toMatch(/The video can’t tell\.$/)
+    expect(reasonText(t, { ...reason, video: 'sheet' }, names)).toMatch(/The video sides with the scoresheet\.$/)
+  })
+
+  it('names the scores where only the score after the rally differs', () => {
+    const reason = { code: 'sheet_log' as const, log: 'them' as const, sheet: 'them' as const, log_score: [4, 3] as [number, number], sheet_score: [3, 4] as [number, number], video: 'log' as const }
+    expect(reasonText(t, reason, names)).toBe('The scoresheet and the board log disagree on the score here (log 4:3, sheet 3:4). The video sides with the board log.')
+  })
+
+  it('keeps the old wording for a reason stored before the video was named', () => {
+    expect(reasonText(t, { code: 'sheet_log', log: 'us', sheet: 'them' }, names)).toBe('The scoresheet and the board log disagree here (log: KSCW H3, sheet: Volero).')
+  })
+
+  it('says where the score line leaves the sheet', () => {
+    expect(reasonText(t, { code: 'sheet', team: 'them', score: [3, 3] }, names)).toBe('The score line leaves the scoresheet here (the sheet: Volero, 3:3).')
+    expect(reasonText(t, { code: 'sheet' }, names)).toBe('The official scoresheet says otherwise.')
   })
 })

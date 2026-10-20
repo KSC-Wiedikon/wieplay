@@ -78,7 +78,22 @@ export interface SheetSetDoc {
   end: string | null
   /** Line the scoring up with this set. */
   use: boolean
+  /** Boxes changed from the paper because other records showed the scorer's slip. */
+  corrections?: CorrectionDoc[]
 }
+
+/** A box corrected from the paper (POST …/scoresheet/correct): the paper's value, the new one. */
+export interface CorrectionDoc {
+  side: Side
+  position: number
+  box: number
+  paper: number | null
+  value: number | null
+  by: CorrectionSource[]
+}
+
+/** On whose word: the club scoreboard's log, the video's serves, a coach's calls, the board. */
+export type CorrectionSource = 'log' | 'video' | 'coach' | 'board'
 
 export interface BoxRef {
   side: Side
@@ -509,7 +524,20 @@ export interface SetCheckOut {
   subs: NoteOut[]
   stats: SetStatsOut | null
   /** The newest scoring with the sheet (lined up, missed, penalties, extra, flagged). */
-  scoring: Record<string, number | string | null> | null
+  scoring: Record<string, unknown> | null
+  /**
+   * Where the newest scoring departs from this typed set (the board log and the video against
+   * the paper): the boxes to change, between which scores, on whose word. Null while it keeps
+   * to the set, or once the set changed.
+   */
+  correction?: CorrectionOut | null
+}
+
+export interface CorrectionOut {
+  boxes: RepairOut[]
+  from: [number, number]
+  to: [number, number]
+  sources: CorrectionSource[]
 }
 
 export interface ChecksOut {
@@ -587,6 +615,25 @@ export function useDeleteScoresheet(videoId: string) {
       void client.invalidateQueries({ queryKey: scoresheetKey(videoId) })
       void client.invalidateQueries({ queryKey: keys.tagging(videoId) })
       void client.invalidateQueries({ queryKey: keys.analysis(videoId) })
+    },
+  })
+}
+
+/**
+ * Apply the scoring's correction to a set (docs/PLAN.md §10.3a): its boxes change as the board
+ * log and the video say, saved as a new version (the paper's stays in the revisions).
+ */
+export function useCorrectScoresheet(videoId: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { set: number; base_version: number }) =>
+      apiRequest<Scoresheet>(`/api/videos/${videoId}/scoresheet/correct`, { method: 'POST', body }),
+    onSuccess: (sheet) => {
+      client.setQueryData(scoresheetKey(videoId), sheet)
+      void client.invalidateQueries({ queryKey: keys.tagging(videoId) })
+      void client.invalidateQueries({ queryKey: keys.analysis(videoId) })
+      void client.invalidateQueries({ queryKey: keys.video(videoId) })
+      void client.invalidateQueries({ queryKey: keys.videoStats(videoId) })
     },
   })
 }

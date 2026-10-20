@@ -474,7 +474,9 @@ export type ScoreNote =
  * Why the joint decode asks the coach about a rally, with what the text names: who a source
  * says won (`team`), a score (`score`, `here`: the decoded score there), the sheet's box as read
  * (`values`), what the video disagrees with (`vs`), a timeout, substitution or card (`kind`,
- * `side`, `sanction`) and what does not fit (`issue`).
+ * `side`, `sanction`) and what does not fit (`issue`). Where the typed sheet and the board log
+ * disagree (`sheet_log`): what each says (`log`, `sheet`, their scores after the rally), the side
+ * the video takes (`video`: null when it cannot tell) and which one the score line follows.
  */
 export interface ScoreReason {
   code: ScoreNote
@@ -489,6 +491,10 @@ export interface ScoreReason {
   issue?: 'off_path' | 'short' | 'log' | 'penalty_rally'
   log?: Side | 'none'
   sheet?: Side
+  log_score?: [number, number] | null
+  sheet_score?: [number, number] | null
+  video?: 'log' | 'sheet' | null
+  follows?: 'log' | 'sheet' | null
   p?: number
 }
 

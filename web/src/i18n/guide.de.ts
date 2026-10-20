@@ -144,6 +144,7 @@ export const guideDe: Guide = {
       'Markiere das eingekreiste Satzresultat jedes Teams mit *. Tippe die Auszeiten (der Spielstand mit dem Team, das sie verlangte, zuerst) und die Spielerwechsel (die Nummer rein, der Stand dabei, der Stand bei der Rückkehr des Startspielers).',
       'Achte auf die Prüfung über den Kästchen: Sie zeigt den Spielstand, wie er wächst, und nennt das erste Kästchen, das nicht passt. Ist ein einzelnes Kästchen falsch, schlägt WiePlay die Korrektur vor; vergleiche sie mit deiner Kopie, bevor du sie übernimmst.',
       'Speichere. Das Spiel wird neu gewertet: Jeder Satz, der zum offiziellen Resultat passt, wird den Ballwechseln zugeordnet; ein Ballwechsel, den WiePlay verpasst hat, eine Wiederholung oder ein Ballwechsel, bei dem dein Sieger vom Matchblatt abweicht, wird in der Durchsicht markiert.',
+      'Zeigen das Protokoll der Club-Anzeigetafel und das Video, dass sich der Schreiber vertan hat (ein verpasster Side-out, eine Serie unter dem falschen Aufschläger, später nachgeholt: der Satz geht trotzdem auf), folgt der Spielstand bei diesen paar Punkten ihnen und im Rest des Satzes dem Matchblatt. Diese Ballwechsel warten unter «Braucht dich» («Matchblatt und Anzeigetafel-Protokoll sind hier uneins; das Video gibt dem Anzeigetafel-Protokoll recht»), und die Seite des Matchblatts nennt die Kästchen, die sie anders sehen («bei Volero steht in Kästchen III/1 2, nicht 5»), markiert sie rot und bietet «Korrektur übernehmen» an: eine neue Version des Matchblatts, die vom Papier bleibt im Verlauf.',
     ],
     keysTitle: 'Tasten in den Aufschlagkästchen',
     keys: [
@@ -175,8 +176,9 @@ export const guideDe: Guide = {
     ],
     tips: [
       'Das abgetippte Matchblatt nimmt nur Rückennummern und Spielstände; Namen, Geburtsdaten und Lizenznummern bleiben auf dem Papier (und auf dem Foto sind sie schwarz).',
-      'Ein Satz, der nicht passt, bleibt gespeichert und dient nur als Hinweis. Einen Satz, dem du nicht traust, kannst du ausschalten; der Rest zählt weiter.',
-      'Deine eigenen Sieger gehen dem Matchblatt immer vor: Wo sie abweichen, wird der Ballwechsel markiert, damit du nochmals hinschaust.',
+      'Das Matchblatt ist starke Evidenz, nicht das letzte Wort: Gegen das Video allein gewinnt es, es und das Anzeigetafel-Protokoll wiegen etwa gleich viel, und wo sie uneins sind, entscheidet das Video. Jeder Ballwechsel, bei dem sie uneins sind, braucht dich, egal wohin der Spielstand ging.',
+      'Ein Satz, der nicht passt, bleibt gespeichert und dient nur als Hinweis. Einen Satz, dem du nicht traust, kannst du weiterhin ausschalten («Diesen Satz für den Spielstand nutzen»), das ist aber kaum mehr nötig: Wo Protokoll und Video dem Matchblatt widersprechen, gewinnen sie diese Punkte ohnehin.',
+      'Deine eigenen Sieger gehen immer vor, auch dem Matchblatt: Die Ballwechsel neben einem, der vom Matchblatt abweicht, werden markiert, damit du nochmals hinschaust.',
       'Ein Aufschlag, den du ohne Nummer taggst, bekommt in einem dem Matchblatt zugeordneten Ballwechsel den Aufschläger, den das Matchblatt nennt (aS für den Gegner); eine Nummer, die du tippst, geht immer vor. «Übernehmen» auf der Spielerseite füllt die früher getaggten Aufschläge.',
       'Die Statistik zeigt die Zahlen des Matchblatts pro Spieler auch ohne ein einziges Tag: Aufschläge, Punkte daraus, die längste Serie, Asse und Fehler, wo ein Aufschlag-Tag sie bewertet hat, und das Plus/Minus auf dem Feld, auch pro Rotation.',
       'Auszeiten, Wechsel und Karten werden in ihrer Pause im Video geprüft: «Vom Matchblatt» in der Kontrolle listet die, bei denen der Spielstand oder das Log der Anzeigetafel etwas anderes sagt, und die Karten sind auf der Zeitleiste markiert (nur das Team, nie eine Person).',
