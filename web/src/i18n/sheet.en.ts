@@ -58,10 +58,10 @@ export const sheetEn = {
     own: '{{team}}',
     opp: 'Other team',
     subs: 'Substitutions',
-    subsHint: 'Under each starting player: who came in, and the scores (this team’s first) when they came in and when the starting player came back.',
+    subsHint: 'OUT: the starting player who left. IN: who came on. The scores are this team’s first: when the substitute came on, and when the starting player came back.',
     sub: {
-      position: 'Position',
-      number: 'In (shirt number)',
+      out: 'OUT',
+      in: 'IN',
       at: 'Score in',
       back: 'Score back',
       add: 'Add a substitution',
