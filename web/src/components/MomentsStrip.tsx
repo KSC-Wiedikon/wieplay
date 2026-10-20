@@ -13,7 +13,8 @@ export interface BreakMark {
   end_ms: number
   kind: GapKind
   label: string
-  suggested: boolean
+  /** WiePlay is unsure of it: to check. */
+  toCheck: boolean
 }
 
 /** Where a set starts. */
@@ -21,7 +22,8 @@ export interface StartMark {
   id: string
   t_ms: number
   label: string
-  suggested: boolean
+  /** WiePlay is unsure of it: to check. */
+  toCheck: boolean
 }
 
 interface MomentsStripProps {
@@ -38,17 +40,11 @@ interface MomentsStripProps {
   onSeek: (t_ms: number) => void
 }
 
-function breakClass(kind: GapKind, suggested: boolean): string {
-  if (suggested) {
-    switch (kind) {
-      case 'timeout':
-        return 'border border-dashed border-danger bg-danger/15'
-      case 'warmup':
-        return 'border border-dashed border-link bg-link/15'
-      default:
-        return 'border border-dashed border-muted bg-muted/20'
-    }
-  }
+function breakClass(kind: GapKind, toCheck: boolean): string {
+  return cx(fill(kind), toCheck && 'ring-1 ring-danger')
+}
+
+function fill(kind: GapKind): string {
   switch (kind) {
     case 'timeout':
       return 'bg-danger/70'
@@ -70,7 +66,7 @@ function breakClass(kind: GapKind, suggested: boolean): string {
 export function MomentsStrip({ duration_ms, ranges, marks, breaks = [], starts = [], playhead, onSeek }: MomentsStripProps) {
   const { t } = useTranslation()
   const pct = (ms: number) => `${Math.min(100, Math.max(0, (ms / duration_ms) * 100))}%`
-  const named = (label: string, suggested: boolean) => (suggested ? t('tagging.markers.suggested', { label }) : label)
+  const named = (label: string, toCheck: boolean) => (toCheck ? t('tagging.markers.toCheck', { label }) : label)
 
   const onClick = (event: MouseEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect()
@@ -94,9 +90,9 @@ export function MomentsStrip({ duration_ms, ranges, marks, breaks = [], starts =
         <div
           key={b.id}
           data-marker={b.kind}
-          data-suggested={b.suggested ? 'true' : undefined}
-          title={named(b.label, b.suggested)}
-          className={cx('absolute bottom-0.5 h-1.5 min-w-0.5 rounded-sm', breakClass(b.kind, b.suggested))}
+          data-to-check={b.toCheck ? 'true' : undefined}
+          title={named(b.label, b.toCheck)}
+          className={cx('absolute bottom-0.5 h-1.5 min-w-0.5 rounded-sm', breakClass(b.kind, b.toCheck))}
           style={{ left: pct(b.start_ms), width: `max(2px, ${pct(b.end_ms - b.start_ms)})` }}
         />
       ))}
@@ -111,9 +107,9 @@ export function MomentsStrip({ duration_ms, ranges, marks, breaks = [], starts =
         <div
           key={s.id}
           data-marker="set-start"
-          data-suggested={s.suggested ? 'true' : undefined}
-          title={named(s.label, s.suggested)}
-          className={cx('absolute inset-y-0 w-1 -translate-x-1/2 border-l-2', s.suggested ? 'border-dashed border-fg/40' : 'border-fg')}
+          data-to-check={s.toCheck ? 'true' : undefined}
+          title={named(s.label, s.toCheck)}
+          className={cx('absolute inset-y-0 w-1 -translate-x-1/2 border-l-2', s.toCheck ? 'border-dashed border-danger' : 'border-fg')}
           style={{ left: pct(s.t_ms) }}
         />
       ))}

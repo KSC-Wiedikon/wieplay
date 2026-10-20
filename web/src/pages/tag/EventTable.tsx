@@ -9,7 +9,7 @@ import { CheckIcon, PencilIcon, PlusIcon, TrashIcon } from '../../components/ico
 import { Table, TBody, Td, Th, THead, Tr } from '../../components/Table'
 import { SearchBar } from '../../components/SearchBar'
 import { TagFilters } from '../../components/TagFilters'
-import { isModelTag, isSuggestedTag, suggestedCount } from '../../lib/actions'
+import { isAutoTag, isModelTag, isToCheckTag, toCheckTagCount } from '../../lib/actions'
 import { filterTags, isFiltered, lastAtOrBefore, NO_FILTER, type TagFilter } from '../../lib/condensed'
 import { isEmptySearch, parseSearch, searchContext, searchTags } from '../../lib/search'
 import { cx } from '../../lib/cx'
@@ -70,7 +70,7 @@ export function EventTable() {
   const currentId = usePlayhead(playhead, (s) => lastAtOrBefore(shown, s.t_ms)?.id ?? null)
   const container = useRef<HTMLDivElement>(null)
   const pointerInside = useRef(false)
-  const suggested = useMemo(() => suggestedCount(view.events), [view.events])
+  const toCheck = useMemo(() => toCheckTagCount(view.events), [view.events])
   const actionReview = useActionReview()
   const regrade = useRegrade()
   // The tag on screen in the actions queue or the regrade queue, else the selected one.
@@ -95,7 +95,7 @@ export function EventTable() {
           {isFiltered(filter) || searching
             ? t('tagging.table.count', { shown: shown.length, total: view.events.length })
             : t('tagging.tagCount', { count: view.events.length })}
-          {suggested > 0 && ` · ${t('actions.table.count', { count: suggested })}`}
+          {toCheck > 0 && ` · ${t('actions.table.count', { count: toCheck })}`}
         </p>
       </div>
       <TagFilters
@@ -169,8 +169,8 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
   const { controller, taxonomy, actions } = useWorkspace()
   const actionReview = useActionReview()
   const view = useView()
-  const open = isSuggestedTag(tag)
-  // In the actions queue a suggestion goes on screen there; elsewhere a row seeks to its tag.
+  const open = isToCheckTag(tag)
+  // In the actions queue WiePlay's action goes on screen there; elsewhere a row seeks to its tag.
   const pick = () => (actionReview.active && isModelTag(tag) ? actions.select(tag.id) : controller.select(tag.id, { seek: true }))
   const skill = skillByCode(taxonomy, tag.code)
   const entry = formatEntry(tag)
@@ -181,11 +181,11 @@ function Row({ tag, current, selected, onAddToReel }: { tag: Tag; current: boole
   return (
     <Tr
       data-tag={tag.id}
-      data-action-suggestion={open ? 'open' : undefined}
+      data-action-suggestion={open ? 'check' : isAutoTag(tag) ? 'auto' : undefined}
       onActivate={pick}
       aria-current={current ? 'true' : undefined}
       aria-selected={selected}
-      className={cx(current && 'bg-accent-soft', selected && 'outline-2 -outline-offset-2 outline-accent', open && 'text-muted italic')}
+      className={cx(current && 'bg-accent-soft', selected && 'outline-2 -outline-offset-2 outline-accent')}
     >
       <Td tight>
         <button

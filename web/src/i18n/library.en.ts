@@ -253,6 +253,9 @@ export const libraryEn = {
       condensed: 'Rallies of a match',
       recap: 'Game recap',
     },
+    sureOnly: 'Sure only',
+    toCheck_one: '{{count}} play still to check',
+    toCheck_other: '{{count}} plays still to check',
     status: {
       queued: 'Preparing',
       ready: 'Ready',

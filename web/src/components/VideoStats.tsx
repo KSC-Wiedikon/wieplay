@@ -35,7 +35,7 @@ import {
 import type { Segment, Tag, Tagging, Taxonomy, Video } from '../lib/types'
 import { buttonClasses } from './buttonStyles'
 import { ActionGateNote } from './ActionGateNote'
-import { ChartIcon, DownloadIcon, SparkleIcon } from './icons'
+import { AlertIcon, ChartIcon, DownloadIcon } from './icons'
 import { EmptyState, LoadError } from './Message'
 import { SectionHeader } from './PageHeader'
 import { RotationStats } from './RotationStats'
@@ -43,6 +43,7 @@ import { SearchBar } from './SearchBar'
 import { SetterStats } from './SetterStats'
 import { SheetPlayerStats } from './SheetPlayerStats'
 import { Spinner } from './Spinner'
+import { Switch } from './Switch'
 import { StatsLegend, StatsTable, TeamTable, type CellTarget, type TeamKey, type TeamTableRow } from './StatsTable'
 import { TabPanel, Tabs } from './Tabs'
 import { ZoneStats } from './ZoneStats'
@@ -70,7 +71,9 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
   const taxonomy = tagging?.taxonomy ?? fallback
   const parsed = useMemo(() => parseSearch(text, taxonomy), [text, taxonomy])
   const search = searchParam(parsed.search)
-  const stats = useVideoStats(video.id, true, search)
+  // "Sure only": WiePlay's sure tags and the checked ones, nothing still to check (PLAN §9.7, §10).
+  const [sure, setSure] = useState(false)
+  const stats = useVideoStats(video.id, true, search, sure)
   const tagged = (stats.data?.tags ?? 0) > 0
   const nothing = search !== null && stats.data?.selected === 0
   const lang = i18n.language === 'de' ? 'de' : 'en'
@@ -91,14 +94,15 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
         }
         action={
           tagged ? (
-            <a href={videoCsvUrl(video.id, lang, CSV_PART[tab], search)} download className={buttonClasses({ variant: 'secondary' })}>
+            <a href={videoCsvUrl(video.id, lang, CSV_PART[tab], search, sure)} download className={buttonClasses({ variant: 'secondary' })}>
               <DownloadIcon className="size-4" />
               {t('stats.csv')}
             </a>
           ) : null
         }
       />
-      {(stats.data?.suggested ?? 0) > 0 ? <SuggestedHint count={stats.data?.suggested ?? 0} /> : <ActionGateNote gate={stats.data?.actions_gate} />}
+      <ToCheckLine count={stats.data?.to_check ?? 0} sure={sure} onSure={setSure} />
+      <ActionGateNote gate={stats.data?.actions_gate} />
       {stats.isPending ? (
         <Spinner />
       ) : stats.isError ? (
@@ -125,7 +129,7 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
           {nothing ? (
             <p className="text-sm text-muted">{t('search.none')}</p>
           ) : (
-            <Numbers data={stats.data} video={video} tagging={tagging} onPlay={onPlay} tab={tab} onTab={setTab} filter={parsed.search} search={search} taxonomy={taxonomy} />
+            <Numbers data={stats.data} video={video} tagging={tagging} onPlay={onPlay} tab={tab} onTab={setTab} filter={parsed.search} search={search} sure={sure} taxonomy={taxonomy} />
           )}
         </div>
       )}
@@ -133,14 +137,24 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
   )
 }
 
-/** WiePlay's suggested actions are not in the numbers until a coach accepts them (PLAN §10.4a). */
-export function SuggestedHint({ count }: { count: number }) {
+/**
+ * Every tag counts, WiePlay's too (PLAN §10): "N still to check" says how many of them nobody has
+ * checked yet, and "Sure only" shows the numbers from sure and checked tags only.
+ */
+export function ToCheckLine({ count, sure, onSure }: { count: number; sure: boolean; onSure: (on: boolean) => void }) {
   const { t } = useTranslation()
+  const id = useId()
   return (
-    <p data-suggested-hint className="flex items-center gap-1.5 text-sm text-muted">
-      <SparkleIcon className="size-4 shrink-0" />
-      {t('actions.statsHint', { count })}
-    </p>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+      <label className="flex cursor-pointer items-center gap-2 font-semibold">
+        <Switch checked={sure} onChange={onSure} label={t('stats.sureOnly')} describedBy={`${id}-hint`} />
+        <span aria-hidden="true">{t('stats.sureOnly')}</span>
+      </label>
+      <p id={`${id}-hint`} data-to-check-hint={count} className={cx('flex items-center gap-1.5', count > 0 ? 'text-danger' : 'text-muted')}>
+        {count > 0 && <AlertIcon className="size-4 shrink-0" />}
+        {count > 0 ? (sure ? t('stats.toCheckLeftOut', { count }) : t('stats.toCheck', { count })) : sure ? t('stats.sureOnlyHint') : t('stats.allChecked')}
+      </p>
+    </div>
   )
 }
 
@@ -151,10 +165,12 @@ interface NumbersProps {
   /** The search's terms (empty: none) and its ?search= form for the zone maps. */
   filter: TagSearch
   search: string | null
+  /** "Sure only" (?sure=true) for the zone maps too. */
+  sure: boolean
   taxonomy: Taxonomy | null
 }
 
-function Numbers({ data, video, tagging, onPlay, tab, onTab, filter, search, taxonomy }: NumbersProps & VideoStatsProps) {
+function Numbers({ data, video, tagging, onPlay, tab, onTab, filter, search, sure, taxonomy }: NumbersProps & VideoStatsProps) {
   const { t } = useTranslation()
   const sides = useSideNames()
   const tabsId = useId()
@@ -239,7 +255,7 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab, filter, search, tax
     return { kind: 'play', onPlay: () => onPlay(keepTags(rotationTags(tagging, plays, column)).map(tagPlay)) }
   }
   // Zone maps load when their tab opens.
-  const zones = useVideoZones(video.id, tab === 'zones', search)
+  const zones = useVideoZones(video.id, tab === 'zones', search, sure)
 
   const setterTarget = (filter: SetFilter): CellTarget | null => {
     const plays = data.match.setter?.plays

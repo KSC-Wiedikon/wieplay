@@ -11,7 +11,7 @@ export const setupEn = {
     wieplay: '{{team}} (WiePlay)',
     none: '–',
     changed: 'Point of rally {{n}}: {{team}}.',
-    cleared: 'Point of rally {{n}}: back to WiePlay’s suggestion.',
+    cleared: 'Point of rally {{n}}: back to WiePlay’s answer.',
     undo: 'Undo',
     failed: 'Couldn’t save the point: {{detail}}',
   },
@@ -91,6 +91,8 @@ export const setupEn = {
     noRallies: 'Mark or review the rallies first.',
     recap: 'Game recap (MP4)',
     recapHint: 'The best plays in 2–3 minutes, with a title card and the score.',
+    recapSure: 'Game recap, sure only (MP4)',
+    recapSureHint: 'Only plays from tags WiePlay is sure of or a person checked.',
     downloads: 'Your downloads',
   },
   videoGame: {

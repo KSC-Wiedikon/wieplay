@@ -13,7 +13,7 @@ import { Spinner } from '../components/Spinner'
 import { StatsLegend, StatsTable, TeamTable, type TeamTableRow } from '../components/StatsTable'
 import { SearchBar } from '../components/SearchBar'
 import { TabPanel, Tabs } from '../components/Tabs'
-import { SuggestedHint, type StatsTab } from '../components/VideoStats'
+import { ToCheckLine, type StatsTab } from '../components/VideoStats'
 import { ZoneStats } from '../components/ZoneStats'
 import { formatDate } from '../lib/format'
 import { useTaxonomy } from '../lib/library'
@@ -45,12 +45,14 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
   const search = searchParam(parsed.search)
   // The search's words as a reel builder reads them back (its `q`).
   const words = search ? formatTerms(parsed.terms, 'en', taxonomy) : ''
-  const stats = useTeamStats(team.id, true, search)
+  // "Sure only": WiePlay's sure tags and the checked ones, nothing still to check.
+  const [sure, setSure] = useState(false)
+  const stats = useTeamStats(team.id, true, search, sure)
   const data = stats.data
   const tagged = (data?.tagged ?? 0) > 0
   const lang = i18n.language === 'de' ? 'de' : 'en'
   const [tab, setTab] = useState<StatsTab>('players')
-  const zones = useTeamZones(team.id, tab === 'zones' && tagged, search)
+  const zones = useTeamZones(team.id, tab === 'zones' && tagged, search, sure)
   const nothing = search !== null && data?.selected === 0
   const names = useMemo(() => new Map((data?.season_box.players ?? []).flatMap((p) => (p.number !== null && p.name ? [[p.number, p.name] as const] : []))), [data])
 
@@ -94,14 +96,15 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
         }
         action={
           tagged ? (
-            <a href={teamCsvUrl(team.id, lang, CSV_PART[tab], search)} download className={buttonClasses({ variant: 'secondary' })}>
+            <a href={teamCsvUrl(team.id, lang, CSV_PART[tab], search, sure)} download className={buttonClasses({ variant: 'secondary' })}>
               <DownloadIcon className="size-4" />
               {t('stats.csv')}
             </a>
           ) : null
         }
       />
-      {(data?.suggested ?? 0) > 0 ? <SuggestedHint count={data?.suggested ?? 0} /> : <ActionGateNote gate={data?.actions_gate} />}
+      <ToCheckLine count={data?.to_check ?? 0} sure={sure} onSure={setSure} />
+      <ActionGateNote gate={data?.actions_gate} />
       {stats.isPending ? (
         <Spinner />
       ) : stats.isError || !data ? (

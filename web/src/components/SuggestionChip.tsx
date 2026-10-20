@@ -1,34 +1,43 @@
 import '../i18n/pages'
 import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
-import { formatPercent, isProposal, isReviewedProposal } from '../lib/suggestions'
+import { formatPercent, isAuto, isReviewedProposal, isToCheck } from '../lib/suggestions'
 import type { Segment } from '../lib/types'
-import { SparkleIcon } from './icons'
+import { AlertIcon, SparkleIcon } from './icons'
 
 /**
- * Where a rally (or a break's label) comes from, when WiePlay suggested it: "Suggested · 87%"
- * with a dashed outline while nobody has answered it; a small marker once it is accepted or
- * corrected (it is a rally like any other then). A part split off in this review session waits
- * for an answer too.
+ * Where a rally (or a break's label) comes from, when WiePlay tagged it: "To check · 62%" while
+ * WiePlay is unsure and nobody has checked it (a person's rally whose winner is unsure too); a
+ * small WiePlay mark on a sure one, and once a person accepted or corrected it (it counts like
+ * any other either way). A part split off in this review session waits for an answer too.
  */
 export function SuggestionChip({ segment, splitOff = false, className }: { segment: Segment; splitOff?: boolean; className?: string }) {
   const { t } = useTranslation()
-  if (splitOff || isProposal(segment)) {
-    const confidence = formatPercent(segment.confidence)
+  if (splitOff || isToCheck(segment)) {
+    const confidence = formatPercent(segment.kind === 'rally' ? (segment.score_confidence ?? segment.confidence) : segment.confidence)
     return (
       <span
-        data-suggestion="open"
+        data-suggestion="check"
         className={cx(
-          'inline-flex items-center gap-1 rounded-full border border-dashed border-accent bg-accent-soft px-2 py-0.5 text-xs leading-4 font-semibold whitespace-nowrap text-on-accent-soft',
+          'inline-flex items-center gap-1 rounded-full border border-accent bg-accent-soft px-2 py-0.5 text-xs leading-4 font-semibold whitespace-nowrap text-on-accent-soft',
           className,
         )}
       >
-        <SparkleIcon className="size-3.5" />
+        {splitOff ? <SparkleIcon className="size-3.5" /> : <AlertIcon className="size-3.5" />}
         {splitOff
           ? t('tagging.suggestions.splitOff')
           : confidence
-            ? t('tagging.suggestions.suggestedConfidence', { confidence })
-            : t('tagging.suggestions.suggested')}
+            ? t('tagging.suggestions.toCheckConfidence', { confidence })
+            : t('tagging.suggestions.toCheck')}
+      </span>
+    )
+  }
+  if (isAuto(segment)) {
+    const full = t('tagging.suggestions.auto')
+    return (
+      <span data-suggestion="auto" title={full} className={cx('inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted', className)}>
+        <SparkleIcon className="size-3.5" />
+        <span className="sr-only">{full}</span>
       </span>
     )
   }

@@ -16,7 +16,7 @@ import { usePlayhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import { ROMAN } from '../../lib/rotations'
 import { useSideNames } from '../../lib/sides'
-import { formatPercent, isSetSuggestion } from '../../lib/suggestions'
+import { formatPercent, isAuto, setToCheck } from '../../lib/suggestions'
 import { newId, periodToIn } from '../../lib/taggingStore'
 import type { CourtSide, Period, PeriodIn, Segment, Side } from '../../lib/types'
 import { useView, useWorkspace } from './context'
@@ -70,7 +70,8 @@ type Texts = ReturnType<typeof periodTexts>
  * The sets (basketball: quarters): add one at the playhead, end it, and compare its final score
  * with the official one. A basketball game has one official result, the final: it is compared
  * with the last quarter once that is the fourth or later and has ended. Volleyball: the sets
- * WiePlay suggested (accept or reject them), and per set what the automatic score needs.
+ * WiePlay found count; those it is unsure of are marked to check (accept or reject them), and per
+ * set what the automatic score needs.
  */
 export function SetsBar() {
   const { t } = useTranslation()
@@ -104,7 +105,7 @@ export function SetsBar() {
           {view.periods.map((p) => (
             <li key={p.id}>
               <SetChip period={p} official={officialOf(p)} current={running?.id === p.id} texts={texts} onEdit={() => setForm(periodToIn(p))} />
-              {isSetSuggestion(p) && (
+              {setToCheck(p) && (
                 <span className="ml-1 inline-flex gap-0.5 align-middle">
                   <Button variant="ghost" size="icon" aria-label={t('tagging.sets.accept', { no: p.no })} title={t('tagging.sets.accept', { no: p.no })} onClick={() => controller.acceptPeriod(p.id)}>
                     <CheckIcon className="size-4" />
@@ -169,7 +170,8 @@ function SetChip({
 }) {
   const { t } = useTranslation()
   const hasFinal = period.final_us !== null && period.final_them !== null
-  const suggested = isSetSuggestion(period)
+  const check = setToCheck(period)
+  const auto = period.source === 'model' && isAuto({ source: period.source, review: period.review ?? 'unreviewed' })
   const confidence = formatPercent(period.confidence)
   // A running set is not compared yet.
   const mismatch =
@@ -179,14 +181,15 @@ function SetChip({
     <span className="inline-flex flex-wrap items-center gap-1">
       <Button
         onClick={onEdit}
-        data-suggestion={suggested ? 'open' : undefined}
-        className={cx(current && 'ring-2 ring-accent', suggested && 'border-2 border-dashed border-accent bg-accent-soft text-on-accent-soft')}
+        data-suggestion={check ? 'check' : auto ? 'auto' : undefined}
+        className={cx(current && 'ring-2 ring-accent', check && 'border-2 border-danger')}
         aria-label={texts.edit(period.no)}
       >
-        {suggested && <SparkleIcon className="size-3.5" />}
+        {(check || auto) && <SparkleIcon className="size-3.5" />}
+        {auto && <span className="sr-only">{t('tagging.suggestions.auto')}</span>}
         <span className="font-bold">{texts.name(period.no)}</span>
-        {suggested && (
-          <span className="text-xs font-semibold">{confidence ? t('tagging.sets.suggestedConfidence', { confidence }) : t('tagging.sets.suggested')}</span>
+        {check && (
+          <span className="text-xs font-semibold text-danger">{confidence ? t('tagging.sets.toCheckConfidence', { confidence }) : t('tagging.sets.toCheck')}</span>
         )}
         <span className="font-normal text-muted tabular-nums">{range}</span>
         {hasFinal && <span className="tabular-nums">{`${period.final_us}:${period.final_them}`}</span>}

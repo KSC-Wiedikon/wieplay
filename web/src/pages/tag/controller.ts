@@ -3,11 +3,12 @@
 // React renders a snapshot of it through subscribe/getState.
 
 import { clipRange } from '../../lib/clips'
-import { factTags } from '../../lib/facts'
+import { countedTags } from '../../lib/facts'
 import { formatEntry, isEntryChar, parseEntry, toggleSide, type EntryError } from '../../lib/grammar'
 import type { Playhead } from '../../lib/playhead'
 import { proposeByKey, proposeByTag, rallyStartForServe, ralliesOf, type RallyProposal } from '../../lib/rallies'
 import { sheetServer, type SheetCourt } from '../../lib/sheetCourt'
+import { isWiePlays, isWiePlaysSet } from '../../lib/suggestions'
 import { eventToIn, newId, periodToIn, segmentToIn, type TaggingStore } from '../../lib/taggingStore'
 import type { EventIn, PeriodIn, Review, Segment, SegmentIn, SegmentKind, Side, Tag, Taxonomy } from '../../lib/types'
 import type { Change } from '../../lib/outbox'
@@ -329,7 +330,7 @@ export class TagController {
     const view = this.store.getView()
     if (view.openRally) {
       // A suggested action's grade is no fact: the winner comes from the coach's tags.
-      this.set({ proposal: proposeByKey(view.openRally, this.now(), factTags(view.events), this.taxonomy) })
+      this.set({ proposal: proposeByKey(view.openRally, this.now(), countedTags(view.events), this.taxonomy) })
       return
     }
     const start_ms = this.now()
@@ -405,10 +406,10 @@ export class TagController {
     this.set({ segmentId: null })
   }
 
-  /** Accepts a model's proposal as it is. */
+  /** Accepts WiePlay's rally or break as it is (one to check, or a sure one). */
   acceptSegment = (id: string): void => {
     const segment = this.store.getView().segments.find((s) => s.id === id)
-    if (!segment || segment.source !== 'model' || segment.review !== 'unreviewed') return
+    if (!segment || !isWiePlays(segment)) return
     this.commit([{ kind: 'segment', payload: { ...segmentToIn(segment), review: 'confirmed' } }])
   }
 
@@ -456,10 +457,10 @@ export class TagController {
     if (period) this.commit([{ kind: 'period', payload: { ...periodToIn(period), ...patch } }])
   }
 
-  /** Accepts a set WiePlay suggested as it is. */
+  /** Accepts a set WiePlay found as it is. */
   acceptPeriod = (id: string): void => {
     const period = this.store.getView().periods.find((p) => p.id === id)
-    if (!period || period.source !== 'model' || period.review !== 'unreviewed') return
+    if (!period || !isWiePlaysSet(period)) return
     this.commit([{ kind: 'period', payload: { ...periodToIn(period), review: 'confirmed' } }])
   }
 

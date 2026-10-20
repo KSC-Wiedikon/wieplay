@@ -5,23 +5,28 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
-import { factTags } from './facts'
+import { personTags } from './facts'
 import { keys } from './queryClient'
 import { rescore, serveCodes } from './rallies'
 import { segmentToIn } from './taggingStore'
 import type { Review, Segment, SegmentIn, Side, Tagging } from './types'
 
-/** The change: the rally as it is with the winner; a model's rally with another winner is corrected (as the server has it). */
+/**
+ * The change: the rally as it is with the winner. WiePlay's rally with another winner than its
+ * own is corrected; with WiePlay's own winner it is confirmed (as the server has it).
+ */
 export function winnerChange(rally: Segment, won_by: Side | null): SegmentIn {
   let review: Review = rally.review
-  if (rally.source === 'model' && (rally.won_by ?? null) !== won_by && (review === 'confirmed' || review === 'unreviewed')) review = 'corrected'
+  if (rally.source === 'model' && (rally.won_by ?? null) !== won_by && review !== 'rejected' && review !== 'merged') {
+    review = won_by !== null && !rally.won_by && won_by === rally.model_won_by && review !== 'corrected' ? 'confirmed' : 'corrected'
+  }
   return { ...segmentToIn(rally), won_by, review }
 }
 
 /** The tagging data with a rally's winner changed and the score line computed again. */
 export function withWinner(data: Tagging, id: string, won_by: Side | null): Tagging {
   const segments = data.segments.map((s) => (s.id === id ? { ...s, won_by, review: winnerChange(s, won_by).review ?? s.review } : s))
-  const scored = rescore(data.periods, segments, factTags(data.events), serveCodes(data.taxonomy))
+  const scored = rescore(data.periods, segments, personTags(data.events), serveCodes(data.taxonomy))
   return { ...data, segments: scored.segments, periods: scored.periods }
 }
 

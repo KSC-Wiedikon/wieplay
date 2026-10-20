@@ -22,6 +22,14 @@ export const statsEn = {
     player: 'Player',
     hintVideo: 'Every number plays its moments in the video above.',
     hintSeason: 'Every number opens its moments as a reel.',
+    // Every tag counts, WiePlay's too; "Sure only" leaves out what is still to check.
+    sureOnly: 'Sure only',
+    toCheck_one: '{{count}} still to check',
+    toCheck_other: '{{count}} still to check',
+    toCheckLeftOut_one: '{{count}} still to check, left out',
+    toCheckLeftOut_other: '{{count}} still to check, left out',
+    sureOnlyHint: 'Only what WiePlay is sure of or someone checked.',
+    allChecked: 'Nothing left to check.',
     tagged: '{{tagged}} of {{count}} matches tagged',
     empty: {
       title: 'No stats yet',

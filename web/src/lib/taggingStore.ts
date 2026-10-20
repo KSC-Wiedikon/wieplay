@@ -2,7 +2,7 @@
 // (docs/PLAN.md §9.6), undo and redo over this page's own changes, and the rally being played
 // (which exists only here until it ends: the API needs an end time; basketball has none).
 
-import { factTags } from './facts'
+import { personTags } from './facts'
 import type { Change, ChangeKind, Outbox, OutboxItem } from './outbox'
 import { byStart, rescoreFor, sortedPeriods, type OpenRally } from './rallies'
 import { readStorage, writeStorage } from './storage'
@@ -232,7 +232,7 @@ export function mergeView(
     return { events: tags, segments: [...segments.values()].sort(byStart), periods: sortedPeriods([...periods.values()]), provisional }
   }
   // A suggested serve or grade is no fact: the score counts the coach's tags only.
-  const scored = rescoreFor(taxonomy, [...periods.values()], [...segments.values()], factTags(tags))
+  const scored = rescoreFor(taxonomy, [...periods.values()], [...segments.values()], personTags(tags))
   return { events: tags, segments: scored.segments, periods: scored.periods, provisional }
 }
 

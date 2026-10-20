@@ -1,13 +1,15 @@
-// Reviewing the actions WiePlay suggested (docs/PLAN.md §10.4a, §11), like the rally review: the
-// list goes through the open suggestions in time order, the player loops the one on screen
-// (1 s before the contact to 0.5 s after it), and every answer is a key:
+// "To check", the actions (docs/PLAN.md §10.4a, §11): WiePlay tags every action it finds by
+// itself; the sure ones count at once (review "auto"), the unsure ones count too and wait here
+// (review "check"). Like the rallies: the list goes through what is still to check in time
+// order, the player loops the one on screen (1 s before the contact to 0.5 s after it), and
+// every answer is a key:
 //
 //   Enter accept · X reject · S R E A B D F the skill · # + ! - / = the grade (again: none)
 //   a number, then Enter: the player (the action is accepted with it) · Tab the other side
 //   ←/→ one frame earlier or later · Shift+Enter accept the rest of this rally · U undo
 //
-// The suggestions WiePlay is sure of wait for one button, "Accept all sure actions"; the walk
-// visits the ones that need the coach first (like the rally review's "Needs you").
+// Each action shows WiePlay's other likely answer (`model_alternative`), which one button takes.
+// The sure ones are not in the walk (↑/↓ still reach them).
 //
 // Answers are ordinary tag changes through the tagging store and its outbox (offline queue,
 // base versions, undo): accept sets review "confirmed", another skill, side, grade or time
@@ -25,7 +27,8 @@ import {
   openInRally,
   rejectChange,
   SKILL_KEYS,
-  sureActions,
+  alternativeOf,
+  isToCheckTag,
   type ActionProgress,
 } from '../../lib/actions'
 import type { Change } from '../../lib/outbox'
@@ -46,7 +49,7 @@ export type ActionNoticeKey =
   | 'side'
   | 'moved'
   | 'acceptedRally'
-  | 'acceptedSure'
+  | 'alternative'
   | 'noneInRally'
   | 'undone'
   | 'redone'
@@ -65,17 +68,15 @@ export interface ActionNotice {
 export interface ActionReviewState {
   /** The actions queue is on (inside the review mode). */
   active: boolean
-  /** The suggestion on screen; null when everything is answered (or nothing was suggested). */
+  /** The action on screen; null when everything is checked (or nothing is to check). */
   currentId: string | null
   /** Digits typed for the player's number (Enter sets it). */
   number: string
-  /** Suggested actions of this video seen in this session (also once rejected), for the progress. */
+  /** Actions seen to check in this session (also once rejected or checked), for the progress. */
   seen: ReadonlySet<string>
-  /** Suggestions rejected before this session (the tagging data no longer lists them). */
+  /** WiePlay's actions rejected before this session (the tagging data no longer lists them). */
   rejectedBefore: number
   notice: ActionNotice | null
-  /** "Accept all sure actions" asks first. */
-  confirmSure: boolean
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -105,11 +106,10 @@ export class ActionReviewController {
       seen: modelIds(store.getView().events, EMPTY),
       rejectedBefore,
       notice: null,
-      confirmSure: false,
     }
   }
 
-  /** Follows the tagging data: suggestions that show up count for the progress. */
+  /** Follows the tagging data: actions to check that show up count for the progress. */
   attach(): () => void {
     this.unsubscribe()
     this.unsubscribe = this.store.subscribe(() => {
@@ -122,7 +122,7 @@ export class ActionReviewController {
     }
   }
 
-  /** New suggestions replaced the old ones: count afresh. */
+  /** A new run replaced WiePlay's actions: count afresh. */
   reset(rejectedBefore: number): void {
     this.marks.clear()
     this.set({ seen: modelIds(this.store.getView().events, EMPTY), rejectedBefore, currentId: null, number: '' })
@@ -168,7 +168,7 @@ export class ActionReviewController {
     return rallies.find((r) => r.id === tag.segment_id) ?? rallies.find((r) => r.start_ms - 2000 <= tag.t_ms && tag.t_ms <= r.end_ms) ?? null
   }
 
-  /** The open suggestions of the current action's rally ("accept the rest of this rally"). */
+  /** The actions to check of the current action's rally ("accept the rest of this rally"). */
   openInCurrentRally(): Tag[] {
     return openInRally(this.store.getView().events, this.rallyOf(this.current()))
   }
@@ -319,7 +319,7 @@ export class ActionReviewController {
     if (this.state.number) this.set({ number: this.state.number.slice(0, -1) })
   }
 
-  /** Shift+Enter: accept every open suggestion of this rally as it is. */
+  /** Shift+Enter: accept every action to check of this rally as it is. */
   acceptRally = (): void => {
     const tag = this.need()
     if (!tag) return
@@ -335,29 +335,19 @@ export class ActionReviewController {
     this.advance(last)
   }
 
-  // Accept all sure actions (PLAN §10.4a): the suggestions WiePlay is sure of, in one step.
-
-  sure(): Tag[] {
-    return sureActions(this.store.getView().events)
-  }
-
-  askAcceptSure = (): void => {
-    if (this.sure().length > 0) this.set({ confirmSure: true })
-  }
-
-  cancelAcceptSure = (): void => this.set({ confirmSure: false })
-
-  confirmAcceptSure = (): void => {
-    const sure = this.sure()
-    this.set({ confirmSure: false })
-    if (sure.length === 0) return
-    const current = this.current()
-    this.commit(sure.map((t) => acceptChange(t)))
-    const left = this.items().filter((t) => t.source === 'model' && t.review === 'unreviewed' && !t.deleted_at).length
-    this.set({ notice: this.notify('acceptedSure', { count: sure.length, left }) })
-    // The action on screen was one of them: on to the next open one.
-    if (current && sure.some((t) => t.id === current.id)) this.advance(current)
-    else if (!current && this.state.active) this.go(nextOpenAction(this.items(), null))
+  /** WiePlay's other answer (`model_alternative`), taken: another skill and side, or no contact (rejected). */
+  takeAlternative = (): void => {
+    const tag = this.need()
+    if (!tag) return
+    const other = alternativeOf(tag)
+    if (other === null) return
+    if (other === 'none') {
+      this.reject()
+      return
+    }
+    this.commit([actionChange(tag, { code: other.code, side: other.side, review: 'corrected' })])
+    this.set({ notice: this.notify('alternative', { code: other.code, side: other.side }) })
+    this.advance(tag)
   }
 
   /** U (and Ctrl+Z here): takes back the last change and goes back to where it was made. */
@@ -393,7 +383,6 @@ export class ActionReviewController {
   private handle(event: KeyboardEvent): boolean {
     const { key, shiftKey, altKey } = event
     const mod = event.ctrlKey || event.metaKey
-    if (this.state.confirmSure) return false
     if (mod) {
       if (altKey) return false
       if (key === 'z' || key === 'Z') {
@@ -478,11 +467,11 @@ function pressable(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('button, a[href], [role="button"], [role="switch"], summary') !== null
 }
 
-/** The ids of the model's tags, added to `seen` (the same set when nothing is new). */
+/** The ids of the actions to check, added to `seen` (the same set when nothing is new). */
 function modelIds(events: readonly Tag[], seen: ReadonlySet<string>): ReadonlySet<string> {
   let out: Set<string> | null = null
   for (const e of events) {
-    if (!isModelTag(e) || seen.has(e.id)) continue
+    if (!isToCheckTag(e) || seen.has(e.id)) continue
     out ??= new Set(seen)
     out.add(e.id)
   }

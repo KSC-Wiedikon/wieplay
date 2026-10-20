@@ -119,7 +119,7 @@ export const en = {
     // A helper's own view of the team (PLAN §5.1 "analyst").
     helping: {
       title: 'You help this team',
-      body: 'Review the rallies WiePlay suggests and tag the games. Every reviewed game teaches WiePlay.',
+      body: 'Check what WiePlay isn’t sure of and tag the games. Every reviewed game teaches WiePlay.',
     },
     // Coaches, team managers, sport admins and admins pick the team's helpers.
     helpers: {
@@ -129,7 +129,7 @@ export const en = {
       can: 'Helpers can',
       cannot: 'Helpers can’t',
       canWatch: 'Watch every season’s videos, tags and clips',
-      canTag: 'Review WiePlay’s suggestions, tag, correct scores',
+      canTag: 'Check what WiePlay isn’t sure of, tag, correct scores',
       canUpload: 'Upload or link a video, correct a video’s roster',
       canShare: 'Share clips and reels with the team',
       cannotDownload: 'Download videos',
@@ -171,7 +171,7 @@ export const en = {
   // The guide for helpers (/how-to-help); its text is in src/i18n/guide.*.ts.
   guide: {
     link: 'How to help',
-    linkHint: 'How to help: reviewing suggestions and tagging, step by step',
+    linkHint: 'How to help: checking and tagging, step by step',
   },
   video: {
     kind: {
@@ -189,8 +189,9 @@ export const en = {
     analysis: {
       queued: 'Analysis queued',
       running: 'Analysing…',
-      open_one: '{{count}} suggestion to review',
-      open_other: '{{count}} suggestions to review',
+      open_one: '{{count}} to check',
+      open_other: '{{count}} to check',
+      steps: 'Analysing: {{done}} of {{total}} steps',
       reviewed: 'Rallies reviewed',
       done: 'Analysed',
       failed: 'Analysis failed',

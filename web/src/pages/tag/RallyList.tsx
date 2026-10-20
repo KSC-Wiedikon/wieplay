@@ -12,22 +12,11 @@ import { cx } from '../../lib/cx'
 import { firstReasonText, formatClock, segmentLabel, sideLabel } from '../../lib/labels'
 import { periodAt, ralliesOf } from '../../lib/rallies'
 import { useSideNames } from '../../lib/sides'
-import {
-  effectiveServer,
-  formatPercent,
-  formatSeconds,
-  isGap,
-  isOpen,
-  isProposal,
-  isSuggestion,
-  needsYou,
-  reviewItems,
-  scoreAfter,
-} from '../../lib/suggestions'
+import { effectiveServer, formatPercent, formatSeconds, isGap, isOpen, isToCheck, isWiePlays, rallyToCheck, reviewItems, scoreAfter } from '../../lib/suggestions'
 import type { Segment } from '../../lib/types'
 import { useReview, useUi, useView, useWorkspace } from './context'
 
-type Filter = 'all' | 'open' | 'needs'
+type Filter = 'all' | 'open'
 
 /** Keeps a row visible inside the scrolling box without scrolling the page. */
 function reveal(container: HTMLElement | null, id: string | null): void {
@@ -42,12 +31,12 @@ function reveal(container: HTMLElement | null, id: string | null): void {
 }
 
 /**
- * The rallies of the video. While tagging: every rally, with WiePlay's suggestions marked and a
- * filter for those still to review (accept or reject them right here); who served and who won,
- * suggested values muted, and "check" where the automatic score disagrees with something.
- * While reviewing: the suggestions (rallies and breaks) in time order with their state, the one
- * on screen highlighted; by default only the rallies that need the coach ("Needs you": the
- * joint decode is not sure of them, docs/PLAN.md §10.1), each with why.
+ * The rallies of the video. While tagging: every rally (WiePlay's count like any other), those
+ * still to check marked, with a filter for them (accept or reject them right here); who served
+ * and who won, WiePlay's values muted, and "check" where the automatic score disagrees with
+ * something. While reviewing: WiePlay's rallies and breaks in time order with their state, the
+ * one on screen highlighted; by default only those still to check (docs/PLAN.md §10.1), each
+ * with why.
  */
 export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?: ReactNode }) {
   const { t } = useTranslation()
@@ -56,7 +45,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
   const view = useView()
   const ui = useUi()
   const state = useReview()
-  const [filter, setFilter] = useState<Filter>(mode === 'review' ? 'needs' : 'all')
+  const [filter, setFilter] = useState<Filter>(mode === 'review' ? 'open' : 'all')
   const container = useRef<HTMLDivElement>(null)
   const reviewing = mode === 'review'
 
@@ -65,15 +54,14 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
     [reviewing, view.segments, state.pending],
   )
   const numbers = useMemo(() => new Map(rows.map((r, i) => [r.id, i + 1])), [rows])
+  // Still to check (a part split off in this session too); while reviewing also the one on screen,
+  // so it stays in view.
   const open = useMemo(() => rows.filter((r) => isOpen(r, state.pending)), [rows, state.pending])
-  // The rallies that need the coach: every rally of the video the scoring is not sure of (also
-  // one a coach added or accepted), and the one on screen so it stays in view.
-  const needs = useMemo(
-    () => (reviewing ? ralliesOf(view.segments).filter((r) => needsYou(r) || r.id === state.currentId) : []),
-    [reviewing, view.segments, state.currentId],
+  const openShown = useMemo(
+    () => (reviewing ? rows.filter((r) => isOpen(r, state.pending) || r.id === state.currentId) : open),
+    [reviewing, rows, open, state.pending, state.currentId],
   )
-  const needsCount = useMemo(() => needs.filter(needsYou).length, [needs])
-  const shown = filter === 'open' ? open : filter === 'needs' && reviewing ? needs : rows
+  const shown = filter === 'open' ? openShown : rows
   const sets = useMemo(() => new Map(view.periods.map((p) => [p.id, p.no])), [view.periods])
   const currentId = reviewing ? state.currentId : ui.segmentId
 
@@ -90,7 +78,6 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
 
   const options = reviewing
     ? ([
-        { value: 'needs', label: t('tagging.suggestions.needsYou', { count: needsCount }) },
         { value: 'open', label: t('tagging.suggestions.reviewOpen', { count: open.length }) },
         { value: 'all', label: t('tagging.suggestions.reviewAll', { count: rows.length }) },
       ] as const)
@@ -171,9 +158,9 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                         <Td className={cx('hidden whitespace-nowrap sm:table-cell', gap && 'font-semibold')}>{segmentLabel(t, rally, taxonomy.sport, names)}</Td>
                       )}
                       {reviewing && (
-                        // Why the rally needs the coach: the first reason (the panel lists them all).
+                        // Why the rally is to check: the first reason (the panel lists them all).
                         <Td className="text-sm">
-                          {needsYou(rally) ? (
+                          {rallyToCheck(rally) ? (
                             <span data-reason={rally.score_reasons?.[0]?.code ?? rally.score_note ?? undefined} className="text-danger">
                               {firstReasonText(t, rally, names)}
                             </span>
@@ -198,7 +185,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                         </Td>
                       )}
                       <Td className={cx(reviewing && 'hidden sm:table-cell')}>
-                        {reviewing && !isProposal(rally) && !splitOff ? (
+                        {reviewing && !isToCheck(rally) && !splitOff ? (
                           <ReviewedState rally={rally} />
                         ) : (
                           <SuggestionChip segment={rally} splitOff={splitOff} />
@@ -206,7 +193,7 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
                       </Td>
                       {!reviewing && (
                         <Td tight className="text-right whitespace-nowrap">
-                          {isSuggestion(rally) && (
+                          {isWiePlays(rally) && isToCheck(rally) && (
                             <>
                               <Button
                                 variant="ghost"
@@ -242,10 +229,11 @@ export function RallyList({ mode, toolbar }: { mode: 'tag' | 'review'; toolbar?:
   )
 }
 
-/** An answered suggestion in the review list: accepted or corrected, and how sure WiePlay was. */
+/** A checked item in the review list: accepted or corrected (or sure), and how sure WiePlay was. */
 function ReviewedState({ rally }: { rally: Segment }) {
   const { t } = useTranslation()
   const confidence = formatPercent(rally.confidence)
+  if (rally.review !== 'confirmed' && rally.review !== 'corrected') return <SuggestionChip segment={rally} />
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 text-xs">
       <span className="inline-flex items-center gap-1 font-semibold">

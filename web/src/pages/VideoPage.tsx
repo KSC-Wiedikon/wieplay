@@ -35,7 +35,7 @@ import { ApiError, blockersOf } from '../lib/api'
 import { clipRange, draftOf, nextInQueue, type ClipDraft, type PlayRange, type RangeQueue } from '../lib/clips'
 import { commentMoments } from '../lib/comments'
 import { PRE_ROLL_MS } from '../lib/condensed'
-import { factTags } from '../lib/facts'
+import { countedTags, toCheckTagCount } from '../lib/facts'
 import { formatBytes, formatDate, formatDuration } from '../lib/format'
 import { formatClock, segmentLabel } from '../lib/labels'
 import { useComments, useVideoClips } from '../lib/library'
@@ -44,7 +44,7 @@ import { useDeleteVideo, useMe, useTagging, useVideo, useVideoConfig } from '../
 import { keys } from '../lib/queryClient'
 import { SideNamesContext, sideNamesOf } from '../lib/sides'
 import { sportOf, useSportAccent } from '../lib/sport'
-import { isGap, isGapSuggestion, isSetSuggestion, isSuggestion } from '../lib/suggestions'
+import { gapToCheck, isGap, setToCheck, toCheckSegments } from '../lib/suggestions'
 import type { StatPlay } from '../lib/stats'
 import { useRangePlayback } from '../lib/useRangePlayback'
 import { useToast } from '../lib/toast'
@@ -322,27 +322,24 @@ function Ready({ video }: { video: Video }) {
 
   // "KSCW H3", "Volero" wherever the page would say us and them.
   const names = useMemo(() => sideNamesOf(video, t), [video, t])
-  // WiePlay's suggestions are not rallies or tags until a coach reviews them (PLAN §10, §10.4a):
-  // the rally list, skipping dead time, the counts, the plays and the diagrams leave them out.
-  const data = useMemo(
-    () =>
-      tagging.data
-        ? { ...tagging.data, segments: tagging.data.segments.filter((s) => !isSuggestion(s)), events: factTags(tagging.data.events) }
-        : undefined,
-    [tagging.data],
-  )
+  // WiePlay's rallies and tags count like a person's (PLAN §10, §10.4a): the rally list, skipping
+  // dead time, the counts, the plays and the diagrams hold them, those still to check marked.
+  const data = useMemo(() => (tagging.data ? { ...tagging.data, events: countedTags(tagging.data.events) } : undefined), [tagging.data])
   const rallyCount = data?.segments.filter((s) => s.kind === 'rally').length ?? 0
-  // The rally suggestions still to review: the rally list says it doesn't hold them yet.
-  const openSuggestions = useMemo(() => (tagging.data?.segments ?? []).filter(isSuggestion), [tagging.data])
+  // Still to check: rallies, breaks, sets, actions.
+  const toCheck = useMemo(
+    () => (data ? toCheckSegments(data.segments).length + data.periods.filter(setToCheck).length + toCheckTagCount(data.events) : 0),
+    [data],
+  )
   const tagCount = data?.events.length ?? 0
   const showSummary = data !== undefined && (data.can_tag || tagCount > 0 || rallyCount > 0)
   const duration = video.duration_ms ?? playhead.getState().duration_ms
-  // Breaks and set starts on the strip below the player; WiePlay's open suggestions lighter (PLAN §10.3).
+  // Breaks and set starts on the strip below the player; those still to check outlined (PLAN §10.3).
   const breaks = useMemo<BreakMark[]>(
     () =>
       (data?.segments ?? []).flatMap((s) =>
         isGap(s.kind)
-          ? [{ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, kind: s.kind, label: segmentLabel(t, s, video.sport, names), suggested: isGapSuggestion(s) }]
+          ? [{ id: s.id, start_ms: s.start_ms, end_ms: s.end_ms, kind: s.kind, label: segmentLabel(t, s, video.sport, names), toCheck: gapToCheck(s) }]
           : [],
       ),
     [data, t, video.sport, names],
@@ -350,7 +347,7 @@ function Ready({ video }: { video: Video }) {
   const starts = useMemo<StartMark[]>(
     () =>
       video.sport === 'volleyball'
-        ? (data?.periods ?? []).map((p) => ({ id: p.id, t_ms: p.start_ms, label: t('tagging.markers.setStart', { no: p.no }), suggested: isSetSuggestion(p) }))
+        ? (data?.periods ?? []).map((p) => ({ id: p.id, t_ms: p.start_ms, label: t('tagging.markers.setStart', { no: p.no }), toCheck: setToCheck(p) }))
         : [],
     [data, t, video.sport],
   )
@@ -531,7 +528,7 @@ function Ready({ video }: { video: Video }) {
                 suspended={current !== null}
                 editVideoId={data.can_tag && volleyball ? video.id : null}
                 filterTeam={{ id: video.team_id, canShare: video.can_share, label: `${video.team_name} ${video.team_season}` }}
-                openSuggestions={openSuggestions}
+                toCheck={toCheck}
                 reviewHref={data.can_tag && volleyball ? `/videos/${video.id}/tag?mode=review` : null}
               />
             </div>
@@ -742,8 +739,8 @@ function UploadingPanel({ video, enabled }: { video: Video; enabled: boolean }) 
 
 /** "Export" in the page's header: the rallies only and the game recap (coaches; PLAN §7.7). */
 function VideoExport({ video }: { video: Video }) {
-  // The rallies as the page shows them: suggestions nobody answered are no rallies yet.
+  // The rallies as the page shows them: WiePlay's count too.
   const tagging = useTagging(video.id, true)
-  const rallies = tagging.data ? tagging.data.segments.filter((s) => s.kind === 'rally' && !isSuggestion(s)).length : 0
+  const rallies = tagging.data ? tagging.data.segments.filter((s) => s.kind === 'rally').length : 0
   return <ExportMenu video={video} rallies={rallies} />
 }

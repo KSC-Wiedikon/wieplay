@@ -3,7 +3,6 @@ import type { TFunction } from 'i18next'
 import { useId, useMemo, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
-import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { AlertIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, MergeIcon, SparkleIcon, SplitIcon, UndoIcon } from '../../components/icons'
 import { EmptyState } from '../../components/Message'
 import { ProgressBar } from '../../components/ProgressBar'
@@ -15,20 +14,18 @@ import { periodAt } from '../../lib/rallies'
 import { cardTone, courtByRally, issueText, notesAfter, notesToShow, noteText, noteTime, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { fullNameOf, useSideNames, type SideNames } from '../../lib/sides'
 import {
-  ACCEPT_ALL_MIN,
   allProgress,
   effectiveServer,
   effectiveWinner,
   formatPercent,
   formatSeconds,
+  gapToCheck,
   isGap,
   isOpen,
-  confidentRallies,
-  needsYou,
-  needsYouRallies,
+  rallyToCheck,
   reviewItems,
   scoreAfter,
-  sureRallies,
+  setToCheck,
 } from '../../lib/suggestions'
 import type { GapKind, Segment, Side } from '../../lib/types'
 import { useReview, useView, useWorkspace } from './context'
@@ -86,10 +83,6 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
       return t('tagging.review.notice.won', { side: sideLabel(t, p.side as Side, names) })
     case 'moved':
       return p.field === 'end' ? t('tagging.review.notice.movedEnd', { time }) : t('tagging.review.notice.movedStart', { time })
-    case 'acceptedRallies':
-      return t('tagging.review.notice.acceptedRallies', { count: Number(p.count) })
-    case 'acceptedSure':
-      return t('tagging.review.notice.acceptedSure', { count: Number(p.count), left: Number(p.left) })
     case 'done':
       return t('tagging.review.doneTitle')
     default:
@@ -98,11 +91,10 @@ function noticeText(t: TFunction, notice: ReviewNotice, sport: string, names: Si
 }
 
 /**
- * The review of WiePlay's suggestions (PLAN §10.1): the suggestion on screen, its boundaries,
- * the answers as big buttons (tablets) with their keys (on a rally also "not a rally, it's a
- * timeout …", on a break which one it is), the progress, and one button: "Accept all
- * sure rallies" (the joint decode is sure of them, §10.3). The rest needs the coach, each with
- * its reason.
+ * "To check", the rallies and breaks (PLAN §10.1): the item on screen, why WiePlay is unsure and
+ * its other answer, its boundaries, the answers as big buttons (tablets) with their keys (on a
+ * rally also "not a rally, it's a timeout …", on a break which one it is), the sets to check, and
+ * the progress. What WiePlay is sure of counts already and is not asked.
  */
 export function ReviewPanel() {
   const { t } = useTranslation()
@@ -117,13 +109,9 @@ export function ReviewPanel() {
     () => allProgress(view.segments, state.seen, state.seenGaps, state.rejectedBefore, state.pending),
     [view.segments, state.seen, state.seenGaps, state.rejectedBefore, state.pending],
   )
-  const sure = useMemo(() => sureRallies(view.segments), [view.segments])
-  const waiting = useMemo(() => needsYouRallies(view.segments).length, [view.segments])
-  const confident = useMemo(() => confidentRallies(view.segments), [view.segments])
   const current = items.find((s) => s.id === state.currentId) ?? null
   const gap = current !== null && isGap(current.kind)
   const set = current ? periodAt(view.periods, current.start_ms) : null
-  const scored = useMemo(() => view.segments.some((s) => s.kind === 'rally' && s.score_sure != null), [view.segments])
   const progressText = t('tagging.review.progressLabel', { done: progress.done, total: progress.total })
 
   return (
@@ -160,6 +148,7 @@ export function ReviewPanel() {
               </h3>
               <SuggestionChip segment={current} splitOff={state.pending.has(current.id)} />
             </div>
+            {gap && gapToCheck(current) && <GapWhy segment={current} />}
             <div className="grid gap-2 min-[28rem]:grid-cols-2">
               {(['start_ms', 'end_ms'] as const).map((field) => {
                 const name = field === 'start_ms' ? t('tagging.review.start') : t('tagging.review.end')
@@ -248,7 +237,7 @@ export function ReviewPanel() {
         >
           {t('tagging.review.stillOpenBody')}
         </EmptyState>
-      ) : progress.total > 0 ? (
+      ) : progress.total > 0 || items.length > 0 ? (
         <Done videoId={video.id} reviewed={Boolean(video.rallies_reviewed_at)} />
       ) : (
         <EmptyState icon={<SparkleIcon />} title={t('tagging.review.emptyTitle')}>
@@ -260,25 +249,7 @@ export function ReviewPanel() {
         {state.notice ? noticeText(t, state.notice, taxonomy.sport, names) : t('tagging.review.hint')}
       </p>
 
-      {(scored || confident.length > 0) && (
-        <div className="flex flex-col gap-2 border-t border-hairline pt-3">
-          {sure.length > 0 ? (
-            <Button variant="primary" size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptSure)}>
-              <CheckIcon className="size-4" />
-              {t('tagging.review.acceptSure', { count: sure.length })}
-            </Button>
-          ) : (
-            scored && waiting > 0 && <p className="text-sm text-muted">{t('tagging.review.sureNone')}</p>
-          )}
-          {confident.length > 0 && (
-            <Button size="touch" className="w-full whitespace-normal" onClick={press(review.askAcceptRallies)}>
-              <CheckIcon className="size-4" />
-              {t('tagging.review.acceptRallies', { min: formatPercent(ACCEPT_ALL_MIN), count: confident.length })}
-            </Button>
-          )}
-        </div>
-      )}
-
+      <SetsToCheck />
       <SheetNotes />
       {!narrow && (
         <div className="border-t border-hairline pt-3">
@@ -287,32 +258,88 @@ export function ReviewPanel() {
       )}
       <GuideLink />
 
-      <ConfirmDialog
-        open={state.confirmSure}
-        title={t('tagging.review.acceptSureTitle', { count: sure.length })}
-        confirmLabel={t('tagging.review.acceptSureConfirm', { count: sure.length })}
-        onCancel={review.cancelAcceptSure}
-        onConfirm={review.confirmAcceptSure}
-      >
-        {t('tagging.review.acceptSureBody')}
-        {waiting > 0 && ` ${t('tagging.review.acceptSureLeft', { count: waiting })}`}
-      </ConfirmDialog>
-      <ConfirmDialog
-        open={state.confirmRallies}
-        title={t('tagging.review.acceptRalliesTitle', { count: confident.length })}
-        confirmLabel={t('tagging.review.acceptSureConfirm', { count: confident.length })}
-        onCancel={review.cancelAcceptRallies}
-        onConfirm={review.confirmAcceptRallies}
-      >
-        {t('tagging.review.acceptRalliesBody', { min: formatPercent(ACCEPT_ALL_MIN) })}
-      </ConfirmDialog>
     </section>
   )
 }
 
-/** "(suggested, 87%, near court)": what the model adds to a suggested value. */
+/** "(WiePlay, 87%, near court)": where a value of WiePlay's comes from. */
 function suggestedDetail(t: TFunction, parts: (string | null | undefined)[]): string {
   return ` (${[t('tagging.scoring.suggested'), ...parts].filter(Boolean).join(', ')})`
+}
+
+/** Why WiePlay is unsure of a break, and its other answer as a button. */
+function GapWhy({ segment }: { segment: Segment }) {
+  const { t } = useTranslation()
+  const { review, taxonomy } = useWorkspace()
+  const other = segment.model_alternative ?? null
+  const confidence = formatPercent(segment.confidence)
+  return (
+    <div data-to-check="true" className="flex flex-col gap-1 rounded-lg border border-danger/40 bg-danger/5 p-2 text-sm">
+      <p className="flex items-center gap-1.5 font-semibold text-danger">
+        <AlertIcon className="size-4 shrink-0" />
+        {t('tagging.review.toCheckTitle')}
+      </p>
+      <p>{confidence ? t('tagging.review.whyGap', { confidence }) : t('tagging.review.whyGapPlain')}</p>
+      {other && isGap(other as GapKind) && (
+        <Button size="touch" className="self-start whitespace-normal" onClick={press(review.takeAlternative)}>
+          {t('tagging.review.otherAnswer', { answer: segmentKindLabel(t, other as GapKind, taxonomy.sport) })}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** WiePlay's other answer for a rally: the other winner, or no rally at all. */
+function RallyAlternative({ rally }: { rally: Segment }) {
+  const { t } = useTranslation()
+  const { review } = useWorkspace()
+  const names = useSideNames()
+  const other = rally.model_alternative ?? null
+  if (other !== 'us' && other !== 'them' && other !== 'none') return null
+  const answer = other === 'none' ? t('tagging.review.otherNone') : t('tagging.review.otherWon', { team: sideLabel(t, other, names) })
+  return (
+    <Button size="touch" data-alternative={other} className="self-start whitespace-normal" onClick={press(review.takeAlternative)}>
+      {t('tagging.review.otherAnswer', { answer })}
+    </Button>
+  )
+}
+
+/**
+ * The sets WiePlay is unsure of (PLAN §10.3): where each starts and ends, how sure it is,
+ * accept or reject. They count already; this is the check.
+ */
+function SetsToCheck() {
+  const { t } = useTranslation()
+  const { controller } = useWorkspace()
+  const view = useView()
+  const sets = view.periods.filter(setToCheck)
+  if (sets.length === 0) return null
+  return (
+    <div className="flex flex-col gap-2 border-t border-hairline pt-3" data-sets-to-check="true">
+      <h3 className="text-sm font-semibold">{t('tagging.review.setsToCheck', { count: sets.length })}</h3>
+      <ul className="flex flex-col gap-2">
+        {sets.map((p) => {
+          const confidence = formatPercent(p.confidence)
+          return (
+            <li key={p.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <button type="button" className="cursor-pointer font-semibold text-link tabular-nums underline-offset-2 hover:underline" onClick={() => controller.seek(p.start_ms)}>
+                {t('tagging.review.setLine', { no: p.no, start: formatClock(p.start_ms), end: p.end_ms == null ? '…' : formatClock(p.end_ms) })}
+              </button>
+              {confidence && <span className="text-muted">{t('tagging.review.setSure', { confidence })}</span>}
+              <span className="ml-auto flex gap-1">
+                <Button size="md" variant="primary" onClick={press(() => controller.acceptPeriod(p.id))}>
+                  {t('tagging.review.accept')}
+                </Button>
+                <Button size="md" variant="danger" onClick={press(() => controller.deletePeriod(p.id))}>
+                  {t('tagging.review.reject')}
+                </Button>
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
 }
 
 /**
@@ -406,19 +433,24 @@ function RallyFacts({ rally }: { rally: Segment }) {
           {logText}
         </p>
       )}
-      {needsYou(rally) && rally.score_reasons && rally.score_reasons.length > 0 ? (
-        <div data-needs-you="true" className="flex flex-col gap-1 rounded-lg border border-danger/40 bg-danger/5 p-2 text-sm">
+      {rallyToCheck(rally) ? (
+        <div data-needs-you="true" data-to-check="true" className="flex flex-col gap-1 rounded-lg border border-danger/40 bg-danger/5 p-2 text-sm">
           <p className="flex items-center gap-1.5 font-semibold text-danger">
             <AlertIcon className="size-4 shrink-0" />
-            {t('tagging.review.needsYouTitle')}
+            {t('tagging.review.toCheckTitle')}
           </p>
-          <ul className="flex list-disc flex-col gap-0.5 pl-6">
-            {rally.score_reasons.map((reason, i) => (
-              <li key={`${reason.code}-${i}`} data-reason={reason.code}>
-                {reasonText(t, reason, names)}
-              </li>
-            ))}
-          </ul>
+          {rally.score_reasons && rally.score_reasons.length > 0 ? (
+            <ul className="flex list-disc flex-col gap-0.5 pl-6">
+              {rally.score_reasons.map((reason, i) => (
+                <li key={`${reason.code}-${i}`} data-reason={reason.code}>
+                  {reasonText(t, reason, names)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>{t('tagging.review.whyRally', { confidence: formatPercent(rally.score_confidence ?? rally.confidence) || '–' })}</p>
+          )}
+          <RallyAlternative rally={rally} />
         </div>
       ) : (
         rally.score_conflict && (
@@ -615,7 +647,7 @@ function BreakButtons({ segment }: { segment: Segment }) {
   )
 }
 
-/** Every suggestion is answered: the way to "rallies reviewed", which teaches WiePlay. */
+/** Every rally and break is checked: the way to "rallies reviewed", which teaches WiePlay. */
 function Done({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   const { t } = useTranslation()
   const { reload } = useWorkspace()
