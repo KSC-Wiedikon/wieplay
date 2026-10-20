@@ -20,7 +20,7 @@ import { ralliesOf } from '../lib/rallies'
 import { isEmptySearch, parseSearch, searchContext, searchRallies } from '../lib/search'
 import { fullNameOf, useSideNames } from '../lib/sides'
 import { readStorage, writeStorage } from '../lib/storage'
-import { effectiveWinner, openBetween, scoreAfter } from '../lib/suggestions'
+import { effectiveWinner, rallyToCheck, scoreAfter } from '../lib/suggestions'
 import { useToast } from '../lib/toast'
 import type { Segment, Side, Tagging } from '../lib/types'
 import { useCondensedPlayback } from '../lib/useCondensedPlayback'
@@ -28,7 +28,7 @@ import { useSetWinner } from '../lib/winner'
 import { Badge } from './Badge'
 import { Button } from './Button'
 import { Card } from './Card'
-import { UndoIcon } from './icons'
+import { AlertIcon, UndoIcon } from './icons'
 import { ScoreHead, SuggestedValue } from './ScoringMarks'
 import { SearchBar, type FilterTeam } from './SearchBar'
 import { Switch } from './Switch'
@@ -52,11 +52,11 @@ interface RallyPanelProps {
   /** The team saved filters belong to (the search bar's); null: no saved filters. */
   filterTeam?: FilterTeam | null
   /**
-   * WiePlay's rally suggestions nobody reviewed yet: not in the list, but the score line counts
-   * them, so the list says where they lie (the score jumps there).
+   * How much is still to check in the video (rallies, actions, players): every rally WiePlay found
+   * is in the list and counts, those to check are marked; the line says how many wait.
    */
-  openSuggestions?: readonly Segment[]
-  /** Their review, for those who may tag; null: no link. */
+  toCheck?: number
+  /** "To check", for those who may tag; null: no link. */
   reviewHref?: string | null
 }
 
@@ -78,7 +78,7 @@ export function RallyPanel({
   action,
   editVideoId = null,
   filterTeam = null,
-  openSuggestions = [],
+  toCheck = 0,
   reviewHref = null,
 }: RallyPanelProps) {
   const { t } = useTranslation()
@@ -109,8 +109,6 @@ export function RallyPanel({
   const currentId = usePlayhead(playhead, (s) => rallyAt(shown, s.t_ms)?.id ?? null)
   const numbers = useMemo(() => new Map(rallies.map((r, i) => [r.id, i + 1])), [rallies])
   const sets = useMemo(() => new Map(tagging.periods.map((p) => [p.id, p.no])), [tagging.periods])
-  // With nothing filtered, the suggestions still to review between two rallies of the list.
-  const between = useMemo(() => openBetween(shown.length === rallies.length ? shown : [], openSuggestions), [shown, rallies, openSuggestions])
 
   const toggle = (on: boolean) => {
     setSkip(on)
@@ -159,14 +157,14 @@ export function RallyPanel({
         {skip && duration
           ? t('tagging.condensed.skipOn', { count: shown.length, length: formatDuration(playLength(windows)), total: formatDuration(duration) })
           : t('tagging.condensed.skipOff')}
-        {openSuggestions.length > 0 && (
+        {toCheck > 0 && (
           <>
-            {` ${t('tagging.condensed.open', { count: openSuggestions.length })}`}
+            {` ${t('tagging.condensed.open', { count: toCheck })}`}
             {reviewHref && (
               <>
                 {' '}
                 <Link to={reviewHref} className="link font-semibold">
-                  {t('tagging.condensed.review', { count: openSuggestions.length })}
+                  {t('tagging.condensed.review', { count: toCheck })}
                 </Link>
               </>
             )}
@@ -222,11 +220,11 @@ export function RallyPanel({
                   // Where no coach decided the point, WiePlay's winner fills the score line (muted).
                   const score = scoreAfter(rally)
                   const winner = effectiveWinner(rally)
-                  const open = between.before.get(rally.id) ?? 0
+                  const check = rallyToCheck(rally)
                   return (
                     <Fragment key={rally.id}>
-                      {open > 0 && <OpenRow count={open} />}
                       <Tr
+                        data-to-check={check ? 'true' : undefined}
                         onActivate={() => play(rally)}
                         aria-current={current ? 'true' : undefined}
                         className={cx(current && 'bg-accent-soft')}
@@ -247,7 +245,15 @@ export function RallyPanel({
                         <Td className="tabular-nums">{set ?? '–'}</Td>
                         <Td className="hidden text-muted tabular-nums sm:table-cell">{formatClock(rally.start_ms, { tenths: false })}</Td>
                         <Td className="font-semibold tabular-nums">
-                          {score ? <SuggestedValue suggested={score.suggested}>{score.text}</SuggestedValue> : '–'}
+                          <span className="inline-flex items-center gap-1">
+                            {score ? <SuggestedValue suggested={score.suggested}>{score.text}</SuggestedValue> : '–'}
+                            {check && (
+                              <span className="inline-flex items-center text-danger" title={t('tagging.condensed.toCheck')}>
+                                <AlertIcon className="size-4" />
+                                <span className="sr-only">{t('tagging.condensed.toCheck')}</span>
+                              </span>
+                            )}
+                          </span>
                         </Td>
                         {editVideoId ? (
                           <Td tight>
@@ -270,7 +276,6 @@ export function RallyPanel({
                     </Fragment>
                   )
                 })}
-                {between.after > 0 && <OpenRow count={between.after} />}
               </TBody>
             </Table>
           </div>
@@ -290,18 +295,6 @@ export function RallyPanel({
         </p>
       )}
     </section>
-  )
-}
-
-/** A line between two rallies of the list: suggestions lie there, so the score jumps. */
-function OpenRow({ count }: { count: number }) {
-  const { t } = useTranslation()
-  return (
-    <tr data-open-suggestions={count}>
-      <td colSpan={5} className="px-4 py-1 text-xs text-muted italic">
-        {t('tagging.condensed.between', { count })}
-      </td>
-    </tr>
   )
 }
 

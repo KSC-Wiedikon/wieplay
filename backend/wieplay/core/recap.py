@@ -6,11 +6,12 @@ from the facts below.
 
 Which plays (`select`):
 
-- **Facts first**: tags that stand (made by hand, or a suggestion a coach accepted) and rallies
-  that stand. Kills, aces and block points score (ours more than theirs), long rallies, and the
-  rallies that ended a set or the match.
-- **No tags yet**: the rally finder's rallies (also proposals nobody answered), the longest ones
+- **Facts first**: tags that stand (a person's, and WiePlay's that nobody rejected; with "sure
+  only" without those still to check) and rallies that stand. Kills, aces and block points score
+  (ours more than theirs), long rallies, and the rallies that ended a set or the match.
+- **No tags yet**: the rally finder's rallies (also those still to check), the longest ones
   and the set and match points from the score line.
+- The export says how many of its plays rest on something still to check (`to_check`).
 - Best first until about 2.5 minutes, then in the order they were played; the match point when
   there is one. A clip runs from just before the serve to just after the point.
 """
@@ -116,6 +117,9 @@ class Play:
 class Selection:
     plays: list[Play]
     source: Literal["facts", "rallies"]
+    # Plays that rest on something still to check: their rally, or the tag that made them.
+    to_check: int = 0
+    sure_only: bool = False
 
     @property
     def total_ms(self) -> int:
@@ -125,29 +129,37 @@ class Selection:
 # --- the plays ----------------------------------------------------------------------------------
 
 
-def _rallies(db: Session, video: Video, facts: bool) -> list[Segment]:
+def _rallies(db: Session, video: Video, sure_only: bool = False) -> list[Segment]:
     query = select(Segment).where(
-        Segment.video_id == video.id, Segment.kind == "rally", Segment.deleted_at.is_(None)
+        Segment.video_id == video.id,
+        Segment.kind == "rally",
+        Segment.deleted_at.is_(None),
+        tagging.stands(sure_only),
     )
-    if facts:
-        query = query.where(tagging.stands())
-    else:
-        query = query.where(Segment.review.not_in(("rejected", "merged")))
     return list(db.scalars(query.order_by(Segment.start_ms)))
 
 
-def _events(db: Session, video: Video) -> list[Event]:
+def _events(db: Session, video: Video, sure_only: bool = False) -> list[Event]:
     return list(
         db.scalars(
             select(Event)
             .where(
                 Event.video_id == video.id,
                 Event.deleted_at.is_(None),
-                tagging.event_stands(),
+                tagging.event_stands(sure_only),
                 Event.code.in_(("S", "A", "B")),
             )
             .order_by(Event.t_ms)
         )
+    )
+
+
+def _rally_to_check(r: Segment) -> bool:
+    """tagging.rally_to_check, on a row."""
+    if r.review in tagging.GONE:
+        return False
+    return r.review == "check" or (
+        r.score_sure is False and r.won_by is None and r.review not in tagging.HUMAN_REVIEWS
     )
 
 
@@ -181,7 +193,8 @@ class RallyFacts:
 
 def _period_fact(period: Period, official: list[tuple[int, int]] | None) -> bool:
     """A set that is a fact: a coach's (made, accepted or corrected), or one whose final
-    score is Wiedisync's official score of that set."""
+    score is Wiedisync's official score of that set (the bug never guesses: a set WiePlay is
+    sure of by its breaks alone may still carry the wrong number)."""
     if period.source != "model" or period.review in ("confirmed", "corrected"):
         return True
     if not official or not 1 <= period.no <= len(official):
@@ -220,7 +233,8 @@ def _scores(db: Session, video: Video, rallies: list[Segment]) -> dict[uuid.UUID
     """Per rally the facts the bug may show: its set (a coach's set, or Wiedisync's official
     score at its end), the score before and after it when every point up to it is a fact (the
     coach's winners, the rallies marked done without a check, or the scoreboard showing that
-    score, sure and without a check), and whether it ended its set or the match."""
+    score, sure and without a check, or the joint decode sure of the rally), and whether it
+    ended its set or the match."""
     from wieplay.core import scoring
 
     official = scoring.official_sets(db, video)
@@ -248,6 +262,7 @@ def _scores(db: Session, video: Video, rallies: list[Segment]) -> dict[uuid.UUID
                 nxt = rs[i + 1] if i + 1 < len(rs) else None
                 fact = (
                     r.score_source == "tags"
+                    or bool(r.score_sure)
                     or (reviewed and not r.score_conflict)
                     or (
                         board is not None
@@ -271,15 +286,16 @@ def _scores(db: Session, video: Video, rallies: list[Segment]) -> dict[uuid.UUID
     return out
 
 
-def select_plays(db: Session, video: Video) -> Selection:
-    """The plays of a recap, in the order played (the module's docstring)."""
-    events = _events(db, video)
+def select_plays(db: Session, video: Video, sure_only: bool = False) -> Selection:
+    """The plays of a recap, in the order played (the module's docstring); `sure_only`:
+    without what is still to check."""
+    events = _events(db, video, sure_only)
     points = [e for e in events if _point_kind(e)]
-    every = _rallies(db, video, facts=False)
+    every = _rallies(db, video, sure_only)
     # Facts: points tagged, the rallies marked done, or rallies a person made or accepted.
     human = any(r.source != "model" or r.review in ("confirmed", "corrected") for r in every)
     facts = bool(points) or video.rallies_reviewed_at is not None or human
-    rallies = _rallies(db, video, facts) if facts else every
+    rallies = every
     scores = _scores(db, video, rallies)
     plays: dict[uuid.UUID, Play] = {}
     for r in rallies:
@@ -295,7 +311,7 @@ def select_plays(db: Session, video: Video) -> Selection:
         )
         ended = known.ended
         length = r.end_ms - r.start_ms
-        unchecked = r.source == "model" and r.review == "unreviewed"
+        unchecked = r.source == "model" and r.review == "check"
         if length >= LONG_MS and not (unchecked and length > SUSPECT_MS):
             play.kinds.append("long")
             play.score += min(3.0, max(0.0, (length - 10_000) / 3_000))
@@ -350,7 +366,10 @@ def select_plays(db: Session, video: Video) -> Selection:
             chosen.append(p)
     chosen.sort(key=lambda p: p.start_ms)
     _trim_overlaps(chosen)
-    return Selection(chosen, "facts" if facts else "rallies")
+    unsure_rallies = {r.id for r in rallies if _rally_to_check(r)}
+    unsure_events = {e.id for e in events if e.source == "model" and e.review == "check"}
+    to_check = sum(1 for p in chosen if p.rally_id in unsure_rallies or p.event_id in unsure_events)
+    return Selection(chosen, "facts" if facts else "rallies", to_check, sure_only)
 
 
 def _choose(candidates: list[Play]) -> list[Play]:

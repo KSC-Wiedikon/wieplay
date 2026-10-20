@@ -740,8 +740,10 @@ segment          id, video_id, period_id NULL,
                  score_note NULL (missing_before|missing_after|extra|serve|coach|unsure),
                  source 'manual'|'model'|'import', import_system NULL, import_ref NULL,
                  model_run_id NULL, confidence NULL,
-                 review 'unreviewed'|'confirmed'|'corrected'|'rejected'|'merged',
-                 merged_into NULL (a merged proposal: the segment it went into),
+                 model_alternative NULL (WiePlay's other likely answer: us|them|none, a break kind),
+                 review 'auto'|'check'|'confirmed'|'corrected'|'rejected'|'merged'|'unreviewed'
+                   (§10.0; 'unreviewed' only on a person's own segments since 20.10.2026),
+                 merged_into NULL (a merged rally: the segment it went into),
                  created_by, updated_by, timestamps, deleted_at, version
 segment_revision same shape as event_revision (§6.7), written by trigger
 sync_point       id, video_id, video_ms, system ('openvolley'|'scoreboard'|'manual'),
@@ -773,7 +775,8 @@ event            id (client UUIDv7), video_id, segment_id NULL, sport, taxonomy_
                  ball_x NULL, ball_y NULL     -- a suggested action: the ball at contact (§10.4a)
                  clip_pre_ms NULL, clip_post_ms NULL, note NULL,
                  source 'manual'|'model'|'import', model_run_id NULL, confidence NULL,
-                 review 'unreviewed'|'confirmed'|'corrected'|'rejected',
+                 model_sure NULL, model_alternative NULL,   -- WiePlay's action (§10.4a)
+                 review 'auto'|'check'|'confirmed'|'corrected'|'rejected'|'unreviewed' (§10.0),
                  supersedes_id NULL, track_ref NULL,
                  created_by, created_at, updated_by, updated_at, deleted_at, version int
 event_revision   id, event_id, version, changed_by, changed_at,
@@ -1268,7 +1271,7 @@ the job waits in `waiting_budget` and admins are told.
 | `cpu_analysis` | `cpu_analysis` | Scoreboard OCR (whistles, motion and the ball moved into `analyse`) |
 | `analysis_copy` | `analysis_copy` | Live segments ±3 s, cropped to the court, 1080p50, to `analysis/` |
 | `trajectory` (16.10.2026) | `analyse`, `nas` | The ball's path with contacts, the court finder's proposal (§10.4, §10.6). Background lane |
-| `players` (17.10.2026, beta; v2 18.10.2026) | `WIEPLAY_PLAYERS_CAPS`: `cuda`, `ml` (the GPU worker, on dev and prod since 18.10.2026), else `analyse`, `nas` (the Lenovo's background lane) | People on the court (YOLO26s ONNX, ByteTrack): on the GPU followed through each set, linked into the players of the video by shirt numbers, team and court position, a confidence per card, back crops (§10.5). On demand (`WIEPLAY_PLAYERS_AUTO`, §10.5). Priority −12 |
+| `players` (17.10.2026, beta; v2 18.10.2026) | `WIEPLAY_PLAYERS_CAPS`: `cuda`, `ml` (the GPU worker, on dev and prod since 18.10.2026), else `analyse`, `nas` (the Lenovo's background lane) | People on the court (YOLO26s ONNX, ByteTrack): on the GPU followed through each set, linked into the players of the video by shirt numbers, team and court position, a confidence per card, back crops (§10.5). Follows the court job of every analysed video since 20.10.2026 (`WIEPLAY_PLAYERS_AUTO`, on by default; §10.0, §10.5). Priority −12 |
 | `ml_analyse` | `cuda` + `ml` (internal) or `gpu_dispatch` (provider), set by the active GPU backend | Serve side, ball track, player tracks → score and event proposals |
 | `export` | `export` | MP4 in `exports/` |
 | `retention`, `bucket_mirror` | `retention` / `nas` | Deletions (audited), weekly mirror |
@@ -1416,7 +1419,9 @@ is in the revision log.
 ### 9.7 Statistics and reports (M3b)
 
 Per match and season, per player and team, each number clickable into a reel of the
-underlying tags:
+underlying tags. Since 20.10.2026 (§10.0) every view counts WiePlay's tags too and says "N still
+to check" (DE "Noch N zu prüfen"); the **Sure only** switch (`?sure=true`) shows the numbers from
+sure and person-checked tags only, and the CSV and the recap say what is still to check:
 
 - Box score: counts by skill and grade, efficiencies (e.g. attack: (kills − errors −
   blocked) / attempts; reception: positive %, plus a 0–3 pass-rating view mapped from the
@@ -1556,13 +1561,90 @@ the skill, an ungraded tag counts as an attempt that is neither a point nor an e
 
 ## 10. Automatic analysis (tier 2)
 
-Everything produces **proposals** (`source='model'`, `review='unreviewed'`) that a coach
-confirms or corrects in one **Review** tab per video (modelled on Hudl's, §12.3: rally
-boundaries, set boundaries, starting rotations, serving sides and scores, calibration, later
-unidentified players; keyboard-first, the list advances on each answer). Corrections are
-revisions and become training data.
-Nothing is shown as fact until reviewed or until its measured accuracy passes the bar below.
+Since 20.10.2026 **WiePlay assigns everything and the coach checks only what it is unsure of**
+(§10.0). Before, everything was a proposal (`review='unreviewed'`) that counted nowhere until a
+coach accepted it. Corrections are revisions and become training data.
 CPU stages run free on the Lenovo server; only what needs a GPU goes to the GPU backend.
+
+### 10.0 WiePlay assigns everything; the coach checks the unsure part (20.10.2026)
+
+The owner (20.10.2026): "instead of suggestions, can you just tag actions, players, teams and if
+not sure: review? … everything gets analysed and automatically assigned: court, action/skills
+tags, grade of action if possible, points, sets, rotation etc." Unsure tags count in the stats
+right away, marked; the stats say "N still to check" and a switch shows the sure-only numbers.
+Grades keep DataVolley's six levels (`# + ! - / =`).
+
+**Every result of the analysis is a tag** (`source='model'`): rallies, who served and who won,
+the sets, the breaks, the actions with skill, side and grade hints, the player of an action, the
+lineups and rotations from the scoresheet. It counts in the stats, the search, the reels and the
+exports like a person's tag. Its review state says how sure WiePlay is:
+
+| `review` | Meaning | Counts | In "To check" |
+|---|---|---|---|
+| `auto` | WiePlay's, sure: accepted by itself, marked as WiePlay's | yes | no |
+| `check` | WiePlay's, unsure: "to check" | yes, marked | yes |
+| `confirmed` | a person accepted WiePlay's answer | yes | no |
+| `corrected` | a person changed it | yes | no |
+| `rejected` | a person said no (soft-deleted, a hard negative for training) | no | no |
+| `merged` | a rally folded into another one (soft-deleted) | no | no |
+| `unreviewed` | only on a person's own tags (manual, import), where the review means nothing | yes | — |
+
+- **Sure** means: a rally the joint decode is sure of (§10.3, `score_sure`: posterior ≥ 0.97,
+  no source disagreeing); a break or a set at confidence ≥ 0.9 (a set break, a long warm-up, a
+  set after a long break or from the scoreboard log); an action marked sure (§10.4a,
+  `model_sure`). WiePlay's untouched tags follow its sureness on every run: a rally that becomes
+  sure after a coach's answer next to it turns `auto` by itself. The revision trigger takes
+  WiePlay's own switch between `auto` and `check` as derived (no revision row); a person's answer
+  is a revision as before.
+- **To check** (one predicate on the server, `tagging.*_to_check`, and in the web): WiePlay's
+  tags marked `check`, and any rally whose winner the scoring is unsure of that nobody gave (a
+  person's own rally too), unless a person answered it; the players are the identify queue's
+  cards (§10.5).
+- **A person's answer always wins**: confirmed, corrected, rejected and merged rows, and rows a
+  person edited, are never replaced; a rerun replaces only WiePlay's untouched tags (`auto`,
+  `check`, `updated_by` empty), as before. A client that sends `unreviewed` for WiePlay's tag
+  (an undo) gets WiePlay's own state back.
+- **Facts for the scoring stay a person's**: the joint decode takes a serve tag as the coach's
+  call only when a person stands behind it (`tagging.event_fact`), never WiePlay's own serve.
+- **Migration `0029`** turned every open suggestion into a tag: actions by `model_sure`, rallies
+  by `score_sure`, breaks and sets by their confidence; rallies a coach had confirmed only the
+  bounds of with the winner still open (PR #74's "≥ 90 %" button) became `check` again (they
+  were "Needs you" before); a person's answers and own tags stayed. It adds
+  `segment.model_alternative` (a rally's other likely answer: the other winner or "none", no
+  point; a break's other kind) and indexes the actions to check per video.
+- **"Rallies done" and "actions done"** still make a game training data; they are refused while
+  anything of the kind is still to check, and a done game's labels include WiePlay's sure tags
+  (the coach stands behind the whole list).
+
+**One review: "To check".** One queue per video, ordered by what matters most: the rallies (and
+the breaks and sets between them, in time order) first, then the actions, then the player
+names (the identify queue, §10.5). Each item says why WiePlay is unsure (the decode's reasons,
+the confidence) and offers WiePlay's other answer as a button. The keyboard flow and the walk
+stay (§10.1 Review UI, §10.4a Review); `Enter` on a rally to check accepts WiePlay's answer: the
+bounds and, where nobody gave one, its winner (a person's fact from then on). The "Accept all
+sure …" buttons are gone: the sure ones are `auto` from the start. The rule stays: the coach
+reviews rallies, never scoresheet cells.
+
+**Stats** (§9.7): every view counts all tags and says "N still to check"; **Sure only**
+(`?sure=true` on every stats, zones and CSV route) leaves out what is still to check, takes
+WiePlay's server and winner only where the joint decode is sure, and WiePlay's players only from
+the scoresheet. The box CSV ends in a "To check" column (the row's tags still to check); a
+sure-only file ends in `-sure-only`. The game recap can be made from sure plays only and says
+how many of its plays rest on something still to check.
+
+**The chain runs by itself** (`wieplay/core/chain.py`): ready → `analyse` (rallies; at once the
+scoring: points, sets, sides, breaks, the scoresheet's lineups and rotations) → `trajectory` →
+`court` (hall memory, the finder, else the nominal camera) → `actions` and `players` (the GPU
+worker; its busy guard only makes the job wait) → the attribution of each action's player. A
+step that fails for good does not stop the next one where it can do without it (no ball path:
+the court is still looked for; no court: actions and players on the nominal camera). The API's
+reaper resumes, hourly and at most five jobs a run, a step nobody queued (older videos, a lost
+hand-off); `python -m wieplay.cli chain --all-ready` does it at once and prints every video's
+steps. The video shows "Analysing: 4 of 7 steps" (`GET /api/videos/{id}/analysis` → `steps`,
+the lists' `steps_done`/`steps_total`); a step counts as done once it succeeded, so a rerun
+after a coach's answer does not bring "Analysing" back. `WIEPLAY_PLAYERS_AUTO` is on by default.
+Training per team (rosters and players across videos, rotation priors, per-team models) is
+separate work.
 
 ### 10.1 Dead-time skipping (volleyball)
 
@@ -1578,16 +1660,17 @@ the recognition with each video". Runbook: [`runbooks/analysis.md`](runbooks/ana
    *signals* (a compressed `.npz` of a few MB, no pictures, no sound) go to `analysis/` on
    the NAS; features are derived from them on every run, so a better rule needs no new pass
    over the video. The current finder then proposes rallies.
-2. **Propose.** Proposals are rally segments with `source='model'`, `review='unreviewed'`,
-   a `confidence` and their `model_run_id`. A model never writes into a video that has
+2. **Propose.** WiePlay's rallies are segments with `source='model'`, `review` `auto` or
+   `check` (§10.0; before 20.10.2026 `unreviewed` proposals), a `confidence` and their
+   `model_run_id`. A model never writes into a video that has
    rallies a person made, confirmed or corrected: there it only scores itself against them
    (boundary precision, recall and F1 at ±1 s, IoU, counts: the per-game accuracy).
    Proposals nobody touched are replaced on a rerun; one that overlaps a rally a coach
-   rejected is dropped. Stats and condensed playback ignore a proposal until it is accepted.
+   rejected is dropped. Since 20.10.2026 stats and condensed playback count them (§10.0).
 3. **Review.** Accept → `confirmed`; a moved boundary, another kind or winner → `corrected`
    (the revision tables keep before and after); delete → `rejected` (soft-deleted: a hard
    negative); merged into another proposal → `merged` with `merged_into` (soft-deleted, no
-   label either way: the surviving one carries it); undo → `unreviewed` again. The server
+   label either way: the surviving one carries it); undo → WiePlay's own state again. The server
    marks edits and deletes itself when a client does not say. "Rallies done"
    (`POST /api/videos/{id}/rallies-reviewed`, `video.rallies_reviewed_at`) makes the game
    training data; it is refused (409 with the count) while a proposal is still open, and a
@@ -1652,7 +1735,7 @@ games), v0 keeps proposing, and a rerun never proposes again where a coach rejec
   at the benches: movement along the sides of the picture, little on court, no ball in play;
   at most four a set), else a `stoppage` from 40 s (substitutions, an injury, ball
   retrieval). Ordinary dead time stays unlabelled. Proposals like the rallies' (source
-  "model", review "unreviewed", a confidence), answered in the review (accept, relabel `W B T
+  "model", review `auto` from confidence 0.9, else `check`, §10.0), answered in the review (accept, relabel `W B T
   D O` or the buttons, Sub for a `substitution`, a coach's label only; reject; "It's a rally"),
   relabelled on every scoring unless answered, a label that stays (same kind, about the same
   stretch) keeping its row and id (20.10.2026: the review may have it on screen); never over a
@@ -1667,11 +1750,9 @@ games), v0 keeps proposing, and a rerun never proposes again where a coach rejec
   and the sheet disagree on the winner", "the sheet's box here is unclear (17 or 11)", "no point
   on the board log", "a timeout (Volero) at 14:12 doesn't fit here: the score here is 13:12",
   "a missed rally next to it"), the walk visits those first, and one button, **"Accept all sure
-  rallies (N)"**, confirms the start and end of every open rally suggestion the scoring is sure
-  of (who won stays WiePlay's suggestion, which follows the evidence, as PR #63 decided for the
-  log), in one undo step. It replaced "accept all remaining with confidence ≥ 90 %" (the
-  finder's confidence, blind to the score) and "accept all that match the scoreboard log"
-  (§10.10). A decision (a winner, a serve, accept, reject, a break, a moved boundary) is scored
+  rallies (N)"**, confirmed the start and end of every open rally suggestion the scoring was sure
+  of. Since 20.10.2026 (§10.0) the sure ones are `auto` from the start and the review is "To
+  check": no button. A decision (a winner, a serve, accept, reject, a break, a moved boundary) is scored
   again in the same request, and the reply carries every rally: the rallies around it can
   become sure while the coach watches.
 - **Bar**: boundary F1 ≥ 0.9 at ±1 s on held-out matches before condensed mode is the default
@@ -2647,16 +2728,18 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 - **When**: after each trajectory job, 90 s after a scoring a coach caused (sets, serve calls,
   rallies done; debounced), after a rally training, after an accepted action training, on
   request (`POST /api/videos/{id}/actions`, `python -m wieplay.cli actions`). Seconds a match.
-- **Review**: dashed in the tag list (with an inline accept) and on the timeline; the review
-  mode gains an Actions queue next to the rallies (since 20.10.2026 "Needs you: N" first, each
-  with WiePlay's other likely answer, and "Accept all sure actions"): the contact loops (1 s before to 0.5 s
+- **Review**: since 20.10.2026 (§10.0) WiePlay's actions are tags (`auto` when sure, else
+  `check`), marked in the tag list and on the timeline; the "To check" review walks the actions
+  after the rallies, each with WiePlay's other likely answer (no "Accept all sure actions" any
+  more): the contact loops (1 s before to 0.5 s
   after), `Enter` accept, `X` reject, `S R E A B D F` the skill, `# + ! - / =` the grade (again:
   none), a number then `Enter` the player, `Tab` the side, `←/→` one frame, `Shift+Enter` the
   rest of the rally, `U` undo; "actions reviewed" (`POST /api/videos/{id}/actions-reviewed`,
   `video.actions_reviewed_at`, refused while suggestions are open) makes the game training
   data. A changed skill, side, grade or time is a correction; naming the player is not.
-- **Facts only**: stats, smart reels, the score and the serving team ignore a suggestion until
-  a coach accepts it (`tagging.event_stands`); the stats say how many wait.
+- **Counted from the start** (§10.0, 20.10.2026): stats and smart reels count WiePlay's actions
+  (`tagging.event_stands`; "Sure only" leaves out those to check); the score and the serving team
+  still take only a person's serve tags (`tagging.event_fact`).
 - **First real run, 17.10.2026** (the H3 vs Volero Legends match of §10.1, v0 rallies and the
   scoring, outside the workers, the court clicked by hand; the nominal camera gives nearly the
   same): 2.9 k candidates, 7.2 per rally; 587 suggestions, 3.1 per rally: 188 serves (one in
@@ -2679,10 +2762,11 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 - **Built 17.10.2026** (`players` job, `wieplay/ml/{people,bytetrack,players}.py`, migration
   `0011`): see "Players in a video" below.
 
-**Players in a video (17.10.2026, beta; v2 18.10.2026, below).** Off by default
-(`WIEPLAY_PLAYERS_AUTO=false`): a coach finds them on demand ("Find players" on the video
-page, `POST /api/videos/{id}/players/find`) or an admin with `wieplay.cli players --video ID |
---all-ready`; switched on, the job follows the court job (§10.6). The attribution runs
+**Players in a video (17.10.2026, beta; v2 18.10.2026, below).** Since 20.10.2026 on by default
+(`WIEPLAY_PLAYERS_AUTO`, §10.0): the job follows the court job of every analysed video (also
+when the court job failed: the nominal camera); a coach can still run it again ("Find players"
+on the video page, `POST /api/videos/{id}/players/find`) or an admin with `wieplay.cli players
+--video ID | --all-ready`. The attribution runs
 whenever a video has players. As built first, on the Lenovo's background lane (CPU, ~2 h a
 match and many more cards than players, §10.9); since 18.10.2026 on the GPU worker
 (§8.2) as players v2, which changes steps 1, 2, 3 and 4 (next paragraphs):
@@ -2967,7 +3051,9 @@ candidate left for 1.8 % of the footage); pieces cards per set instead of per ma
 Continuity links between pieces that both read a number were right 50-60 % of the time when two
 candidates were close in cost: there is no long, safe stitching to be had from motion alone.
 
-**Automatic run** (`WIEPLAY_PLAYERS_AUTO`): stays off, on demand. The GPU makes it cheap
+**Automatic run** (`WIEPLAY_PLAYERS_AUTO`): on since 20.10.2026 (§10.0, the owner: "everything
+gets analysed and automatically assigned"); the cards WiePlay is unsure of are the last part of
+"To check". The reasoning of 18.10.2026 for keeping it off: the GPU makes it cheap
 (~10 min a match), but only calibrated videos get sure cards (3 of the 22 prod videos had
 one on 18.10.2026), more than half of a match's player footage stays on cards to
 check even then, and there are no coach-tagged numbers yet to measure the attribution.

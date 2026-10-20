@@ -136,7 +136,7 @@ def test_a_ready_volleyball_video_is_analysed(
     state = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()
     assert state["status"] == "queued" and state["model_run"] is None
     assert state["proposals"] == {
-        "unreviewed": 0, "confirmed": 0, "corrected": 0, "rejected": 0, "merged": 0,
+        "auto": 0, "check": 0, "confirmed": 0, "corrected": 0, "rejected": 0, "merged": 0,
     }  # fmt: skip
     # The media lane (no "analyse" cap) never gets it; the background lane does.
     media = worker_client(club["coach"].app, club["admin"], MEDIA_CAPS)  # type: ignore[arg-type]
@@ -194,9 +194,7 @@ def test_proposals_are_written_with_their_model_run(
     complete(analyser, job, payload(job, [(10_000, 20_000), (40_000, 52_000), (80_000, 90_000)]))
     segs = segments(club["coach"], ready)
     assert len(segs) == 3
-    assert {(s["source"], s["review"], s["confidence"]) for s in segs} == {
-        ("model", "unreviewed", 0.7)
-    }
+    assert {(s["source"], s["review"], s["confidence"]) for s in segs} == {("model", "check", 0.7)}
     state = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()
     assert state["status"] == "done" and state["metrics_vs_human"] is None
     run = state["model_run"]
@@ -204,7 +202,7 @@ def test_proposals_are_written_with_their_model_run(
     assert run["kind"] == "analyse" and run["model_version"] == "abc123"
     assert run["metrics"]["mode"] == "proposals" and run["metrics"]["proposed"] == 3
     assert run["metrics"]["signals"]["whistles"] == 300
-    assert state["proposals"]["unreviewed"] == 3
+    assert state["proposals"]["check"] == 3
     with db_engine.connect() as conn:
         artifact = conn.execute(
             text("SELECT kind, nas_path, video_id FROM analysis_artifact")
@@ -233,16 +231,18 @@ def test_video_lists_say_where_the_analysis_stands(
         listed = coach.get(f"/api/teams/{ready['team_id']}/videos").json()
         one = coach.get(f"/api/videos/{ready['id']}").json()["analysis"]
         assert next(v for v in listed if v["id"] == ready["id"])["analysis"] == one
-        return one
+        assert one["open"] == one["to_check"]
+        return {"status": one["status"], "open": one["open"]}
 
     assert brief() == {"status": "queued", "open": 0}
     job = claim_kind(analyser, "analyse")
     assert brief() == {"status": "running", "open": 0}
     complete(analyser, job, payload(job, [(10_000, 20_000), (40_000, 52_000)]))
-    assert brief() == {"status": "done", "open": 2}
+    # Two rallies to check, and the break after the last one (the end of the match).
+    assert brief() == {"status": "done", "open": 3}
     first = segments(coach, ready)[0]
     change(coach, ready, edit(first, review="confirmed"))
-    assert brief() == {"status": "done", "open": 1}
+    assert brief() == {"status": "done", "open": 2}
 
 
 def test_a_bad_result_fails_the_analysis_not_the_video(
@@ -273,7 +273,7 @@ def test_rerun_replaces_untouched_proposals_and_respects_rejections(
     first = {s["start_ms"]: s for s in segments(club["coach"], ready)}
     change(club["coach"], ready, edit(first[40_000], deleted=True))  # the coach rejects one
     assert club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()["proposals"] == {
-        "unreviewed": 1, "confirmed": 0, "corrected": 0, "rejected": 1, "merged": 0,
+        "auto": 0, "check": 1, "confirmed": 0, "corrected": 0, "rejected": 1, "merged": 0,
     }  # fmt: skip
 
     club["coach"].post(f"/api/videos/{ready['id']}/analyse")
@@ -342,7 +342,7 @@ def test_review_actions_on_proposals(
     assert {s["source"] for s in after.values()} == {"model"}
     state = club["coach"].get(f"/api/videos/{ready['id']}/analysis").json()
     assert state["proposals"] == {
-        "unreviewed": 0, "confirmed": 1, "corrected": 2, "rejected": 0, "merged": 1,
+        "auto": 0, "check": 0, "confirmed": 1, "corrected": 2, "rejected": 0, "merged": 1,
     }  # fmt: skip
 
     # Undo, as the review page sends it: the fields as they were and "unreviewed".
@@ -357,8 +357,8 @@ def test_review_actions_on_proposals(
     back = {s["id"]: s for s in undo["segments"]}
     assert [(back[x["id"]]["review"], back[x["id"]]["start_ms"], back[x["id"]]["end_ms"])
             for x in (a, b, c, d)] == [
-        ("unreviewed", 10_000, 20_000), ("unreviewed", 40_000, 52_000),
-        ("unreviewed", 80_000, 90_000), ("unreviewed", 90_500, 99_000),
+        ("check", 10_000, 20_000), ("check", 40_000, 52_000),
+        ("check", 80_000, 90_000), ("check", 90_500, 99_000),
     ]  # fmt: skip
     assert back[d["id"]]["merged_into"] is None and back[d["id"]]["deleted_at"] is None
 
@@ -367,7 +367,7 @@ def test_review_actions_on_proposals(
     rejected = {s["id"]: s for s in gone["segments"]}[c["id"]]
     assert rejected["review"] == "rejected" and rejected["deleted_at"] is not None
     restored = change(club["coach"], ready, edit(rejected, deleted=False))
-    assert {s["id"]: s for s in restored["segments"]}[c["id"]]["review"] == "unreviewed"
+    assert {s["id"]: s for s in restored["segments"]}[c["id"]]["review"] == "check"
     # merged_into must name another segment of the video.
     bad = edit(back[a["id"]], deleted=True, review="merged", merged_into=str(uuid.uuid4()))
     r = club["coach"].post(f"/api/videos/{ready['id']}/changes", json={"segments": [bad]})
@@ -463,9 +463,9 @@ def test_rallies_reviewed_needs_every_proposal_answered_and_trains_once(
     change(club["coach"], ready, edit(first[40_000], deleted=True))
     refused = club["coach"].post(url, json={"reviewed": True})
     assert refused.status_code == 409
-    assert refused.json()["detail"]["open_proposals"] == 1
+    assert refused.json()["detail"]["to_check"] == 1
     # Nothing was confirmed behind the coach's back.
-    assert [s["review"] for s in segments(club["coach"], ready)] == ["unreviewed"]
+    assert [s["review"] for s in segments(club["coach"], ready)] == ["check"]
     change(club["coach"], ready, edit(first[10_000], review="confirmed"))
     done = club["coach"].post(url, json={"reviewed": True})
     assert done.status_code == 200, done.text
@@ -626,16 +626,17 @@ def test_training_waits_for_the_debounce(
     assert r.json()["jobs"] == []
 
 
-def test_open_proposals_are_not_facts_yet(
+def test_wieplays_rallies_count_from_the_start(
     ready: Any, club: dict[str, TestClient], analyser: TestClient
 ) -> None:
-    """Condensed playback and the stats use a proposal once a coach accepted it."""
+    """Condensed playback and the stats use WiePlay's rallies at once (PLAN §10.0); a rally a
+    coach rejected no longer counts."""
     job = claim_kind(analyser, "analyse")
     complete(analyser, job, payload(job, [(10_000, 20_000), (40_000, 52_000)]))
     url = f"/api/videos/{ready['id']}"
-    assert club["coach"].get(f"{url}/condensed").json() == []
+    assert len(club["coach"].get(f"{url}/condensed").json()) == 2
     by_start = {s["start_ms"]: s for s in segments(club["coach"], ready)}
-    change(club["coach"], ready, edit(by_start[10_000], review="confirmed", won_by="us"))
+    change(club["coach"], ready, edit(by_start[40_000], review="rejected", deleted=True))
     pieces = club["coach"].get(f"{url}/condensed").json()
     assert len(pieces) == 1 and pieces[0]["start_ms"] < 10_000 < pieces[0]["end_ms"]
     assert club["coach"].get(f"{url}/stats").status_code == 200
@@ -655,6 +656,4 @@ def test_a_reopened_game_does_not_train_until_it_is_done_again(
     train = claim_kind(analyser, "train_rallies")
     inputs = analyser.post(f"/api/worker/jobs/{train['id']}/inputs", json={}).json()
     assert inputs["train"] == [] and inputs["others"] == []
-    assert [(e["video_id"], e["reason"]) for e in inputs["skipped"]] == [
-        (ready["id"], "open proposals")
-    ]
+    assert [(e["video_id"], e["reason"]) for e in inputs["skipped"]] == [(ready["id"], "to check")]

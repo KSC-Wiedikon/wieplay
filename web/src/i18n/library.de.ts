@@ -254,6 +254,9 @@ export const libraryDe: Messages<typeof libraryEn> = {
       condensed: 'Ballwechsel eines Spiels',
       recap: 'Spielzusammenfassung',
     },
+    sureOnly: 'Nur sichere',
+    toCheck_one: 'Noch {{count}} Szene zu prüfen',
+    toCheck_other: 'Noch {{count}} Szenen zu prüfen',
     status: {
       queued: 'In Vorbereitung',
       ready: 'Bereit',

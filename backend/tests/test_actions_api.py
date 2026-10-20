@@ -153,7 +153,7 @@ def test_the_actions_follow_the_trajectory_and_are_suggested(
     events = suggested(coach, ready)
     assert len(events) == 12
     serve = events[0]
-    assert (serve["code"], serve["side"], serve["review"]) == ("S", "us", "unreviewed")
+    assert (serve["code"], serve["side"], serve["review"]) == ("S", "us", "check")
     assert serve["number"] is None and serve["confidence"] == 0.7
     assert (serve["ball_x"], serve["ball_y"]) == (0.5, 0.45)
     assert serve["time_precision"] == "adjusted" and serve["frame"] == round(serve["t_ms"] / 20)
@@ -164,13 +164,16 @@ def test_the_actions_follow_the_trajectory_and_are_suggested(
     state = coach.get(f"/api/videos/{ready['id']}/analysis").json()["actions"]
     assert state["status"] == "done" and state["finder"] == "v0"
     assert state["proposed"] == 12 and state["counts"]["S"] == 3 and state["counts"]["B"] == 0
-    assert state["suggestions"] == {"unreviewed": 12, "confirmed": 0, "corrected": 0, "rejected": 0}
+    assert state["suggestions"] == {
+        "auto": 0, "check": 12, "confirmed": 0, "corrected": 0, "rejected": 0
+    }  # fmt: skip
     assert state["vs_coach"] is None and state["model"]["finder"] == "v0"
-    # Facts only: the stats count none of them yet, and say how many wait.
+    # They count from the start (PLAN §10.0), marked: the stats say how many are to check.
     stats = coach.get(f"/api/videos/{ready['id']}/stats").json()
-    assert stats["tags"] == 0 and stats["suggested"] == 12
-    assert coach.get(f"/api/teams/{ready['team_id']}/stats").json()["suggested"] == 12
-    # A suggested serve is no fact: the rally's server stays the model's.
+    assert stats["tags"] == 12 and stats["to_check"] >= 12
+    assert coach.get(f"/api/teams/{ready['team_id']}/stats").json()["to_check"] >= 12
+    assert coach.get(f"/api/videos/{ready['id']}/stats?sure=true").json()["tags"] == 0
+    # WiePlay's serve is no fact for the scoring: the rally's server stays the model's.
     seg = next(s for s in rallies_of(tagging(coach, ready)) if s["id"] == first["id"])
     assert seg["serving"] is None
 
@@ -291,10 +294,11 @@ def test_a_suggestion_is_accepted_corrected_or_rejected(
     # Undo the rejection: open again.
     gone = next(x for x in out["events"] if x["id"] == a["id"])
     back = post_events(coach, ready, {**event_in(gone), "review": "rejected", "deleted": False})
-    assert back["events"][0]["review"] == "unreviewed"
-    # The accepted and corrected ones count now; the open one does not.
+    assert back["events"][0]["review"] == "check"
+    # All four count; the reopened one is to check, so "sure only" leaves it out.
     stats = coach.get(f"/api/videos/{ready['id']}/stats").json()
-    assert stats["tags"] == 3 and stats["suggested"] == 1
+    assert stats["tags"] == 4
+    assert coach.get(f"/api/videos/{ready['id']}/stats?sure=true").json()["tags"] == 3
     # An accepted serve is a fact: it names the rally's server.
     seg = next(x for x in rallies_of(tagging(coach, ready)) if x["id"] == rally["id"])
     assert seg["serving"] == s["side"]
@@ -319,7 +323,7 @@ def test_actions_done_waits_for_every_answer_and_trains(
     url = f"/api/videos/{ready['id']}/actions-reviewed"
     refused = coach.post(url, json={"reviewed": True})
     assert refused.status_code == 409
-    assert refused.json()["detail"]["open_suggestions"] == 8
+    assert refused.json()["detail"]["to_check"] == 8
     events = suggested(coach, ready)
     post_events(coach, ready, *(event_in(e, review="confirmed") for e in events[:7]))
     post_events(coach, ready, {**event_in(events[7]), "deleted": True})

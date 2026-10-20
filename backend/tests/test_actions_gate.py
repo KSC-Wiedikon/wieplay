@@ -159,7 +159,7 @@ def test_suggestions_from_the_start_with_sure_flags(
     assert state["gate"]["reason"] == "auto" and state["gate"]["games"] == 0
     assert set(state["gate"]["measured"]) >= {"rallies", "precision", "sure", "sure_wrong"}
     stats = coach.get(f"/api/videos/{ready['id']}/stats").json()
-    assert stats["suggested"] == 8 and stats["actions_gate"]["open"] is True
+    assert stats["tags"] == 8 and stats["actions_gate"]["open"] is True
 
 
 def test_a_bad_alternative_is_refused(ready: Any, analyser: TestClient, store: FakeStore) -> None:

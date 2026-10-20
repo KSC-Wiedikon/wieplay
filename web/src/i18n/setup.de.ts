@@ -11,7 +11,7 @@ export const setupDe: Messages<typeof setupEn> = {
     wieplay: '{{team}} (WiePlay)',
     none: '–',
     changed: 'Punkt von Ballwechsel {{n}}: {{team}}.',
-    cleared: 'Punkt von Ballwechsel {{n}}: wieder der Vorschlag von WiePlay.',
+    cleared: 'Punkt von Ballwechsel {{n}}: wieder die Antwort von WiePlay.',
     undo: 'Rückgängig',
     failed: 'Der Punkt konnte nicht gespeichert werden: {{detail}}',
   },
@@ -91,6 +91,8 @@ export const setupDe: Messages<typeof setupEn> = {
     noRallies: 'Markier oder prüf zuerst die Ballwechsel.',
     recap: 'Spielzusammenfassung (MP4)',
     recapHint: 'Die besten Szenen in 2–3 Minuten, mit Titelbild und Spielstand.',
+    recapSure: 'Spielzusammenfassung, nur sichere (MP4)',
+    recapSureHint: 'Nur Szenen aus Tags, bei denen WiePlay sicher ist oder die jemand geprüft hat.',
     downloads: 'Deine Downloads',
   },
   videoGame: {

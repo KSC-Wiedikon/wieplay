@@ -2,9 +2,9 @@ import { useId, useMemo, useState, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
 import { Select } from '../../components/Field'
-import { SparkleIcon } from '../../components/icons'
+import { AlertIcon, SparkleIcon } from '../../components/icons'
 import { SuggestionChip } from '../../components/SuggestionChip'
-import { isSuggestedTag } from '../../lib/actions'
+import { isToCheckTag } from '../../lib/actions'
 import { commentMoments } from '../../lib/comments'
 import { cx } from '../../lib/cx'
 import { formatEntry } from '../../lib/grammar'
@@ -13,34 +13,25 @@ import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
 import { cardTone, noteText, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { useSideNames } from '../../lib/sides'
-import {
-  formatPercent,
-  GAP_KINDS,
-  isGap,
-  isGapSuggestion,
-  isProposal,
-  isReviewedProposal,
-  isSetSuggestion,
-  isSuggestion,
-  scoreAfter,
-} from '../../lib/suggestions'
+import { GAP_KINDS, isAuto, isGap, isReviewedProposal, isToCheck, isWiePlays, scoreAfter, setToCheck } from '../../lib/suggestions'
 import type { Segment, SegmentKind, Side, Tag } from '../../lib/types'
 import { useActionReview, useReview, useUi, useView, useWorkspace } from './context'
 
 const SPANS = [30_000, 60_000, 120_000, 300_000] as const
 
 /**
- * WiePlay's open suggestions are outlined (dashed), not filled: they are not rallies (or breaks)
- * yet. A break WiePlay labelled is a lighter, dashed band in its colour.
+ * Every rally and break counts, WiePlay's too: filled in its colour. One still to check gets a
+ * red outline (and a "!" on the zoom).
  */
-function segmentClass(segment: Pick<Segment, 'kind' | 'source' | 'review'>): string {
-  if (isSuggestion(segment)) return 'border-2 border-dashed border-accent bg-accent-soft'
-  if (isGapSuggestion(segment)) return suggestedGapClass(segment.kind)
-  return kindClass(segment.kind)
+function segmentClass(segment: Segment): string {
+  return cx(kindClass(segment.kind), isToCheck(segment) && TO_CHECK_RING)
 }
 
+const TO_CHECK_RING = 'ring-2 ring-inset ring-danger'
+
 function suggestionState(segment: Segment): string | undefined {
-  if (isProposal(segment)) return 'open'
+  if (isToCheck(segment)) return 'check'
+  if (isAuto(segment)) return 'auto'
   return isReviewedProposal(segment) ? segment.review : undefined
 }
 
@@ -59,21 +50,6 @@ function kindClass(kind: SegmentKind): string {
       return 'bg-fg/30'
     default:
       return 'bg-muted/40'
-  }
-}
-
-function suggestedGapClass(kind: SegmentKind): string {
-  switch (kind) {
-    case 'timeout':
-      return 'border border-dashed border-danger bg-danger/15'
-    case 'set_break':
-      return 'border border-dashed border-muted bg-muted/25'
-    case 'warmup':
-      return 'border border-dashed border-link bg-link/15'
-    case 'stoppage':
-      return 'border border-dashed border-fg/50 bg-fg/10'
-    default:
-      return 'border border-dashed border-muted bg-muted/10'
   }
 }
 
@@ -153,8 +129,8 @@ function Overview({ duration, span }: { duration: number; span: number }) {
             data-set-start={p.no}
             className={cx(
               'absolute top-0 h-1.5 border-l-2',
-              // A set WiePlay suggested: lighter, until a coach accepts it.
-              isSetSuggestion(p) ? 'border-dashed border-fg/40 bg-fg/15' : cx('border-fg', i % 2 === 0 ? 'bg-fg/40' : 'bg-fg/25'),
+              // A set WiePlay is unsure of: dashed, until someone checks it.
+              setToCheck(p) ? 'border-dashed border-danger bg-fg/15' : cx('border-fg', i % 2 === 0 ? 'bg-fg/40' : 'bg-fg/25'),
             )}
             style={{ left: pct(p.start_ms), width: pct((p.end_ms ?? duration) - p.start_ms) }}
           />
@@ -164,19 +140,16 @@ function Overview({ duration, span }: { duration: number; span: number }) {
             key={s.id}
             data-suggestion={suggestionState(s)}
             data-gap={isGap(s.kind) ? s.kind : undefined}
-            className={cx(
-              'absolute top-2 bottom-3 min-w-px rounded-sm',
-              isSuggestion(s) ? 'border border-dashed border-accent bg-accent-soft' : isGapSuggestion(s) ? suggestedGapClass(s.kind) : kindClass(s.kind),
-            )}
+            className={cx('absolute top-2 bottom-3 min-w-px rounded-sm', kindClass(s.kind), isToCheck(s) && 'ring-1 ring-inset ring-danger')}
             style={{ left: pct(s.start_ms), width: pct(s.end_ms - s.start_ms) }}
           />
         ))}
         {view.events.map((e) => (
           <div
             key={e.id}
-            data-action-suggestion={isSuggestedTag(e) ? 'open' : undefined}
-            // A suggested action: shorter and in the accent colour, until a coach accepts it.
-            className={cx('absolute bottom-0 w-px', isSuggestedTag(e) ? 'h-1 bg-accent' : cx('h-2', e.side === 'us' ? 'bg-fg' : 'bg-muted'))}
+            data-action-suggestion={isToCheckTag(e) ? 'check' : undefined}
+            // An action to check: in red, until someone checks it.
+            className={cx('absolute bottom-0 h-2 w-px', isToCheckTag(e) ? 'bg-danger' : e.side === 'us' ? 'bg-fg' : 'bg-muted')}
             style={{ left: pct(e.t_ms) }}
           />
         ))}
@@ -316,24 +289,24 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
           />
         ))}
       {sets.map((p) => {
-        const suggested = isSetSuggestion(p)
+        const check = setToCheck(p)
         const name = periodLabel(t, taxonomy.sport, p.no)
         return (
           <div
             key={p.id}
             data-set-start={p.no}
-            title={suggested ? t('tagging.markers.suggested', { label: name }) : name}
-            className={cx('absolute top-0 bottom-0 border-l-2', suggested ? 'border-dashed border-fg/40' : 'border-fg')}
+            title={check ? t('tagging.markers.toCheck', { label: name }) : name}
+            className={cx('absolute top-0 bottom-0 border-l-2', check ? 'border-dashed border-danger' : 'border-fg')}
             style={{ left: x(p.start_ms) }}
           >
-            <span className={cx('absolute bottom-0.5 left-1 rounded px-1 text-[10px] leading-4 font-bold whitespace-nowrap', suggested ? 'bg-surface text-muted italic' : 'bg-fg text-page')}>
+            <span className={cx('absolute bottom-0.5 left-1 rounded px-1 text-[10px] leading-4 font-bold whitespace-nowrap', check ? 'bg-surface text-danger' : 'bg-fg text-page')}>
               {name}
             </span>
           </div>
         )
       })}
       {segments.map((s) => {
-        const open = isSuggestion(s)
+        const check = isToCheck(s)
         const gap = isGap(s.kind)
         const score = s.kind === 'rally' ? scoreAfter(s) : null
         const kind = segmentLabel(t, s, taxonomy.sport, names)
@@ -343,20 +316,19 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
             onClick={pickSegment(s)}
             data-suggestion={suggestionState(s)}
             data-gap={gap ? s.kind : undefined}
-            title={isGapSuggestion(s) ? t('tagging.markers.suggested', { label: kind }) : s.score_conflict ? scoreNoteText(t, s.score_note) : undefined}
+            title={check ? t('tagging.markers.toCheck', { label: kind }) : s.score_conflict ? scoreNoteText(t, s.score_note) : undefined}
             className={cx(
               'absolute top-5 flex h-7 items-center gap-0.5 overflow-hidden rounded-md px-1 text-xs font-semibold whitespace-nowrap',
               segmentClass(s),
-              open ? 'text-on-accent-soft' : s.kind === 'rally' || s.kind === 'possession' ? 'text-on-accent' : 'text-fg',
-              isGapSuggestion(s) && 'font-normal italic',
+              s.kind === 'rally' || s.kind === 'possession' ? 'text-on-accent' : 'text-fg',
               selectedId === s.id && 'ring-2 ring-fg',
             )}
             style={{ left: x(Math.max(s.start_ms, from)), width: `${((Math.min(s.end_ms, to) - Math.max(s.start_ms, from)) / span) * 100}%` }}
           >
-            {/* A suggestion that was accepted or corrected keeps a small marker. */}
+            {/* WiePlay's rallies and breaks keep a small marker; one to check a "!" too. */}
             {s.source === 'model' && (s.kind === 'rally' || gap) && <SparkleIcon className="size-3 shrink-0" />}
-            {s.score_conflict && <span aria-hidden="true" className="rounded-sm bg-danger px-0.5 text-[10px] leading-3 text-page">!</span>}
-            {open ? formatPercent(s.confidence) : s.kind === 'rally' ? <span className={cx(score?.suggested && 'italic opacity-80')}>{score?.text ?? ''}</span> : kind}
+            {(check || s.score_conflict) && <span aria-hidden="true" className="rounded-sm bg-danger px-0.5 text-[10px] leading-3 text-page">!</span>}
+            {s.kind === 'rally' ? <span className={cx(score?.suggested && 'italic opacity-80')}>{score?.text ?? ''}</span> : kind}
           </div>
         )
       })}
@@ -383,26 +355,26 @@ function Zoom({ duration, span }: { duration: number; span: number }) {
 function TagMarker({ tag, left, selected, onClick }: { tag: Tag; left: string; selected: boolean; onClick: (e: MouseEvent) => void }) {
   const { t } = useTranslation()
   const row: Record<Side, string> = { us: 'top-13', them: 'top-[4.25rem]' }
-  const suggested = isSuggestedTag(tag)
+  const check = isToCheckTag(tag)
   return (
     <div
       onClick={onClick}
-      data-action-suggestion={suggested ? 'open' : undefined}
-      title={suggested ? t('tagging.markers.suggested', { label: formatEntry(tag) }) : undefined}
+      data-action-suggestion={check ? 'check' : undefined}
+      title={check ? t('tagging.markers.toCheck', { label: formatEntry(tag) }) : undefined}
       className={cx(
         'absolute -translate-x-1/2 rounded px-1 font-mono text-[11px] leading-4 font-bold whitespace-nowrap',
         row[tag.side],
-        // A suggested action: dashed and light, until a coach accepts it.
-        suggested
-          ? 'border border-dashed border-accent bg-accent-soft font-semibold text-on-accent-soft italic'
-          : tag.side === 'us'
-            ? 'bg-fg text-page'
-            : 'bg-surface text-fg ring-1 ring-hairline',
+        tag.side === 'us' ? 'bg-fg text-page' : 'bg-surface text-fg ring-1 ring-hairline',
+        // An action to check: a red outline, until someone checks it.
+        check && 'ring-2 ring-danger',
         selected && 'ring-2 ring-accent',
       )}
       style={{ left }}
     >
       {formatEntry(tag)}
+      {check && (
+        <AlertIcon aria-hidden="true" className="ml-0.5 inline size-3 align-[-2px] text-danger" />
+      )}
     </div>
   )
 }
@@ -412,9 +384,7 @@ function Legend() {
   const { controller, taxonomy } = useWorkspace()
   const names = useSideNames()
   const view = useView()
-  const suggested = view.segments.some((s) => s.source === 'model' && s.kind === 'rally')
-  const gapSuggested = view.segments.some(isGapSuggestion)
-  const actionSuggested = view.events.some(isSuggestedTag)
+  const toCheck = view.segments.some(isToCheck) || view.events.some(isToCheckTag)
   // Warm-up, stoppage and other breaks only once there are some.
   const more = GAP_KINDS.filter((k) => k !== 'timeout' && k !== 'set_break' && view.segments.some((s) => s.kind === k))
   const items: [string, string][] = [
@@ -422,18 +392,16 @@ function Legend() {
     ...(controller.playsRallies
       ? ([
           ['bg-accent', t('tagging.timeline.legend.rally')],
-          ...(suggested ? [['border border-dashed border-accent bg-accent-soft', t('tagging.suggestions.legend')]] : []),
           ['bg-sunken ring-1 ring-hairline', t('tagging.timeline.legend.dead')],
         ] as [string, string][])
       : []),
     ['bg-danger/60', t('tagging.segment.kind.timeout')],
     ['bg-muted/70', segmentKindLabel(t, 'set_break', taxonomy.sport)],
     ...more.map((k): [string, string] => [kindClass(k), segmentKindLabel(t, k, taxonomy.sport)]),
-    ...(gapSuggested ? [['border border-dashed border-muted bg-muted/10', t('tagging.timeline.legend.gapSuggested')] as [string, string]] : []),
     ...(view.periods.length > 0 ? [['rounded-none border-l-2 border-fg', t('tagging.timeline.legend.setStart')] as [string, string]] : []),
     ['bg-fg', t('tagging.timeline.legend.tagUs', { team: sideLabel(t, 'us', names) })],
     ['bg-muted', t('tagging.timeline.legend.tagThem', { team: sideLabel(t, 'them', names) })],
-    ...(actionSuggested ? [['border border-dashed border-accent bg-accent-soft', t('actions.legend')] as [string, string]] : []),
+    ...(toCheck ? [['bg-surface ring-2 ring-inset ring-danger', t('tagging.timeline.legend.toCheck')] as [string, string]] : []),
     ['bg-link rotate-45 scale-75', t('tagging.timeline.legend.comment')],
   ]
   return (
@@ -478,7 +446,7 @@ export function SegmentPanel({ id }: { id: string }) {
           <SuggestionChip segment={segment} />
         </h2>
         <span className="flex flex-wrap gap-2">
-          {isProposal(segment) && (
+          {isWiePlays(segment) && isToCheck(segment) && (
             <Button variant="primary" onClick={() => controller.acceptSegment(segment.id)}>
               {t('tagging.suggestions.accept')}
             </Button>

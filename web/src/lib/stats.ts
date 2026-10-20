@@ -48,6 +48,8 @@ export interface StatRow {
   values: Record<string, StatValue>
   /** Season: matches with a tag of this row. */
   matches: number | null
+  /** The row's tags still to check (absent from older servers). */
+  to_check?: number
 }
 
 export interface TeamLine {
@@ -214,9 +216,14 @@ export interface VideoStats {
   sets: SetBox[]
   /** The numbers of our tags shown per rotation (absent from older servers). */
   rotation_columns?: StatColumn[]
-  /** Suggested actions nobody has answered yet: not counted (absent from older servers). */
-  suggested?: number
-  /** Whether WiePlay suggests actions yet. */
+  /**
+   * Tags, rallies, breaks and sets still to check in what this view counts (with ?sure=true: those
+   * left out of the numbers); absent from older servers.
+   */
+  to_check?: number
+  /** The numbers are from sure and person-checked tags only (?sure=true). */
+  sure_only?: boolean
+  /** Whether WiePlay tags actions. */
   actions_gate?: ActionGate | null
   /** With ?search=: the tags it kept (`tags` stays the match's count); null without one. */
   selected?: number | null
@@ -253,8 +260,9 @@ export interface TeamStats {
   season_box: BoxScore
   matches: MatchLine[]
   rotation_columns?: StatColumn[]
-  /** Suggested actions nobody has answered yet, over the matches: not counted. */
-  suggested?: number
+  /** Still to check over the matches (with ?sure=true: left out of the numbers). */
+  to_check?: number
+  sure_only?: boolean
   actions_gate?: ActionGate | null
   /** With ?search=: the tags it kept over the matches; null (or absent) without one. */
   selected?: number | null
@@ -310,34 +318,45 @@ export interface ZoneStats {
   scopes: ZoneScope[]
 }
 
-/** `?search=…` (a TagSearch as JSON, src/lib/search.ts searchParam), or nothing. */
-const searchQuery = (search: string | null | undefined, first = false) => (search ? `${first ? '?' : '&'}search=${encodeURIComponent(search)}` : '')
+/**
+ * `?search=…` (a TagSearch as JSON, src/lib/search.ts searchParam) and `sure=true` ("Sure only":
+ * WiePlay's sure tags and the person-checked ones, nothing still to check), or nothing.
+ */
+const statsQuery = (search: string | null | undefined, sure: boolean, first = false): string => {
+  const parts = [...(search ? [`search=${encodeURIComponent(search)}`] : []), ...(sure ? ['sure=true'] : [])]
+  return parts.length === 0 ? '' : `${first ? '?' : '&'}${parts.join('&')}`
+}
 
 export const statsApi = {
-  video: (id: string, signal?: AbortSignal, search: string | null = null) => apiRequest<VideoStats>(`/api/videos/${id}/stats${searchQuery(search, true)}`, { signal }),
-  team: (id: number, signal?: AbortSignal, search: string | null = null) => apiRequest<TeamStats>(`/api/teams/${id}/stats${searchQuery(search, true)}`, { signal }),
-  videoZones: (id: string, signal?: AbortSignal, search: string | null = null) =>
-    apiRequest<ZoneStats>(`/api/videos/${id}/stats/zones${searchQuery(search, true)}`, { signal }),
-  teamZones: (id: number, signal?: AbortSignal, search: string | null = null) =>
-    apiRequest<ZoneStats>(`/api/teams/${id}/stats/zones${searchQuery(search, true)}`, { signal }),
+  video: (id: string, signal?: AbortSignal, search: string | null = null, sure = false) =>
+    apiRequest<VideoStats>(`/api/videos/${id}/stats${statsQuery(search, sure, true)}`, { signal }),
+  team: (id: number, signal?: AbortSignal, search: string | null = null, sure = false) =>
+    apiRequest<TeamStats>(`/api/teams/${id}/stats${statsQuery(search, sure, true)}`, { signal }),
+  videoZones: (id: string, signal?: AbortSignal, search: string | null = null, sure = false) =>
+    apiRequest<ZoneStats>(`/api/videos/${id}/stats/zones${statsQuery(search, sure, true)}`, { signal }),
+  teamZones: (id: number, signal?: AbortSignal, search: string | null = null, sure = false) =>
+    apiRequest<ZoneStats>(`/api/teams/${id}/stats/zones${statsQuery(search, sure, true)}`, { signal }),
 }
 
 const partQuery = (part: CsvPart) => (part === 'box' ? '' : `&part=${part}`)
 
 /** The CSV download is a plain link (the session cookie goes along). */
-export function videoCsvUrl(id: string, lang: CsvLanguage, part: CsvPart = 'box', search: string | null = null): string {
-  return `/api/videos/${id}/stats.csv?lang=${lang}${partQuery(part)}${searchQuery(search)}`
+export function videoCsvUrl(id: string, lang: CsvLanguage, part: CsvPart = 'box', search: string | null = null, sure = false): string {
+  return `/api/videos/${id}/stats.csv?lang=${lang}${partQuery(part)}${statsQuery(search, sure)}`
 }
 
-export function teamCsvUrl(id: number, lang: CsvLanguage, part: CsvPart = 'box', search: string | null = null): string {
-  return `/api/teams/${id}/stats.csv?lang=${lang}${partQuery(part)}${searchQuery(search)}`
+export function teamCsvUrl(id: number, lang: CsvLanguage, part: CsvPart = 'box', search: string | null = null, sure = false): string {
+  return `/api/teams/${id}/stats.csv?lang=${lang}${partQuery(part)}${statsQuery(search, sure)}`
 }
 
-/** Stats follow the tagging: always asked again when the page opens. `search`: ?search= (null: none). */
-export function useVideoStats(id: string, enabled: boolean, search: string | null = null) {
+/**
+ * Stats follow the tagging: always asked again when the page opens. `search`: ?search= (null:
+ * none); `sure`: "Sure only".
+ */
+export function useVideoStats(id: string, enabled: boolean, search: string | null = null, sure = false) {
   return useQuery({
-    queryKey: [...keys.videoStats(id), search ?? ''],
-    queryFn: ({ signal }) => statsApi.video(id, signal, search),
+    queryKey: [...keys.videoStats(id), search ?? '', sure ? 'sure' : 'all'],
+    queryFn: ({ signal }) => statsApi.video(id, signal, search, sure),
     enabled,
     staleTime: 0,
     // While a new search loads, the last numbers stay (never another video's or team's).
@@ -345,10 +364,10 @@ export function useVideoStats(id: string, enabled: boolean, search: string | nul
   })
 }
 
-export function useTeamStats(id: number, enabled: boolean, search: string | null = null) {
+export function useTeamStats(id: number, enabled: boolean, search: string | null = null, sure = false) {
   return useQuery({
-    queryKey: [...keys.teamStats(id), search ?? ''],
-    queryFn: ({ signal }) => statsApi.team(id, signal, search),
+    queryKey: [...keys.teamStats(id), search ?? '', sure ? 'sure' : 'all'],
+    queryFn: ({ signal }) => statsApi.team(id, signal, search, sure),
     enabled,
     staleTime: 0,
     // While a new search loads, the last numbers stay (never another video's or team's).
@@ -357,10 +376,10 @@ export function useTeamStats(id: number, enabled: boolean, search: string | null
 }
 
 /** The zone maps, loaded when their tab opens. */
-export function useVideoZones(id: string, enabled: boolean, search: string | null = null) {
+export function useVideoZones(id: string, enabled: boolean, search: string | null = null, sure = false) {
   return useQuery({
-    queryKey: [...keys.videoStats(id), 'zones', search ?? ''],
-    queryFn: ({ signal }) => statsApi.videoZones(id, signal, search),
+    queryKey: [...keys.videoStats(id), 'zones', search ?? '', sure ? 'sure' : 'all'],
+    queryFn: ({ signal }) => statsApi.videoZones(id, signal, search, sure),
     enabled,
     staleTime: 0,
     // While a new search loads, the last numbers stay (never another video's or team's).
@@ -368,10 +387,10 @@ export function useVideoZones(id: string, enabled: boolean, search: string | nul
   })
 }
 
-export function useTeamZones(id: number, enabled: boolean, search: string | null = null) {
+export function useTeamZones(id: number, enabled: boolean, search: string | null = null, sure = false) {
   return useQuery({
-    queryKey: [...keys.teamStats(id), 'zones', search ?? ''],
-    queryFn: ({ signal }) => statsApi.teamZones(id, signal, search),
+    queryKey: [...keys.teamStats(id), 'zones', search ?? '', sure ? 'sure' : 'all'],
+    queryFn: ({ signal }) => statsApi.teamZones(id, signal, search, sure),
     enabled,
     staleTime: 0,
     // While a new search loads, the last numbers stay (never another video's or team's).

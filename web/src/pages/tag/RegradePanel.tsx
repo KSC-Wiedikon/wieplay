@@ -9,7 +9,7 @@ import { ProgressBar } from '../../components/ProgressBar'
 import { Segmented } from '../../components/Segmented'
 import { playerKey } from '../../lib/condensed'
 import { cx } from '../../lib/cx'
-import { factTags } from '../../lib/facts'
+import { countedTags } from '../../lib/facts'
 import { skillByCode } from '../../lib/grammar'
 import { formatClock, gradeLabel, periodLabel, playerLabel, skillLabel } from '../../lib/labels'
 import { periodAt } from '../../lib/rallies'
@@ -82,7 +82,7 @@ function Setup() {
   // Players with tags of the skill, ours first.
   const players = useMemo(() => {
     const seen = new Map<string, Tag>()
-    for (const tag of factTags(view.events)) if (tag.code === setup.code) seen.set(playerKey(tag.side, tag.number), tag)
+    for (const tag of countedTags(view.events)) if (tag.code === setup.code) seen.set(playerKey(tag.side, tag.number), tag)
     return [...seen.entries()].sort(([, a], [, b]) => (a.side === b.side ? (a.number ?? 100) - (b.number ?? 100) : a.side === 'us' ? -1 : 1))
   }, [view.events, setup.code])
 

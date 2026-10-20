@@ -4,7 +4,7 @@
 // scoreboard", "no scoresheet").
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { proposalTotal } from './analysis'
+import { proposalsToCheck, proposalTotal } from './analysis'
 import { apiRequest } from './api'
 import type { CourtState } from './court'
 import type { PlayersSummary } from './players'
@@ -29,9 +29,9 @@ export function analysisState(analysis: Analysis | undefined, video: Pick<Video,
   if (BUSY_JOBS.includes(analysis.status)) return 'busy'
   if (analysis.status === 'failed') return 'attention'
   if (analysis.status === 'none') return 'todo'
-  if (analysis.proposals.unreviewed > 0) return 'attention'
+  if ((analysis.to_check?.rallies ?? proposalsToCheck(analysis.proposals)) > 0) return 'attention'
   if (video.rallies_reviewed_at) return 'done'
-  // Every suggestion answered (or the coach's own rallies): "rallies reviewed" is left.
+  // Nothing left to check (or the coach's own rallies): "rallies reviewed" is left.
   return proposalTotal(analysis.proposals) > 0 || rallies > 0 ? 'todo' : 'done'
 }
 

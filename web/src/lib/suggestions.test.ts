@@ -5,75 +5,87 @@ import {
   allProgress,
   effectiveServer,
   effectiveWinner,
-  factualRallies,
   formatPercent,
   gapProgress,
+  gapToCheck,
   hasTrustedLog,
-  isGapSuggestion,
-  isProposal,
-  isReviewedSuggestion,
-  isSetSuggestion,
-  isSuggestion,
-  logCounts,
-  logMatches,
+  isAuto,
+  isReviewedProposal,
+  isToCheck,
+  isWiePlays,
+  isWiePlaysSet,
   logVerdict,
   loopRestart,
-  openBetween,
-  needsYou,
-  needsYouRallies,
   nextOpen,
+  rallyToCheck,
   reviewItems,
   reviewProgress,
   scoreAfter,
-  sureRallies,
-  sureSuggestions,
-  suggestionCount,
+  setToCheck,
+  toCheckRallies,
+  toCheckSegments,
 } from './suggestions'
 
 const manual = rally({ id: 'm1', start_ms: 1_000, end_ms: 5_000 })
-const open1 = rally({ id: 'a', start_ms: 10_000, end_ms: 15_000, source: 'model', confidence: 0.95 })
-const done = rally({ id: 'b', start_ms: 20_000, end_ms: 25_000, source: 'model', review: 'confirmed', confidence: 0.6 })
-const open2 = rally({ id: 'c', start_ms: 30_000, end_ms: 35_000, source: 'model', confidence: 0.7 })
+// WiePlay's rallies: one it is sure of (auto), two it is not (check), two a person answered.
+const check1 = rally({ id: 'a', start_ms: 10_000, end_ms: 15_000, source: 'model', review: 'check', confidence: 0.95, score_sure: false })
+const done = rally({ id: 'b', start_ms: 20_000, end_ms: 25_000, source: 'model', review: 'confirmed', confidence: 0.6, won_by: 'us' })
+const check2 = rally({ id: 'c', start_ms: 30_000, end_ms: 35_000, source: 'model', review: 'check', confidence: 0.7, score_sure: false })
 const fixed = rally({ id: 'd', start_ms: 40_000, end_ms: 45_000, source: 'model', review: 'corrected', confidence: 0.5 })
-const timeout = rally({ id: 't', kind: 'timeout', start_ms: 50_000, end_ms: 80_000, source: 'model' })
-const all = [open2, manual, fixed, open1, done, timeout]
+const sure = rally({ id: 'e', start_ms: 46_000, end_ms: 49_000, source: 'model', review: 'auto', score_sure: true })
+const timeout = rally({ id: 't', kind: 'timeout', start_ms: 50_000, end_ms: 80_000, source: 'model', review: 'check', confidence: 0.6 })
+const setBreak = rally({ id: 'sb', kind: 'set_break', start_ms: 90_000, end_ms: 200_000, source: 'model', review: 'auto', confidence: 0.9 })
+const all = [check2, manual, fixed, check1, done, timeout, sure, setBreak]
 
-describe('suggestions', () => {
-  it('tells open suggestions from answered ones and from rallies marked by hand', () => {
-    expect(all.filter(isSuggestion).map((s) => s.id)).toEqual(['c', 'a'])
-    expect(all.filter(isReviewedSuggestion).map((s) => s.id)).toEqual(['d', 'b'])
-    expect(suggestionCount(all)).toBe(2)
-    // Only open suggestions are not fact yet (PLAN §10).
-    expect(factualRallies(all).map((s) => s.id)).toEqual(['m1', 'b', 'd'])
+describe('WiePlay’s rallies and what is still to check', () => {
+  it('tells WiePlay’s own (sure or to check) from answered ones and from rallies marked by hand', () => {
+    expect(all.filter(isWiePlays).map((s) => s.id)).toEqual(['c', 'a', 't', 'e', 'sb'])
+    expect(all.filter(isAuto).map((s) => s.id)).toEqual(['e', 'sb'])
+    expect(all.filter(isReviewedProposal).map((s) => s.id)).toEqual(['d', 'b'])
+    // Older data: a model's row still "unreviewed" is WiePlay's too.
+    expect(isWiePlays(rally({ start_ms: 0, end_ms: 1, source: 'model' }))).toBe(true)
   })
 
-  it("lists the model's rallies and break labels and the parts split off in this session, in time order", () => {
-    expect(reviewItems(all, new Set()).map((s) => s.id)).toEqual(['a', 'b', 'c', 'd', 't'])
-    expect(reviewItems(all, new Set(['m1'])).map((s) => s.id)).toEqual(['m1', 'a', 'b', 'c', 'd', 't'])
-    // A break marked by hand is no suggestion.
+  it('reads "to check" like the server: unsure rallies and breaks, and a rally whose winner is unsure', () => {
+    expect(all.filter(isToCheck).map((s) => s.id)).toEqual(['c', 'a', 't'])
+    expect(all.filter(gapToCheck).map((s) => s.id)).toEqual(['t'])
+    expect(toCheckRallies(all).map((s) => s.id)).toEqual(['a', 'c'])
+    expect(toCheckSegments(all).map((s) => s.id)).toEqual(['a', 'c', 't'])
+    // A person's rally the scoring is unsure of, with no winner: to check (who won).
+    const unsureHand = rally({ start_ms: 0, end_ms: 1, score_sure: false })
+    expect(rallyToCheck(unsureHand)).toBe(true)
+    // … not once someone said who won, or confirmed it.
+    expect(rallyToCheck({ ...unsureHand, won_by: 'them' })).toBe(false)
+    expect(rallyToCheck({ ...unsureHand, review: 'confirmed' })).toBe(false)
+    // Rejected, merged or deleted ones are gone.
+    expect(rallyToCheck({ ...check1, review: 'rejected' })).toBe(false)
+    expect(rallyToCheck({ ...check1, deleted_at: '2026-10-20T10:00:00Z' })).toBe(false)
+    // A break a person labelled is never to check.
+    expect(gapToCheck(rally({ kind: 'timeout', start_ms: 0, end_ms: 1, review: 'check' }))).toBe(false)
+  })
+
+  it("lists WiePlay's rallies and break labels, the rallies to check and the parts split off in this session, in time order", () => {
+    expect(reviewItems(all, new Set()).map((s) => s.id)).toEqual(['a', 'b', 'c', 'd', 'e', 't', 'sb'])
+    expect(reviewItems(all, new Set(['m1'])).map((s) => s.id)).toEqual(['m1', 'a', 'b', 'c', 'd', 'e', 't', 'sb'])
+    // A break marked by hand is not WiePlay's.
     expect(reviewItems([rally({ id: 'mt', kind: 'timeout', start_ms: 0, end_ms: 30_000 })], new Set())).toEqual([])
+    // A person's rally to check is in the walk.
+    expect(reviewItems([rally({ id: 'h', start_ms: 0, end_ms: 1, score_sure: false })], new Set()).map((s) => s.id)).toEqual(['h'])
   })
 
-  it('tells break labels to review apart from rally suggestions', () => {
-    expect(all.filter(isGapSuggestion).map((s) => s.id)).toEqual(['t'])
-    expect(all.filter(isProposal).map((s) => s.id)).toEqual(['c', 'a', 't'])
-    // Rally counts leave breaks out.
-    expect(suggestionCount(all)).toBe(2)
-  })
-
-  it('goes to the next open item later in time, then wraps to one skipped earlier', () => {
+  it('goes to the next item to check later in time, then wraps to one skipped earlier; sure ones are not visited', () => {
     const items = reviewItems(all, new Set())
     expect(nextOpen(items, new Set(), null)?.id).toBe('a')
-    expect(nextOpen(items, new Set(), open1)?.id).toBe('c')
+    expect(nextOpen(items, new Set(), check1)?.id).toBe('c')
     expect(nextOpen(items, new Set(), done)?.id).toBe('c')
-    expect(nextOpen(items, new Set(), open2)?.id).toBe('t')
+    expect(nextOpen(items, new Set(), check2)?.id).toBe('t')
     expect(nextOpen(items, new Set(), timeout)?.id).toBe('a')
-    expect(nextOpen([done, fixed], new Set(), done)).toBeNull()
-    // A split-off part waits like a suggestion.
+    expect(nextOpen([done, fixed, sure], new Set(), done)).toBeNull()
+    // A split-off part waits like one to check.
     expect(nextOpen(reviewItems(all, new Set(['m1'])), new Set(['m1']), timeout)?.id).toBe('m1')
   })
 
-  it('counts progress over every proposal, those rejected earlier included', () => {
+  it('counts progress over the rallies seen to check, those rejected earlier included', () => {
     const seen = new Set(['a', 'b', 'c', 'd', 'gone'])
     expect(reviewProgress(all, seen, 3)).toEqual({ done: 6, total: 8 })
     expect(reviewProgress([], new Set(), 0)).toEqual({ done: 0, total: 0 })
@@ -85,7 +97,7 @@ describe('suggestions', () => {
     expect(allProgress(all, new Set(['a', 'b', 'c', 'd']), seenGaps, 1)).toEqual({ done: 4, total: 7 })
   })
 
-  it("shows the coach's facts, else the model's suggestions", () => {
+  it("shows the coach's facts, else WiePlay's", () => {
     expect(effectiveServer({ serving: 'us', model_serving: 'them' })).toEqual({ value: 'us', suggested: false })
     expect(effectiveServer({ serving: null, model_serving: 'them' })).toEqual({ value: 'them', suggested: true })
     expect(effectiveServer({ serving: null })).toEqual({ value: null, suggested: false })
@@ -96,38 +108,25 @@ describe('suggestions', () => {
     expect(scoreAfter({ score_us_after: null, score_them_after: null, score_source: null })).toBeNull()
   })
 
-  it('tells a set WiePlay suggested until a coach accepts it', () => {
-    expect(isSetSuggestion(period({ no: 1, start_ms: 0, source: 'model', review: 'unreviewed' }))).toBe(true)
-    expect(isSetSuggestion(period({ no: 1, start_ms: 0, source: 'model', review: 'confirmed' }))).toBe(false)
-    expect(isSetSuggestion(period({ no: 1, start_ms: 0 }))).toBe(false)
+  it('tells a set WiePlay is unsure of until someone checks it', () => {
+    expect(setToCheck(period({ no: 1, start_ms: 0, source: 'model', review: 'check' }))).toBe(true)
+    expect(setToCheck(period({ no: 1, start_ms: 0, source: 'model', review: 'auto' }))).toBe(false)
+    expect(setToCheck(period({ no: 1, start_ms: 0, source: 'model', review: 'confirmed' }))).toBe(false)
+    expect(setToCheck(period({ no: 1, start_ms: 0 }))).toBe(false)
+    expect(isWiePlaysSet(period({ no: 1, start_ms: 0, source: 'model', review: 'auto' }))).toBe(true)
+    expect(isWiePlaysSet(period({ no: 1, start_ms: 0, source: 'model', review: 'corrected' }))).toBe(false)
   })
 
-  it('picks the open suggestions WiePlay is at least 90% sure of', () => {
-    expect(sureSuggestions(all).map((s) => s.id)).toEqual(['a'])
-    expect(sureSuggestions(all, 0.7).map((s) => s.id)).toEqual(['a', 'c'])
-    expect(sureSuggestions([rally({ start_ms: 0, end_ms: 1, source: 'model', confidence: null })])).toEqual([])
-  })
-
-  it('sorts open suggestions by what the scoreboard log says about them', () => {
+  it('says what the scoreboard log says about a rally', () => {
     const open = (id: string, start_ms: number, patch: Partial<Segment>) => rally({ id, start_ms, end_ms: start_ms + 5_000, source: 'model', ...patch })
-    const segments = [
-      open('m2', 20_000, { log_won_by: 'them', model_won_by: 'them' }),
-      open('m1', 10_000, { log_won_by: 'us', model_won_by: 'us' }),
-      open('none', 30_000, { log_won_by: 'none', score_conflict: true, score_note: 'extra' }),
-      // The video alone was sure of the other winner: the scoring followed the log, flagged.
-      open('video', 40_000, { log_won_by: 'us', model_won_by: 'us', score_conflict: true, score_note: 'log' }),
-      open('other', 50_000, { log_won_by: 'us', model_won_by: 'them' }),
-      open('missed', 60_000, { log_won_by: 'them', model_won_by: 'them', score_conflict: true, score_note: 'missing_before' }),
-      open('silent', 70_000, { model_won_by: 'us' }),
-      // Answered already, or a rally marked by hand: not suggestions.
-      open('done', 80_000, { log_won_by: 'us', model_won_by: 'us', review: 'confirmed' }),
-      rally({ id: 'hand', start_ms: 90_000, end_ms: 95_000, log_won_by: 'us', won_by: 'us' }),
-    ]
-    expect(logMatches(segments).map((s) => s.id)).toEqual(['m1', 'm2'])
-    expect(logCounts(segments)).toEqual({ match: 2, none: 1, disagree: 2, missed: 1, silent: 1 })
+    expect(logVerdict(open('m', 0, { log_won_by: 'us', model_won_by: 'us' }))).toBe('match')
+    expect(logVerdict(open('n', 0, { log_won_by: 'none' }))).toBe('none')
+    expect(logVerdict(open('o', 0, { log_won_by: 'us', model_won_by: 'them' }))).toBe('disagree')
+    expect(logVerdict(open('x', 0, { log_won_by: 'them', model_won_by: 'them', score_conflict: true, score_note: 'missing_before' }))).toBe('missed')
+    expect(logVerdict(open('s', 0, { model_won_by: 'us' }))).toBe('silent')
     // A coach's winner counts over the model's.
     expect(logVerdict({ log_won_by: 'us', won_by: 'them', model_won_by: 'us' })).toBe('disagree')
-    expect(hasTrustedLog(segments)).toBe(true)
+    expect(hasTrustedLog([open('m', 0, { log_won_by: 'us' })])).toBe(true)
     expect(hasTrustedLog([open('x', 0, { model_won_by: 'us' })])).toBe(false)
   })
 
@@ -144,53 +143,5 @@ describe('suggestions', () => {
     expect(formatPercent(0.87)).toBe('87%')
     expect(formatPercent(0.9)).toBe('90%')
     expect(formatPercent(null)).toBe('')
-  })
-})
-
-describe('the joint decode: needs you, sure (docs/PLAN.md §10.1, §10.3)', () => {
-  const unsure = { score_sure: false, score_reasons: [{ code: 'log_none' as const }] }
-  const segments: Segment[] = [
-    rally({ id: 's', start_ms: 10_000, end_ms: 15_000, source: 'model', score_sure: true }),
-    rally({ id: 'n', start_ms: 20_000, end_ms: 25_000, source: 'model', ...unsure }),
-    // Accepted, but the scoring is still not sure who won: it still needs the coach.
-    rally({ id: 'a', start_ms: 30_000, end_ms: 35_000, source: 'model', review: 'confirmed', ...unsure }),
-    // The coach said who won: a fact, never asked again.
-    rally({ id: 'w', start_ms: 40_000, end_ms: 45_000, source: 'model', review: 'corrected', won_by: 'us', ...unsure }),
-    // Not scored (no set yet): neither.
-    rally({ id: 'x', start_ms: 50_000, end_ms: 55_000, source: 'model', score_sure: null }),
-    rally({ id: 'g', kind: 'timeout', start_ms: 60_000, end_ms: 90_000, source: 'model', score_sure: false }),
-  ]
-
-  it('needs you: not sure, no winner from the coach, rallies only', () => {
-    expect(segments.filter(needsYou).map((s) => s.id)).toEqual(['n', 'a'])
-    expect(needsYouRallies([...segments].reverse()).map((s) => s.id)).toEqual(['n', 'a'])
-  })
-
-  it('accept all sure rallies takes the open suggestions the scoring is sure of', () => {
-    expect(sureRallies(segments).map((s) => s.id)).toEqual(['s'])
-  })
-
-  it('the walk visits what needs the coach first; the sure ones wait for the button', () => {
-    const items = reviewItems(segments, new Set())
-    expect(nextOpen(items, new Set(), null)?.id).toBe('n')
-    expect(nextOpen(items, new Set(), { id: 'n', start_ms: 20_000 })?.id).toBe('x')
-    // Only sure ones left open: then those.
-    expect(nextOpen(segments.slice(0, 1), new Set(), null)?.id).toBe('s')
-  })
-})
-
-describe('openBetween', () => {
-  it('says how many open suggestions lie before each rally of a list, and after the last', () => {
-    const a = rally({ id: 'a', start_ms: 10_000, end_ms: 18_000 })
-    const b = rally({ id: 'b', start_ms: 60_000, end_ms: 68_000 })
-    const open = (start_ms: number) => rally({ start_ms, end_ms: start_ms + 5_000, source: 'model' })
-    const out = openBetween([a, b], [open(70_000), open(1_000), open(30_000), open(40_000)])
-    expect([...out.before.entries()]).toEqual([
-      ['a', 1],
-      ['b', 2],
-    ])
-    expect(out.after).toBe(1)
-    // A filtered list says nothing: the gaps there are the filter's.
-    expect(openBetween([], [open(1_000)])).toEqual({ before: new Map(), after: 0 })
   })
 })

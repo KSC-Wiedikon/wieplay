@@ -70,12 +70,13 @@ class Settings(BaseSettings):
     # after a burst of games).
     analysis_auto: bool = True
     analysis_train_delay_seconds: int = 600
-    # Players in a video (PLAN §10.5, beta): ~2 h of the Lenovo's CPU a match and many cards
-    # for the coach to merge, so off by default: nothing queues the players job by itself
-    # (not after the court job, not in a court backfill); a coach finds them on demand
-    # (POST /api/videos/{id}/players/find) or an admin with `wieplay.cli players`. The
-    # attribution of actions runs whenever a video has players.
-    players_auto: bool = False
+    # Players in a video (PLAN §10.5): on since 20.10.2026 ("everything gets analysed and
+    # automatically assigned"): the players job follows the court job of every analysed
+    # video (core/chain.py), on the GPU worker when WIEPLAY_PLAYERS_CAPS sends it there (its
+    # busy guard makes the job wait, nothing fails). Off: found on request only
+    # (POST /api/videos/{id}/players/find, `wieplay.cli players`). The attribution of actions
+    # runs whenever a video has players.
+    players_auto: bool = True
     # What a coach is told the search takes (minutes): ~120 on the Lenovo's CPU, ~20 when
     # the players job's caps (WIEPLAY_PLAYERS_CAPS) send it to the GPU worker (PLAN §8.2).
     players_minutes: int = 120

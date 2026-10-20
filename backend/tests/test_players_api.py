@@ -251,7 +251,7 @@ def test_the_players_job_follows_the_trajectory_with_its_inputs(
     )
 
 
-def test_players_are_off_by_default_and_found_on_demand(
+def test_players_switched_off_are_found_on_demand(
     ready: Any,
     app: FastAPI,
     club: dict[str, TestClient],
@@ -260,7 +260,7 @@ def test_players_are_off_by_default_and_found_on_demand(
     as_: Any,
 ) -> None:
     app.state.settings = app.state.settings.model_copy(update={"players_auto": False})
-    assert Settings.model_fields["players_auto"].default is False
+    assert Settings.model_fields["players_auto"].default is True  # on since 20.10.2026
     hit = model_event(app, ready, 12_000, "us")
     trajectory(analyser, store)  # the court job is done: no players job follows
     none = analyser.post(

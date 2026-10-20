@@ -71,7 +71,14 @@ export function ExportsPage() {
                     <Td>
                       <span className="font-semibold wrap-break-word">{item.title}</span>
                       <span className="mt-0.5 block text-xs text-muted tabular-nums">
-                        {[t(`exports.kind.${item.kind}`), formatDuration(item.duration_ms)].join(' · ')}
+                        {[
+                          t(`exports.kind.${item.kind}`),
+                          formatDuration(item.duration_ms),
+                          item.sure_only ? t('exports.sureOnly') : null,
+                          item.to_check ? t('exports.toCheck', { count: item.to_check }) : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </span>
                       {ready && item.expires_at && (
                         <span className="mt-0.5 block text-xs text-muted tabular-nums sm:hidden">

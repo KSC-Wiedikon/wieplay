@@ -227,6 +227,8 @@ class ExportIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     # The language of what a game recap writes on the picture (the viewer's).
     lang: Literal["de", "en"] = "en"
+    # A game recap from what is sure only (PLAN §10: without what is still to check).
+    sure_only: bool = False
 
 
 class ExportOut(BaseModel):
@@ -240,6 +242,10 @@ class ExportOut(BaseModel):
     error: str | None
     created_at: datetime
     expires_at: datetime | None
+    # A game recap: how many of its plays rest on something still to check, and whether it
+    # was made from what is sure only (null for other exports).
+    to_check: int | None = None
+    sure_only: bool | None = None
 
 
 # --- helpers -------------------------------------------------------------------------------
@@ -813,6 +819,8 @@ def _export_out(export: VideoExport, db: Session, viewer: Viewer) -> ExportOut:
         error=guests.error_for(viewer, export.error),
         created_at=export.created_at,
         expires_at=export.expires_at,
+        to_check=(export.source or {}).get("to_check"),
+        sure_only=(export.source or {}).get("sure_only"),
     )
 
 
@@ -828,6 +836,7 @@ def _filename(export: VideoExport) -> str:
 def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
     """Queue a watermarked MP4 (coaches, team managers, sport admins; PLAN §5.2)."""
     recap_params: dict[str, Any] | None = None
+    recap_check: tuple[int, bool] | None = None
     if body.kind == "clip":
         clip = db.get(Clip, body.clip_id) if body.clip_id else None
         if clip is None or clip.deleted_at is not None:
@@ -851,7 +860,7 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
         video, _ = _watchable(db, viewer, body.video_id)
         if video.sport != "volleyball":
             raise HTTPException(409, "Game recaps are for volleyball matches")
-        chosen = recap.select_plays(db, video)
+        chosen = recap.select_plays(db, video, sure_only=body.sure_only)
         if not chosen.plays:
             raise HTTPException(409, "This video has no rallies or plays to choose from yet")
         pieces = [
@@ -867,6 +876,7 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
             "lang": body.lang,
         }
         title = body.title or recap.title_of(video, body.lang)
+        recap_check = (chosen.to_check, chosen.sure_only)
     else:
         reel = _readable_reel(db, viewer, body.reel_id) if body.reel_id else None
         if reel is None:
@@ -899,6 +909,11 @@ def create_export(body: ExportIn, viewer: ViewerDep, db: DbDep) -> ExportOut:
             "clip_id": str(body.clip_id) if body.clip_id else None,
             "reel_id": str(body.reel_id) if body.reel_id else None,
             "video_id": str(body.video_id) if body.video_id else None,
+            **(
+                {"to_check": recap_check[0], "sure_only": recap_check[1]}
+                if recap_check is not None
+                else {}
+            ),
         },
         status="queued",
         requested_by=viewer.member_id,

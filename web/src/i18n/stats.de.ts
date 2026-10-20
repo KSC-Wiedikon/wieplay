@@ -22,6 +22,13 @@ export const statsDe: Messages<typeof statsEn> = {
     csv: 'CSV herunterladen',
     player: 'Spieler/in',
     hintVideo: 'Jede Zahl spielt ihre Szenen im Video oben ab.',
+    sureOnly: 'Nur sichere',
+    toCheck_one: 'Noch {{count}} zu prüfen',
+    toCheck_other: 'Noch {{count}} zu prüfen',
+    toCheckLeftOut_one: 'Noch {{count}} zu prüfen, weggelassen',
+    toCheckLeftOut_other: 'Noch {{count}} zu prüfen, weggelassen',
+    sureOnlyHint: 'Nur, worin WiePlay sicher ist oder was jemand geprüft hat.',
+    allChecked: 'Nichts mehr zu prüfen.',
     hintSeason: 'Jede Zahl öffnet ihre Szenen als Reel.',
     tagged: '{{tagged}} von {{count}} Spielen getaggt',
     empty: {

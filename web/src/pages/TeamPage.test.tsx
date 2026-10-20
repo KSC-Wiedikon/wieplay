@@ -143,7 +143,7 @@ describe('TeamPage videos', () => {
     expect(months.map((list) => list.getAttribute('aria-label'))).toEqual(['October 2026', 'September 2026', 'January 2026'])
     const card = (title: string) => screen.getByRole('link', { name: title }).closest('li') as HTMLElement
     expect(within(card('Legends')).getByText('Analysis queued')).toBeInTheDocument()
-    expect(within(card('VBC Swiss')).getByText('12 suggestions to review')).toBeInTheDocument()
+    expect(within(card('VBC Swiss')).getByText('12 to check')).toBeInTheDocument()
     expect(within(card('H1')).getByText('Analysing…')).toBeInTheDocument()
     expect(within(card('Stäfa')).getByText('Rallies reviewed')).toBeInTheDocument()
   })

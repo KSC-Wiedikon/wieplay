@@ -278,9 +278,10 @@ describe('VideoSetup', () => {
   })
 
   it('shows the analysis with its review link and the switch that teaches WiePlay', async () => {
-    show({ analysis: analysis({ proposals: { unreviewed: 2, confirmed: 3, corrected: 0, rejected: 1 } }), video: { rallies_reviewed_at: null } })
-    expect(await screen.findByRole('link', { name: 'Review suggestions (2)' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
-    expect(screen.getByText('WiePlay suggested 6 rallies.')).toBeInTheDocument()
+    const toCheck = { rallies: 2, breaks: 1, sets: 0, actions: 2, players: 0, total: 5 }
+    show({ analysis: analysis({ proposals: { auto: 0, check: 2, confirmed: 3, corrected: 0, rejected: 1 }, to_check: toCheck }), video: { rallies_reviewed_at: null } })
+    expect(await screen.findByRole('link', { name: 'To check (5)' })).toHaveAttribute('href', `/videos/${ID}/tag?mode=review`)
+    expect(screen.getByText('WiePlay found 6 rallies.')).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: 'Rallies reviewed' })).toBeInTheDocument()
     expect(steps()[0]).toEqual(['Rallies and score', 'attention'])
   })

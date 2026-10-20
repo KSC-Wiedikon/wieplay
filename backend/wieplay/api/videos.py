@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from wieplay.api.access import TeamAccess, team_refs, visible_team, visible_video
@@ -29,7 +29,7 @@ from wieplay.api.deps import (
     audit,
 )
 from wieplay.api.media import permission_cache
-from wieplay.core import club_games, guests, imports, names, pipeline
+from wieplay.core import chain, club_games, guests, imports, names, pipeline, tagging
 from wieplay.core.config import Settings
 from wieplay.core.filming import (
     Blocker,
@@ -38,7 +38,7 @@ from wieplay.core.filming import (
     club_today,
     refresh_rosters,
 )
-from wieplay.core.models import InboxFile, Job, Segment, Video, VideoSourceFile, WdGame, WdTeam
+from wieplay.core.models import InboxFile, Job, Video, VideoSourceFile, WdGame, WdTeam
 from wieplay.core.permissions import (
     Viewer,
     can_delete_video,
@@ -129,8 +129,14 @@ class AnalysisBriefOut(BaseModel):
 
     # none: never queued; queued | running; done; failed (the latest analyse job)
     status: Literal["none", "queued", "running", "done", "failed"]
-    # Rally suggestions nobody has answered yet.
+    # What is still to check (rallies, breaks, sets, actions; PLAN §10); `open` is the same
+    # number under its older name.
     open: int = 0
+    to_check: int = 0
+    # The automatic chain (core/chain.py): "Analysing: 4 of 7 steps" while running.
+    steps_done: int = 0
+    steps_total: int = 0
+    steps_running: bool = False
 
 
 class NamesOut(BaseModel):
@@ -315,9 +321,10 @@ JOB_TO_ANALYSIS: dict[str, Literal["queued", "running", "done", "failed"]] = {
 
 
 def _analysis(db: Session, videos: list[Video]) -> dict[uuid.UUID, AnalysisBriefOut]:
-    """The latest analyse job and the open rally suggestions of each ready video, in two
-    queries: "Ready" says the video plays, this says whether WiePlay has looked at it yet."""
-    ids = [v.id for v in videos if v.status == "ready"]
+    """The latest analyse job, the chain's steps and what is still to check of each ready
+    video: "Ready" says the video plays, this says how far WiePlay is with it."""
+    ready = [v for v in videos if v.status == "ready"]
+    ids = [v.id for v in ready]
     if not ids:
         return {}
     latest: dict[uuid.UUID, tuple[datetime, str]] = {}
@@ -328,28 +335,23 @@ def _analysis(db: Session, videos: list[Video]) -> dict[uuid.UUID, AnalysisBrief
     ):
         if video_id is not None and (video_id not in latest or created > latest[video_id][0]):
             latest[video_id] = (created, status)
-    open_by_video = dict(
-        db.execute(
-            select(Segment.video_id, func.count())
-            .where(
-                Segment.video_id.in_(ids),
-                Segment.source == "model",
-                Segment.kind == "rally",
-                Segment.review == "unreviewed",
-                Segment.deleted_at.is_(None),
-            )
-            .group_by(Segment.video_id)
-        ).all()
-    )
-    return {
-        video_id: AnalysisBriefOut(
+    counts = tagging.to_check_counts(db, ids)
+    steps = chain.steps_of(db, ready)
+    out = {}
+    for video_id in ids:
+        to_check = sum(counts.get(video_id, {}).values())
+        found = steps.get(video_id)
+        out[video_id] = AnalysisBriefOut(
             status=JOB_TO_ANALYSIS.get(latest[video_id][1], "none")
             if video_id in latest
             else "none",
-            open=int(open_by_video.get(video_id, 0)),
+            open=to_check,
+            to_check=to_check,
+            steps_done=found.done if found else 0,
+            steps_total=found.total if found else 0,
+            steps_running=found.running if found else False,
         )
-        for video_id in ids
-    }
+    return out
 
 
 def _imported_from(video: Video) -> ImportedFromOut | None:

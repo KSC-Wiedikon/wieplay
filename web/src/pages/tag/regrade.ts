@@ -14,7 +14,7 @@
 
 import { actionChange } from '../../lib/actions'
 import { playerKey } from '../../lib/condensed'
-import { factTags } from '../../lib/facts'
+import { countedTags } from '../../lib/facts'
 import type { Playhead } from '../../lib/playhead'
 import { periodAt } from '../../lib/rallies'
 import { tagWindow } from '../../lib/stats'
@@ -60,9 +60,9 @@ export interface RegradeState {
 
 const NONE: ReadonlySet<string> = new Set()
 
-/** The tags a setup goes through, in time order: the facts only (no open suggestions). */
+/** The tags a setup goes through, in time order: every tag that counts (WiePlay's too). */
 export function regradeTags(tags: readonly Tag[], periods: Parameters<typeof periodAt>[0], setup: RegradeSetup): Tag[] {
-  return factTags(tags)
+  return countedTags(tags)
     .filter((tag) => {
       if (tag.code !== setup.code) return false
       if (setup.which === 'ungraded' && tag.attributes.grade) return false

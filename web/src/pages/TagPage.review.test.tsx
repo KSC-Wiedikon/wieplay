@@ -47,7 +47,7 @@ const video: Video = {
 
 const set1 = period({ no: 1, start_ms: 0, first_serve: 'us' })
 const suggestion = (id: string, start_ms: number, confidence: number, patch: Partial<Segment> = {}) =>
-  rally({ id, start_ms, end_ms: start_ms + 8_000, period_id: set1.id, source: 'model', confidence, model_run_id: 'run-1', ...patch })
+  rally({ id, start_ms, end_ms: start_ms + 8_000, period_id: set1.id, source: 'model', review: 'check', score_sure: false, confidence, model_run_id: 'run-1', ...patch })
 const S1 = '00000000-0000-4000-8000-0000000005a1'
 const S2 = '00000000-0000-4000-8000-0000000005a2'
 const S3 = '00000000-0000-4000-8000-0000000005a3'
@@ -68,7 +68,7 @@ const data = (): Tagging =>
 const analysis: Analysis = {
   status: 'done',
   model_run: { id: 'run-1', model_name: 'rally-finder', model_version: 'v0', created_at: '2026-10-16T18:00:00Z', params: {}, metrics: {} },
-  proposals: { unreviewed: 3, confirmed: 1, corrected: 0, rejected: 1 },
+  proposals: { auto: 0, check: 3, confirmed: 1, corrected: 0, rejected: 1 },
   metrics_vs_human: null,
 }
 
@@ -127,7 +127,7 @@ function keys(...list: (string | { key: string; shiftKey?: boolean; altKey?: boo
   for (const k of list) fireEvent.keyDown(document.body, typeof k === 'string' ? { key: k } : k)
 }
 
-const panel = () => screen.getByRole('region', { name: 'Review suggestions' })
+const panel = () => screen.getByRole('region', { name: 'To check' })
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory())
@@ -136,24 +136,24 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
 })
 
-describe('TagPage, suggestions', () => {
-  it('marks suggestions on the timeline and in the rally list, with a filter for those to review', async () => {
+describe('TagPage, to check', () => {
+  it('marks the rallies to check on the timeline and in the rally list, with a filter for them', async () => {
     const { container } = show()
     await screen.findByRole('region', { name: 'Tag entry' })
-    expect(screen.getByText('WiePlay suggested 5 rallies.')).toBeInTheDocument()
-    expect(screen.getByText('3 still to review.')).toBeInTheDocument()
-    // Open suggestions are outlined on the timeline; an accepted one keeps a marker.
-    expect(container.querySelectorAll('[data-suggestion="open"]').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('WiePlay found 5 rallies.')).toBeInTheDocument()
+    expect(screen.getByText('3 still to check.')).toBeInTheDocument()
+    // Every rally counts and is drawn; those to check are marked, an accepted one keeps a marker.
+    expect(container.querySelectorAll('[data-suggestion="check"]').length).toBeGreaterThanOrEqual(2)
     expect(container.querySelector('[data-suggestion="confirmed"]')).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Rallies (5)' }))
     const table = screen.getByRole('table', { name: 'Rallies' })
     const rows = () => within(table).getAllByRole('row').slice(1)
     expect(rows()).toHaveLength(5)
-    expect(within(table).getByText('Suggested · 95%')).toBeInTheDocument()
-    expect(within(table).getByText('Suggested, confirmed')).toBeInTheDocument()
+    expect(within(table).getByText('To check · 95%')).toBeInTheDocument()
+    expect(within(table).getByText('Found by WiePlay, confirmed')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Suggestions (3)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Still to check (3)' }))
     expect(rows()).toHaveLength(3)
     expect(rows().map((r) => within(r).getAllByRole('button')[0]?.textContent)).toEqual(['2', '3', '5'])
     // Accepted right in the list: it leaves the filter.
@@ -161,7 +161,7 @@ describe('TagPage, suggestions', () => {
     expect(rows()).toHaveLength(2)
     fireEvent.click(screen.getByRole('button', { name: 'Reject rally 3' }))
     fireEvent.click(screen.getByRole('button', { name: 'Reject rally 4' }))
-    expect(screen.getByText('No suggestions to review.')).toBeInTheDocument()
+    expect(screen.getByText('Nothing to check.')).toBeInTheDocument()
   })
 
   it('accepts and rejects from the rally list through the outbox', async () => {
@@ -178,27 +178,27 @@ describe('TagPage, suggestions', () => {
   it('reviews with the keys, sends each answer through the outbox and shows the progress', async () => {
     const { server, router } = show()
     await screen.findByRole('region', { name: 'Tag entry' })
-    fireEvent.click(screen.getByRole('button', { name: 'Review suggestions (3)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'To check (3)' }))
     expect(router.state.location.search).toBe('?mode=review')
     const player = document.querySelector('video') as HTMLVideoElement
     // The first open one, from 1 s before it.
     expect(within(panel()).getByRole('heading', { name: /Rally at 0:10\.0/ })).toBeInTheDocument()
     expect(player.currentTime).toBe(9)
-    const progress = within(panel()).getByText('2 of 5 suggestions reviewed')
+    const progress = within(panel()).getByText('1 of 4 checked')
     expect(progress.closest('[aria-live]')).toHaveAttribute('aria-live', 'polite')
 
     keys('ArrowRight', { key: 'ArrowRight', shiftKey: true })
     expect(within(panel()).getByText('End moved to 0:18.2.')).toBeInTheDocument()
     keys('Enter')
     expect(within(panel()).getByText('Accepted the rally at 0:10.2.')).toBeInTheDocument()
-    expect(within(panel()).getByText('3 of 5 suggestions reviewed')).toBeInTheDocument()
+    expect(within(panel()).getByText('2 of 4 checked')).toBeInTheDocument()
     expect(within(panel()).getByRole('heading', { name: /Rally at 0:30\.0/ })).toBeInTheDocument()
     keys('x')
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:10\.0/ })).toBeInTheDocument()
     keys('Enter')
-    expect(within(panel()).getByText('5 of 5 suggestions reviewed')).toBeInTheDocument()
-    // Every suggestion answered: on to "rallies reviewed".
-    expect(within(panel()).getByText('Every suggestion is reviewed')).toBeInTheDocument()
+    expect(within(panel()).getByText('4 of 4 checked')).toBeInTheDocument()
+    // Everything checked: on to "rallies reviewed".
+    expect(within(panel()).getByText('Every rally and break is checked')).toBeInTheDocument()
     expect(within(panel()).getByRole('button', { name: 'Mark rallies reviewed' })).toBeInTheDocument()
 
     await waitFor(() => expect(server.posts.length).toBeGreaterThan(0), { timeout: 3000 })
@@ -214,58 +214,53 @@ describe('TagPage, suggestions', () => {
     expect(screen.getByRole('region', { name: 'Tag entry' })).toBeInTheDocument()
   })
 
-  it('lists the rallies that need you by default, each with why, and accepts all sure rallies in one step', async () => {
+  it("lists the rallies to check by default, each with why and WiePlay's other answer; the sure ones are not asked", async () => {
     const S5 = '00000000-0000-4000-8000-0000000005a5'
     const unsure = (reasons: Segment['score_reasons']) =>
       ({ score_sure: false, score_conflict: true, score_note: reasons?.[0]?.code ?? null, score_reasons: reasons }) as Partial<Segment>
     const scored = bundle({
       periods: [set1],
       segments: [
-        suggestion(S1, 10_000, 0.95, { score_sure: true, model_won_by: 'us', log_won_by: 'us', log_score_us: 1, log_score_them: 0 }),
-        suggestion(S2, 30_000, 0.62, { log_won_by: 'none', ...unsure([{ code: 'log_none' }]) }),
+        suggestion(S1, 10_000, 0.95, { review: 'auto', score_sure: true, model_won_by: 'us', log_won_by: 'us', log_score_us: 1, log_score_them: 0 }),
+        suggestion(S2, 30_000, 0.62, { log_won_by: 'none', model_alternative: 'none', ...unsure([{ code: 'log_none' }]) }),
         suggestion(S3, 50_000, 0.91, { review: 'confirmed', version: 2, score_sure: true, model_won_by: 'us' }),
-        suggestion(S4, 70_000, 0.97, { model_won_by: 'them', ...unsure([{ code: 'sheet_box', values: [17, 11], team: 'them' }]) }),
-        suggestion(S5, 90_000, 0.5, { score_sure: true, model_won_by: 'them' }),
+        suggestion(S4, 70_000, 0.97, { model_won_by: 'them', model_alternative: 'us', ...unsure([{ code: 'sheet_box', values: [17, 11], team: 'them' }]) }),
+        suggestion(S5, 90_000, 0.5, { review: 'auto', score_sure: true, model_won_by: 'them' }),
       ],
     })
     const { server } = show(`/videos/${ID}/tag?mode=review`, scored)
-    await screen.findByRole('region', { name: 'Review suggestions' })
-    // The walk starts with the first rally that needs the coach, its reasons in the panel.
+    await screen.findByRole('region', { name: 'To check' })
+    // The walk starts with the first rally to check, its reasons in the panel.
     expect(within(panel()).getByRole('heading', { name: /Rally at 0:30\.0/ })).toBeInTheDocument()
     expect(within(panel()).getByText('No point on the board log: a replay, or not a rally.')).toBeInTheDocument()
-    // The list shows "Needs you" by default: only those two, each with why.
-    const list = screen.getByRole('table', { name: 'Suggestions' })
-    expect(screen.getByRole('button', { name: 'Needs you: 2' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(panel()).getByRole('button', { name: 'Or: No rally (X)' })).toBeInTheDocument()
+    // The list shows those to check by default, each with why.
+    const list = screen.getByRole('table', { name: 'WiePlay’s rallies and breaks' })
+    expect(screen.getByRole('button', { name: 'Still to check (2)' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(list).getAllByRole('row')).toHaveLength(3) // the head and two rallies
     expect(within(list).getByText('The sheet’s box here is unclear (17 or 11).')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'All suggestions (5)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'All (5)' }))
     expect(within(list).getAllByRole('row')).toHaveLength(6)
+    // No button accepts many at once: the sure ones count already.
+    expect(within(panel()).queryByRole('button', { name: /Accept all/ })).not.toBeInTheDocument()
 
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Accept all sure rallies (2)' }))
-    const dialog = screen.getByRole('alertdialog', { name: 'Accept 2 sure rallies?' })
-    expect(dialog).toHaveTextContent('Who won stays WiePlay’s suggestion, which follows the evidence.')
-    expect(dialog).toHaveTextContent('2 rallies need you.')
-    // Keys belong to the dialog while it asks.
-    fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Cancel' }), { key: 'x' })
-    expect(server.current().segments).toHaveLength(5)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Accept 2' }))
-    expect(within(panel()).getByText('Accepted 2 sure rallies. 2 need you.')).toBeInTheDocument()
-    expect(within(panel()).queryByRole('button', { name: /Accept all sure rallies/ })).not.toBeInTheDocument()
-    await waitFor(() => expect(server.sent().get(S5)).toBeDefined(), { timeout: 3000 })
-    // Accepted as they are: the winner stays the model's (no coach's fact written).
-    expect(server.sent().get(S1)).toMatchObject({ review: 'confirmed', won_by: null })
-    expect(server.sent().get(S5)).toMatchObject({ review: 'confirmed', won_by: null })
-    expect(server.sent().get(S2)).toBeUndefined()
-    expect(server.sent().get(S4)).toBeUndefined()
-    // One undo takes the whole batch back.
-    fireEvent.click(within(panel()).getByRole('button', { name: /Undo/ }))
-    expect(within(panel()).getByRole('button', { name: 'Accept all sure rallies (2)' })).toBeInTheDocument()
+    keys('Enter') // WiePlay is right: no point, the rally as it is
+    expect(within(panel()).getByRole('heading', { name: /Rally at 1:10\.0/ })).toBeInTheDocument()
+    // WiePlay's other answer, taken with its button: we won.
+    fireEvent.click(within(panel()).getByRole('button', { name: /^Or: .* won$/ }))
+    expect(within(panel()).getByText('Every rally and break is checked')).toBeInTheDocument()
+    await waitFor(() => expect(server.sent().get(S4)).toBeDefined(), { timeout: 3000 })
+    expect(server.sent().get(S2)).toMatchObject({ review: 'confirmed', won_by: null })
+    expect(server.sent().get(S4)).toMatchObject({ review: 'corrected', won_by: 'us' })
+    // The sure ones are left as they are.
+    expect(server.sent().get(S1)).toBeUndefined()
+    expect(server.sent().get(S5)).toBeUndefined()
   })
 
   it('reviews by touch on a narrow screen: big buttons, no tagging desk', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }))
     const { server } = show()
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     expect(screen.queryByRole('region', { name: 'Tag entry' })).not.toBeInTheDocument()
     expect(screen.getByText(/reviewing works here too/)).toBeInTheDocument()
     fireEvent.click(within(panel()).getByRole('button', { name: 'Start 0.25 s later' }))
@@ -274,7 +269,7 @@ describe('TagPage, suggestions', () => {
     fireEvent.click(within(panel()).getByRole('button', { name: 'Undo' }))
     expect(within(panel()).getByRole('heading', { name: /Rally at 0:10\.2/ })).toBeInTheDocument()
     fireEvent.click(within(panel()).getByRole('button', { name: /Merge with next/ }))
-    expect(within(panel()).getByText('Merged with the next suggestion.')).toBeInTheDocument()
+    expect(within(panel()).getByText('Merged with the next rally.')).toBeInTheDocument()
     await waitFor(() => expect(server.sent().get(S2)).toBeDefined(), { timeout: 3000 })
     expect(server.sent().get(S1)).toMatchObject({ start_ms: 10_250, end_ms: 38_000, review: 'corrected' })
     expect(server.sent().get(S2)).toMatchObject({ review: 'merged', merged_into: S1, deleted: true })
@@ -283,7 +278,7 @@ describe('TagPage, suggestions', () => {
   it('says "not a rally, it’s a timeout" (or a sub) with a visible button, by touch too', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }))
     const { server } = show()
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     expect(within(panel()).getByRole('heading', { name: /Rally at 0:10\.0/ })).toBeInTheDocument()
     const breaks = within(panel()).getByRole('group', { name: 'Not a rally, it’s a:' })
     // Short names, each with its key as Accept and Reject show theirs (hidden on touch); "Sub" has none.
@@ -301,7 +296,7 @@ describe('TagPage, suggestions', () => {
     expect(within(breaks).getByRole('button', { name: 'Other' })).toHaveAttribute('title', 'Other break')
 
     fireEvent.click(within(breaks).getByRole('button', { name: 'Timeout' }))
-    expect(within(panel()).getByText('Not a rally: the suggestion at 0:10.0 is a timeout.')).toBeInTheDocument()
+    expect(within(panel()).getByText('Not a rally: 0:10.0 is a timeout.')).toBeInTheDocument()
     expect(within(panel()).getByRole('heading', { name: /Rally at 0:30\.0/ })).toBeInTheDocument()
     await waitFor(() => expect(server.sent().get(S1)).toBeDefined(), { timeout: 3000 })
     expect(server.sent().get(S1)).toMatchObject({ review: 'rejected', deleted: true })
@@ -309,7 +304,7 @@ describe('TagPage, suggestions', () => {
     expect([...server.sent().values()].find((s) => s.kind === 'timeout')).toMatchObject({ start_ms: 7_000, end_ms: 30_000 })
     // A substitution has its own label.
     fireEvent.click(within(within(panel()).getByRole('group', { name: 'Not a rally, it’s a:' })).getByRole('button', { name: 'Sub' }))
-    expect(within(panel()).getByText('Not a rally: the suggestion at 0:30.0 is a substitution.')).toBeInTheDocument()
+    expect(within(panel()).getByText('Not a rally: 0:30.0 is a substitution.')).toBeInTheDocument()
     await waitFor(() => expect([...server.sent().values()].some((s) => s.kind === 'substitution')).toBe(true), { timeout: 3000 })
     expect(server.sent().get(S2)).toMatchObject({ review: 'rejected', deleted: true })
   })
@@ -322,10 +317,10 @@ describe('TagPage, suggestions', () => {
 
   it('lists the review keys with ?', async () => {
     show(`/videos/${ID}/tag?mode=review`)
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     keys('?')
     const dialog = screen.getByRole('dialog', { name: 'Keys' })
-    expect(within(dialog).getByText('Merge with the next suggestion')).toBeInTheDocument()
+    expect(within(dialog).getByText('Merge with the next rally')).toBeInTheDocument()
     expect(within(dialog).getByText('With the arrows: one frame instead of 0.25 s')).toBeInTheDocument()
   })
 })

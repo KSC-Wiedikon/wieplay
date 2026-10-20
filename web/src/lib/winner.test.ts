@@ -25,11 +25,14 @@ describe('who won a rally, set outside the workspace', () => {
     ])
   })
 
-  it("sends the rally as it is with the winner; a model's rally with another winner is corrected", () => {
+  it("sends the rally as it is with the winner; WiePlay's rally with another winner is corrected, with its own confirmed", () => {
     expect(winnerChange(second, 'us')).toMatchObject({ id: second.id, kind: 'rally', start_ms: 9_000, end_ms: 14_000, won_by: 'us', review: 'unreviewed', base_version: second.version })
     const accepted = { ...second, source: 'model', review: 'confirmed' as const }
     expect(winnerChange(accepted, 'us').review).toBe('corrected')
     expect(winnerChange({ ...accepted, won_by: 'us' }, 'us').review).toBe('confirmed') // nothing changed
-    expect(winnerChange({ ...accepted, review: 'unreviewed' }, 'them').review).toBe('corrected')
+    // WiePlay's own winner taken: a confirmation (the server reads it the same way).
+    expect(winnerChange({ ...accepted, review: 'check' }, 'them').review).toBe('confirmed')
+    expect(winnerChange({ ...accepted, review: 'check' }, 'us').review).toBe('corrected')
+    expect(winnerChange({ ...accepted, review: 'auto' }, 'us').review).toBe('corrected')
   })
 })

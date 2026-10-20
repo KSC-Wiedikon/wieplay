@@ -1,8 +1,8 @@
 import '../i18n/pages'
-import { useId, useState, type ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { measuredText } from '../lib/actions'
-import { isBusy, proposalTotal, useAnalyse, useAnalysis, useSetActionsReviewed, useSetRalliesReviewed } from '../lib/analysis'
+import { isBusy, proposalsToCheck, proposalTotal, stepsLine, useAnalyse, useAnalysis, useSetActionsReviewed, useSetRalliesReviewed } from '../lib/analysis'
 import { cx } from '../lib/cx'
 import { formatDateTime } from '../lib/format'
 import { formatPercent, GAP_KINDS } from '../lib/suggestions'
@@ -10,28 +10,27 @@ import type { ActionsState, Scoring, Video } from '../lib/types'
 import { ActionGateNote } from './ActionGateNote'
 import { Button, ButtonLink } from './Button'
 import { Card } from './Card'
-import { ConfirmDialog } from './ConfirmDialog'
 import { AlertIcon, CheckIcon, SparkleIcon } from './icons'
 import { Switch } from './Switch'
 
 export interface LiveCounts {
-  /** Every proposal (answered or not). */
+  /** Every rally WiePlay made (checked or not). */
   total: number
-  /** Proposals nobody has answered yet. */
+  /** Rallies still to check. */
   open: number
 }
 
 interface AnalysisStatusProps {
   video: Video
-  /** Rallies there are besides open suggestions (a game tagged by hand can be marked reviewed too). */
+  /** A person's own rallies (a game tagged by hand can be marked reviewed too). */
   rallies: number
   /** The tagging page counts from its own data (changes not sent yet included); else the server's. */
   live?: LiveCounts
-  /** Where to review the suggestions (the video page links to the tagging page's review). */
+  /** Where "To check" is (the video page links to the tagging page's review). */
   reviewHref?: string
-  /** After "rallies reviewed" was saved: the server accepted the open suggestions itself. */
+  /** After "rallies reviewed" was saved. */
   onReviewed?: () => void
-  /** The coach's own action tags (suggestions not counted): "actions reviewed" needs some. */
+  /** A person's own action tags (WiePlay's not counted): "actions reviewed" needs some. */
   actionTags?: number
   /** Without a card of its own (the video page's setup frames it). */
   plain?: boolean
@@ -49,9 +48,10 @@ function Spinning() {
 
 /**
  * The automatic analysis of a video and the learning loop (PLAN §10.1), for those who may tag:
- * its state (queued and running update by themselves), "Analyse" when there is none or it
- * failed, how well the suggestions matched the coach's own rallies, the automatic score
- * (§10.3), and "Rallies reviewed", which tells WiePlay to learn from the game.
+ * where the chain is ("Analysing: 4 of 7 steps"; it updates by itself), "Analyse" when there is
+ * none or it failed, how many rallies WiePlay found and how many are still to check, how well
+ * its rallies matched the coach's own, the automatic score (§10.3), and "Rallies reviewed",
+ * which tells WiePlay to learn from the game.
  */
 export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, actionTags = 0, plain = false, className }: AnalysisStatusProps) {
   const { t } = useTranslation()
@@ -61,14 +61,16 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
   if (!data) return null
 
   const total = live?.total ?? proposalTotal(data.proposals)
-  const open = live?.open ?? data.proposals.unreviewed
+  const open = live?.open ?? data.to_check?.rallies ?? proposalsToCheck(data.proposals)
+  // Everything still to check (rallies, breaks, sets, actions, players): the link says so.
+  const toCheck = data.to_check?.total ?? open
   const metrics = data.metrics_vs_human
   // Starting it by hand is for coaches and helpers (players tag and review; older servers: allowed).
   const canAnalyse = (data.can_run ?? true) && (data.status === 'none' || data.status === 'failed')
   const action =
-    reviewHref && open > 0 ? (
+    reviewHref && toCheck > 0 ? (
       <ButtonLink to={reviewHref} variant="primary">
-        {t('tagging.analysis.reviewCount', { count: open })}
+        {t('tagging.analysis.reviewCount', { count: toCheck })}
       </ButtonLink>
     ) : null
 
@@ -79,7 +81,7 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
     case 'queued':
     case 'running':
       icon = <Spinning />
-      line = data.status === 'queued' ? t('tagging.analysis.queued') : t('tagging.analysis.running')
+      line = stepsLine(t, data) ?? (data.status === 'queued' ? t('tagging.analysis.queued') : t('tagging.analysis.running'))
       body = t('tagging.analysis.busyBody')
       break
     case 'failed':
@@ -88,10 +90,16 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
       body = t('tagging.analysis.failedBody')
       break
     case 'done':
-      icon = <SparkleIcon className="size-5" />
-      // A game the coach tagged himself is only measured: no proposals, just the comparison.
-      line = total > 0 ? t('tagging.analysis.done', { count: total }) : metrics ? t('tagging.analysis.measured') : t('tagging.analysis.noneFound')
-      body = total > 0 ? (open > 0 ? t('tagging.analysis.open', { count: open }) : t('tagging.analysis.allReviewed')) : null
+      // The rest of the chain (ball, court, actions, players) may still run: "Analysing: 4 of 7 steps".
+      icon = data.steps?.running ? <Spinning /> : <SparkleIcon className="size-5" />
+      line =
+        stepsLine(t, data) ??
+        // A game the coach tagged himself is only measured: no rallies of WiePlay's, just the comparison.
+        (total > 0 ? t('tagging.analysis.done', { count: total }) : metrics ? t('tagging.analysis.measured') : t('tagging.analysis.noneFound'))
+      body =
+        total > 0
+          ? `${data.steps && !data.steps.running ? `${t('tagging.analysis.done', { count: total })} ` : ''}${open > 0 ? t('tagging.analysis.open', { count: open }) : t('tagging.analysis.allReviewed')}`
+          : null
       break
     default:
       icon = <SparkleIcon className="size-5 text-muted" />
@@ -196,25 +204,26 @@ function ScoringSummary({ scoring }: { scoring: Scoring }) {
 }
 
 /**
- * The suggested actions (PLAN §10.4a): how many and how many are open (switched off: why there
- * are none); what is measured on hand-checked rallies and against the coach's tags; "Actions
- * reviewed", which makes a game the coach tagged teach WiePlay.
+ * WiePlay's actions (PLAN §10.4a): how many and how many are still to check (switched off: why
+ * there are none); what is measured on hand-checked rallies and against the coach's tags;
+ * "Actions reviewed", which makes a game teach WiePlay.
  */
 function ActionsSummary({ videoId, actions, tags }: { videoId: string; actions: ActionsState; tags: number }) {
   const { t } = useTranslation()
   const id = useId()
   const mark = useSetActionsReviewed(videoId)
   const s = actions.suggestions
-  const total = s.unreviewed + s.confirmed + s.corrected + s.rejected
+  const open = (s.check ?? 0) + (s.unreviewed ?? 0)
+  const total = (s.auto ?? 0) + open + s.confirmed + s.corrected + s.rejected
   const vs = actions.vs_coach
   const at = actions.reviewed_at
-  const canMark = tags > 0 || total - s.unreviewed > 0 || at !== null
+  const canMark = tags > 0 || total > 0 || at !== null
   const measured = measuredText(t, actions.gate)
   return (
     <section aria-label={t('actions.card.title')} className="mt-2 flex flex-col gap-1 border-t border-hairline pt-2 text-sm">
       <h3 className="font-semibold">{t('actions.card.title')}</h3>
       <ActionGateNote gate={actions.gate} />
-      {total > 0 && <p>{t('actions.card.counts', { count: total, open: s.unreviewed })}</p>}
+      {total > 0 && <p>{t('actions.card.counts', { count: total, open })}</p>}
       {measured && <p className="text-muted">{measured}</p>}
       {vs && (
         <p className="text-muted">{t('actions.card.measured', { score: formatPercent(vs.action_precision ?? null), recall: formatPercent(vs.recall) })}</p>
@@ -242,12 +251,11 @@ function ActionsSummary({ videoId, actions, tags }: { videoId: string; actions: 
   )
 }
 
-/** "Rallies reviewed": a switch with what it does, or a nudge once every suggestion is answered. */
+/** "Rallies reviewed": a switch with what it does, or a nudge once nothing is left to check. */
 function Reviewed({ video, open, total, onReviewed }: { video: Video; open: number; total: number; onReviewed?: () => void }) {
   const { t } = useTranslation()
   const id = useId()
   const mark = useSetRalliesReviewed(video.id)
-  const [asking, setAsking] = useState(false)
   const save = (on: boolean) => mark.mutate(on, { onSuccess: () => onReviewed?.() })
   const at = video.rallies_reviewed_at ?? null
   const reviewed = at !== null
@@ -278,11 +286,11 @@ function Reviewed({ video, open, total, onReviewed }: { video: Video; open: numb
     <div className="flex min-w-0 flex-[1_1_20rem] items-start gap-2 border-t border-hairline pt-3 md:border-t-0 md:border-l md:pt-0 md:pl-5">
       <Switch
         checked={reviewed}
-        disabled={mark.isPending}
         label={t('tagging.analysis.reviewed')}
         describedBy={`${id}-hint`}
-        // Open suggestions are accepted as they are by the server: ask first.
-        onChange={(on) => (on && open > 0 ? setAsking(true) : save(on))}
+        // The server waits until nothing is left to check.
+        disabled={mark.isPending || (!reviewed && open > 0)}
+        onChange={save}
       />
       <div className="flex min-w-0 flex-col gap-0.5 pt-2.5 sm:pt-1.5">
         <p className="font-semibold" aria-hidden="true">
@@ -292,18 +300,6 @@ function Reviewed({ video, open, total, onReviewed }: { video: Video; open: numb
           {hint}
         </p>
       </div>
-      <ConfirmDialog
-        open={asking}
-        title={t('tagging.analysis.confirmTitle')}
-        confirmLabel={t('tagging.analysis.markReviewed')}
-        onCancel={() => setAsking(false)}
-        onConfirm={() => {
-          setAsking(false)
-          save(true)
-        }}
-      >
-        {t('tagging.analysis.confirmBody', { count: open })}
-      </ConfirmDialog>
     </div>
   )
 }

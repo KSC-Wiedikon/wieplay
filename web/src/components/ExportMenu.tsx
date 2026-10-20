@@ -26,8 +26,8 @@ function Item({ icon, title, hint, disabled, onClick }: { icon: ReactNode; title
 
 /**
  * "Export": the video's downloads in one place (coaches, team managers, sport admins): the
- * rallies only (the match without the dead time) and the game recap (volleyball), both as
- * watermarked MP4s that show up under Downloads.
+ * rallies only (the match without the dead time) and the game recap (volleyball; also from sure
+ * and checked tags only), all as watermarked MP4s that show up under Downloads.
  */
 export function ExportMenu({ video, rallies }: { video: Video; rallies: number }) {
   const { t, i18n } = useTranslation()
@@ -66,6 +66,18 @@ export function ExportMenu({ video, rallies }: { video: Video; rallies: number }
                 onClick={() => {
                   close()
                   start({ kind: 'recap', video_id: video.id, lang: i18n.language === 'de' ? 'de' : 'en' }, t('recap.queued'))
+                }}
+              />
+            )}
+            {volleyball && (
+              <Item
+                icon={<SparkleIcon className="size-4" />}
+                title={t('exportMenu.recapSure')}
+                hint={t('exportMenu.recapSureHint')}
+                disabled={busy}
+                onClick={() => {
+                  close()
+                  start({ kind: 'recap', video_id: video.id, lang: i18n.language === 'de' ? 'de' : 'en', sure_only: true }, t('recap.queued'))
                 }}
               />
             )}

@@ -8,10 +8,11 @@ import { TagController } from './controller'
 import { BREAK_BUTTONS, GAP_KEYS, NUDGE_MS, ReviewController } from './review'
 
 const VIDEO = '00000000-0000-4000-8000-0000000000dd'
+/** WiePlay's rally it is unsure of (to check), unless the patch says otherwise. */
 const suggestion = (id: string, start_ms: number, confidence: number, patch: Partial<Segment> = {}) =>
-  rally({ id, start_ms, end_ms: start_ms + 8_000, source: 'model', confidence, model_run_id: 'run-1', version: 1, ...patch })
+  rally({ id, start_ms, end_ms: start_ms + 8_000, source: 'model', review: 'check', score_sure: false, confidence, model_run_id: 'run-1', version: 1, ...patch })
 
-/** Four suggestions (one accepted already) and a rally marked by hand. */
+/** Four rallies of WiePlay's to check (one accepted already) and a rally marked by hand. */
 function data() {
   return bundle({
     segments: [
@@ -86,11 +87,11 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('ReviewController', () => {
-  it('starts at the first open suggestion, 1 s before it', async () => {
+  it('starts at the first rally to check, 1 s before it', async () => {
     const { review } = await setup()
     expect(review.getState()).toMatchObject({ active: true, currentId: 's1' })
     expect(video.currentTime).toBe(9)
-    expect(review.progress()).toEqual({ done: 2, total: 5 }) // s3 answered, one rejected before
+    expect(review.progress()).toEqual({ done: 1, total: 4 }) // s1, s2, s4 to check; one rejected before
   })
 
   it('Enter accepts: review "confirmed" through the outbox, and the list moves on', async () => {
@@ -98,7 +99,7 @@ describe('ReviewController', () => {
     press('Enter')
     expect(review.getState().currentId).toBe('s2')
     expect(video.currentTime).toBe(29)
-    expect(review.progress()).toEqual({ done: 3, total: 5 })
+    expect(review.progress()).toEqual({ done: 2, total: 4 })
     expect(await sent()).toEqual([
       { id: 's1', base_version: 1, kind: 'rally', start_ms: 10_000, end_ms: 18_000, won_by: null, review: 'confirmed' },
     ])
@@ -109,7 +110,7 @@ describe('ReviewController', () => {
     press('x')
     expect(segment('s1')).toBeUndefined()
     expect(review.getState().currentId).toBe('s2')
-    expect(review.progress()).toEqual({ done: 3, total: 5 })
+    expect(review.progress()).toEqual({ done: 2, total: 4 })
     expect(await sent()).toEqual([expect.objectContaining({ id: 's1', review: 'rejected', deleted: true, base_version: 1 })])
   })
 
@@ -195,138 +196,130 @@ describe('ReviewController', () => {
     press('x')
     expect(review.getState().currentId).toBe('s4')
     press('u')
-    expect(segment('s2')).toMatchObject({ review: 'unreviewed' })
+    expect(segment('s2')).toMatchObject({ review: 'check' })
     expect(review.getState().currentId).toBe('s2')
     press('u')
-    expect(segment('s1')).toMatchObject({ review: 'unreviewed' })
+    expect(segment('s1')).toMatchObject({ review: 'check' })
     expect(review.getState().currentId).toBe('s1')
-    expect(review.progress()).toEqual({ done: 2, total: 5 })
-    // The queue holds each suggestion's state from before: nothing changes on the server.
+    expect(review.progress()).toEqual({ done: 1, total: 4 })
+    // The queue holds each rally's state from before: nothing changes on the server.
     expect(await sent()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: 's1', review: 'unreviewed' }),
-        expect.objectContaining({ id: 's2', review: 'unreviewed' }),
+        expect.objectContaining({ id: 's1', review: 'check' }),
+        expect.objectContaining({ id: 's2', review: 'check' }),
       ]),
     )
     press('u')
     expect(review.getState().notice?.key).toBe('nothingToUndo')
   })
 
-  it('undoes a rejection that was saved already: the suggestion comes back as one', async () => {
+  it('undoes a rejection that was saved already: the rally comes back, to check', async () => {
     const { review, press, sent, segment } = await setup()
     press('x')
     await sent()
     expect(segment('s1')).toBeUndefined()
     press('u')
-    expect(segment('s1')).toMatchObject({ source: 'model', confidence: 0.95, review: 'unreviewed' })
+    expect(segment('s1')).toMatchObject({ source: 'model', confidence: 0.95, review: 'check' })
     expect(review.getState().currentId).toBe('s1')
-    expect(await sent()).toEqual([expect.objectContaining({ id: 's1', review: 'unreviewed', base_version: 2 })])
+    expect(await sent()).toEqual([expect.objectContaining({ id: 's1', review: 'check', base_version: 2 })])
   })
 
-  it('accepts all sure rallies after a confirmation, in one undo step, the winner left to the scoring', async () => {
+  it("Enter takes WiePlay's answer: the rally confirmed with WiePlay's winner, a fact; U takes it back", async () => {
     const reasons = (code: string) => ({ score_sure: false, score_conflict: true, score_note: code, score_reasons: [{ code }] }) as Partial<Segment>
     const scored = bundle({
       segments: [
-        suggestion('s1', 10_000, 0.6, { score_sure: true, model_won_by: 'us' }),
-        suggestion('s2', 30_000, 0.95, { log_won_by: 'none', ...reasons('log_none') }),
-        suggestion('s3', 50_000, 0.9, { model_won_by: 'them', ...reasons('video') }),
-        suggestion('s4', 70_000, 0.5, { score_sure: true, model_won_by: 'them' }),
-        suggestion('s5', 90_000, 0.97, { model_won_by: 'us', ...reasons('unsure') }),
-        // Accepted already: not offered again.
-        suggestion('s6', 110_000, 0.8, { score_sure: true, review: 'confirmed', version: 2 }),
+        // Sure: WiePlay's, counted, not in the walk.
+        suggestion('s1', 10_000, 0.6, { review: 'auto', score_sure: true, model_won_by: 'us' }),
+        suggestion('s2', 30_000, 0.95, { model_won_by: 'them', ...reasons('video') }),
+        // No point, WiePlay thinks: confirmed as it is, no winner.
+        suggestion('s3', 50_000, 0.9, { model_won_by: null, ...reasons('log_none') }),
+        // A person's rally whose winner the scoring is unsure of: to check too.
+        rally({ id: 'h', start_ms: 70_000, end_ms: 78_000, model_won_by: 'us', score_sure: false }),
       ],
     })
     const { review, sent, segment, press } = await setup(scored)
-    // The walk starts with the rallies that need the coach; the sure ones wait for the button.
     expect(review.getState().currentId).toBe('s2')
-    expect(review.sure().map((s) => s.id)).toEqual(['s1', 's4'])
-    expect(review.needsYou().map((s) => s.id)).toEqual(['s2', 's3', 's5'])
-    review.askAcceptSure()
-    expect(review.getState().confirmSure).toBe(true)
-    press('x') // keys wait while the dialog asks
-    expect(segment('s2')).toBeDefined()
-    review.confirmAcceptSure()
-    expect(review.getState().confirmSure).toBe(false)
-    expect(['s1', 's2', 's3', 's4', 's5'].map((id) => segment(id)?.review)).toEqual([
-      'confirmed',
-      'unreviewed',
-      'unreviewed',
-      'confirmed',
-      'unreviewed',
-    ])
-    expect(review.getState().notice).toMatchObject({ key: 'acceptedSure', params: { count: 2, left: 3 } })
-    expect(review.getState().currentId).toBe('s2')
-    // Accepted as they are: the winner stays the model's (no coach's fact written).
+    expect(review.toCheck().map((s) => s.id)).toEqual(['s2', 's3', 'h'])
+    press('Enter')
+    expect(segment('s2')).toMatchObject({ review: 'confirmed', won_by: 'them' })
+    expect(review.getState().currentId).toBe('s3')
+    press('Enter')
+    expect(segment('s3')).toMatchObject({ review: 'confirmed', won_by: null })
+    expect(review.getState().currentId).toBe('h')
+    press('Enter')
+    expect(segment('h')).toMatchObject({ review: 'confirmed', won_by: 'us', source: 'manual' })
+    expect(review.toCheck()).toEqual([])
+    expect(review.getState().currentId).toBeNull()
+    // Taking WiePlay's own winner is no correction (the server reads it the same way).
     const body = await sent()
     expect(body).toEqual([
-      { id: 's1', base_version: 1, kind: 'rally', start_ms: 10_000, end_ms: 18_000, won_by: null, review: 'confirmed' },
-      { id: 's4', base_version: 1, kind: 'rally', start_ms: 70_000, end_ms: 78_000, won_by: null, review: 'confirmed' },
+      { id: 's2', base_version: 1, kind: 'rally', start_ms: 30_000, end_ms: 38_000, won_by: 'them', review: 'confirmed' },
+      { id: 's3', base_version: 1, kind: 'rally', start_ms: 50_000, end_ms: 58_000, won_by: null, review: 'confirmed' },
+      { id: 'h', base_version: 1, kind: 'rally', start_ms: 70_000, end_ms: 78_000, won_by: 'us', review: 'confirmed' },
     ])
     press('u')
-    expect(segment('s1')?.review).toBe('unreviewed')
-    expect(segment('s4')?.review).toBe('unreviewed')
+    expect(segment('h')).toMatchObject({ review: 'unreviewed', won_by: null })
+    // The sure one is reachable with ↑, and stays as it is.
+    press('ArrowUp')
+    press('ArrowUp')
+    press('ArrowUp')
+    expect(review.getState().currentId).toBe('s1')
+    expect(segment('s1')?.review).toBe('auto')
   })
 
-  it('a decision on a rally that needs the coach is a fact: it no longer needs them', async () => {
+  it('a decision on a rally to check is a fact: it is no longer to check', async () => {
     const scored = bundle({
       segments: [
         suggestion('s1', 10_000, 0.6, { model_won_by: 'us', score_sure: false, score_reasons: [{ code: 'unsure' }] }),
-        suggestion('s2', 30_000, 0.95, { score_sure: true }),
+        suggestion('s2', 30_000, 0.95, { review: 'auto', score_sure: true }),
       ],
     })
     const { review, press, segment } = await setup(scored)
-    expect(review.needsYou().map((s) => s.id)).toEqual(['s1'])
+    expect(review.toCheck().map((s) => s.id)).toEqual(['s1'])
     press('4') // they won: the coach's call
     expect(segment('s1')).toMatchObject({ won_by: 'them', review: 'corrected' })
-    expect(review.needsYou()).toEqual([])
+    expect(review.toCheck()).toEqual([])
   })
 
-  it('accepts the rallies the finder is 90 % sure of when the scoring is not sure, who won left open', async () => {
-    // A match without the board's log or a scoresheet: the scoring is sure of no winner.
-    const unsure = { score_sure: false, score_conflict: true, score_note: 'unsure', score_reasons: [{ code: 'unsure' }] } as Partial<Segment>
+  it("takes WiePlay's other answer: the other winner, or no rally", async () => {
     const scored = bundle({
       segments: [
-        suggestion('s1', 10_000, 0.95, { model_won_by: 'us', ...unsure }),
-        suggestion('s2', 30_000, 0.6, { model_won_by: 'them', ...unsure }),
-        suggestion('s3', 50_000, 0.92, { model_won_by: 'them', ...unsure }),
-        // Sure of the score too: that is "Accept all sure rallies", not this button.
-        suggestion('s4', 70_000, 0.97, { score_sure: true, model_won_by: 'us' }),
+        suggestion('s1', 10_000, 0.6, { model_won_by: 'us', model_alternative: 'them' }),
+        suggestion('s2', 30_000, 0.6, { model_won_by: 'us', model_alternative: 'none' }),
       ],
     })
-    const { review, sent, segment, press } = await setup(scored)
-    expect(review.confident().map((s) => s.id)).toEqual(['s1', 's3'])
-    review.askAcceptRallies()
-    expect(review.getState().confirmRallies).toBe(true)
-    press('x') // keys wait while the dialog asks
-    expect(segment('s1')?.review).toBe('unreviewed')
-    review.confirmAcceptRallies()
-    expect(review.getState().confirmRallies).toBe(false)
-    expect(['s1', 's2', 's3', 's4'].map((id) => segment(id)?.review)).toEqual(['confirmed', 'unreviewed', 'confirmed', 'unreviewed'])
-    expect(review.getState().notice).toMatchObject({ key: 'acceptedRallies', params: { count: 2 } })
-    // Start and end only: no winner written, so who won still needs the coach.
+    const { review, segment, sent } = await setup(scored)
+    review.takeAlternative()
+    expect(segment('s1')).toMatchObject({ won_by: 'them', review: 'corrected' })
+    expect(review.getState().currentId).toBe('s2')
+    review.takeAlternative()
+    expect(segment('s2')).toBeUndefined()
     expect(await sent()).toEqual([
-      expect.objectContaining({ id: 's1', won_by: null, review: 'confirmed' }),
-      expect.objectContaining({ id: 's3', won_by: null, review: 'confirmed' }),
+      expect.objectContaining({ id: 's1', won_by: 'them', review: 'corrected' }),
+      expect.objectContaining({ id: 's2', review: 'rejected', deleted: true }),
     ])
-    expect(review.needsYou().map((s) => s.id)).toEqual(['s1', 's2', 's3'])
-    press('u')
-    expect(segment('s1')?.review).toBe('unreviewed')
   })
 
-  it('has nothing to accept when the scoring is sure of no rally', async () => {
-    const { review } = await setup()
-    expect(review.sure()).toEqual([])
-    review.askAcceptSure()
-    expect(review.getState().confirmSure).toBe(false)
+  it('goes on into the actions once nothing is left to check here', async () => {
+    const onEnd = vi.fn()
+    const scored = bundle({ segments: [suggestion('s1', 10_000, 0.6)] })
+    const { review, press } = await setup(scored)
+    review.setOnEnd(onEnd)
+    press('Enter')
+    expect(onEnd).toHaveBeenCalledTimes(1)
+    // Started with nothing to check: on at once.
+    review.stop()
+    review.start()
+    expect(onEnd).toHaveBeenCalledTimes(2)
   })
 
-  it('ends with nothing on screen once every suggestion is answered', async () => {
+  it('ends with nothing on screen once everything is checked', async () => {
     const { review, press } = await setup()
     press('Enter')
     press('Enter')
     press('Enter')
     expect(review.getState().currentId).toBeNull()
-    expect(review.progress()).toEqual({ done: 5, total: 5 })
+    expect(review.progress()).toEqual({ done: 4, total: 4 })
   })
 
   it('↑/↓ move through the list without answering; Esc leaves the review', async () => {
@@ -348,7 +341,7 @@ describe('ReviewController', () => {
     button.dispatchEvent(event)
     review.onKeyDown(event)
     expect(event.defaultPrevented).toBe(false)
-    expect(segment('s1')?.review).toBe('unreviewed')
+    expect(segment('s1')?.review).toBe('check')
     button.remove()
   })
 
@@ -366,7 +359,7 @@ describe('ReviewController', () => {
 
 describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
   const gap = (id: string, kind: Segment['kind'], start_ms: number, end_ms: number, patch: Partial<Segment> = {}) =>
-    rally({ id, kind, start_ms, end_ms, source: 'model', confidence: 0.8, model_run_id: 'run-1', version: 1, ...patch })
+    rally({ id, kind, start_ms, end_ms, source: 'model', review: 'check', confidence: 0.8, model_run_id: 'run-1', version: 1, ...patch })
 
   /** WiePlay's warm-up before the first rally and a timeout between two rallies. */
   function scored() {
@@ -392,7 +385,7 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     press('ArrowDown')
     expect(review.getState().currentId).toBe('s1')
     press('1')
-    expect(segment('s1')).toMatchObject({ serving_manual: 'us', review: 'unreviewed' })
+    expect(segment('s1')).toMatchObject({ serving_manual: 'us', review: 'check' })
     expect(review.getState().notice).toMatchObject({ key: 'serve', params: { side: 'us' } })
     // Still on screen: a serve call is not an answer.
     expect(review.getState().currentId).toBe('s1')
@@ -404,7 +397,7 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     press('u')
     expect(segment('s1')?.serving_manual).toBe('them')
     expect(await sent()).toEqual([
-      { id: 's1', base_version: 1, kind: 'rally', start_ms: 10_000, end_ms: 18_000, won_by: null, review: 'unreviewed', serving_manual: 'them' },
+      { id: 's1', base_version: 1, kind: 'rally', start_ms: 10_000, end_ms: 18_000, won_by: null, review: 'check', serving_manual: 'them' },
     ])
     // The answer after it doesn't name the call: the server keeps it.
     press('Enter')
@@ -458,7 +451,7 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     )
     press('u')
     press('u')
-    expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'unreviewed' })
+    expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'check' })
     expect(review.getState().currentId).toBe('g')
   })
 
@@ -492,8 +485,8 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
       ]),
     )
     press('u')
-    expect(segment('s1')).toMatchObject({ kind: 'rally', review: 'unreviewed' })
-    expect(segment('g')).toMatchObject({ review: 'unreviewed' })
+    expect(segment('s1')).toMatchObject({ kind: 'rally', review: 'check' })
+    expect(segment('g')).toMatchObject({ review: 'check' })
   })
 
   it('a break key on a rally with no break around it makes one from the rally before to the rally after', async () => {
@@ -587,7 +580,7 @@ describe('ReviewController, serve calls and breaks (automatic scoring)', () => {
     // this session's own is no change of its own).
     press('u')
     expect(review.getState().notice?.key).toBe('undone')
-    expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'unreviewed' })
+    expect(segment('g')).toMatchObject({ kind: 'timeout', review: 'check' })
     expect(store.getView().segments.some((s) => s.id === made?.id)).toBe(false)
     expect(review.getState().currentId).toBe('g')
     // A short break (the 9 s warm-up) becomes a rally over all of it; a rally is one already.

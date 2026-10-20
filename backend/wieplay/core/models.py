@@ -660,7 +660,11 @@ class Segment(Base):
     import_ref: Mapped[str | None] = mapped_column(String(128))
     model_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
     confidence: Mapped[float | None] = mapped_column(Float)
-    # unreviewed | confirmed | corrected | rejected | merged (into merged_into)
+    # WiePlay's likeliest other answer: for a rally us | them (the other winner) | none (no
+    # point); for a break another kind. Written by the scoring.
+    model_alternative: Mapped[str | None] = mapped_column(String(8))
+    # auto | check (WiePlay's, sure or to check) | confirmed | corrected | rejected | merged
+    # (into merged_into) | unreviewed (a person's own); see tagging.Review.
     review: Mapped[str] = mapped_column(String(16), default="unreviewed")
     merged_into: Mapped[uuid.UUID | None] = mapped_column(UUID)
     created_by: Mapped[int | None] = mapped_column(Integer)
@@ -704,7 +708,7 @@ class Event(Base):
     source: Mapped[str] = mapped_column(String(16), default="manual")
     model_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
     confidence: Mapped[float | None] = mapped_column(Float)
-    # A suggested action: sure (the coach accepts it in bulk), else the likeliest other answer.
+    # WiePlay's action: sure (review "auto"), else to check; the likeliest other answer.
     model_sure: Mapped[bool | None] = mapped_column(Boolean)
     model_alternative: Mapped[str | None] = mapped_column(String(16))
     review: Mapped[str] = mapped_column(String(16), default="unreviewed")

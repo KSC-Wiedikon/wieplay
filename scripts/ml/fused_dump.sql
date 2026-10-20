@@ -27,7 +27,7 @@ select json_build_object(
   'serves', (select coalesce(json_agg(json_build_object('t_ms', e.t_ms, 'side', e.side)
                                       order by e.t_ms), '[]')
              from event e where e.video_id = :'vid' and e.code = 'S' and e.deleted_at is null
-               and not (e.source = 'model' and e.review in ('unreviewed', 'rejected', 'merged'))),
+               and (e.source <> 'model' or e.review in ('confirmed', 'corrected'))),
   'tracks', (select coalesce(json_object_agg(t.kind, json_build_object(
                 'step_ms', t.step_ms, 'channels', t.channels)), '{}')
              from (select distinct on (kind) kind, step_ms, channels from analysis_track

@@ -18,7 +18,7 @@ function wideScreen(): boolean {
 
 /**
  * /videos/:id/tag — the tagging workspace (PLAN §9.1), desktop only; `?mode=review` opens the
- * review of WiePlay's suggestions (PLAN §10.1) and `?mode=regrade` the regrade queue (PLAN §9.7),
+ * "To check", what WiePlay is unsure of (PLAN §10.1), and `?mode=regrade` the regrade queue (PLAN §9.7),
  * which smaller screens get on their own.
  */
 export function TagPage() {
@@ -65,7 +65,7 @@ function TagLoader({ videoId }: { videoId: string }) {
   const bundle = tagging.data
   if (!bundle.taxonomy) return <Message action={back}>{t('tagging.noTaxonomy')}</Message>
   if (!bundle.can_tag) return <Message action={back}>{t('tagging.forbidden')}</Message>
-  // Tagging is a keyboard task; reviewing WiePlay's suggestions and regrading work by touch too.
+  // Tagging is a keyboard task; checking what WiePlay is unsure of and regrading work by touch too.
   if (!desktop) {
     if (regrade) return <Workspace video={video.data} taxonomy={bundle.taxonomy} narrow />
     if (!bundle.segments.some((s) => s.source === 'model')) return phone

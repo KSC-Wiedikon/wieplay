@@ -329,13 +329,26 @@ WIEPLAY_ACTION_SUGGEST_MIN_RECALL=0.6
 `GET /api/videos/{id}/analysis` → `actions.gate` says where it stands (reason, games, score).
 After switching to `on`, `python -m wieplay.cli actions --all-ready` fills the games in.
 
-Suggestions are tags with source "model" and review "unreviewed": they show dashed on the
-tagging page and are answered in Review → Actions (Enter, X, S R E A B D F, # + ! - / =, a
-number then Enter, Tab, ←/→, Shift+Enter, U). They never count in stats, reels or the score
-until accepted. A run never writes into a rally with a person's tags; it replaces its own
-untouched suggestions elsewhere and leaves rejected ones out.
+WiePlay's actions are tags with source "model" and review "auto" (sure) or "check" (to check,
+PLAN §10.0): they count in stats and reels from the start ("Sure only" leaves out the ones to
+check) and the unsure ones are answered in the "To check" review after the rallies (Enter, X,
+S R E A B D F, # + ! - / =, a number then Enter, Tab, ←/→, Shift+Enter, U). The scoring never
+takes WiePlay's serve as the coach's call. A run never writes into a rally with a person's
+tags; it replaces its own untouched tags elsewhere and leaves rejected ones out.
 
-The learning loop is the rallies': "Actions reviewed" (refused while suggestions are open)
+## The chain
+
+Everything after the upload runs by itself (PLAN §10.0, `wieplay/core/chain.py`): analyse →
+scoring → trajectory → court → actions and players → attribution. The API's reaper queues, once
+an hour and at most five jobs a run, a step nobody queued. To see every video's steps and drain
+a backlog at once:
+
+```bash
+python -m wieplay.cli chain --all-ready --dry-run   # print the steps, queue nothing
+python -m wieplay.cli chain --all-ready             # queue the first missing step per video
+```
+
+The learning loop is the rallies': "Actions reviewed" (refused while actions are still to check)
 queues a `train_actions` job ten minutes later; it needs two such games, scores the rules (v0)
 and the learned model (v1) on each game left out and keeps v1 only when its action F1 beats
 v0's (then every game nobody has done gets new suggestions).

@@ -121,7 +121,7 @@ export const de: Messages<typeof en> = {
     highlightsWatch: 'Meine Highlights anschauen',
     helping: {
       title: 'Du hilfst diesem Team',
-      body: 'Prüf die Ballwechsel, die WiePlay vorschlägt, und tagge die Spiele. Jedes geprüfte Spiel bringt WiePlay etwas bei.',
+      body: 'Prüf, worin WiePlay unsicher ist, und tagge die Spiele. Jedes geprüfte Spiel bringt WiePlay etwas bei.',
     },
     helpers: {
       title: 'Helfer',
@@ -130,7 +130,7 @@ export const de: Messages<typeof en> = {
       can: 'Helfer können',
       cannot: 'Helfer können nicht',
       canWatch: 'Die Videos, Tags und Clips jeder Saison anschauen',
-      canTag: 'Vorschläge von WiePlay prüfen, taggen, Spielstände korrigieren',
+      canTag: 'Prüfen, worin WiePlay unsicher ist, taggen, Spielstände korrigieren',
       canUpload: 'Ein Video hochladen oder verlinken, die Aufstellung eines Videos korrigieren',
       canShare: 'Clips und Reels mit dem Team teilen',
       cannotDownload: 'Videos herunterladen',
@@ -171,7 +171,7 @@ export const de: Messages<typeof en> = {
   },
   guide: {
     link: 'So hilfst du',
-    linkHint: 'So hilfst du: Vorschläge prüfen und taggen, Schritt für Schritt',
+    linkHint: 'So hilfst du: prüfen und taggen, Schritt für Schritt',
   },
   video: {
     kind: {
@@ -189,8 +189,9 @@ export const de: Messages<typeof en> = {
     analysis: {
       queued: 'Analyse in der Warteschlange',
       running: 'Wird analysiert …',
-      open_one: '{{count}} Vorschlag zu prüfen',
-      open_other: '{{count}} Vorschläge zu prüfen',
+      open_one: '{{count}} zu prüfen',
+      open_other: '{{count}} zu prüfen',
+      steps: 'Analyse: {{done}} von {{total}} Schritten',
       reviewed: 'Ballwechsel geprüft',
       done: 'Analysiert',
       failed: 'Analyse fehlgeschlagen',

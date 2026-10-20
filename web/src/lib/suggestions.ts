@@ -1,13 +1,13 @@
-// Rally proposals from the automatic analysis (docs/PLAN.md §10, §10.1, §11) and the gap
-// labels of the automatic scoring (§10.3): which segments are suggestions, the review list and
-// its order, and the loop the review plays. Pure, so the review controller and the pages share
-// one reading of the data.
+// WiePlay's rallies (docs/PLAN.md §10, §10.1, §11) and the break labels of its scoring (§10.3):
+// every one of them counts like a person's, the sure ones (review "auto") and the unsure ones
+// (review "check") alike; what is unsure waits in one review, "To check". Which segments are
+// WiePlay's, which are still to check, the walk's list and order, and the loop the review plays.
+// Pure, so the review controller and the pages share one reading of the data (the server reads
+// "to check" the same way).
 
 import { byStart, ralliesOf } from './rallies'
-import type { GapKind, Period, Segment, SegmentKind, Side } from './types'
+import type { GapKind, Period, Review, Segment, SegmentKind, Side } from './types'
 
-/** "Accept all remaining with confidence ≥ 90%". */
-export const ACCEPT_ALL_MIN = 0.9
 /** The review loop starts this long before a rally and ends this long after it. */
 export const LOOP_PRE_MS = 1000
 export const LOOP_POST_MS = 500
@@ -16,14 +16,24 @@ const LOOP_SLACK_MS = 1500
 
 type Kind = Pick<Segment, 'kind' | 'source' | 'review'>
 
+/** WiePlay's own review states: nobody has answered (`unreviewed` from older data). */
+const UNTOUCHED: readonly Review[] = ['auto', 'check', 'unreviewed']
+/** A person's answer. */
+const ANSWERED: readonly Review[] = ['confirmed', 'corrected']
+
 /** Made by a model (any review state). */
 export function isModel(segment: Pick<Segment, 'source'>): boolean {
   return segment.source === 'model'
 }
 
-/** A model's rally proposal that nobody has answered yet. */
-export function isSuggestion(segment: Kind): boolean {
-  return segment.kind === 'rally' && segment.source === 'model' && segment.review === 'unreviewed'
+/** WiePlay's rally or break that nobody has answered yet (sure or to check). */
+export function isWiePlays(segment: Pick<Segment, 'source' | 'review'>): boolean {
+  return segment.source === 'model' && UNTOUCHED.includes(segment.review)
+}
+
+/** WiePlay's rally or break that is sure: it counts, nobody needs to check it. */
+export function isAuto(segment: Pick<Segment, 'source' | 'review'>): boolean {
+  return segment.source === 'model' && segment.review === 'auto'
 }
 
 export const GAP_KINDS: readonly GapKind[] = ['warmup', 'set_break', 'timeout', 'stoppage', 'substitution', 'other_dead']
@@ -33,33 +43,32 @@ export function isGap(kind: SegmentKind): kind is GapKind {
   return (GAP_KINDS as readonly string[]).includes(kind)
 }
 
-/** A model's gap label that nobody has answered yet. */
-export function isGapSuggestion(segment: Kind): boolean {
-  return isGap(segment.kind) && segment.source === 'model' && segment.review === 'unreviewed'
+type CheckFields = Pick<Segment, 'kind' | 'source' | 'review' | 'deleted_at'> & Partial<Pick<Segment, 'score_sure' | 'won_by'>>
+
+/**
+ * A rally still to check: WiePlay's unsure rally (review "check"), or one whose winner the
+ * scoring is not sure of while nobody has said who won or answered the rally (a person's own
+ * rally too). Rejected and merged ones are gone.
+ */
+export function rallyToCheck(segment: CheckFields): boolean {
+  if (segment.kind !== 'rally' || segment.deleted_at || segment.review === 'rejected' || segment.review === 'merged') return false
+  if (segment.review === 'check') return true
+  return segment.score_sure === false && !segment.won_by && !ANSWERED.includes(segment.review)
 }
 
-/** Waits for an answer in the review: a rally proposal or a gap label. */
-export function isProposal(segment: Kind): boolean {
-  return isSuggestion(segment) || isGapSuggestion(segment)
+/** A break WiePlay labelled and is not sure of. */
+export function gapToCheck(segment: CheckFields): boolean {
+  return isGap(segment.kind) && segment.source === 'model' && segment.review === 'check' && !segment.deleted_at
 }
 
-/** A model's rally that a person accepted or corrected: a rally like any other, with a marker. */
-export function isReviewedSuggestion(segment: Kind): boolean {
-  return segment.kind === 'rally' && segment.source === 'model' && (segment.review === 'confirmed' || segment.review === 'corrected')
+/** Waits in "To check": a rally or a break. */
+export function isToCheck(segment: CheckFields): boolean {
+  return rallyToCheck(segment) || gapToCheck(segment)
 }
 
 /** A model's rally or break label that a person accepted or corrected. */
 export function isReviewedProposal(segment: Kind): boolean {
-  return (segment.kind === 'rally' || isGap(segment.kind)) && segment.source === 'model' && (segment.review === 'confirmed' || segment.review === 'corrected')
-}
-
-/** Rallies shown as fact: all but unanswered proposals (PLAN §10: nothing is fact until reviewed). */
-export function factualRallies(segments: readonly Segment[]): Segment[] {
-  return ralliesOf(segments).filter((s) => !isSuggestion(s))
-}
-
-export function suggestionCount(segments: readonly Segment[]): number {
-  return segments.filter(isSuggestion).length
+  return (segment.kind === 'rally' || isGap(segment.kind)) && segment.source === 'model' && ANSWERED.includes(segment.review)
 }
 
 /** The model's rallies in time order, whatever their review state. */
@@ -68,36 +77,29 @@ export function modelRallies(segments: readonly Segment[]): Segment[] {
 }
 
 /**
- * The review list: the model's rallies and gap labels plus the rallies split off in this
- * session (`extra`, manual rallies that still wait for an answer), in time order.
+ * The review list: WiePlay's rallies and break labels, the rallies still to check (a person's
+ * too: who won) and the rallies split off in this session (`extra`, manual rallies that still
+ * wait for an answer), in time order.
  */
 export function reviewItems(segments: readonly Segment[], extra: ReadonlySet<string>): Segment[] {
   return segments
-    .filter((s) => (s.kind === 'rally' && (isModel(s) || extra.has(s.id))) || (isGap(s.kind) && isModel(s)))
+    .filter((s) => (s.kind === 'rally' && (isModel(s) || extra.has(s.id) || rallyToCheck(s))) || (isGap(s.kind) && isModel(s)))
     .sort(byStart)
 }
 
-/** Still waits for an answer: an unanswered proposal, or a part split off in this session. */
+/** Still waits for an answer: to check, or a part split off in this session. */
 export function isOpen(segment: Segment, pending: ReadonlySet<string>): boolean {
-  return isProposal(segment) || pending.has(segment.id)
+  return isToCheck(segment) || pending.has(segment.id)
 }
 
 /**
  * The next item to answer after `from`: the first open one that starts later, else the first
- * open one from the start (one skipped earlier). Null when everything is answered.
+ * open one from the start (one skipped earlier). Null when everything is checked.
  */
 export function nextOpen(items: readonly Segment[], pending: ReadonlySet<string>, from: Pick<Segment, 'id' | 'start_ms'> | null): Segment | null {
-  const all = items.filter((s) => isOpen(s, pending) && s.id !== from?.id)
-  // A sure rally suggestion waits for "Accept all sure rallies": the ones that need the coach first.
-  const unsure = all.filter((s) => !(isSuggestion(s) && s.score_sure === true))
-  const open = unsure.length > 0 ? unsure : all
+  const open = items.filter((s) => isOpen(s, pending) && s.id !== from?.id)
   if (!from) return open[0] ?? null
   return open.find((s) => s.start_ms > from.start_ms) ?? open[0] ?? null
-}
-
-/** Open proposals that are at least this sure ("accept all remaining with confidence ≥ 90%"). */
-export function sureSuggestions(segments: readonly Segment[], min = ACCEPT_ALL_MIN): Segment[] {
-  return segments.filter((s) => isSuggestion(s) && s.confidence != null && s.confidence >= min).sort(byStart)
 }
 
 /**
@@ -127,70 +129,35 @@ export function hasTrustedLog(segments: readonly Segment[]): boolean {
   return segments.some((s) => s.kind === 'rally' && s.log_won_by != null)
 }
 
-/** Open rally suggestions that match the scoreboard log ("accept all that match the log"). */
-export function logMatches(segments: readonly Segment[]): Segment[] {
-  return segments.filter((s) => isSuggestion(s) && logVerdict(s) === 'match').sort(byStart)
+/** The rallies still to check, in time order. */
+export function toCheckRallies(segments: readonly Segment[]): Segment[] {
+  return segments.filter(rallyToCheck).sort(byStart)
 }
 
-/** The open rally suggestions by what the log says about them. */
-export function logCounts(segments: readonly Segment[]): Record<LogVerdict, number> {
-  const counts: Record<LogVerdict, number> = { match: 0, none: 0, disagree: 0, missed: 0, silent: 0 }
-  for (const s of segments) if (isSuggestion(s)) counts[logVerdict(s)] += 1
-  return counts
-}
-
-// The joint decode (docs/PLAN.md §10.1, §10.3): every source per rally; the coach is asked
-// only about the rallies it is not sure of ("Needs you").
-
-/**
- * The coach is needed for this rally: the scoring is not sure of it (its reasons say why) and
- * the coach has not said who won. A rally outside every set counts too (warm-up, a break).
- */
-export function needsYou(segment: Pick<Segment, 'kind' | 'score_sure' | 'won_by' | 'deleted_at'>): boolean {
-  return segment.kind === 'rally' && !segment.deleted_at && segment.score_sure === false && !segment.won_by
-}
-
-/** The rallies that need the coach, in time order. */
-export function needsYouRallies(segments: readonly Segment[]): Segment[] {
-  return segments.filter(needsYou).sort(byStart)
-}
-
-/**
- * Open rally suggestions the scoring is sure of: "Accept all sure rallies" confirms their start
- * and end (who won stays WiePlay's suggestion, which follows the evidence; PR #63).
- */
-export function sureRallies(segments: readonly Segment[]): Segment[] {
-  return segments.filter((s) => isSuggestion(s) && s.score_sure === true).sort(byStart)
-}
-
-/**
- * Open rally suggestions the rally finder is at least `min` sure of that the scoring is not sure of
- * (a match without the board's log or a scoresheet): "Accept the rallies" confirms their start
- * and end; who won still needs the coach.
- */
-export function confidentRallies(segments: readonly Segment[], min = ACCEPT_ALL_MIN): Segment[] {
-  return sureSuggestions(segments, min).filter((s) => s.kind === 'rally' && s.score_sure !== true)
+/** The rallies and breaks still to check, in time order. */
+export function toCheckSegments(segments: readonly Segment[]): Segment[] {
+  return segments.filter(isToCheck).sort(byStart)
 }
 
 export interface ReviewProgress {
-  /** Answered: accepted, corrected or rejected. */
+  /** Checked: accepted, corrected or rejected. */
   done: number
   total: number
 }
 
 /**
- * Progress over every proposal of the video: those seen in this session (live or rejected since)
- * and those rejected before it, which the tagging data no longer lists.
+ * Progress over the rallies to check of this session: those seen to check (live or rejected
+ * since) and those rejected before it, which the tagging data no longer lists.
  */
 export function reviewProgress(segments: readonly Segment[], seen: ReadonlySet<string>, rejectedBefore: number): ReviewProgress {
-  const open = segments.filter((s) => isSuggestion(s) && seen.has(s.id)).length
+  const open = segments.filter((s) => rallyToCheck(s) && seen.has(s.id)).length
   const total = seen.size + rejectedBefore
   return { done: Math.max(0, total - open), total }
 }
 
-/** Progress over the gap labels seen in this session (live or rejected since). */
+/** Progress over the break labels seen to check in this session (live or rejected since). */
 export function gapProgress(segments: readonly Segment[], seen: ReadonlySet<string>): ReviewProgress {
-  const open = segments.filter((s) => isGapSuggestion(s) && seen.has(s.id)).length
+  const open = segments.filter((s) => gapToCheck(s) && seen.has(s.id)).length
   return { done: Math.max(0, seen.size - open), total: seen.size }
 }
 
@@ -207,25 +174,25 @@ export function allProgress(
 ): ReviewProgress {
   const rallies = reviewProgress(segments, seen, rejectedBefore)
   const gaps = gapProgress(segments, seenGaps)
-  const waiting = pending.size === 0 ? 0 : segments.filter((s) => pending.has(s.id) && !isProposal(s)).length
+  const waiting = pending.size === 0 ? 0 : segments.filter((s) => pending.has(s.id) && !isToCheck(s)).length
   return { done: rallies.done + gaps.done, total: rallies.total + gaps.total + waiting }
 }
 
-// Who served and who won: the coach's facts, else the model's suggestions (PLAN §10.3).
+// Who served and who won: a person's facts, else WiePlay's (PLAN §10.3), which count too.
 
 export interface Suggested<T> {
   value: T | null
-  /** The value is the model's, not a fact. */
+  /** The value is WiePlay's, not a person's. */
   suggested: boolean
 }
 
-/** The serving team to show: the fact, else the model's suggestion. */
+/** The serving team to show: the fact, else WiePlay's. */
 export function effectiveServer(rally: Pick<Segment, 'serving' | 'model_serving'>): Suggested<Side> {
   if (rally.serving) return { value: rally.serving, suggested: false }
   return { value: rally.model_serving ?? null, suggested: rally.model_serving != null }
 }
 
-/** The winner to show: the coach's, else the model's suggestion. */
+/** The winner to show: the coach's, else WiePlay's. */
 export function effectiveWinner(rally: Pick<Segment, 'won_by' | 'model_won_by'>): Suggested<Side> {
   if (rally.won_by) return { value: rally.won_by, suggested: false }
   return { value: rally.model_won_by ?? null, suggested: rally.model_won_by != null }
@@ -237,27 +204,14 @@ export function scoreAfter(rally: Pick<Segment, 'score_us_after' | 'score_them_a
   return { text: `${rally.score_us_after}:${rally.score_them_after}`, suggested: rally.score_source === 'model' }
 }
 
-/**
- * Where the suggestions nobody reviewed lie between the rallies of a list (in time order): rally
- * id → how many come before it (after the rally above), `after`: how many after the last. The
- * score line counts them, so the score of the list jumps there.
- */
-export function openBetween(rallies: readonly Segment[], suggestions: readonly Segment[]): { before: Map<string, number>; after: number } {
-  const before = new Map<string, number>()
-  if (rallies.length === 0) return { before, after: 0 }
-  const sorted = [...suggestions].sort((a, b) => a.start_ms - b.start_ms)
-  let next = 0
-  for (const rally of rallies) {
-    const from = next
-    while (next < sorted.length && (sorted[next] as Segment).start_ms < rally.start_ms) next += 1
-    if (next > from) before.set(rally.id, next - from)
-  }
-  return { before, after: sorted.length - next }
+/** WiePlay's set that nobody has accepted or rejected yet (sure or to check). */
+export function isWiePlaysSet(period: Pick<Period, 'source' | 'review'>): boolean {
+  return period.source === 'model' && UNTOUCHED.includes(period.review ?? 'unreviewed')
 }
 
-/** A model's set that nobody has accepted or rejected yet. */
-export function isSetSuggestion(period: Pick<Period, 'source' | 'review'>): boolean {
-  return period.source === 'model' && period.review === 'unreviewed'
+/** WiePlay's set that it is not sure of: it counts, and waits in "To check". */
+export function setToCheck(period: Pick<Period, 'source' | 'review'> & { deleted_at?: string | null }): boolean {
+  return period.source === 'model' && period.review === 'check' && !period.deleted_at
 }
 
 const PERCENT = new Intl.NumberFormat('de-CH', { style: 'percent', maximumFractionDigits: 0 })

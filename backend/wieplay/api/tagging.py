@@ -80,7 +80,7 @@ class EventOut(BaseModel):
     ball_y: float | None = None
     court_x: float | None = None
     court_y: float | None = None
-    # ... and whether it is sure (accepted in bulk), else the likeliest other answer
+    # ... and whether it is sure (review "auto"), else the likeliest other answer
     # ("D:us", "E:them"; "none": maybe no contact at all).
     model_sure: bool | None = None
     model_alternative: str | None = None
@@ -137,11 +137,15 @@ class SegmentOut(BaseModel):
     score_us_after: int | None
     score_them_after: int | None
     score_source: str | None
-    # manual | model | import; a model's rally proposal carries its confidence and run.
+    # manual | model | import; WiePlay's rally or break carries its confidence and run.
     source: str
     confidence: float | None
     model_run_id: uuid.UUID | None
-    # unreviewed | confirmed | corrected | rejected | merged
+    # WiePlay's likeliest other answer: a rally's other winner (us | them) or none (no point);
+    # a break's other kind.
+    model_alternative: str | None = None
+    # auto | check (WiePlay's: sure, or to check) | confirmed | corrected | rejected | merged
+    # | unreviewed (a person's own)
     review: str
     merged_into: uuid.UUID | None = None
     version: int
@@ -166,7 +170,7 @@ class PeriodOut(BaseModel):
     start_lineup_them: list[int | None] | None = None
     final_us: int | None
     final_them: int | None
-    # manual | model (a set the scoring proposed, answered like a rally proposal).
+    # manual | model (a set the scoring found, answered like WiePlay's rallies).
     source: str = "manual"
     review: str = "unreviewed"
     confidence: float | None = None

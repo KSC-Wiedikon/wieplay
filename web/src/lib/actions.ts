@@ -1,19 +1,18 @@
-// Actions WiePlay suggests per rally (docs/PLAN.md §10.4a): serve, reception, set, attack, block,
-// dig and freeball at the ball's contacts, as tags with source "model" and review "unreviewed".
-// Which tags are suggestions, the review list and its progress, and the change a review
-// answer sends. Pure, so the review controller and the pages share one reading of the data.
-//
-// Nothing a model suggests is a fact until a coach accepts it: the score, the stats and the
-// plays behind a number use `factTags` (the server's stats do the same).
+// Actions WiePlay tags per rally (docs/PLAN.md §10.4a): serve, reception, set, attack, block,
+// dig and freeball at the ball's contacts, as tags with source "model": review "auto" when
+// WiePlay is sure, "check" when not (to check). Every one of them counts, like the server's stats;
+// the unsure ones wait in "To check". Which tags are WiePlay's, the review list and its
+// progress, and the change a review answer sends. Pure, so the review controller and the pages
+// share one reading of the data.
 
 import type { TFunction } from 'i18next'
-import { isSuggestedTag } from './facts'
+import { isToCheckTag } from './facts'
 import { formatPercent } from './suggestions'
 import { eventToIn } from './taggingStore'
 import type { Change } from './outbox'
 import type { ActionGate, EventIn, Review, Side, Tag } from './types'
 
-export { factTags, isSuggestedTag } from './facts'
+export { countedTags, isAutoTag, isToCheckTag, isWiePlaysTag, personTags, toCheckTagCount } from './facts'
 
 /** The skill keys of the action review: DataVolley's letters. */
 export const SKILL_KEYS: readonly string[] = ['S', 'R', 'E', 'A', 'B', 'D', 'F']
@@ -28,44 +27,27 @@ export function isModelTag(tag: Pick<Tag, 'source'>): boolean {
   return tag.source === 'model'
 }
 
-/** A suggested action a person accepted or corrected: a tag like any other, with a marker. */
+/** WiePlay's action a person accepted or corrected: a tag like any other, with a marker. */
 export function isReviewedSuggestion(tag: Kind): boolean {
   return tag.source === 'model' && (tag.review === 'confirmed' || tag.review === 'corrected')
 }
 
-export function suggestedCount(tags: readonly Kind[]): number {
-  return tags.filter(isSuggestedTag).length
-}
-
-/** The review list: every suggested action (answered or not), in time order. */
+/** The review list: every action WiePlay tagged (checked or not), in time order. */
 export function actionItems(tags: readonly Tag[]): Tag[] {
   return tags.filter(isModelTag).sort((a, b) => a.t_ms - b.t_ms || a.id.localeCompare(b.id))
 }
 
-/** An open suggestion WiePlay is sure of: "Accept all sure actions" takes it. */
-export function isSureAction(tag: Pick<Tag, 'source' | 'review' | 'deleted_at' | 'model_sure'>): boolean {
-  return isSuggestedTag(tag) && tag.model_sure === true
-}
-
-/** The open suggestions WiePlay is sure of, in time order. */
-export function sureActions(tags: readonly Tag[]): Tag[] {
-  return actionItems(tags).filter(isSureAction)
-}
-
-/** The open suggestions that need the coach (not sure), in time order. */
-export function needsYouActions(tags: readonly Tag[]): Tag[] {
-  return actionItems(tags).filter((t) => isSuggestedTag(t) && !isSureAction(t))
+/** The actions still to check, in time order. */
+export function toCheckActions(tags: readonly Tag[]): Tag[] {
+  return actionItems(tags).filter(isToCheckTag)
 }
 
 /**
- * The next action to answer after `from`: the first open one that comes later, else the first
- * open one from the start (one skipped earlier). The ones that need the coach come first; a
- * sure one waits for "Accept all sure actions". Null when everything is answered.
+ * The next action to check after `from`: the first one to check that comes later, else the
+ * first one from the start (one skipped earlier). Null when everything is checked.
  */
 export function nextOpenAction(items: readonly Tag[], from: Pick<Tag, 'id' | 't_ms'> | null): Tag | null {
-  const all = items.filter((t) => isSuggestedTag(t) && t.id !== from?.id)
-  const unsure = all.filter((t) => !isSureAction(t))
-  const open = unsure.length > 0 ? unsure : all
+  const open = items.filter((t) => isToCheckTag(t) && t.id !== from?.id)
   if (!from) return open[0] ?? null
   return open.find((t) => t.t_ms > from.t_ms) ?? open[0] ?? null
 }
@@ -86,25 +68,25 @@ export interface ActionProgress {
 }
 
 /**
- * Progress over every suggestion of the video: those seen in this session (live or rejected
+ * Progress over the actions to check of this session: those seen to check (live or rejected
  * since) and those rejected before it, which the tagging data no longer lists.
  */
 export function actionProgress(tags: readonly Tag[], seen: ReadonlySet<string>, rejectedBefore: number): ActionProgress {
-  const open = tags.filter((t) => isSuggestedTag(t) && seen.has(t.id)).length
+  const open = tags.filter((t) => isToCheckTag(t) && seen.has(t.id)).length
   const total = seen.size + rejectedBefore
   return { done: Math.max(0, total - open), total }
 }
 
-/** The open suggestions of one rally (by its link, else by time). */
+/** The actions to check of one rally (by its link, else by time). */
 export function openInRally(tags: readonly Tag[], rally: { id: string; start_ms: number; end_ms: number } | null): Tag[] {
   if (!rally) return []
   return tags.filter(
-    (t) => isSuggestedTag(t) && (t.segment_id === rally.id || (t.segment_id === null && t.t_ms >= rally.start_ms && t.t_ms <= rally.end_ms)),
+    (t) => isToCheckTag(t) && (t.segment_id === rally.id || (t.segment_id === null && t.t_ms >= rally.start_ms && t.t_ms <= rally.end_ms)),
   )
 }
 
 /**
- * A change to a suggested action (PLAN §11: corrections are data): another skill, side, grade
+ * A change to WiePlay's action (PLAN §11: corrections are data): another skill, side, grade
  * or time corrects it; naming the player (the model leaves it empty) or accepting it does not.
  * The server reads the change the same way.
  */
@@ -116,7 +98,7 @@ export function actionChange(tag: Tag, patch: Partial<EventIn>): Change {
     (patch.attributes !== undefined && JSON.stringify(patch.attributes) !== JSON.stringify(tag.attributes)) ||
     (patch.number !== undefined && tag.number !== null && patch.number !== tag.number)
   let review: Review = patch.review ?? tag.review
-  if (isModelTag(tag) && edited && (review === 'unreviewed' || review === 'confirmed')) review = 'corrected'
+  if (isModelTag(tag) && edited && (review === 'auto' || review === 'check' || review === 'unreviewed' || review === 'confirmed')) review = 'corrected'
   if (isModelTag(tag) && tag.review === 'corrected' && review === 'confirmed') review = 'corrected'
   return { kind: 'event', payload: { ...eventToIn(tag), ...patch, review } }
 }
@@ -131,15 +113,15 @@ export function rejectChange(tag: Tag): Change {
   return { kind: 'event', payload: { ...eventToIn(tag), review: isModelTag(tag) ? 'rejected' : tag.review, deleted: true } }
 }
 
-/** Why there are no suggested actions (PLAN §10.4a): only when they are switched off. */
+/** Why WiePlay tags no actions (PLAN §10.4a): only when that is switched off. */
 export function gateText(t: TFunction, gate: ActionGate | null | undefined): string | null {
   if (!gate || gate.open) return null
   return t('actions.gate.off')
 }
 
 /**
- * What is measured, plainly (PLAN §10.4a): on hand-checked rallies, how many suggestions are
- * fully right, how many contacts get one, and how many sure ones were wrong. Null when unknown.
+ * What is measured, plainly (PLAN §10.4a): on hand-checked rallies, how many of WiePlay's actions
+ * are fully right, how many contacts get one, and how many sure ones were wrong. Null when unknown.
  */
 export function measuredText(t: TFunction, gate: ActionGate | null | undefined): string | null {
   const m = gate?.measured

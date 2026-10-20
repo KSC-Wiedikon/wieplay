@@ -1,32 +1,31 @@
-// Reviewing the rallies WiePlay suggested (docs/PLAN.md §10, §10.1, §11), modelled on Hudl's
-// review: the list goes through the open suggestions in time order, the player loops the one
-// on screen (1 s before it to just after it), and every answer is one key:
+// "To check" (docs/PLAN.md §10, §10.1, §11), the rallies and breaks: WiePlay tags every rally,
+// its winner and the breaks by itself; what it is sure of counts at once (review "auto"), what
+// it is not sure of counts too and waits here (review "check", or a winner it is unsure of).
+// Modelled on Hudl's review: the list goes through what is still to check in time order, the
+// player loops the one on screen (1 s before it to just after it), and every answer is one key:
 //
-//   Enter accept · X reject · ←/→ move the start · Shift+←/→ move the end (0.25 s; with Alt
-//   one frame) · M merge with the next suggestion · S split at the playhead · U undo
+//   Enter accept (WiePlay's answer is right: the rally, and its winner when nobody set one)
+//   X reject · ←/→ move the start · Shift+←/→ move the end (0.25 s; with Alt one frame)
+//   M merge with the next rally · S split at the playhead · U undo
 //   1 we serve · 2 they serve (again: no call) · 3 we won · 4 they won (again: no call;
 //   the winner is a fact the scoring keeps to) · W B T D O label a break (§10.3); on a
-//   rally suggestion they say "no rally, a break": the rally is rejected and the dead time
-//   around it (from the rally before to the rally after) becomes that break
+//   rally they say "no rally, a break": the rally is rejected and the dead time around it
+//   (from the rally before to the rally after) becomes that break
 //
-// One shortcut accepts many suggestions in one undo step, after a confirmation: "Accept all sure
-// rallies", the rally suggestions the joint decode is sure of (§10.3: every source agrees and the
-// answer with its score line is at least 97 % probable). It confirms their start and end; who won
-// stays WiePlay's suggestion, which follows the evidence (as the scoreboard log's button decided,
-// PR #63). The rest "needs you", each with its reason; the walk goes through those first. A
-// decision (who won, the serve, reject, a break) is scored again at once: the rallies around it
-// can become sure.
+// Each item says why WiePlay is unsure (the scoring's reasons) and offers its other answer
+// (`model_alternative`). The sure ones are not in the walk (↑/↓ still reach them). A decision
+// (who won, the serve, reject, a break) is scored again at once: the rallies around it can
+// become sure. When nothing is left here, the walk goes on into the actions (`onEnd`).
 //
-// The gap labels of the automatic scoring (warm-up, set break, timeout, stoppage, after the
+// The break labels of the automatic scoring (warm-up, set break, timeout, stoppage, after the
 // match) are in the list too, in time order with the rallies; they are accepted, rejected,
 // relabelled and moved like rallies, but not merged or split.
 //
 // Answers are ordinary segment changes through the tagging store and its outbox (offline
-// queue, base versions, undo): accept sets review "confirmed", a moved boundary or another
-// label "corrected", reject deletes the segment with review "rejected" (the server keeps it as
-// a negative). A serve call sets `serving_manual`, a winner `won_by` (a model's proposal with
-// another winner is corrected, as the server has it). Plain TypeScript like the tagging
-// controller, so a burst of keys always sees the last state.
+// queue, base versions, undo): accept sets review "confirmed", a moved boundary, another label
+// or another winner "corrected", reject deletes the segment with review "rejected" (the server
+// keeps it as a negative). A serve call sets `serving_manual`, a winner `won_by`. Plain
+// TypeScript like the tagging controller, so a burst of keys always sees the last state.
 
 import type { Playhead } from '../../lib/playhead'
 import {
@@ -34,13 +33,12 @@ import {
   isGap,
   isModel,
   isOpen,
-  isProposal,
+  isToCheck,
+  isWiePlays,
   LOOP_PRE_MS,
-  confidentRallies,
-  needsYouRallies,
   nextOpen,
   reviewItems,
-  sureRallies,
+  toCheckRallies,
   type ReviewProgress,
 } from '../../lib/suggestions'
 import { newId, segmentToIn, type TaggingStore } from '../../lib/taggingStore'
@@ -90,8 +88,6 @@ export type ReviewNoticeKey =
   | 'noNext'
   | 'cannotSplit'
   | 'tooShort'
-  | 'acceptedSure'
-  | 'acceptedRallies'
   | 'done'
   | 'nothingSelected'
 
@@ -104,20 +100,16 @@ export interface ReviewNotice {
 
 export interface ReviewState {
   active: boolean
-  /** The suggestion on screen; null when everything is answered (or nothing was suggested). */
+  /** The item on screen; null when everything is checked (or nothing is to check). */
   currentId: string | null
   /** Rallies split off in this session: manual rallies that wait for an answer like suggestions. */
   pending: ReadonlySet<string>
-  /** Rally proposals of this video seen in this session (also once rejected), for the progress. */
+  /** Rallies seen to check in this session (also once rejected or checked), for the progress. */
   seen: ReadonlySet<string>
-  /** Gap labels of this video seen in this session (also once rejected). */
+  /** Break labels seen to check in this session (also once rejected or checked). */
   seenGaps: ReadonlySet<string>
-  /** Proposals rejected before this session (the tagging data no longer lists them). */
+  /** Rallies rejected before this session (the tagging data no longer lists them). */
   rejectedBefore: number
-  /** "Accept all sure rallies" waits for its confirmation. */
-  confirmSure: boolean
-  /** "Accept the rallies ≥ 90 %" (who won still open) waits for its confirmation. */
-  confirmRallies: boolean
   notice: ReviewNotice | null
 }
 
@@ -154,6 +146,8 @@ export class ReviewController {
   /** Gap labels this session answered (a rejected one leaves the view, but it counts as done). */
   private readonly answeredGaps = new Set<string>()
   private readonly onLeave: () => void
+  /** Nothing left to check here: the walk goes on (into the actions). */
+  private onEnd: () => void = () => {}
 
   /** `onLeave`: the review ends after changes (the page asks the server to score again). */
   constructor(store: TaggingStore, playhead: Playhead, tag: TagController, { rejectedBefore = 0, onLeave = () => {} } = {}) {
@@ -169,14 +163,17 @@ export class ReviewController {
       seen: modelIds(segments, EMPTY, 'rally'),
       seenGaps: modelIds(segments, EMPTY, 'gap'),
       rejectedBefore,
-      confirmSure: false,
-      confirmRallies: false,
       notice: null,
     }
   }
 
+  /** What happens when nothing is left to check here (the page chains the actions). */
+  setOnEnd(onEnd: () => void): void {
+    this.onEnd = onEnd
+  }
+
   /**
-   * Follows the tagging data: proposals that show up count for the progress, gap labels the
+   * Follows the tagging data: items to check that show up count for the progress, labels the
    * server took away unanswered no longer do, and when the item on screen disappears (the
    * server's scoring replaced it, someone else answered it) the walk goes on from where it was.
    */
@@ -195,7 +192,7 @@ export class ReviewController {
     }
   }
 
-  /** A new analysis replaced the proposals: count afresh. */
+  /** A new analysis replaced WiePlay's rallies: count afresh. */
   reset(rejectedBefore: number): void {
     this.marks.clear()
     const segments = this.store.getView().segments
@@ -228,7 +225,7 @@ export class ReviewController {
 
   // What is on screen
 
-  /** The review list: the model's rallies and gap labels and this session's split-off parts, in time order. */
+  /** The review list: WiePlay's rallies and break labels, the rallies to check and this session's split-off parts, in time order. */
   items(): Segment[] {
     return reviewItems(this.store.getView().segments, this.state.pending)
   }
@@ -243,35 +240,30 @@ export class ReviewController {
     return allProgress(this.store.getView().segments, this.state.seen, this.state.seenGaps, this.state.rejectedBefore)
   }
 
-  /** The open rally suggestions the scoring is sure of: what "Accept all sure rallies" accepts. */
-  sure(): Segment[] {
-    return sureRallies(this.store.getView().segments)
-  }
-
-  /** Open suggestions the rally finder is at least 90 % sure of, the scoring not: "Accept the rallies". */
-  confident(): Segment[] {
-    return confidentRallies(this.store.getView().segments)
-  }
-
-  /** The rallies that need the coach (the scoring is not sure, no winner set). */
-  needsYou(): Segment[] {
-    return needsYouRallies(this.store.getView().segments)
+  /** The rallies still to check, in time order. */
+  toCheck(): Segment[] {
+    return toCheckRallies(this.store.getView().segments)
   }
 
   // Mode
 
-  /** Review mode on: the first open suggestion in time order, unless one is on screen already. */
+  /**
+   * Review mode on: the first item to check in time order, unless one is on screen already.
+   * Nothing to check here: the walk goes on (`onEnd`, the actions).
+   */
   start = (): void => {
     const current = this.current()
     if (!this.state.active) this.changed = false
     this.set({ active: true, notice: null })
-    this.go(current && this.items().some((s) => s.id === current.id) ? current : nextOpen(this.items(), this.state.pending, null))
+    const next = current && this.items().some((s) => s.id === current.id) ? current : nextOpen(this.items(), this.state.pending, null)
+    this.go(next)
+    if (!next) this.onEnd()
   }
 
   stop = (): void => {
     const leaving = this.state.active && this.changed
     this.changed = false
-    this.set({ active: false, confirmSure: false, confirmRallies: false })
+    this.set({ active: false })
     if (leaving) this.onLeave()
   }
 
@@ -328,7 +320,7 @@ export class ReviewController {
     if (next && next.id !== this.state.currentId) this.go(next)
   }
 
-  /** After an answer: the next open item, or the end of the list. */
+  /** After an answer: the next item to check, or the end of the list (then on to the actions). */
   private advance(from: Segment): void {
     const next = nextOpen(this.items(), this.state.pending, from)
     if (next) {
@@ -337,6 +329,7 @@ export class ReviewController {
     }
     this.set({ currentId: null })
     this.playhead.video?.pause()
+    this.onEnd()
   }
 
   // Answers
@@ -366,14 +359,18 @@ export class ReviewController {
     }
   }
 
-  /** Enter: accept the suggestion as it is (a corrected one stays corrected) and go on. */
+  /**
+   * Enter: WiePlay's answer is right, and on. A rally to check (WiePlay's, or a person's whose
+   * winner the scoring is unsure of) is confirmed with WiePlay's winner when nobody set one: the
+   * winner is then a fact the scoring keeps to. A corrected one stays corrected.
+   */
   accept = (): void => {
     const segment = this.current()
     if (!segment) {
       this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
       return
     }
-    const changes: Change[] = isProposal(segment) ? [segmentChange(segment, { review: 'confirmed' })] : []
+    const changes: Change[] = isToCheck(segment) || isWiePlays(segment) ? [acceptance(segment)] : []
     this.commit(changes, without(this.state.pending, segment.id))
     this.set({ notice: this.answered(segment, 'accepted') })
     this.advance(segment)
@@ -438,7 +435,7 @@ export class ReviewController {
     const pending = without(this.state.pending, segment.id)
     if (gap) {
       const changes: Change[] = [rejection(segment)]
-      if (gap.kind !== kind || isProposal(gap)) changes.push(segmentChange(gap, { kind, review: 'confirmed' }))
+      if (gap.kind !== kind || isWiePlays(gap)) changes.push(segmentChange(gap, { kind, review: 'confirmed' }))
       this.commit(changes, without(pending, gap.id))
     } else {
       const created: SegmentIn = { id: newId(), base_version: 0, kind, start_ms: start, end_ms: end, won_by: null }
@@ -605,52 +602,30 @@ export class ReviewController {
     this.set({ notice: this.notify(this.quietly(() => this.store.redo()) ? 'redone' : 'nothingToRedo') })
   }
 
-  // Accept all sure rallies (PLAN §10.1, §10.3)
-  //
-  // Accepting confirms the rally's start and end only. Who won stays WiePlay's suggestion, which
-  // already follows every source there (the scoring is sure of it). A winner written here would
-  // be the coach's fact, shown as "your call", that the scoring and the training keep to; and it
-  // would no longer follow the evidence, which every scoring weighs again.
-
-  askAcceptSure = (): void => {
-    if (this.sure().length > 0) this.set({ confirmSure: true })
-  }
-
-  cancelAcceptSure = (): void => this.set({ confirmSure: false })
-
-  confirmAcceptSure = (): void => {
-    const sure = this.sure()
-    this.set({ confirmSure: false })
-    if (sure.length === 0) return
-    const current = this.current()
-    this.commit(sure.map((s) => segmentChange(s, { review: 'confirmed' })))
-    this.set({ notice: this.notify('acceptedSure', { count: sure.length, left: this.needsYou().length }) })
-    // The suggestion on screen was one of them: go on to the next open one.
-    if (current && sure.some((s) => s.id === current.id)) this.advance(current)
-    else if (!current) this.go(nextOpen(this.items(), this.state.pending, null))
-  }
-
-  // Accept the rallies ≥ 90 % (PLAN §10.1)
-  //
-  // For a match without the board's log or a scoresheet the scoring is sure of no winner, but
-  // the rally finder often is of the rallies: their start and end are confirmed in one step
-  // (training learns from them); who won stays open under "Needs you".
-
-  askAcceptRallies = (): void => {
-    if (this.confident().length > 0) this.set({ confirmRallies: true })
-  }
-
-  cancelAcceptRallies = (): void => this.set({ confirmRallies: false })
-
-  confirmAcceptRallies = (): void => {
-    const found = this.confident()
-    this.set({ confirmRallies: false })
-    if (found.length === 0) return
-    const current = this.current()
-    this.commit(found.map((s) => segmentChange(s, { review: 'confirmed' })))
-    this.set({ notice: this.notify('acceptedRallies', { count: found.length, left: this.needsYou().length }) })
-    if (current && found.some((s) => s.id === current.id)) this.advance(current)
-    else if (!current) this.go(nextOpen(this.items(), this.state.pending, null))
+  /**
+   * WiePlay's other answer (`model_alternative`), taken: on a rally the other winner, or "no
+   * point" (it is not a rally: rejected); on a break the other label.
+   */
+  takeAlternative = (): void => {
+    const segment = this.current()
+    if (!segment) {
+      this.set({ notice: this.notify('nothingSelected', undefined, 'error') })
+      return
+    }
+    const other = segment.model_alternative ?? null
+    if (other === null) return
+    if (isGap(segment.kind)) {
+      if (isGapKind(other)) this.relabel(other)
+      return
+    }
+    if (other === 'none') {
+      this.reject()
+      return
+    }
+    if (other !== 'us' && other !== 'them') return
+    this.commit([segmentChange(segment, { won_by: other, review: 'corrected' })], without(this.state.pending, segment.id))
+    this.set({ notice: this.notify('won', { side: other }) })
+    this.advance(segment)
   }
 
   // Keyboard
@@ -668,8 +643,6 @@ export class ReviewController {
   private handle(event: KeyboardEvent): boolean {
     const { key, shiftKey, altKey } = event
     const mod = event.ctrlKey || event.metaKey
-    if (this.state.confirmSure || this.state.confirmRallies) return false
-
     if (mod) {
       if (altKey) return false
       if (key === 'z' || key === 'Z') {
@@ -760,12 +733,12 @@ function pressable(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('button, a[href], [role="button"], [role="switch"], summary') !== null
 }
 
-/** The ids of the model's rallies (or gap labels), added to `seen` (the same set when nothing is new). */
+/** The ids of the rallies (or break labels) to check, added to `seen` (the same set when nothing is new). */
 function modelIds(segments: readonly Segment[], seen: ReadonlySet<string>, which: 'rally' | 'gap'): ReadonlySet<string> {
   let out: Set<string> | null = null
   for (const s of segments) {
     const kind = which === 'rally' ? s.kind === 'rally' : isGap(s.kind)
-    if (!kind || !isModel(s) || seen.has(s.id)) continue
+    if (!kind || !isToCheck(s) || seen.has(s.id)) continue
     out ??= new Set(seen)
     out.add(s.id)
   }
@@ -795,18 +768,35 @@ function without(set: ReadonlySet<string>, id: string): ReadonlySet<string> {
 }
 
 /**
- * A change to a segment; a model's proposal with new boundaries, another label or another
- * winner is corrected (PLAN §11; the server does the same).
+ * A change to a segment; WiePlay's rally with new boundaries, another label or another winner
+ * than its own is corrected (PLAN §11; the server does the same). Taking WiePlay's own winner
+ * is no correction.
  */
 function segmentChange(segment: Segment, patch: Partial<SegmentIn>): Change {
+  const wonBy = patch.won_by === undefined ? undefined : (patch.won_by ?? null)
+  const ownWinner = wonBy !== undefined && wonBy !== null && !segment.won_by && wonBy === (segment.model_won_by ?? null)
   const moved =
     (patch.start_ms !== undefined && patch.start_ms !== segment.start_ms) ||
     (patch.end_ms !== undefined && patch.end_ms !== segment.end_ms) ||
     (patch.kind !== undefined && patch.kind !== segment.kind) ||
-    (patch.won_by !== undefined && (patch.won_by ?? null) !== (segment.won_by ?? null))
+    (wonBy !== undefined && wonBy !== (segment.won_by ?? null) && !ownWinner)
   let review: Review = patch.review ?? segment.review
   if (isModel(segment) && moved) review = 'corrected'
   return { kind: 'segment', payload: { ...segmentToIn(segment), ...patch, review } }
+}
+
+/**
+ * Enter on an item to check: confirmed; a rally without a winner gets WiePlay's (a corrected
+ * one stays corrected).
+ */
+function acceptance(segment: Segment): Change {
+  const review: Review = segment.review === 'corrected' ? 'corrected' : 'confirmed'
+  const takeWinner = segment.kind === 'rally' && !segment.won_by && (segment.model_won_by ?? null) !== null
+  return segmentChange(segment, takeWinner ? { review, won_by: segment.model_won_by ?? null } : { review })
+}
+
+function isGapKind(value: string): value is GapKind {
+  return (BREAK_BUTTONS as readonly string[]).includes(value)
 }
 
 /** Folded into `into` by M: a proposal becomes "merged" (soft-deleted, kept apart from rejections). */

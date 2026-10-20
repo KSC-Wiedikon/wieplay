@@ -304,8 +304,14 @@ export interface VideoSetupIn {
 /** "Ready" says a video plays; this says whether WiePlay has analysed it (PLAN §10.1). */
 export interface AnalysisBrief {
   status: 'none' | 'queued' | 'running' | 'done' | 'failed'
-  /** Rally suggestions nobody has answered yet. */
+  /** Still to check (rallies, breaks, sets, actions); older servers: rally suggestions open. */
   open: number
+  /** Still to check; absent from older servers. */
+  to_check?: number
+  /** The automatic analysis steps finished, of how many, and whether one is queued or running. */
+  steps_done?: number
+  steps_total?: number
+  steps_running?: boolean
 }
 
 /** A match: a Wiedisync game, or a date and a title for one that is not in Wiedisync. */
@@ -434,8 +440,13 @@ export interface ImportChannel {
 // Tagging (M2, docs/PLAN.md §6.5–§6.7, §9).
 
 export type Side = 'us' | 'them'
-/** merged: a proposal folded into another one (merged_into); neither a rally nor a negative. */
-export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'merged'
+/**
+ * auto: WiePlay's, sure (counts, nobody needs to check it); check: WiePlay's, unsure (counts,
+ * marked "to check"); confirmed / corrected: a person's answer; rejected: a person said no;
+ * merged: a rally folded into another one (merged_into); unreviewed: a person's own tag (the
+ * review means nothing there).
+ */
+export type Review = 'auto' | 'check' | 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'merged'
 export type TimePrecision = 'live' | 'adjusted' | 'frame'
 export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'substitution' | 'other_dead'
 /**
@@ -552,7 +563,7 @@ export interface Period {
   final_us: number | null
   final_them: number | null
   // Automatic scoring (step D, PLAN §10.3); absent from servers before it.
-  /** manual | model: a model's set is a proposal until a coach accepts it. */
+  /** manual | model: WiePlay's set counts; review "check" says it waits in "To check". */
   source?: string
   review?: Review
   /** A model's set: how sure the boundary is (0..1). */
@@ -585,7 +596,7 @@ export interface Segment {
   score_us_after: number | null
   score_them_after: number | null
   score_source: string | null
-  /** manual | model | import. A model's segment is a proposal until someone reviews it (PLAN §10). */
+  /** manual | model | import. WiePlay's segments count like a person's; review says whether to check them (PLAN §10). */
   source: string
   review: Review
   /** How sure the model is (0..1), for a model's proposal; absent from servers before the analysis. */
@@ -610,8 +621,10 @@ export interface Segment {
   /** "Check": the score alignment disagrees with something here; score_note says what. */
   score_conflict?: boolean
   score_note?: ScoreNote | null
-  /** The joint decode is sure of this rally (no coach needed); false: "Needs you"; null: not scored. */
+  /** The joint decode is sure of this rally (no coach needed); false: to check; null: not scored. */
   score_sure?: boolean | null
+  /** WiePlay's likeliest other answer: a rally's other winner or 'none' (no point); a break's other kind. */
+  model_alternative?: string | null
   /** Why it needs the coach, the first reason first. */
   score_reasons?: ScoreReason[] | null
   /** Model: points it thinks were played right before this rally without one (counted in the score line). */
@@ -666,7 +679,7 @@ export interface Tag {
   note: string | null
   source: string
   review: Review
-  // A suggested action (source "model", PLAN §10.4a); absent from servers before it.
+  // WiePlay's action (source "model", PLAN §10.4a); absent from servers before it.
   /** How sure the model is (0..1). */
   confidence?: number | null
   model_run_id?: string | null
@@ -676,7 +689,7 @@ export interface Tag {
   /** The floor below it in metres, with a calibrated court only. */
   court_x?: number | null
   court_y?: number | null
-  /** Sure: "Accept all sure actions" takes it; else it needs the coach. */
+  /** Sure: review "auto"; else review "check" (to check). */
   model_sure?: boolean | null
   /** The likeliest other answer: "D:us", "E:them", or "none" (maybe no contact at all). */
   model_alternative?: string | null
@@ -816,12 +829,39 @@ export interface ModelRun {
   metrics: Record<string, unknown>
 }
 
-/** The model's proposals of a video by review state ("rejected": soft-deleted negatives). */
+/** WiePlay's rallies of a video by review state ("rejected": soft-deleted negatives). Older servers send `unreviewed`. */
 export interface ProposalCounts {
-  unreviewed: number
+  auto?: number
+  check?: number
+  unreviewed?: number
   confirmed: number
   corrected: number
   rejected: number
+  merged?: number
+}
+
+/** What is still to check in a video (PLAN §10): one queue, rallies first, then actions, then players. */
+export interface ToCheck {
+  rallies: number
+  breaks: number
+  sets: number
+  actions: number
+  /** Player cards (the identify queue). */
+  players: number
+  total: number
+}
+
+export type AnalysisStepKey = 'rallies' | 'score' | 'ball' | 'court' | 'actions' | 'players' | 'attribution'
+export type AnalysisStepStatus = 'none' | 'queued' | 'running' | 'done' | 'failed' | 'skipped'
+
+/** The automatic analysis chain of a video, step by step ("Analysing: 4 of 7 steps"). */
+export interface AnalysisSteps {
+  /** Finished steps (done, failed or skipped). */
+  done: number
+  total: number
+  /** A step is queued or running. */
+  running: boolean
+  items: { key: AnalysisStepKey; status: AnalysisStepStatus }[]
 }
 
 /** The proposals measured against the coach's own rallies (boundaries within ±1 s). */
@@ -948,7 +988,8 @@ export interface ActionsState {
   created_at: string | null
   /** v0 rules, v1 learned. */
   finder: string | null
-  suggestions: { unreviewed: number; confirmed: number; corrected: number; rejected: number }
+  /** WiePlay's actions by review state; older servers send `unreviewed`. */
+  suggestions: { auto?: number; check?: number; unreviewed?: number; confirmed: number; corrected: number; rejected: number }
   counts: Record<string, number>
   proposed: number
   rallies: number
@@ -973,6 +1014,10 @@ export interface Analysis {
   players?: PlayersSummary | null
   /** Start long jobs by hand (analysis, actions, players): coaches and helpers, not every player. */
   can_run?: boolean
+  /** Still to check; absent from older servers. */
+  to_check?: ToCheck | null
+  /** The analysis chain step by step; absent from older servers. */
+  steps?: AnalysisSteps | null
 }
 
 // Clips, reels, comments, exports (M3, docs/PLAN.md §6.8, §7.7).
@@ -1160,6 +1205,9 @@ export interface VideoExport {
   error: string | null
   created_at: string
   expires_at: string | null
+  /** A game recap: plays that rest on something still to check, and whether it is from sure tags only. */
+  to_check?: number | null
+  sure_only?: boolean | null
 }
 
 export interface ExportIn {
@@ -1171,6 +1219,8 @@ export interface ExportIn {
   title?: string
   /** A game recap: the language of the words on the picture (the viewer's). */
   lang?: 'en' | 'de'
+  /** A game recap from sure and person-checked tags only. */
+  sure_only?: boolean
 }
 
 // Guest clubs (PLAN §4.5): other clubs' teams with their own logins.

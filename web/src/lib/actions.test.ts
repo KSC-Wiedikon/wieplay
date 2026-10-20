@@ -8,48 +8,58 @@ import {
   actionItems,
   actionProgress,
   alternativeOf,
-  factTags,
+  countedTags,
   gateText,
+  isAutoTag,
   isReviewedSuggestion,
-  isSuggestedTag,
+  isToCheckTag,
+  isWiePlaysTag,
   measuredText,
-  needsYouActions,
   nextOpenAction,
   openInRally,
+  personTags,
   rejectChange,
-  suggestedCount,
-  sureActions,
+  toCheckActions,
+  toCheckTagCount,
 } from './actions'
 import type { OutboxItem } from './outbox'
 import { mergeView } from './taggingStore'
 import type { ActionGate, EventIn, Tag } from './types'
 
 const model = (id: string, t_ms: number, patch: Partial<Tag> = {}) =>
-  tag({ id, t_ms, code: 'S', number: null, member_id: null, source: 'model', confidence: 0.8, ...patch })
+  tag({ id, t_ms, code: 'S', number: null, member_id: null, source: 'model', review: 'check', confidence: 0.8, ...patch })
 
 const payload = (change: { payload: unknown }) => change.payload as EventIn & { deleted?: boolean }
 
-describe('suggested actions', () => {
+describe("WiePlay's actions", () => {
   const items = [
     model('b', 2_000, { code: 'R' }),
     model('a', 1_000),
     tag({ id: 'hand', t_ms: 1_500 }),
     model('c', 3_000, { code: 'E', review: 'confirmed' }),
+    model('s', 3_500, { code: 'A', review: 'auto', model_sure: true }),
   ]
 
-  it('tells suggestions from facts', () => {
-    expect(items.map(isSuggestedTag)).toEqual([true, true, false, false])
-    expect(items.map(isReviewedSuggestion)).toEqual([false, false, false, true])
-    expect(factTags(items).map((t) => t.id)).toEqual(['hand', 'c'])
-    expect(suggestedCount(items)).toBe(2)
-    // Without suggestions the list is the same (a copy).
+  it('counts every tag; tells sure ones, ones to check and a person’s apart', () => {
+    expect(items.map(isToCheckTag)).toEqual([true, true, false, false, false])
+    expect(items.map(isAutoTag)).toEqual([false, false, false, false, true])
+    expect(items.map(isWiePlaysTag)).toEqual([true, true, false, false, true])
+    expect(items.map(isReviewedSuggestion)).toEqual([false, false, false, true, false])
+    expect(toCheckTagCount(items)).toBe(2)
+    // Every tag counts; only a rejected one does not.
+    expect(countedTags(items).map((t) => t.id)).toEqual(['b', 'a', 'hand', 'c', 's'])
+    expect(countedTags([...items, model('x', 9, { review: 'rejected' })]).length).toBe(5)
+    // A person's: made by hand or answered (the score's serve facts).
+    expect(personTags(items).map((t) => t.id)).toEqual(['hand', 'c'])
+    // Without WiePlay's the list is the same (a copy).
     const facts = [tag({ id: 'x', t_ms: 1 })]
-    expect(factTags(facts)).toEqual(facts)
+    expect(personTags(facts)).toEqual(facts)
+    expect(toCheckActions(items).map((t) => t.id)).toEqual(['a', 'b'])
   })
 
-  it("lists the model's tags in time order and finds the next open one", () => {
+  it("lists the model's tags in time order and finds the next one to check", () => {
     const list = actionItems(items)
-    expect(list.map((t) => t.id)).toEqual(['a', 'b', 'c'])
+    expect(list.map((t) => t.id)).toEqual(['a', 'b', 'c', 's'])
     expect(nextOpenAction(list, null)?.id).toBe('a')
     expect(nextOpenAction(list, list[0] ?? null)?.id).toBe('b')
     // After the last open one: back to the first still open.
@@ -61,7 +71,7 @@ describe('suggested actions', () => {
     expect(actionProgress(items, new Set(['a', 'b', 'c']), 2)).toEqual({ done: 3, total: 5 })
   })
 
-  it('finds the open suggestions of a rally by link or by time', () => {
+  it('finds the actions to check of a rally by link or by time', () => {
     const linked = model('l', 9_000, { segment_id: 'r1' })
     const timed = model('t', 5_500)
     const other = model('o', 20_000)
@@ -88,8 +98,8 @@ describe('suggested actions', () => {
   })
 })
 
-describe('the score from facts only', () => {
-  it('a suggested serve names no server; an accepted one does', () => {
+describe("the score's facts: a person's serves", () => {
+  it("WiePlay's serve names no server (it comes out of the scoring); an accepted one does", () => {
     const set1 = period({ no: 1, start_ms: 0 })
     const r = rally({ id: 'r', start_ms: 10_000, end_ms: 18_000, period_id: set1.id })
     const serve = model('sv', 11_000, { side: 'them', segment_id: 'r' })
@@ -127,32 +137,31 @@ describe('whether suggestions are written, and what is measured', () => {
 
   it('says only that they are switched off', () => {
     expect(gateText(t, gate({}))).toBeNull()
-    expect(gateText(t, gate({ mode: 'off', open: false, reason: 'off' }))).toBe('Action suggestions are switched off.')
+    expect(gateText(t, gate({ mode: 'off', open: false, reason: 'off' }))).toBe('WiePlay’s action tagging is switched off.')
     expect(gateText(t, null)).toBeNull()
   })
 
   it('shows the measured numbers as they are', () => {
     expect(measuredText(t, gate({}))).toBe(
-      'Measured on 61 hand-checked rallies: 58% of the suggestions are fully right (time, skill and side) and 30% of the contacts get one. Of 40 sure ones, 0 were wrong.',
+      'Measured on 61 hand-checked rallies: 58% of WiePlay’s actions are fully right (time, skill and side) and 30% of the contacts get one. Of 40 sure ones, 0 were wrong.',
     )
-    expect(measuredText(i18n.getFixedT('de'), gate({}))).toMatch(/^Gemessen an 61 von Hand geprüften Ballwechseln: 58 ?% der Vorschläge/)
+    expect(measuredText(i18n.getFixedT('de'), gate({}))).toMatch(/^Gemessen an 61 von Hand geprüften Ballwechseln: 58 ?% der Aktionen von WiePlay/)
     expect(measuredText(t, gate({ measured: {} }))).toBeNull()
   })
 })
 
 describe('sure actions', () => {
-  const s = tag({ id: 's', t_ms: 1000, code: 'S', source: 'model', model_sure: true })
-  const r = tag({ id: 'r', t_ms: 2000, code: 'R', source: 'model', model_sure: false, model_alternative: 'D:them' })
-  const e = tag({ id: 'e', t_ms: 3000, code: 'E', source: 'model', model_alternative: 'none' })
+  const s = tag({ id: 's', t_ms: 1000, code: 'S', source: 'model', review: 'auto', model_sure: true })
+  const r = tag({ id: 'r', t_ms: 2000, code: 'R', source: 'model', review: 'check', model_sure: false, model_alternative: 'D:them' })
+  const e = tag({ id: 'e', t_ms: 3000, code: 'E', source: 'model', review: 'check', model_alternative: 'none' })
   const done = tag({ id: 'd', t_ms: 4000, code: 'A', source: 'model', model_sure: true, review: 'confirmed' })
 
-  it('waits for "Accept all sure actions"; the walk visits the rest first', () => {
+  it('are not in the walk: it visits only those to check', () => {
     const tags = [s, r, e, done]
-    expect(sureActions(tags).map((x) => x.id)).toEqual(['s'])
-    expect(needsYouActions(tags).map((x) => x.id)).toEqual(['r', 'e'])
+    expect(toCheckActions(tags).map((x) => x.id)).toEqual(['r', 'e'])
     expect(nextOpenAction(actionItems(tags), null)?.id).toBe('r')
     expect(nextOpenAction(actionItems(tags), e)?.id).toBe('r')
-    expect(nextOpenAction(actionItems([s, done]), null)?.id).toBe('s')
+    expect(nextOpenAction(actionItems([s, done]), null)).toBeNull()
   })
 
   it("reads the model's other answer", () => {

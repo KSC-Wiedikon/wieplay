@@ -19,15 +19,21 @@ export function VideoStatusBadge({ status }: { status: VideoStatus }) {
   return <Badge tone={statusTone[status] ?? 'neutral'}>{t(`video.status.${status}`, status)}</Badge>
 }
 
-/** Whether WiePlay has analysed a ready video and how many rally suggestions wait for a coach. */
+/**
+ * Where WiePlay's analysis of a ready video stands ("Analysing: 4 of 7 steps") and how much is
+ * still to check.
+ */
 export function AnalysisBadge({ video }: { video: Pick<Video, 'status' | 'analysis' | 'rallies_reviewed_at'> }) {
   const { t } = useTranslation()
   const analysis = video.analysis
   if (video.status !== 'ready' || !analysis || analysis.status === 'none') return null
+  if (analysis.status === 'failed') return <Badge tone="danger">{t('video.analysis.failed')}</Badge>
+  if (analysis.steps_running && analysis.steps_total)
+    return <Badge tone="accent">{t('video.analysis.steps', { done: analysis.steps_done ?? 0, total: analysis.steps_total })}</Badge>
   if (analysis.status === 'queued') return <Badge tone="neutral">{t('video.analysis.queued')}</Badge>
   if (analysis.status === 'running') return <Badge tone="accent">{t('video.analysis.running')}</Badge>
-  if (analysis.status === 'failed') return <Badge tone="danger">{t('video.analysis.failed')}</Badge>
-  if (analysis.open > 0) return <Badge tone="accent">{t('video.analysis.open', { count: analysis.open })}</Badge>
+  const open = analysis.to_check ?? analysis.open
+  if (open > 0) return <Badge tone="accent">{t('video.analysis.open', { count: open })}</Badge>
   if (video.rallies_reviewed_at)
     return (
       <Badge tone="neutral" className="gap-1 whitespace-nowrap">

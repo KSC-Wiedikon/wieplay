@@ -30,9 +30,26 @@ from wieplay.core.models import (
 from wieplay.core.taxonomy import Taxonomy
 
 Side = Literal["us", "them"]
-# merged: a model's proposal a coach merged into another one (merged_into); it is neither
-# a rally nor a "not a rally" for training, the surviving one carries the label.
-Review = Literal["unreviewed", "confirmed", "corrected", "rejected", "merged"]
+# What a tag's review says (PLAN §10, since 20.10.2026 "WiePlay assigns everything"):
+# - auto: WiePlay's, sure; it counts and nobody needs to look at it;
+# - check: WiePlay's, unsure; it counts too, marked "to check";
+# - confirmed / corrected: a person's answer (it stays when WiePlay runs again);
+# - rejected: a person said no (soft-deleted, a hard negative for training);
+# - merged: a rally a coach folded into another one (merged_into); neither a rally nor a
+#   "not a rally" for training, the surviving one carries the label;
+# - unreviewed: before 20.10.2026 a model's open suggestion (migration 0029 turned those into
+#   auto or check); since then only on a person's own tags (source manual or import), where
+#   the review means nothing. From a client on a model's tag it means "back to WiePlay's".
+Review = Literal["auto", "check", "unreviewed", "confirmed", "corrected", "rejected", "merged"]
+# WiePlay's own review states: nobody answered the tag yet (a rerun may replace it).
+MODEL_OWN = ("auto", "check", "unreviewed")
+HUMAN_REVIEWS = ("confirmed", "corrected")
+GONE = ("rejected", "merged")
+# A break or a set WiePlay labelled is sure from this confidence on (gaps.py: a set break
+# 0.9, a warm-up over two minutes 0.95; propose_sets: 0.95 after a long break).
+GAP_SURE = 0.9
+SET_SURE = 0.9
+GAP_KINDS = ("warmup", "set_break", "timeout", "stoppage", "substitution", "other_dead")
 # A serve tag may sit slightly before the rally marker (the toss).
 SERVE_SLACK_MS = 2000
 # substitution: a coach's label only (the review's "Sub"); the model calls such a break a stoppage.
@@ -135,18 +152,110 @@ class TaggingError(ValueError):
     pass
 
 
-def stands() -> Any:
-    """Segments that count as what happened: everything but a model's proposal nobody has
-    accepted yet (PLAN §10: nothing a model made is shown as fact until it is reviewed).
-    Stats and condensed playback use only these; the tagging page shows all of them."""
-    return ~((Segment.source == "model") & Segment.review.in_(("unreviewed", "rejected", "merged")))
+def stands(sure_only: bool = False) -> Any:
+    """Segments that count (with the live filter of the caller): everything but what a person
+    rejected or merged (PLAN §10: WiePlay's rallies and breaks count from the start, the
+    unsure ones marked "to check"). `sure_only`: without those still to check (a rally whose
+    winner alone is unsure still counts; its winner is left out, stats_input.rally_in)."""
+    out: Any = Segment.review.not_in(GONE)
+    if sure_only:
+        out = out & (Segment.review != "check")
+    return out
 
 
-def event_stands() -> Any:
-    """Tags that count as what happened: everything but a model's suggested action nobody has
-    accepted yet (PLAN §10.4a). Stats, smart reels and the score use only these; the tagging
-    page shows the suggestions too, apart."""
-    return ~((Event.source == "model") & Event.review.in_(("unreviewed", "rejected", "merged")))
+def event_stands(sure_only: bool = False) -> Any:
+    """Tags that count (with the live filter of the caller): everything but what a person
+    rejected (PLAN §10.4a). `sure_only`: without the ones still to check."""
+    out: Any = Event.review.not_in(GONE)
+    if sure_only:
+        out = out & (Event.review != "check")
+    return out
+
+
+def event_fact() -> Any:
+    """Tags a person stands behind: made by hand or imported, or WiePlay's that a person
+    accepted or corrected. What the automatic scoring takes as the coach's (a serve tag names
+    the server): WiePlay's own tags are its output, never its input."""
+    return Event.source.in_(("manual", "import")) | Event.review.in_(HUMAN_REVIEWS)
+
+
+def period_stands(sure_only: bool = False) -> Any:
+    out: Any = Period.review.not_in(GONE)
+    if sure_only:
+        out = out & (Period.review != "check")
+    return out
+
+
+def rally_to_check() -> Any:
+    """A live rally that waits for a person (with the live filter of the caller): WiePlay's
+    unsure rally, or any rally whose winner the scoring is unsure of and nobody gave
+    (a person's own rally too), unless a person answered it."""
+    return (
+        (Segment.kind == "rally")
+        & Segment.review.not_in(GONE)
+        & (
+            (Segment.review == "check")
+            | (
+                Segment.score_sure.is_(False)
+                & Segment.won_by.is_(None)
+                & Segment.review.not_in(HUMAN_REVIEWS)
+            )
+        )
+    )
+
+
+def gap_to_check() -> Any:
+    return Segment.kind.in_(GAP_KINDS) & (Segment.source == "model") & (Segment.review == "check")
+
+
+def event_to_check() -> Any:
+    return (Event.source == "model") & (Event.review == "check")
+
+
+def period_to_check() -> Any:
+    return (Period.source == "model") & (Period.review == "check")
+
+
+TO_CHECK_KINDS = ("rallies", "breaks", "sets", "actions")
+
+
+def to_check_counts(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict[str, int]]:
+    """Per video, what still waits for a person ("N still to check"): rallies, breaks, sets and
+    actions (the players are the identify queue's, core/identify.py)."""
+    out: dict[uuid.UUID, dict[str, int]] = {v: dict.fromkeys(TO_CHECK_KINDS, 0) for v in video_ids}
+    if not video_ids:
+        return out
+    queries = (
+        ("rallies", Segment, rally_to_check()),
+        ("breaks", Segment, gap_to_check()),
+        ("sets", Period, period_to_check()),
+        ("actions", Event, event_to_check()),
+    )
+    for key, model, where in queries:
+        rows = db.execute(
+            select(model.video_id, func.count())
+            .where(model.video_id.in_(video_ids), model.deleted_at.is_(None), where)
+            .group_by(model.video_id)
+        ).all()
+        for video_id, n in rows:
+            out[video_id][key] = int(n)
+    return out
+
+
+def to_check_total(db: Session, video_ids: list[uuid.UUID]) -> int:
+    return sum(sum(c.values()) for c in to_check_counts(db, video_ids).values())
+
+
+def model_state(sure: bool | None) -> str:
+    """WiePlay's review state for a tag of its own: auto when sure, else to check."""
+    return "auto" if sure else "check"
+
+
+def keep_model_state(row: Segment | Event | Period, sure: bool | None) -> None:
+    """Follow WiePlay's sureness on a tag nobody answered (a person's answer stays). Not a
+    person's change: the revision trigger takes it as derived (migration 0029)."""
+    if row.source == "model" and row.review in MODEL_OWN and row.deleted_at is None:
+        row.review = model_state(sure)
 
 
 IN_USE = "this id is already in use"
@@ -350,29 +459,48 @@ def _apply_event(
     return row
 
 
+def _answer(row_review: str, asked: str, edited: bool, own: str) -> str:
+    """The review state of WiePlay's tag after a person's change (PLAN §11: corrections are
+    data; the revision tables keep before and after). `asked`: the state the client sent,
+    `own`: WiePlay's state for the tag (auto or check), `edited`: the person changed what
+    WiePlay said.
+
+    A client that names another state than the tag has gets it: accept ("confirmed"),
+    correct ("corrected"), reopen (auto, check or the older "unreviewed": WiePlay's own state
+    again, the undo of an answer). Confirming while changing it is a correction. A client
+    that passes the state through unchanged (one that does not know about reviews, like the
+    tagging page) still leaves a trace: an edit corrects. WiePlay's two states count as one
+    here: a client that saw "auto" before a scoring made it "check" answers nothing."""
+    if edited and asked == "confirmed":
+        return "corrected"
+    explicit = asked != row_review and not (asked in MODEL_OWN and row_review in MODEL_OWN)
+    if explicit:
+        return own if asked in MODEL_OWN else asked
+    if edited and asked in MODEL_OWN:
+        return "corrected"
+    return own if asked in MODEL_OWN else asked
+
+
 def _model_event_review(row: Event, item: EventIn, attributes: dict[str, Any]) -> str:
-    """Review state of a model's suggested action after a person's change, like a rally
-    proposal's (_model_review; PLAN §11: corrections are data): a delete rejects it (kept as
-    a hard negative), undoing that reopens it; another skill, side, grade, zone or time
-    corrects it, also when the client passes the state through unchanged; an explicit state
-    wins otherwise. Naming the player of an action the model left without one (the coach's
-    `7` in the review) is information it asked for, not a correction. Manual and imported
-    tags keep what the client sends."""
+    """Review state of WiePlay's action after a person's change (`_answer`): a delete rejects
+    it (kept as a hard negative), undoing that reopens it; another skill, side, grade, zone or
+    time corrects it. Naming the player of an action WiePlay left without one (the coach's `7`
+    in the review) is information it asked for, not a correction. Manual and imported tags
+    keep what the client sends."""
     if row.source != "model":
         return item.review
+    own = model_state(row.model_sure)
     if item.deleted:
         return "rejected"
     if row.deleted_at is not None:  # undo of a rejection
-        return "unreviewed" if item.review == "rejected" else item.review
+        return own if item.review in ("rejected", *MODEL_OWN) else item.review
     edited = (row.code, row.side, row.t_ms, row.attributes or {}) != (
         item.code,
         item.side,
         item.t_ms,
         attributes,
     ) or (row.number is not None and row.number != item.number)
-    if edited and item.review in ("confirmed", "unreviewed"):
-        return "corrected"
-    return item.review
+    return _answer(row.review, item.review, edited, own)
 
 
 def upsert_segment(
@@ -406,39 +534,32 @@ def upsert_segment(
     return row
 
 
+def segment_sure(row: Segment) -> bool:
+    """Whether WiePlay is sure of its rally (the joint decode, PLAN §10.3) or break label."""
+    if row.kind == "rally":
+        return bool(row.score_sure)
+    return row.confidence is not None and row.confidence >= GAP_SURE
+
+
 def _model_review(row: Segment, item: SegmentIn) -> str:
-    """Review state of a model's proposal after a person's change (PLAN §11: corrections are
-    data; the revision tables keep before and after).
-
-    A client that names another state than the segment has gets it: accept ("confirmed"),
-    correct ("corrected"), reopen ("unreviewed", the undo of any of these, with the fields
-    as they were). Confirming while changing a boundary, the kind or the winner is a
-    correction. A delete is a rejection ("rejected", kept as a hard negative), unless the
-    client says "merged" (merged into another proposal: no label either way). Undoing a
-    delete reopens the proposal.
-
-    A client that passes the state through unchanged (one that does not know about reviews,
-    like the tagging page) still leaves a trace: an edit corrects, a delete rejects.
-    Manual and imported segments keep whatever the client sends."""
+    """Review state of WiePlay's rally or break after a person's change (`_answer`): moving a
+    boundary, another kind or another winner corrects it. A delete is a rejection
+    ("rejected", kept as a hard negative), unless the client says "merged" (merged into
+    another rally: no label either way). Undoing a delete reopens it. Manual and imported
+    segments keep whatever the client sends."""
     if row.source != "model":
         return item.review
+    own = model_state(segment_sure(row))
     if item.deleted:
         return "merged" if item.review == "merged" else "rejected"
     if row.deleted_at is not None:  # undo of a rejection or a merge
-        return "unreviewed" if item.review in ("rejected", "merged") else item.review
-    edited = (row.kind, row.start_ms, row.end_ms, row.won_by) != (
-        item.kind,
-        item.start_ms,
-        item.end_ms,
-        item.won_by,
+        return own if item.review in ("rejected", "merged", *MODEL_OWN) else item.review
+    # Taking WiePlay's winner for a rally nobody gave one ("Enter" in To check) is no change.
+    took = row.won_by is None and item.won_by is not None and item.won_by == row.model_won_by
+    edited = (row.kind, row.start_ms, row.end_ms) != (item.kind, item.start_ms, item.end_ms) or (
+        row.won_by != item.won_by and not took
     )
-    if edited and item.review == "confirmed":
-        return "corrected"
-    if item.review != row.review:
-        return item.review  # an explicit review action
-    if edited and item.review == "unreviewed":
-        return "corrected"
-    return item.review
+    return _answer(row.review, item.review, edited, own)
 
 
 def upsert_period(db: Session, video: Video, item: PeriodIn, actor: int, now: datetime) -> Period:
@@ -450,7 +571,7 @@ def _apply_period(db: Session, video: Video, item: PeriodIn, actor: int, now: da
     row = db.get(Period, item.id)
     kept = _kept(item, row)
     if row is None and kept.get("review") is None:
-        kept["review"] = "unreviewed"
+        kept["review"] = "unreviewed"  # a person's own set: the review means nothing
     if not _check_base(row, video, item, _intended(item, PERIOD_FIELDS, **kept), PERIOD_FIELDS):
         assert row is not None
         return row
@@ -494,7 +615,7 @@ def untouched_model_sets() -> Any:
     """Sets the scoring proposed that nobody answered or filled in: replaced freely."""
     return (
         (Period.source == "model")
-        & (Period.review == "unreviewed")
+        & Period.review.in_(MODEL_OWN)
         & Period.deleted_at.is_(None)
         & (Period.start_us == 0)
         & (Period.start_them == 0)
@@ -502,21 +623,24 @@ def untouched_model_sets() -> Any:
     )
 
 
+def period_sure(row: Period) -> bool:
+    return row.confidence is not None and row.confidence >= SET_SURE
+
+
 def _period_review(row: Period, item: PeriodIn, asked: str) -> str:
-    """Review state of a set the model proposed after a person's change, like a rally
-    proposal's (_model_review): a delete rejects it, moving it or changing its number or
-    starting score corrects it; filling in who served first or the sides does not (that is
-    information the model asks for). A coach's own set keeps what the client sends."""
+    """Review state of a set WiePlay proposed after a person's change (`_answer`): a delete
+    rejects it, moving it or changing its number or starting score corrects it; filling in who
+    served first or the sides does not (that is information WiePlay asks for). A person's own
+    set keeps what the client sends."""
     if row.source != "model":
         return asked
+    own = model_state(period_sure(row))
     if item.deleted:
         return "rejected"
     if row.deleted_at is not None:  # undo of a rejection
-        return "unreviewed" if asked == "rejected" else asked
+        return own if asked in ("rejected", *MODEL_OWN) else asked
     edited = any(getattr(row, f) != getattr(item, f) for f in PERIOD_EDIT)
-    if edited and asked in ("confirmed", "unreviewed"):
-        return "corrected"
-    return asked
+    return _answer(row.review, asked, edited, own)
 
 
 def rescore(db: Session, video: Video) -> None:
@@ -572,7 +696,7 @@ def rescore(db: Session, video: Video) -> None:
                 Event.video_id == video.id,
                 Event.code == "S",
                 Event.deleted_at.is_(None),
-                event_stands(),  # a suggested serve is no fact
+                event_fact(),  # WiePlay's serve is its output, not a fact
             )
             .order_by(Event.t_ms)
         ).all()

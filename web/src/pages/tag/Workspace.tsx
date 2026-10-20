@@ -28,8 +28,8 @@ import { Outbox, type OutboxItem } from '../../lib/outbox'
 import { Playhead, usePlayhead } from '../../lib/playhead'
 import { keys } from '../../lib/queryClient'
 import { periodAt, ralliesOf, scoreBefore, SERVE_SLACK_MS, serveCodes, shotScoreAt } from '../../lib/rallies'
-import { actionItems, factTags, suggestedCount } from '../../lib/actions'
-import { allProgress, LOOP_POST_MS, LOOP_PRE_MS, reviewProgress, suggestionCount } from '../../lib/suggestions'
+import { actionItems, personTags, toCheckActions, toCheckTagCount } from '../../lib/actions'
+import { allProgress, isModel, isWiePlays, LOOP_POST_MS, LOOP_PRE_MS, setToCheck, toCheckRallies, toCheckSegments } from '../../lib/suggestions'
 import { useSheetCourt } from '../../lib/sheetCourt'
 import { SideNamesContext, sideNamesOf, useSideNames } from '../../lib/sides'
 import { TaggingStore } from '../../lib/taggingStore'
@@ -62,9 +62,9 @@ interface Session {
   store: TaggingStore
   outbox: Outbox
   bundle: Tagging
-  /** Proposals rejected before this session (no longer in the tagging data), for the review's progress. */
+  /** WiePlay's rallies rejected before this session (no longer in the tagging data), for the review's progress. */
   rejectedBefore: number
-  /** Suggested actions rejected before this session, likewise. */
+  /** WiePlay's actions rejected before this session, likewise. */
   actionsRejectedBefore: number
 }
 
@@ -90,7 +90,7 @@ export function Workspace({ video, taxonomy, narrow = false }: { video: Video; t
           queryFn: ({ signal }) => api.tagging(video.id, signal),
           staleTime: 0,
         }),
-        // Read with the tagging data, so its count of rejected proposals matches it. Optional:
+        // Read with the tagging data, so its count of rejected rallies matches it. Optional:
         // without it (basketball, an older server) the review counts what the data lists.
         taxonomy.sport === 'basketball' ? null : client.fetchQuery({ ...analysisQuery(video.id), staleTime: 0, retry: false }).catch(() => null),
       ])
@@ -175,7 +175,7 @@ interface DeskProps extends WorkspaceProps {
 
 /**
  * Leaving the review after changes: once they are sent, WiePlay scores the match again with them
- * (who served, who won, sets, breaks) and the page takes over the new suggestions. Nothing to
+ * (who served, who won, sets, breaks) and the page takes over what it found. Nothing to
  * wait for: a failure (or a sport without scoring, 409) leaves things as they are.
  */
 function scoreAgain(client: QueryClient, outbox: Outbox, store: TaggingStore, videoId: string): void {
@@ -236,6 +236,13 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
 
   useEffect(() => review.attach(), [review])
   useEffect(() => actions.attach(), [actions])
+  // One walk: when no rally or break is left to check, it goes on into the actions.
+  useEffect(() => {
+    review.setOnEnd(() => {
+      if (!actions.getState().active && toCheckActions(store.getView().events).length > 0) actions.start()
+    })
+    return () => review.setOnEnd(() => {})
+  }, [review, actions, store])
   // Leaving the review leaves its actions queue too.
   useEffect(
     () =>
@@ -258,7 +265,7 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [controller, review, actions, regrade])
 
-  // ?mode=review (the video page's "Review suggestions") opens the review, ?mode=regrade the
+  // ?mode=review (the video page's "To check") opens the review, ?mode=regrade the
   // regrade queue; a narrow screen has only those two.
   const wantsRegrade = params.get('mode') === 'regrade'
   const wantsReview = !wantsRegrade && (narrow || params.get('mode') === 'review')
@@ -315,10 +322,10 @@ function Desk({ video, bundle, taxonomy, store, outbox, rejectedBefore, actionsR
     )
   }, [narrow, mode, params, setParams])
 
-  // An analysis that finishes while the page is open brings its suggestions in.
+  // An analysis that finishes while the page is open brings its rallies in.
   const analysis = useAnalysis(video.id, taxonomy.sport !== 'basketball')
   const analysisStatus = analysis.data?.status ?? null
-  // So do new suggested actions.
+  // So do new actions of WiePlay's.
   const actionsStatus = analysis.data?.actions?.status ?? null
   const lastActions = useRef(actionsStatus)
   useEffect(() => {
@@ -430,25 +437,30 @@ function DeskLayout({
   const loop = current ?? (action ? { start_ms: action.t_ms, end_ms: action.t_ms } : null) ?? (regraded ? { start_ms: regraded.start_ms + LOOP_PRE_MS, end_ms: Math.max(regraded.start_ms + LOOP_PRE_MS, regraded.end_ms - LOOP_POST_MS) } : null)
   useLoopPlayback(element, loop?.start_ms ?? null, loop?.end_ms ?? null)
 
-  // The analysis card counts rally proposals ("rallies reviewed" waits for those only); the
-  // review goes through the breaks WiePlay labelled too.
-  const rallyProgress = useMemo(() => reviewProgress(view.segments, review.seen, review.rejectedBefore), [view.segments, review.seen, review.rejectedBefore])
-  const live = useMemo(() => ({ total: rallyProgress.total, open: rallyProgress.total - rallyProgress.done }), [rallyProgress])
+  // The analysis card counts WiePlay's rallies and those still to check ("rallies reviewed" waits
+  // for those); the review goes through the breaks and sets WiePlay is unsure of too.
+  const live = useMemo(
+    () => ({ total: rallies.filter(isModel).length + review.rejectedBefore, open: toCheckRallies(view.segments).length }),
+    [rallies, view.segments, review.rejectedBefore],
+  )
   const progress = useMemo(
     () => allProgress(view.segments, review.seen, review.seenGaps, review.rejectedBefore, review.pending),
     [view.segments, review.seen, review.seenGaps, review.rejectedBefore, review.pending],
   )
-  const byHand = rallies.length - suggestionCount(view.segments)
+  // Still to check: rallies and breaks, sets, actions.
+  const segmentsToCheck = useMemo(() => toCheckSegments(view.segments).length + view.periods.filter(setToCheck).length, [view.segments, view.periods])
+  const byHand = rallies.filter((r) => !isWiePlays(r)).length
   const actionCount = useMemo(() => actionItems(view.events).length, [view.events])
-  const openActions = useMemo(() => suggestedCount(view.events), [view.events])
-  const factCount = useMemo(() => factTags(view.events).length, [view.events])
-  // Below the bar (PLAN §10.4a) the Actions queue says why there are no suggestions.
+  const openActions = useMemo(() => toCheckTagCount(view.events), [view.events])
+  const personCount = useMemo(() => personTags(view.events).length, [view.events])
+  // Switched off (PLAN §10.4a), the Actions queue says why there are none.
   const gate = useAnalysis(video.id, controller.playsRallies).data?.actions?.gate
-  // The review is offered once WiePlay suggested something (volleyball: basketball marks no rallies).
-  const canReview = controller.playsRallies && (progress.total > 0 || actionCount > 0 || reviewing)
+  // "To check" is offered once WiePlay tagged something (volleyball: basketball marks no rallies).
+  const wiePlays = useMemo(() => view.segments.some(isModel), [view.segments])
+  const canReview = controller.playsRallies && (wiePlays || segmentsToCheck > 0 || progress.total > 0 || actionCount > 0 || reviewing)
   const status =
     controller.playsRallies && video.can_tag ? (
-      <AnalysisStatus video={video} rallies={byHand} live={live} actionTags={factCount} onReviewed={reload} />
+      <AnalysisStatus video={video} rallies={byHand} live={live} actionTags={personCount} onReviewed={reload} />
     ) : null
 
   // Without IndexedDB, unsent changes are lost with the page: ask before leaving.
@@ -478,14 +490,14 @@ function DeskLayout({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {controller.playsRallies && !narrow && <ModeSwitch review={canReview} open={progress.total - progress.done + openActions} />}
+          {controller.playsRallies && !narrow && <ModeSwitch review={canReview} open={segmentsToCheck + openActions} />}
           <SyncStatus />
           <ButtonLink to={`/videos/${video.id}`}>{t('tagging.back')}</ButtonLink>
         </div>
       </header>
       <SyncNotes />
       {narrow && !regrading && <p className="text-sm text-muted">{t('tagging.review.phoneHint')}</p>}
-      {/* While reviewing, the suggestion comes first; the analysis and "rallies reviewed" go below. */}
+      {/* While reviewing, the item to check comes first; the analysis and "rallies reviewed" go below. */}
       {!reviewing && !regrading && status}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
@@ -507,7 +519,7 @@ function DeskLayout({
           </div>
         ) : reviewing ? (
           <div className={cx('flex flex-col gap-2', !narrow && 'min-w-80 flex-[1_0_22rem]')}>
-            {(actionCount > 0 || gate) && <QueueSwitch rallies={progress.total - progress.done} actions={openActions} />}
+            {(actionCount > 0 || gate) && <QueueSwitch rallies={segmentsToCheck} actions={openActions} />}
             {reviewingActions ? <ActionReviewPanel /> : <ReviewPanel />}
           </div>
         ) : (
@@ -533,8 +545,9 @@ function DeskLayout({
 }
 
 /**
- * Tag, review or regrade: the review goes through WiePlay's suggestions one by one (once there
- * are any), the regrade queue through the tags of one skill to grade them (PLAN §9.7).
+ * Tag, check or regrade: "To check" goes through what WiePlay is unsure of one by one (rallies,
+ * then actions, then the players), the regrade queue through the tags of one skill to grade them
+ * (PLAN §9.7).
  */
 function ModeSwitch({ review: canReview, open }: { review: boolean; open: number }) {
   const { t } = useTranslation()
@@ -568,7 +581,7 @@ function ModeSwitch({ review: canReview, open }: { review: boolean; open: number
   )
 }
 
-/** In the review: WiePlay's rallies (and breaks) or its suggested actions. */
+/** In "To check": WiePlay's rallies (and breaks and sets) or its actions. */
 function QueueSwitch({ rallies, actions: open }: { rallies: number; actions: number }) {
   const { t } = useTranslation()
   const { actions } = useWorkspace()
@@ -591,7 +604,7 @@ function QueueSwitch({ rallies, actions: open }: { rallies: number; actions: num
   )
 }
 
-/** Below the timeline: the tags, or (volleyball) the rallies with WiePlay's suggestions. */
+/** Below the timeline: the tags, or (volleyball) the rallies, WiePlay's marked. */
 function Lists({ rallies }: { rallies: number }) {
   const { t } = useTranslation()
   const { controller } = useWorkspace()
@@ -809,12 +822,12 @@ function SetState() {
   const state = scoreBefore(t_ms, view.periods, view.segments)
   const open = view.openRally
   const serves = serveCodes(taxonomy)
-  // A suggested serve is no fact: only the coach's tags name the server.
+  // A person's serve tag names the server; WiePlay's serves come out of its scoring.
   const serveTag = open
-    ? factTags(view.events).find((e) => serves.has(e.code) && e.t_ms >= open.start_ms - SERVE_SLACK_MS && e.t_ms <= t_ms)
+    ? personTags(view.events).find((e) => serves.has(e.code) && e.t_ms >= open.start_ms - SERVE_SLACK_MS && e.t_ms <= t_ms)
     : undefined
   const serving = serveTag?.side ?? state.serving
-  // The score counts winners WiePlay suggested (no coach decided those rallies yet).
+  // The score counts WiePlay's winners (where no person said who won), marked as WiePlay's.
   const suggested = !serveTag && state.suggested === true
 
   return (

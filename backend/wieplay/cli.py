@@ -611,7 +611,7 @@ def players(video: str | None, all_ready: bool, force: bool, dry_run: bool) -> i
     """Queue the players job (PLAN §10.5, beta, ~2 h of CPU a match) on demand: one video, or
     every ready volleyball video with a ball track. Videos that have players are skipped
     unless --force (a rerun keeps the coach's numbers where the same shirt number is read).
-    Nothing queues the job by itself unless WIEPLAY_PLAYERS_AUTO is on."""
+    With WIEPLAY_PLAYERS_AUTO on (the default) the chain queues it after the court job."""
     from wieplay.core import players as found
     from wieplay.core.models import AnalysisArtifact, Video
 
@@ -653,6 +653,46 @@ def players(video: str | None, all_ready: bool, force: bool, dry_run: bool) -> i
         else:
             db.commit()
         print(f"{queued} queued")
+    return 0
+
+
+def chain_cmd(video: str | None, all_ready: bool, limit: int, dry_run: bool) -> int:
+    """The automatic chain (PLAN §10, core/chain.py): print where each ready volleyball video
+    stands and queue the first step nobody queued (at most --limit jobs). The API does the
+    same hourly with a limit of 5; this drains a backlog at once."""
+    from wieplay.core import chain
+    from wieplay.core.models import Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        query = (
+            select(Video)
+            .where(Video.status == "ready", Video.sport == "volleyball")
+            .order_by(Video.recorded_on, Video.id)
+        )
+        if video:
+            query = query.where(Video.id == uuid.UUID(video))
+        elif not all_ready:
+            print("name --video or --all-ready", file=sys.stderr)
+            return 2
+        rows = list(db.scalars(query))
+        found = chain.steps_of(db, rows, settings)
+        queued = 0
+        for row in rows:
+            steps = found.get(row.id)
+            line = " ".join(f"{s.key}:{s.status}" for s in steps.items) if steps else "-"
+            label = f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id})"
+            kind = chain.resume(db, row, settings) if queued < limit else None
+            if kind is not None:
+                queued += 1
+            verb = "would queue" if dry_run else "queued"
+            print(f"{label}: {line}" + (f" -> {verb} {kind}" if kind else ""))
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+        print(f"{queued} {'would be ' if dry_run else ''}queued")
     return 0
 
 
@@ -776,7 +816,15 @@ def main(argv: list[str] | None = None) -> int:
     which_players.add_argument("--all-ready", action="store_true", help="every tracked video")
     players_cmd.add_argument("--force", action="store_true", help="also videos that have them")
     players_cmd.add_argument("--dry-run", action="store_true")
+    chain_parser = sub.add_parser("chain", help="the automatic chain: steps, resume")
+    which_chain = chain_parser.add_mutually_exclusive_group(required=True)
+    which_chain.add_argument("--video", help="one video id")
+    which_chain.add_argument("--all-ready", action="store_true", help="every ready video")
+    chain_parser.add_argument("--limit", type=int, default=50, help="jobs to queue at most")
+    chain_parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "chain":
+        return chain_cmd(args.video, args.all_ready, args.limit, args.dry_run)
     if args.command == "players":
         return players(args.video, args.all_ready, args.force, args.dry_run)
     if args.command == "actions":
