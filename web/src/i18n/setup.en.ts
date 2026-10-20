@@ -46,6 +46,8 @@ export const setupEn = {
       none: 'Not set up. With the court, the ball’s landings count in the tendencies.',
       busy: 'WiePlay is looking for the court…',
       auto: 'Set automatically: check that the lines sit on the court.',
+      sure: 'Found by WiePlay, sure.',
+      found: 'WiePlay found a court but isn’t sure: check it.',
       done: 'Set up.',
       open: 'Set up the court',
       check: 'Check the court',

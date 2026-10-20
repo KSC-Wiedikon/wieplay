@@ -6,7 +6,7 @@ import type { ScoreboardState, ScoreLogState } from '../lib/scoreboard'
 import type { Scoresheet } from '../lib/scoresheet'
 import { analysisState, ballState, courtState as courtStepState, namesState, playersState, scoreboardState, sheetState } from '../lib/setup'
 import type { Analysis, TeamNames, Video } from '../lib/types'
-import { courtState, savedCalibration } from '../test/court'
+import { CORNER_POINTS, courtState, savedCalibration } from '../test/court'
 import { PLAYERS_VIDEO_ID as ID, readyVideo } from '../test/players'
 import { renderRoute, stubFetch } from '../test/render'
 import { VideoSetup } from './VideoSetup'
@@ -200,6 +200,11 @@ describe('the states of the steps', () => {
     expect(courtStepState(courtState({ court_job: 'running' }))).toBe('busy')
     expect(courtStepState(courtState({ calibration: savedCalibration({ method: 'auto-hall', checked: false }) }))).toBe('attention')
     expect(courtStepState(courtState({ calibration: savedCalibration() }))).toBe('done')
+    // WiePlay sure of the court it set: nothing to do; a court it found but isn't sure of: check it.
+    expect(courtStepState(courtState({ calibration: savedCalibration({ method: 'auto', checked: false, sure: true, confidence: 0.9 }) }))).toBe('done')
+    const proposal = { source: 'auto' as const, points: CORNER_POINTS, confidence: 0.55, sure: false, video_id: ID, video_title: null, recorded_on: null, calibration_id: 'p1' }
+    expect(courtStepState(courtState({ suggestions: [proposal] }))).toBe('attention')
+    expect(courtStepState(courtState({ suggestions: [{ ...proposal, source: 'team' }] }))).toBe('todo')
 
     expect(scoreboardState(board(), false)).toBe('todo')
     expect(scoreboardState(board(), true)).toBe('done') // "no scoreboard in this video"
