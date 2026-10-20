@@ -4,9 +4,10 @@ coach, and how often the score line after a point is the right one.
 
 Real games, offline (nothing here writes to a database or a bucket):
 
-1. A dump of what the database knows about a video, read-only (psql on the database host): its
-   rallies, sets, serve tags, the newest track of each kind (serve, activity, score_log,
-   scoreboard), its game's official sets, the roster's numbers. One JSON object:
+1. A dump of what the database knows about a video, read-only (psql on the database host,
+   `scripts/ml/fused_dump.sql`): its rallies, sets, serve tags, the newest track of each kind
+   (serve, activity, score_log, scoreboard), its game's official sets, the roster's numbers. One
+   JSON object:
    {"video", "game", "rallies", "periods", "serves", "tracks": {kind: {step_ms, channels}},
    "roster"}.
 2. The scoresheet as typed (a transcription by eye; format as scripts/ml/sheet_players_eval.py
@@ -14,7 +15,10 @@ Real games, offline (nothing here writes to a database or a bucket):
    run offline on the photo; never in git).
 
     cd backend && uv run python ../scripts/ml/fused_eval.py DUMP.json SHEET.json CELLS.json \
-        [--truth TRUTH.json] [--sure 0.97] [--weight 0.6] [--sweep]
+        [--truth TRUTH.json] [--sure 0.97] [--weight 0.6] [--sheet-weight 0.96] [--sweep] \
+        [--mixes a,c,d,e,c0,e0]
+
+CELLS.json may be {} (no photo was read): then leave b and e' out of --mixes.
 
 The reference per rally is the club scoreboard's log (PLAN §10.10: every point of these games
 in order with its time; lined up with the rallies as the scoring does): its winner, "no point",
@@ -30,6 +34,9 @@ numbers say how well the decode keeps to it):
     d  the video, the official set scores and the log
     e  everything: the typed sheet and the log
     e' the read sheet and the log
+    c0 the typed sheet and the official set scores, without the video's evidence (no serve
+       readings, no board in the picture: the rallies are still the finder's)
+    e0 the typed sheet, the official set scores and the log, without the video's evidence
 
 Dumps, sheets and cells hold club members' data: keep them outside git and delete them after
 the measurement (PLAN §5.5).
@@ -62,7 +69,7 @@ from wieplay.ml import scoring as sc  # noqa: E402
 from wieplay.ml import sheet_read as rd  # noqa: E402
 from wieplay.ml import tracks as tr  # noqa: E402
 
-MIXES = ("a", "b", "c", "d", "e", "e'")
+MIXES = ("a", "b", "c", "d", "e", "e'", "c0", "e0")
 
 
 def _rows(dump: dict[str, Any]) -> list[NS]:
@@ -206,11 +213,15 @@ def decode(
     if mix in ("b", "e'") and cells_doc is not None:
         use, _ = read_use(cells_doc, official, roster)
         set_ins = scoresheet.apply(use, set_ins)
-    elif mix in ("c", "e"):
+    elif mix in ("c", "e", "c0", "e0"):
         set_ins = scoresheet.apply(typed_use(docs, official), set_ins)
+    if mix in ("c0", "e0"):  # without the video's evidence of who served and won
+        set_ins = [replace(st, rallies=[replace(r, p_near=None) for r in st.rallies])
+                   for st in set_ins]  # fmt: skip
+        board = None
     t0 = time.perf_counter()
     done = core_scoring.decide(
-        set_ins, log_ev=ev if mix in ("d", "e", "e'") else None, board=board, sure=sure
+        set_ins, log_ev=ev if mix in ("d", "e", "e'", "e0") else None, board=board, sure=sure
     )
     outs = [
         replace(ro, p_answer=ro.p_answer * so.sides_share)
@@ -284,6 +295,9 @@ def main() -> None:
     parser.add_argument("--note-weight", type=float, default=sc.W_NOTE)
     parser.add_argument("--temperature", type=float, default=sc.TEMPERATURE)
     parser.add_argument("--box-disagrees", type=float, default=sc.BOX_DISAGREES)
+    parser.add_argument(
+        "--sheet-weight", type=float, default=sc.W_SHEET, help="the typed sheet against the log"
+    )
     parser.add_argument("--mixes", default=",".join(MIXES))
     parser.add_argument(
         "--sweep", help="thresholds to report, e.g. 0.9,0.95,0.97,0.99 (one decode per mix)"
@@ -296,13 +310,16 @@ def main() -> None:
     sc.W_NOTE = args.note_weight
     sc.TEMPERATURE = args.temperature
     sc.BOX_DISAGREES = args.box_disagrees
+    sc.W_SHEET = args.sheet_weight
+    sc.C_SHEET_WON = sc.C_LOG * args.sheet_weight
+    sc.C_SHEET_SCORE = sc.C_LOG_SCORE * args.sheet_weight
     dump = json.loads(args.dump.read_text())
     docs = sheet_docs(json.loads(args.sheet.read_text()))
     cells_doc = json.loads(args.cells.read_text())
     truth = json.loads(args.truth.read_text()) if args.truth else {}
     print(
         f"{dump['video']['title']}: read weight {args.weight}, note weight {args.note_weight}, "
-        f"temperature {args.temperature}"
+        f"temperature {args.temperature}, sheet weight {args.sheet_weight}"
     )
     thresholds = [float(x) for x in args.sweep.split(",")] if args.sweep else [args.sure]
     open_keys = {

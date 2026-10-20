@@ -147,11 +147,13 @@ def test_a_coachs_winner_wins_and_the_disagreement_is_flagged(
               "base_version": rally["version"], "review": rally["review"]}  # fmt: skip
     r = coach.post(f"/api/videos/{ready['id']}/changes", json={"segments": [change]})
     assert r.status_code == 200, r.text
-    after = rallies_of(tagging(coach, ready))[5]
-    # The coach's winner counts; the score before it came from the sheet.
+    rallies = rallies_of(tagging(coach, ready))
+    after = rallies[5]
+    # The coach's winner counts, in the decode too (absolute); the score before it came from the
+    # sheet; the rallies next to it are lined up with the sheet otherwise and need the coach.
     assert after["won_by"] == wrong and after["score_source"] == "sheet"
-    assert after["sheet_won_by"] == played[5][3]
-    assert after["score_conflict"] is True and after["score_note"] == "sheet"
+    assert after["model_won_by"] == wrong and after["score_sure"] is True
+    assert any(r["score_conflict"] and not r["score_sure"] for r in rallies[2:9])
 
 
 def test_a_typo_is_named_and_repaired(ready: Any, club: dict[str, TestClient]) -> None:
@@ -265,3 +267,98 @@ def test_no_scoresheet_is_remembered(ready: Any, club: dict[str, TestClient]) ->
     played, _ = match()
     assert put(club["coach"], ready, sheet_sets(played)).status_code == 200
     assert club["coach"].get(f"/api/videos/{ready['id']}").json()["no_scoresheet"] is False
+
+
+# --- a scorer's slip, outvoted by the board log and the video, corrected on the page ------------
+
+# Set 1 as played and as the scorer wrote it (U: our point, T: theirs): at 1:1 the scorer missed
+# our side-out, wrote their next three points under the server before it and caught up at 5:5.
+# Both add up to 25:20; their boxes II.1 and III.1 differ.
+PLAYED_1 = "UT" + "UTTTUUUT" + "T" + "UT" * 14 + "U" * 6
+WRITTEN_1 = "UT" + "TTTUTUUU" + "T" + "UT" * 14 + "U" * 6
+
+
+def with_set_1(played: list[tuple[int, int, str, str]]) -> list[tuple[int, int, str, str]]:
+    """The fixtures' match with set 1 played as PLAYED_1 (same rallies, other winners)."""
+    out = []
+    server = "us"
+    for k, (start, end, _, _) in enumerate(played[: len(PLAYED_1)]):
+        won = "us" if PLAYED_1[k] == "U" else "them"
+        out.append((start, end, server, won))
+        server = won
+    return out + played[len(PLAYED_1) :]
+
+
+def test_a_slip_the_log_and_the_video_outvote_is_offered_as_a_correction(
+    app: FastAPI,
+    club: dict[str, TestClient],
+    store: FakeStore,
+    analyser: TestClient,
+    db_engine: Any,
+) -> None:
+    from tests.test_score_log_api import LogBridge, board_log
+
+    assert len(PLAYED_1) == len(WRITTEN_1) == sum(OFFICIAL[0])
+    video = make_ready(app, club, store, k=0)
+    played = with_set_1(match()[0])
+    app.state.bridge_client_factory = lambda: LogBridge(board_log(played))
+    analysed(analyser, played)  # the serves read at 97 %, the board log imported
+    coach = club["coach"]
+    sets = sheet_sets(played)
+    grids, circled = sh.encode("us", ["us" if c == "U" else "them" for c in WRITTEN_1])
+    sets[0].update(
+        boxes_us=grids["us"],
+        boxes_them=grids["them"],
+        circled_us=list(circled["us"] or []),
+        circled_them=list(circled["them"] or []),
+    )
+    out = put(coach, video, sets).json()
+    set1 = out["checks"][0]
+    assert set1["status"] == "consistent" and set1["use"] == "path"
+    # The score line follows the log and the video on the four points, the sheet elsewhere.
+    rallies = rallies_of(tagging(coach, video))
+    assert [r["model_won_by"] for r in rallies] == [w for _, _, _, w in played]
+    slip = rallies[2:10]
+    assert all(not r["score_sure"] and r["score_note"] == "sheet_log" for r in slip)
+    reason = slip[0]["score_reasons"][0]
+    assert reason["code"] == "sheet_log" and reason["video"] == "log" and reason["follows"] == "log"
+    assert all(r["sheet_point"] is not None for r in rallies[10:45])
+    # The page names the boxes and offers the fix.
+    fix = set1["correction"]
+    assert fix["sources"] == ["log", "video"]
+    assert fix["from"] == [1, 1] and fix["to"] == [5, 5]
+    assert {(b["box"]["side"], b["box"]["position"], b["box"]["box"], b["old"], b["new"])
+            for b in fix["boxes"]} == {("them", 2, 1, 4, 1), ("them", 3, 1, 5, 4)}  # fmt: skip
+    assert all(c["correction"] is None for c in out["checks"][1:])
+
+    # Whoever may type the sheet may correct it; a set without a correction, an old version: no.
+    url = f"/api/videos/{video['id']}/scoresheet/correct"
+    assert coach.post(url, json={"set": 2, "base_version": 1}).status_code == 409  # none there
+    assert coach.post(url, json={"set": 1, "base_version": 0}).status_code == 409  # stale
+    r = coach.post(url, json={"set": 1, "base_version": 1})
+    assert r.status_code == 200, r.text
+    after = r.json()
+    assert after["version"] == 2
+    fixed = after["checks"][0]
+    assert fixed["status"] == "consistent" and fixed["correction"] is None
+    assert [p["winner"] for p in fixed["points"]] == [w for _, _, _, w in played[:45]]
+    notes = after["sets"][0]["corrections"]
+    assert {(n["side"], n["position"], n["box"], n["paper"], n["value"]) for n in notes} == {
+        ("them", 2, 1, 4, 1),
+        ("them", 3, 1, 5, 4),
+    }
+    assert all(n["by"] == ["log", "video"] for n in notes)
+    # Scored again: the whole set keeps to the corrected sheet; nothing left to ask there.
+    rallies = rallies_of(tagging(coach, video))
+    assert all(r["sheet_point"] == k + 1 for k, r in enumerate(rallies[:45]))
+    assert not any(r["score_note"] == "sheet_log" for r in rallies)
+    with Session(db_engine) as db:
+        revisions = list(db.scalars(select(ScoresheetRevision).order_by(ScoresheetRevision.id)))
+        assert [x.action for x in revisions] == ["create", "update"]
+        paper = revisions[0].after or {}
+        assert paper["sets"][0]["boxes_them"] == grids["them"]  # the paper's version is kept
+        [entry] = db.scalars(select(AuditLog).where(AuditLog.action == "scoresheet_corrected"))
+        assert entry.details["set"] == 1 and entry.details["sources"] == ["log", "video"]
+        assert entry.details["version"] == 2
+    # Nothing more to correct.
+    assert coach.post(url, json={"set": 1, "base_version": 2}).status_code == 409

@@ -6,10 +6,14 @@
                  a doubtful one as a hint; the sets' first server and lineups filled in;
                  the sheet's timeouts as `timeout` breaks with their team
 
-Ranked (research §4.1): the coach's facts > the official scoresheet > the scoreboard's log > the
-model. A coach's winner or serve is never changed; where it disagrees with the sheet the rally
-is flagged ("sheet"). The sheet never overrides the official set score either: a sheet whose set
-ends elsewhere is inconsistent (both are shown).
+Ranked (research §4.1, softened 20.10.2026): the coach's facts and the official set score are
+hard; a typed or confirmed set is strong evidence, not a fact (wieplay/ml/scoring.py
+`C_SHEET_WON`): it wins against the video alone, it and the club scoreboard's log weigh about
+alike where both speak, so where they disagree the video decides, and the rest of the set follows
+the sheet. Such a stretch is never sure ("the scoresheet and the board log disagree here"), and the
+sheet page offers the boxes to change so the set says what the decode found (`correction_for`,
+`apply_correction`: a new version, the paper's in the revisions). A sheet whose set ends elsewhere
+than the official score is inconsistent (both are shown).
 
 A set read from the photo and not confirmed (SS4, a draft) is evidence too, weaker than a typed
 one and the log, stronger than the serves (PLAN §10.3): the reader's probabilities per service
@@ -24,6 +28,8 @@ end times. No names, birthdates or licence numbers ever. Opponents by shirt numb
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import uuid
 from collections.abc import Mapping, Sequence, Set
@@ -100,6 +106,20 @@ class SanctionIn(_Strict):
     opp: int = Field(ge=0, le=99)
 
 
+class CorrectionIn(_Strict):
+    """A box changed from what the paper says because other records showed the scorer's slip
+    (the sheet page's correction, `apply_correction`): which box, the paper's value, the new one,
+    and on whose word (the board log, the video, a coach, the board in the picture). The paper's
+    version stays in the sheet's revisions."""
+
+    side: Side
+    position: int = Field(ge=1, le=6)
+    box: int = Field(ge=1, le=8)
+    paper: int | None = Field(default=None, ge=0, le=99)
+    value: int | None = Field(default=None, ge=0, le=99)
+    by: list[Literal["log", "video", "coach", "board"]] = Field(default_factory=list, max_length=4)
+
+
 class CancelledIn(_Strict):
     """Rallies played after this score that the sheet does not count (a rotation fault)."""
 
@@ -129,6 +149,7 @@ class SetSheetIn(_Strict):
     start: str | None = None  # hh:mm, the time of the first serve
     end: str | None = None
     use: bool = True  # this set lines up the scoring ("don't use the sheet for set 3")
+    corrections: list[CorrectionIn] = Field(default_factory=list, max_length=96)
 
     @model_validator(mode="after")
     def _check(self) -> SetSheetIn:
@@ -680,8 +701,9 @@ def write(match: sc.MatchOut, rallies: Sequence[Segment]) -> None:
 def metrics(use: SheetUse, set_ins: Sequence[sc.SetIn], match: sc.MatchOut) -> dict[str, Any]:
     """What the sheet did in this scoring (research §4.2): per set how it was used, its points
     lined up with a rally, penalties and missed rallies (points without one), rallies without a
-    point, disagreements with the coach and the log; the log's and the coach's winners against
-    the sheet's."""
+    point, disagreements with the coach and the log, where the decode departs from it and the
+    boxes to change for that (`correction_for`); the log's and the coach's winners against the
+    sheet's."""
     sets: dict[str, Any] = {}
     agree_log = told_log = agree_coach = told_coach = 0
     for st, so in zip(set_ins, match.sets, strict=True):
@@ -693,25 +715,36 @@ def metrics(use: SheetUse, set_ins: Sequence[sc.SetIn], match: sc.MatchOut) -> d
         if so.sheet == "path":
             for out in so.rallies:
                 r = sheet_rallies.get(out.key)
-                if r is None or not out.point:
+                if r is None or not out.point or out.sheet_won is None:
                     continue
                 if r.log in ("us", "them") and r.log_p > 0:
                     told_log += 1
-                    agree_log += int(r.log == out.won_by)
+                    agree_log += int(r.log == out.sheet_won)
                 if r.won_fact is not None:
                     told_coach += 1
-                    agree_coach += int(r.won_fact == out.won_by)
+                    agree_coach += int(r.won_fact == out.sheet_won)
+        path = so.sheet == "path"
+        disputes = sc.sheet_disputes(st, so) if path else []
         sets[str(st.no)] = {
             "status": c.status,
             "use": so.sheet,
             "draft": c.draft,
             "points": len(c.decoded.points),
-            "aligned": aligned if so.sheet == "path" else None,
-            "penalties": so.penalties if so.sheet == "path" else None,
-            "missed": so.missed if so.sheet == "path" else None,
+            "aligned": aligned if path else None,
+            "penalties": so.penalties if path else None,
+            "missed": so.missed if path else None,
             "extra": so.extra,
             "flagged": so.flagged,
             "sheet_flags": sum(1 for r in so.rallies if r.note == "sheet"),
+            # Where the sheet and the log disagree (rallies), where the decode departs from the
+            # sheet (rallies), and the boxes to change so the set says what the decode found.
+            "disputed": sum(len(d.keys) for d in disputes) if path else None,
+            "departs": sum(
+                1 for r in so.rallies if r.point and r.sheet_won is not None and not r.sheet_point
+            )
+            if path
+            else None,
+            "correction": correction_for(c, st, so),
         }
     return {
         "on": use.on,
@@ -722,6 +755,108 @@ def metrics(use: SheetUse, set_ins: Sequence[sc.SetIn], match: sc.MatchOut) -> d
         "vs_log": {"agree": agree_log, "told": told_log},
         "vs_coach": {"agree": agree_coach, "told": told_coach},
     }
+
+
+# --- where the decode departs from a typed set: the boxes to change (PLAN §10.3a) --------------
+
+
+def digest(s: sh.SheetSet) -> str:
+    """What a correction was found for: the set's first server and boxes (a change since makes
+    the correction stale)."""
+    key = json.dumps(
+        [s.no, s.deciding, s.first_serve, [list(map(list, s.boxes.get(x) or [])) for x in sh.SIDES]]
+    )
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def correction_for(c: SetCheck, st: sc.SetIn, so: sc.SetOut) -> dict[str, Any] | None:
+    """Where the joint decode departs from a typed set it used: the boxes to change so the set
+    says what the decode found (wieplay/ml/sheet.py `correction`), from which score to which,
+    and on whose word ("log", "video", "coach", "board"); None where it keeps to the set."""
+    if so.sheet != "path" or st.sheet is None or c.status != "consistent" or not so.winners:
+        return None
+    sheet_w = [p.winner for p in c.decoded.points]
+    offset = len(sheet_w) - len(st.sheet.winners)  # a set the video joined late
+    if offset < 0:
+        return None
+    winners = [*sheet_w[:offset], *so.winners]
+    if winners == sheet_w:
+        return None
+    edits = sh.correction(c.sheet, winners)
+    if not edits:
+        return None
+    differ = [k for k, (x, y) in enumerate(zip(winners, sheet_w, strict=False)) if x != y]
+    if not differ:
+        differ = [min(len(winners), len(sheet_w)) - 1]
+    scores = [(0, 0)]
+    for w in winners:
+        a, b = scores[-1]
+        scores.append((a + (w == "us"), b + (w == "them")))
+    lo, hi = differ[0], min(differ[-1] + 1, len(scores) - 1)
+    return {
+        "boxes": [r.as_json() for r in edits],
+        "from": list(scores[lo]),
+        "to": list(scores[hi]),
+        "sources": sc.departure_sources(st, so),
+        "digest": digest(c.sheet),
+    }
+
+
+def correction_now(c: SetCheck, found: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    """A set's correction from the newest scoring, while the set is as it was then."""
+    if not isinstance(found, Mapping) or not found.get("boxes"):
+        return None
+    if found.get("digest") != digest(c.sheet) or c.status != "consistent":
+        return None
+    return dict(found)
+
+
+class CorrectionStale(Exception):
+    pass
+
+
+def apply_correction(docs: Sequence[Mapping[str, Any]], no: int, found: Mapping[str, Any]
+                     ) -> list[dict[str, Any]]:  # fmt: skip
+    """The sheet's sets with set `no` corrected as the scoring proposed (`correction_for`): its
+    boxes changed, each change noted with the paper's value and on whose word, the circled finals
+    moved to the last boxes where they were marked. CorrectionStale when the set changed since."""
+    out = [dict(d) for d in docs]
+    doc = next((d for d in out if int(d.get("no", 0)) == no), None)
+    if doc is None:
+        raise CorrectionStale()
+    s = to_set(doc)
+    if found.get("digest") != digest(s) or not found.get("boxes"):
+        raise CorrectionStale()
+    repairs = [
+        sh.Repair(
+            "change",
+            sh.BoxRef(e["box"]["side"], int(e["box"]["position"]), int(e["box"]["box"])),
+            e.get("old"),
+            e.get("new"),
+            float(e.get("cost", 0.0)),
+            (int(e["final"][0]), int(e["final"][1])),
+        )
+        for e in found["boxes"]
+    ]
+    grids = sh.corrected(s, repairs)
+    doc["boxes_us"], doc["boxes_them"] = grids["us"], grids["them"]
+    by = [x for x in found.get("sources") or [] if x in ("log", "video", "coach", "board")]
+    notes = [dict(n) for n in doc.get("corrections") or []]
+    for r in repairs:
+        where = (r.box.side, r.box.position, r.box.box)
+        prior = next((n for n in notes if (n["side"], n["position"], n["box"]) == where), None)
+        notes = [n for n in notes if (n["side"], n["position"], n["box"]) != where]
+        paper = prior["paper"] if prior is not None else r.old
+        notes.append({"side": r.box.side, "position": r.box.position, "box": r.box.box,
+                      "paper": paper, "value": r.new, "by": by})  # fmt: skip
+    doc["corrections"] = notes
+    fixed = to_set(doc)
+    if any(i.code == "circled" for i in sh.decode(fixed).issues):
+        for side in sh.SIDES:
+            if doc.get(f"circled_{side}"):
+                seq = sh.turns(fixed, side)
+                doc[f"circled_{side}"] = [seq[-1][0], seq[-1][1]] if seq else None
+    return out
 
 
 # --- timeouts as breaks (research §4.4) ----------------------------------------------------------

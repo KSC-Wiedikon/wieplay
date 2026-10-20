@@ -713,6 +713,47 @@ def _candidates(
     return sorted(out)
 
 
+def correction(s: SheetSet, winners: Sequence[Side]) -> list[Repair]:
+    """The boxes to change so a consistent set says these points instead (the joint decode
+    departs from it: a scorer's slip that still adds up, PLAN §10.3a): every box whose value
+    differs from what a scorer writes for them (`encode`), a box filled or emptied too, as
+    "change" repairs in the sheet's order. A point sequence has exactly one set of boxes, so this
+    is the smallest edit. [] when the set says these points already, or they cannot be written."""
+    if s.first_serve is None or not winners:
+        return []
+    d = decode(s)
+    if [p.winner for p in d.points] == list(winners):
+        return []
+    try:
+        grids, circled = encode(s.first_serve, winners, s.deciding)
+    except ValueError:
+        return []
+    final = (sum(w == "us" for w in winners), sum(w == "them" for w in winners))
+    # A set won on reception whose winner's final was never written stays so: not an edit.
+    won: Side = "us" if final[0] > final[1] else "them"
+    unwritten = circled.get(won) if any(i.code == "final_missing" for i in d.issues) else None
+    out: list[Repair] = []
+    for side in SIDES:
+        for p, b in cells(side == s.first_serve, s.deciding):
+            old, new = s.value(side, p, b), grids[side][p - 1][b - 1]
+            if old == new or (side == won and (p, b) == unwritten and old is None):
+                continue
+            cost = COST_DELETE if new is None else typo_cost(old, new)
+            out.append(Repair("change", BoxRef(side, p, b), old, new, cost, final))
+    return out
+
+
+def corrected(s: SheetSet, repairs: Sequence[Repair]) -> dict[Side, list[list[int | None]]]:
+    """Each team's grid [position][box] with the repairs applied."""
+    n = boxes_for(s.deciding)
+    grids: dict[Side, list[list[int | None]]] = {}
+    for side in SIDES:
+        grids[side] = [[s.value(side, p, b) for b in range(1, n + 1)] for p in range(1, 7)]
+    for r in repairs:
+        grids[r.box.side][r.box.position - 1][r.box.box - 1] = r.new
+    return grids
+
+
 def clear_repair(found: Sequence[Repair]) -> Repair | None:
     """The repair to suggest: the cheapest, when it is clearly cheaper than the next."""
     if not found:

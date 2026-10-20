@@ -3,6 +3,9 @@
 GET    /api/videos/{id}/scoresheet         the sheet, each set decoded and checked, its numbers
 PUT    /api/videos/{id}/scoresheet         save it (whoever may tag); the match is scored again
 POST   /api/videos/{id}/scoresheet/check   the checks of a sheet not saved yet (repairs too)
+POST   /api/videos/{id}/scoresheet/correct apply the correction the scoring found for a set
+                                           (the board log and the video against the paper): a
+                                           new version, the paper's kept in the revisions
 DELETE /api/videos/{id}/scoresheet         remove it (and its photos); scored again without it
 GET    /api/videos/{id}/scoresheet/court   per rally lined up with it: who served (team and
                                            number) and both teams' six by zone; its timeouts,
@@ -81,6 +84,19 @@ class RepairOut(BaseModel):
     final: list[int]
 
 
+class CorrectionOut(BaseModel):
+    """Where the joint decode departs from a typed set (PLAN §10.3a): the boxes to change so the
+    set says what the board log and the video say (`old` the typed value, `new` theirs), from
+    which score to which, and on whose word (log, video, coach, board)."""
+
+    boxes: list[RepairOut]
+    from_score: list[int] = Field(alias="from")
+    to: list[int]
+    sources: list[str]
+
+    model_config = {"populate_by_name": True}
+
+
 class PointOut(BaseModel):
     winner: str
     server: str
@@ -151,6 +167,8 @@ class SetCheckOut(BaseModel):
     # The newest scoring with the sheet: its points lined up with a rally, penalties, missed
     # rallies (points without one), rallies without a point, flagged rallies.
     scoring: dict[str, Any] | None = None
+    # The boxes the newest scoring found otherwise than typed (while the set is as it was then).
+    correction: CorrectionOut | None = None
 
 
 class ChecksOut(BaseModel):
@@ -434,6 +452,7 @@ def _checks_out(
                 ],
                 stats=set_stats,
                 scoring=(scoring_sets or {}).get(str(c.no)),
+                correction=_correction_out(c, sheet_on, (scoring_sets or {}).get(str(c.no))),
             )
         )
     match_out = None
@@ -458,6 +477,13 @@ def _checks_out(
         match=match_out,
         match_by_setter=bool(all_setters and by_setter),
     )
+
+
+def _correction_out(c: ss.SetCheck, on: bool, scored: Any) -> CorrectionOut | None:
+    if c.use(on) != "path" or not isinstance(scored, dict):
+        return None
+    found = ss.correction_now(c, scored.get("correction"))
+    return CorrectionOut.model_validate(found) if found is not None else None
 
 
 def _state(db: Session, viewer: Viewer, video: Video, access: TeamAccess) -> SheetOut:
@@ -649,6 +675,62 @@ def check_scoresheet(
     out = _checks_out(checks, body.use_in_scoring, official=official)
     db.rollback()
     return out
+
+
+class CorrectIn(BaseModel):
+    """Apply the scoring's correction to this set; `base_version`: the version the page saw."""
+
+    set: int = Field(ge=1, le=ss.MAX_SETS)
+    base_version: int = Field(ge=0)
+
+
+@router.post("/videos/{video_id}/scoresheet/correct", response_model=SheetOut)
+def correct_scoresheet(
+    video_id: uuid.UUID, body: CorrectIn, viewer: ViewerDep, db: DbDep
+) -> SheetOut:
+    """Change a typed set's boxes as the newest scoring found them (the board log and the video
+    against what the scorer wrote): saved as a new version, the paper's stays in the revisions,
+    audited as a correction from those records; the match is scored again."""
+    video, _ = _writable(db, viewer, video_id)
+    if video.status != "ready":
+        raise HTTPException(409, "Correct the scoresheet once the video is ready")
+    row = ss.stored(db, video.id)
+    if row is None or not ss.typed(row):
+        raise HTTPException(404, "The video has no scoresheet")
+    if row.version != body.base_version:
+        raise HTTPException(409, "The scoresheet was changed meanwhile: reload it")
+    run = scoring.latest_run(db, video.id)
+    sheet_metrics = (run.metrics or {}).get("sheet") if run is not None else None
+    scored = ((sheet_metrics or {}).get("sets") or {}).get(str(body.set)) if isinstance(
+        sheet_metrics, dict) else None  # fmt: skip
+    found = scored.get("correction") if isinstance(scored, dict) else None
+    if not isinstance(found, dict):
+        raise HTTPException(409, "WiePlay has no correction for this set")
+    try:
+        sets = ss.apply_correction(row.sets, body.set, found)
+    except ss.CorrectionStale:
+        raise HTTPException(409, "The set was changed since: score the match again") from None
+    now = tagging.now_utc()
+    sheet_in = ss.SheetIn(base_version=row.version, sets=sets, use_in_scoring=row.use_in_scoring)
+    try:
+        row = ss.save(db, video, sheet_in, viewer.member_id, now)
+    except ss.Stale:
+        db.rollback()
+        raise HTTPException(409, "The scoresheet was changed meanwhile: reload it") from None
+    checks = ss.check(row.sets, ss.official_sets(db, video), ss.drafts_of(row))
+    ss.fill_periods(db, video, checks, row.use_in_scoring)
+    scoring.score_video(db, video, reason="scoresheet")
+    boxes = [
+        {"side": e["box"]["side"], "position": e["box"]["position"], "box": e["box"]["box"],
+         "paper": e.get("old"), "value": e.get("new")}
+        for e in found["boxes"]
+    ]  # fmt: skip
+    audit(db, viewer.member_id, "scoresheet_corrected", "video", str(video.id),
+          version=row.version, set=body.set, boxes=boxes, sources=found.get("sources") or [],
+          span=[found.get("from"), found.get("to")])  # fmt: skip
+    db.commit()
+    _, access = visible_video(db, viewer, video.id)
+    return _state(db, viewer, video, access)
 
 
 @router.put("/videos/{video_id}/scoresheet", response_model=SheetOut)
