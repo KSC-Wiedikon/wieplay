@@ -63,6 +63,22 @@ describe('IdentifyPage', () => {
     expect(numbers.map((b) => b.textContent)).toEqual(['#11', '#3Sam Beispiel', '#7Alex Muster'])
   })
 
+  it('names the cards the team’s earlier games recognise in one step', async () => {
+    const recognised: Queue['recognised'] = [
+      { card: 'c2', number: 7, member_id: 101, name: 'Alex Muster', games: 3, confidence: 0.98, crops: [[0, 2]] },
+    ]
+    const fetch = show(
+      { [`POST /api/videos/${ID}/players/accept-recognised`]: { body: answered(['c1']) } },
+      { ...queue(['c1']), recognised },
+    )
+    const card = await screen.findByRole('region', { name: 'Recognised from earlier games' })
+    expect(within(card).getByText('#7 Alex Muster')).toBeInTheDocument()
+    expect(within(card).getByText('Named in 3 games')).toBeInTheDocument()
+    fireEvent.click(within(card).getByRole('button', { name: 'Accept' }))
+    await waitFor(() => expect(posted(fetch, `/api/videos/${ID}/players/accept-recognised`)).toEqual([{ cards: ['c2'] }]))
+    expect(await screen.findByText('1 of 2')).toBeInTheDocument()
+  })
+
   it('a tapped number is an answer; Undo takes it back', async () => {
     const fetch = show({
       [`POST /api/videos/${ID}/players/clusters/c1/answer`]: { body: answered(['c2']) },

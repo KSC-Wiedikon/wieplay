@@ -14,10 +14,15 @@ import type { RosterEntry, Side } from './types'
 
 export interface QueueItem {
   card: string
-  /** On court for its team in its rallies (the scoresheet), the most often first; then liberos. */
+  /**
+   * On court for its team in its rallies (the scoresheet, else the team's usual rotation), the
+   * most often first; then liberos. A number the team's memory backs leads.
+   */
   on_court: number[]
   /** Cards that may be the same person. */
   same_as: string[]
+  /** What the team's memory says of the read number (docs/PLAN.md §10.5b). */
+  memory?: { number: number; member_id: number | null; games: number; confidence: number; sure: boolean } | null
 }
 
 export interface TeamsSide {
@@ -34,11 +39,25 @@ export interface TeamsQuestion {
   far_team: Side | null
 }
 
+/** A card of ours the team's earlier games recognise (docs/PLAN.md §10.5b): offered as named. */
+export interface Recognised {
+  card: string
+  number: number
+  member_id: number | null
+  name: string | null
+  /** The team's games that named the number. */
+  games: number
+  confidence: number
+  crops: [number, number][]
+}
+
 export interface Queue {
   items: QueueItem[]
   named: number
   sure_share: number
   teams: TeamsQuestion | null
+  /** Not in `items`: "Accept all" names them (older APIs send none). */
+  recognised?: Recognised[]
 }
 
 export type CardState = Record<string, unknown> & { id: string }
@@ -136,6 +155,13 @@ export function useRestore(videoId: string) {
 export function useTap(videoId: string) {
   return useIdentifyMutation(videoId, (body: { t_ms: number; track: number; number: number | null; not_player: boolean }) =>
     apiRequest<Answered>(`/api/videos/${videoId}/players/tap`, { method: 'POST', body }),
+  )
+}
+
+/** "Accept all": the recognised cards named with their numbers, like answers one by one. */
+export function useAcceptRecognised(videoId: string) {
+  return useIdentifyMutation(videoId, (cards: string[]) =>
+    apiRequest<Answered>(`/api/videos/${videoId}/players/accept-recognised`, { method: 'POST', body: { cards } }),
   )
 }
 

@@ -9,6 +9,8 @@ import { courtEn } from './court.en'
 import i18n from './index'
 import { libraryDe } from './library.de'
 import { libraryEn } from './library.en'
+import { memoryDe } from './memory.de'
+import { memoryEn } from './memory.en'
 import { playersDe } from './players.de'
 import { playersEn } from './players.en'
 import { regradeDe } from './regrade.de'
@@ -27,8 +29,8 @@ import { videoDe } from './video.de'
 import { videoEn } from './video.en'
 
 for (const [lng, bundles] of [
-  ['en', [videoEn, libraryEn, statsEn, courtEn, actionsEn, playersEn, scoreboardEn, setupEn, searchEn, regradeEn, sheetEn]],
-  ['de', [videoDe, libraryDe, statsDe, courtDe, actionsDe, playersDe, scoreboardDe, setupDe, searchDe, regradeDe, sheetDe]],
+  ['en', [videoEn, libraryEn, statsEn, courtEn, actionsEn, playersEn, scoreboardEn, setupEn, searchEn, regradeEn, sheetEn, memoryEn]],
+  ['de', [videoDe, libraryDe, statsDe, courtDe, actionsDe, playersDe, scoreboardDe, setupDe, searchDe, regradeDe, sheetDe, memoryDe]],
 ] as const) {
   for (const bundle of bundles) i18n.addResourceBundle(lng, 'translation', bundle, true, false)
 }

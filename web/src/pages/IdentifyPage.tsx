@@ -17,6 +17,7 @@ import { useHlsSource } from '../lib/hls'
 import {
   boxAt,
   numbersToOffer,
+  useAcceptRecognised,
   useAnswer,
   useIdentifyQueue,
   useMoments,
@@ -27,6 +28,7 @@ import {
   type CardState,
   type Moment,
   type QueueItem,
+  type Recognised,
   type TeamsQuestion,
 } from '../lib/identify'
 import { clusterTitle, cropStyle, isPieces, parseNumber, sheetUrl, usePlayers, type PlayerCluster, type PlayerTrack, type Players, type Sheets } from '../lib/players'
@@ -92,7 +94,15 @@ function IdentifyView({ videoId }: { videoId: string }) {
         <LoadError onRetry={() => void Promise.all([players.refetch(), queue.refetch()])} />
       ) : players.data?.run && players.data.sheets && queue.data ? (
         <SideNamesContext value={sideNamesOf(v, t)}>
-          <Queue video={v} players={players.data} sheets={players.data.sheets} items={queue.data.items} sureShare={queue.data.sure_share} teams={queue.data.teams} />
+          <Queue
+            video={v}
+            players={players.data}
+            sheets={players.data.sheets}
+            items={queue.data.items}
+            sureShare={queue.data.sure_share}
+            teams={queue.data.teams}
+            recognised={queue.data.recognised ?? []}
+          />
         </SideNamesContext>
       ) : (
         <Message>{t('identify.noPlayers')}</Message>
@@ -108,12 +118,14 @@ interface QueueProps {
   items: QueueItem[]
   sureShare: number
   teams: TeamsQuestion | null
+  recognised: Recognised[]
 }
 
-function Queue({ video, players, sheets, items, sureShare, teams }: QueueProps) {
+function Queue({ video, players, sheets, items, sureShare, teams, recognised }: QueueProps) {
   const { t } = useTranslation()
   const answer = useAnswer(video.id)
   const restore = useRestore(video.id)
+  const accept = useAcceptRecognised(video.id)
   const [skipped, setSkipped] = useState<string[]>([])
   const [undo, setUndo] = useState<CardState[][]>([])
   const [start] = useState(() => items.length)
@@ -123,7 +135,19 @@ function Queue({ video, players, sheets, items, sureShare, teams }: QueueProps) 
   const current = open[0] ?? null
   const card = current ? (byId.get(current.card) ?? null) : null
   const total = Math.max(start, done + items.length)
-  const busy = answer.isPending || restore.isPending
+  const busy = answer.isPending || restore.isPending || accept.isPending
+  const acceptAll = () => {
+    if (busy || recognised.length === 0) return
+    accept.mutate(
+      recognised.map((r) => r.card),
+      {
+        onSuccess: (data) => {
+          setUndo((u) => [...u, data.undo])
+          setDone((n) => n + 1)
+        },
+      },
+    )
+  }
 
   const send = (a: Answer) => {
     if (!current || busy) return
@@ -161,6 +185,9 @@ function Queue({ video, players, sheets, items, sureShare, teams }: QueueProps) 
         <ProgressBar value={sureShare} label={t('identify.sureShare', { value: formatPercent(sureShare) })} />
       </Card>
       {teams && players.can_edit && <TeamsCard videoId={video.id} sheets={sheets} question={teams} />}
+      {recognised.length > 0 && players.can_edit && (
+        <RecognisedCard videoId={video.id} sheets={sheets} recognised={recognised} busy={busy} onAccept={acceptAll} />
+      )}
       {!players.can_edit ? (
         <Message>{t('identify.readOnly')}</Message>
       ) : card && current && isPieces(card) ? (
@@ -212,6 +239,51 @@ function Queue({ video, players, sheets, items, sureShare, teams }: QueueProps) 
         </Card>
       )}
     </div>
+  )
+}
+
+/**
+ * The cards of ours the team's earlier games recognise (docs/PLAN.md §10.5b): the number read
+ * on the shirt is one the team plays. One check of the pictures, then "Accept all".
+ */
+function RecognisedCard({
+  videoId,
+  sheets,
+  recognised,
+  busy,
+  onAccept,
+}: {
+  videoId: string
+  sheets: Sheets
+  recognised: Recognised[]
+  busy: boolean
+  onAccept: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Card className="flex flex-col gap-3 p-4" role="region" aria-label={t('identify.recognised.title')}>
+      <h2 className="font-semibold">{t('identify.recognised.title')}</h2>
+      <p className="text-sm text-muted">{t('identify.recognised.body', { count: recognised.length })}</p>
+      <ul className="flex flex-wrap gap-3">
+        {recognised.map((r) => (
+          <li key={r.card} className="flex flex-col items-start gap-1">
+            <span className="flex gap-1">
+              {r.crops.slice(0, 2).map((c) => (
+                <Crop key={`${c[0]}-${c[1]}`} videoId={videoId} sheets={sheets} crop={c} scale={0.75} />
+              ))}
+            </span>
+            <span className="text-sm font-semibold">{r.name ? `#${r.number} ${r.name}` : `#${r.number}`}</span>
+            <span className="text-xs text-muted">{t('identify.recognised.games', { count: r.games })}</span>
+          </li>
+        ))}
+      </ul>
+      <div>
+        <Button variant="primary" disabled={busy} onClick={onAccept}>
+          <CheckIcon className="size-4" />
+          {t('identify.recognised.accept', { count: recognised.length })}
+        </Button>
+      </div>
+    </Card>
   )
 }
 

@@ -270,7 +270,7 @@ export const guideEn: Guide = {
     ],
     tips: [
       'Each answer is a fact: cards whose shirt shows the number you gave join that card by themselves.',
-      'You match the person with your own eyes; WiePlay uses no faces, and nothing leaves this video.',
+      'You match the person with your own eyes; WiePlay uses no faces. Only the numbers you name count for the team’s next games: no pictures, no looks.',
       'Far-side players at 1080p are often too small to tell: skip them, the near side matters most.',
     ],
   },

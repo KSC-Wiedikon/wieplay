@@ -6,7 +6,7 @@ export const playersEn = {
     title: 'Players in this video',
     back: 'Back to the video',
     intro:
-      'WiePlay found these people on the court. Give each card the shirt number from the roster once; the actions then get their player. WiePlay recognises no faces and nothing carries over to other videos: the number is the only identity.',
+      'WiePlay found these people on the court. Give each card the shirt number from the roster once; the actions then get their player. WiePlay recognises no faces: the number is the only identity, and only the numbers the team plays carry over to its other games.',
     status: {
       none: 'WiePlay has not looked for the players yet.',
       queued: 'Waiting to find the players…',
@@ -158,6 +158,16 @@ export const playersEn = {
       near: 'Near side (the camera’s end)',
       far: 'Far side',
       ours: 'These are ours',
+    },
+    // Cards of ours the team's earlier games recognise (docs/PLAN.md §10.5b).
+    recognised: {
+      title: 'Recognised from earlier games',
+      body_one: 'The number read on this card is one the team plays: its earlier games named it. Check the pictures and accept.',
+      body_other: 'The numbers read on these {{count}} cards are ones the team plays: its earlier games named them. Check the pictures and accept them in one step.',
+      games_one: 'Named in {{count}} game',
+      games_other: 'Named in {{count}} games',
+      accept_one: 'Accept',
+      accept_other: 'Accept all {{count}}',
     },
     tap: {
       button: 'Name a player',
