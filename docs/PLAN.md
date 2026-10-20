@@ -2614,17 +2614,31 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   its mean action F1 (contact within ±0.3 s with the coach's skill and side) beats v0's; a
   kept model suggests again for every game nobody has done. Also reported: the contact
   recall (the coaches' tags with a candidate within ±0.3 s: what the ball's path can find).
-- **The bar** (since 17.10.2026, a coach's review costs more than wrong suggestions save):
-  suggestions are written only once the finder in use passes it on games whose actions a
-  coach reviewed, held out: at least two games, **precision of fully right suggestions**
-  (contact within ±0.3 s with the coach's skill and side) **≥ 0.70** and **contact recall ≥
-  0.6** (`WIEPLAY_ACTION_SUGGEST_MIN_PRECISION`, `WIEPLAY_ACTION_SUGGEST_MIN_RECALL`;
-  `WIEPLAY_ACTION_SUGGESTIONS` = `auto` (default) | `on` (write anyway, for testing) | `off`).
-  Below it every run still measures itself where a coach tagged and writes nothing (its old
-  untouched suggestions go); the training that first passes it brings suggestions to every
-  game nobody has reviewed. The tagging page, the analysis card and the stats say plainly why
-  there are none yet ("… now: 2 games, last score 41 %"); "Actions reviewed" stays available
-  for a game the coach tagged, which is how the loop gets its labels.
+- **No bar since 20.10.2026** (the owner: "can we automate tagging actions?"; prod had no
+  action tags, so the bar of 17.10.2026, two reviewed games at precision ≥ 0.70, never opened):
+  the rules suggest for every analysed game from the start (`WIEPLAY_ACTION_SUGGESTIONS` =
+  `auto` (default) | `on` (the same) | `off` (never)); the review works like the rallies' (§10.3):
+  WiePlay proposes everything, the sure ones are accepted in one step, the coach reviews the rest.
+  What changed (measured on hand-labelled rallies of two matches, docs/research/actions-2026-10.md):
+  - **Serves the tracker misses** (17 of 30 at first) get estimated candidates: a near serve is
+    a toss (a ball rising fast from low in the picture) and the hit about 0.8 s later; a far
+    serve left the server about 0.5 s before the first flight seen at the net's height. With the
+    server known, the first one around the rally's start is the serve.
+  - **The player at the ball** (`wieplay/ml/contact_pose.py`): YOLO26s-pose (Ultralytics,
+    AGPL-3.0, ONNX on the Lenovo's CPU) on a 640 px crop around the ball at each in-rally
+    candidate; the nearest person's hand distance, raised wrists and the people around give a
+    log-likelihood ratio of "a contact" that raises or lowers the candidate's prior. ~0.1 s a
+    candidate, a few minutes a match the first time, then cached next to the signals
+    (`contact-pose-<sha>.json.gz`). From behind the end line it says little about the skill.
+  - **Posteriors**: the rules' lattice is sampled (300 paths at temperature 0.5): each
+    suggestion carries how often its skill and side recur at its contact (`confidence`) and the
+    likeliest other answer (`model_alternative`: "D:us", or "none": maybe no contact).
+  - **Sure** (`model_sure`, migration 0028): only in a rally the joint decode is sure of (so of
+    its server): a near serve timed from its toss, and the reception right after a serve
+    (0.6-1.6 s later, posterior ≥ 0.85, someone's hands at the ball). Set so that none of the
+    sure ones was wrong on the labelled rallies; every other skill was wrong too often.
+  - The coach's answers still make a game "actions reviewed", which trains v1; v1 takes over
+    once it beats the rules on held-out reviewed games, as before.
 - **Rules for writing**: never into a rally that has a person's tags (made, imported, or a
   suggestion accepted or corrected): there the run only scores itself against them
   (precision, recall, F1 of contacts at ±0.3 s, skill and side accuracy, action F1; in
@@ -2634,7 +2648,8 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   rallies done; debounced), after a rally training, after an accepted action training, on
   request (`POST /api/videos/{id}/actions`, `python -m wieplay.cli actions`). Seconds a match.
 - **Review**: dashed in the tag list (with an inline accept) and on the timeline; the review
-  mode gains an Actions queue next to the rallies: the contact loops (1 s before to 0.5 s
+  mode gains an Actions queue next to the rallies (since 20.10.2026 "Needs you: N" first, each
+  with WiePlay's other likely answer, and "Accept all sure actions"): the contact loops (1 s before to 0.5 s
   after), `Enter` accept, `X` reject, `S R E A B D F` the skill, `# + ! - / =` the grade (again:
   none), a number then `Enter` the player, `Tab` the side, `←/→` one frame, `Shift+Enter` the
   rest of the rally, `U` undo; "actions reviewed" (`POST /api/videos/{id}/actions-reviewed`,
