@@ -184,6 +184,9 @@ def rally_inputs(db: Session, video: Video) -> list[dict[str, Any]]:
         if near_us is None:
             continue
         serve_near = _p_near(rally.serving, near_us, SURE_SIDE)
+        if serve_near is None and rally.score_sure:
+            # The joint decode is sure of the rally (§10.3), so of who served it too.
+            serve_near = _p_near(rally.model_serving, near_us, SURE_SIDE)
         if serve_near is None:
             model = _p_near(rally.model_serving, near_us, 0.85)
             court = None
@@ -343,26 +346,35 @@ def latest_training(db: Session) -> ModelRun | None:
     ).first()
 
 
-# --- the bar: suggestions only once the finder gets them right often enough ----------------
+# --- whether suggestions are written ---------------------------------------------------------
 
-MIN_GAMES = 2  # games with actions reviewed before the held-out score means anything
+# How the finder did on hand-checked rallies (docs/research/actions-2026-10.md): two matches
+# filmed from behind the end line, every contact labelled by eye. Shown to the coach as it
+# is; the numbers on a coach's own games (vs_coach, the training's held-out score) follow.
+MEASURED: dict[str, Any] = {
+    "rallies": 0,
+    "contacts": 0,
+    "found": 0.0,  # the contacts with a suggestion fully right (time, skill, side)
+    "precision": 0.0,  # the suggestions fully right
+    "sure": 0,  # suggestions marked sure ...
+    "sure_wrong": 0,  # ... and how many of them were wrong
+}
 
 
 @dataclass(frozen=True)
 class Gate:
-    """Whether suggested actions are written (PLAN §10.4a): the active finder's held-out score
-    on games whose actions a coach reviewed (the newest training's) against the bars."""
+    """Whether suggested actions are written (PLAN §10.4a). Since 20.10.2026 always, unless
+    switched off: the rules (v0) suggest from the start, each action with its posterior and
+    a "sure" flag; a learned finder (v1) takes over once it beats them on games a coach
+    reviewed. Its held-out score on those games is reported with the gate."""
 
     mode: str  # auto | on | off
     open: bool
-    # on, off (forced); passed; no_training; too_few_games; below_bar
-    reason: str
-    finder: str  # v0 | v1: the finder in use, whose score counts
+    reason: str  # auto, on, off
+    finder: str  # v0 | v1: the finder in use
     games: int
-    precision: float | None  # fully right (±0.3 s, skill, side) of the suggested, held out
+    precision: float | None  # the finder's fully right suggestions on reviewed games, held out
     contact_recall: float | None  # the coaches' tags with a contact candidate
-    min_precision: float
-    min_recall: float
     run_id: uuid.UUID | None = None
     trained_at: datetime | None = None
 
@@ -375,8 +387,6 @@ class Gate:
             "games": self.games,
             "precision": self.precision,
             "contact_recall": self.contact_recall,
-            "min_precision": self.min_precision,
-            "min_recall": self.min_recall,
             "run_id": str(self.run_id) if self.run_id else None,
             "trained_at": self.trained_at.isoformat() if self.trained_at else None,
         }
@@ -384,7 +394,6 @@ class Gate:
 
 def gate_of(run: ModelRun | None, settings: Settings) -> Gate:
     mode = settings.action_suggestions
-    min_p, min_r = settings.action_suggest_min_precision, settings.action_suggest_min_recall
     metrics = run.metrics if run is not None else {}
     finder = "v1" if metrics.get("accepted") else "v0"
     summary = metrics.get("summary") or {}
@@ -392,28 +401,14 @@ def gate_of(run: ModelRun | None, settings: Settings) -> Gate:
     games = int(summary.get("games") or scores.get("games") or 0)
     precision = scores.get("action_precision")
     recall = summary.get("contact_recall")
-    if mode == "on":
-        is_open, reason = True, "on"
-    elif mode == "off":
-        is_open, reason = False, "off"
-    elif run is None:
-        is_open, reason = False, "no_training"
-    elif games < MIN_GAMES:
-        is_open, reason = False, "too_few_games"
-    elif precision is None or recall is None or precision < min_p or recall < min_r:
-        is_open, reason = False, "below_bar"
-    else:
-        is_open, reason = True, "passed"
     return Gate(
         mode=mode,
-        open=is_open,
-        reason=reason,
+        open=mode != "off",
+        reason=mode,
         finder=finder,
         games=games,
         precision=None if precision is None else float(precision),
         contact_recall=None if recall is None else float(recall),
-        min_precision=min_p,
-        min_recall=min_r,
         run_id=run.id if run is not None else None,
         trained_at=run.created_at if run is not None else None,
     )
@@ -465,6 +460,13 @@ def video_inputs(db: Session, video: Video) -> dict[str, Any] | None:
         "camera": camera,
         "calibration": source,
         "rallies": rally_inputs(db, video),
+        # The camera files on the NAS: the frames of the player-at-the-ball cue.
+        "parts": [
+            {"path": f.nas_path, "offset_ms": f.offset_ms or 0, "duration_ms": f.duration_ms or 0}
+            for f in video.files
+        ]
+        if video.files and all(f.nas_path for f in video.files)
+        else [],
     }
 
 
@@ -540,6 +542,9 @@ class ActionIn(BaseModel):
     code: Literal["S", "R", "E", "A", "B", "D", "F"]
     grade: Literal["#", "+", "!", "-", "/", "="] | None = None
     confidence: float = Field(ge=0, le=1)
+    sure: bool = False
+    # The likeliest other answer at this contact: "<skill>:<near|far>", or "none".
+    alternative: str | None = Field(default=None, pattern=r"^(none|[SREABDF]:(near|far))$")
     ball_x: float = Field(ge=-0.5, le=1.5)
     ball_y: float = Field(ge=-0.5, le=1.5)
     court_x: float | None = Field(default=None, ge=-20, le=40)
@@ -578,6 +583,14 @@ class TrainResult(BaseModel):
     # summary (v0/v1 on held-out games, contact recall) and per video {"v0", "v1", ...}
     evaluation: dict[str, Any] = Field(default_factory=dict)
     dataset: list[dict[str, Any]] = Field(default_factory=list, max_length=10_000)
+
+
+def _alternative(found: str | None, near_us: bool) -> str | None:
+    """The worker's "D:near" in the coach's terms ("D:us")."""
+    if not found or found == "none":
+        return found
+    code, side = found.split(":")
+    return f"{code}:{'us' if (side == 'near') == near_us else 'them'}"
 
 
 def _near(times: list[int], t: int, tol: int = TOLERANCE_MS) -> bool:
@@ -632,6 +645,7 @@ def apply_actions(
     skipped: Counter[str] = Counter()
     written: Counter[str] = Counter()
     graded = 0
+    sure = 0
     vs_pred: dict[uuid.UUID, list[action_eval.Action]] = {}
     for item in sorted(result.actions, key=lambda a: a.t_ms):
         rally = by_id.get(item.rally_id)
@@ -645,7 +659,7 @@ def apply_actions(
             skipped["coach"] += 1
             continue
         if not bar.open:
-            skipped["below_bar"] += 1  # measured where a coach tagged, written nowhere
+            skipped["off"] += 1  # switched off: measured where a coach tagged, written nowhere
             continue
         if not rally.start_ms - tagging.SERVE_SLACK_MS <= item.t_ms <= rally.end_ms + 1000:
             skipped["outside"] += 1
@@ -686,12 +700,15 @@ def apply_actions(
                 source="model",
                 model_run_id=run.id,
                 confidence=round(item.confidence, 3),
+                model_sure=item.sure,
+                model_alternative=_alternative(item.alternative, near_us),
                 review="unreviewed",
                 version=1,
             )
         )
         present.insert(bisect_left(present, item.t_ms), item.t_ms)
         written[item.code] += 1
+        sure += int(item.sure)
         graded += int(bool(attributes))
         room -= 1
     db.flush()
@@ -703,6 +720,7 @@ def apply_actions(
         "graded": graded,
         "replaced": replaced,
         "skipped": dict(skipped),
+        "sure": sure,
         "rallies": len(sides),
         "coach_rallies": len(locked),
         "stats": result.stats,

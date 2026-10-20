@@ -184,19 +184,19 @@ class ActionModelOut(BaseModel):
 
 
 class ActionGateOut(BaseModel):
-    """Whether WiePlay writes suggested actions: only once its action finder's held-out score on
-    games whose actions a coach reviewed passes the bars (mode auto; on and off force it)."""
+    """Whether WiePlay writes suggested actions (always, unless switched off), the finder in
+    use and what is measured: on hand-checked rallies (`measured`, the same for every video)
+    and, once coaches reviewed games, the finder's held-out score on them."""
 
     mode: str  # auto | on | off
     open: bool
-    reason: str  # on | off | passed | no_training | too_few_games | below_bar
+    reason: str  # auto | on | off
     finder: str
     games: int  # games with actions reviewed in the newest training
     precision: float | None  # fully right (±0.3 s, skill, side) of the suggested, held out
     contact_recall: float | None
-    min_precision: float
-    min_recall: float
     trained_at: datetime | None
+    measured: dict[str, Any] = Field(default_factory=dict)
 
 
 class PlayersSummaryOut(BaseModel):
@@ -394,9 +394,8 @@ def gate_out(db: DbDep, settings: Settings) -> ActionGateOut:
         games=g.games,
         precision=g.precision,
         contact_recall=g.contact_recall,
-        min_precision=g.min_precision,
-        min_recall=g.min_recall,
         trained_at=g.trained_at,
+        measured=actions.MEASURED,
     )
 
 
