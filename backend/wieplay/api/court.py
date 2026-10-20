@@ -13,6 +13,9 @@ POST   /api/videos/{id}/court/solve   a calibration from clicked landmarks, not 
                                       homography, the camera, the error, the lines to draw
 PUT    /api/videos/{id}/court         save it (whoever may tag); `segment`: one setup only,
                                       the setups nobody set follow it
+POST   /api/videos/{id}/court/confirm the court WiePlay found is right ("Check the court"):
+                                      its own court becomes checked, or its proposal the
+                                      video's court (whoever may tag)
 DELETE /api/videos/{id}/court         remove it (whoever may tag)
 
 Whoever may watch the video may read; the court of a video is set by its taggers.
@@ -138,6 +141,10 @@ class CalibrationOut(SolveOut):
     updated_at: datetime
     # False: the court job set it and nobody checked it yet.
     checked: bool = True
+    # The court job was sure of it (confidence at least calibration.SURE_CONFIDENCE); the
+    # chain uses a court by itself when it is checked or sure (`usable`).
+    sure: bool = False
+    usable: bool = True
     at_ms: int | None = None
     # The camera's setups when it moved during the match; None: one for the whole video.
     segments: list[SegmentOut] | None = None
@@ -157,6 +164,7 @@ class SuggestionOut(BaseModel):
     source: Literal["auto", "auto-hall", "team"]
     points: list[PointOut]
     confidence: float | None
+    sure: bool = False
     video_id: uuid.UUID
     video_title: str | None
     recorded_on: date | None
@@ -269,6 +277,8 @@ def _calibration_out(row: Calibration) -> CalibrationOut:
         copied_from=row.copied_from,
         updated_at=row.updated_at,
         checked=row.checked,
+        sure=calibration.is_sure(row),
+        usable=calibration.usable(row),
         at_ms=row.at_ms,
         segments=(
             [_segment_out(k, seg) for k, seg in enumerate(row.segments)] if row.segments else None
@@ -373,6 +383,7 @@ def get_court(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> CourtOut:
                 source=s.source,
                 points=[PointOut(landmark=n, u=p[0], v=p[1]) for n, p in s.points.items()],
                 confidence=s.confidence,
+                sure=s.sure,
                 video_id=s.video_id,
                 video_title=s.video_title,
                 recorded_on=s.recorded_on,
@@ -468,6 +479,29 @@ def save(video_id: uuid.UUID, body: SaveIn, viewer: ViewerDep, db: DbDep) -> Cal
         points=len(body.points),
         error_cm=row.reproj_error_cm,
         segment=body.segment,
+    )
+    db.commit()
+    db.refresh(row)
+    return _calibration_out(row)
+
+
+@router.post("/videos/{video_id}/court/confirm", response_model=CalibrationOut)
+def confirm(video_id: uuid.UUID, viewer: ViewerDep, db: DbDep) -> CalibrationOut:
+    video = _editable(db, viewer, video_id)
+    try:
+        row = calibration.confirm(db, video, viewer.member_id)
+    except court.CourtError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if not row.segments:
+        calibration.after_save(db, video, row, analysis.analysis_subdir(db, video))
+    audit(
+        db,
+        viewer.member_id,
+        "court_confirmed",
+        "video",
+        str(video.id),
+        method=row.method,
+        confidence=row.confidence,
     )
     db.commit()
     db.refresh(row)

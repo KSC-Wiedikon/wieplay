@@ -73,6 +73,7 @@ def court_result(
     bump: bool = True,
     second: str = "bump",
     reference: dict[str, Any] | None = None,
+    sure: bool | None = None,
 ) -> dict[str, Any]:
     setups: list[dict[str, Any]] = [
         {
@@ -113,6 +114,7 @@ def court_result(
         "court": {
             "method": method,
             "confidence": confidence,
+            **({"sure": sure} if sure is not None else {}),
             "reference": reference,
             "setups": found,
             "stats": {"how": "direct", "inliers": 140},
@@ -226,9 +228,71 @@ def test_an_unsure_court_is_a_guess_and_a_weak_one_nothing(
     rerun = club["coach"].post(f"/api/videos/{ready['id']}/analyse")
     assert rerun.status_code == 202
     job2 = court_job(analyser, store)
-    complete(analyser, job2, court_result(job2, method="auto", confidence=0.3, bump=False))
+    complete(analyser, job2, court_result(job2, method="auto", confidence=0.2, bump=False))
     assert court_of(club, ready)["suggestions"] == []
     assert len(runs(app)) == 2
+
+
+def test_a_sure_court_is_used_by_itself_and_an_unsure_one_waits_for_a_coach(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
+) -> None:
+    job = court_job(analyser, store)
+    assert job["params"]["net_tops"] == [calibration.NET_TOP_MEN]  # H3: the men's net
+    complete(analyser, job, court_result(job, method="auto", confidence=0.9, sure=True))
+    cal = court_of(club, ready)["calibration"]
+    assert cal["method"] == "auto" and cal["checked"] is False
+    assert cal["sure"] is True and cal["usable"] is True
+    # A rerun no longer sure: the court goes back to a proposal, nothing to use unchecked.
+    assert club["coach"].post(f"/api/videos/{ready['id']}/analyse").status_code == 202
+    job2 = court_job(analyser, store)
+    complete(analyser, job2, court_result(job2, method="auto", confidence=0.75, sure=False))
+    state = court_of(club, ready)
+    assert state["calibration"] is None  # 0.75 set it under the old bars: not any more
+    [guess] = state["suggestions"]
+    assert guess["source"] == "auto" and guess["sure"] is False
+
+
+def test_the_coach_confirms_the_court_wieplay_found(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
+) -> None:
+    url = f"/api/videos/{ready['id']}/court/confirm"
+    assert club["coach"].post(url).status_code == 409  # nothing found yet
+    job = court_job(analyser, store)
+    complete(analyser, job, court_result(job, method="auto", confidence=0.6, sure=False))
+    assert court_of(club, ready)["calibration"] is None
+    r = club["coach"].post(url)
+    assert r.status_code == 200, r.text
+    cal = r.json()
+    assert cal["method"] == "auto" and cal["checked"] is True and cal["usable"] is True
+    assert len(cal["segments"]) == 2 and all(s["checked"] for s in cal["segments"])
+    # A court set by itself (sure) is confirmed as it is.
+    assert club["coach"].post(f"/api/videos/{ready['id']}/analyse").status_code == 202
+    job2 = court_job(analyser, store)
+    complete(analyser, job2, court_result(job2, confidence=0.95, sure=True))
+    assert court_of(club, ready)["calibration"]["checked"] is True  # the coach's look stays
+
+
+def test_the_net_height_follows_the_team() -> None:
+    from types import SimpleNamespace
+
+    class Db:
+        def __init__(self, team: object) -> None:
+            self.team = team
+
+        def get(self, _model: object, _id: object) -> object:
+            return self.team
+
+    def tops(name: str, league: str | None) -> list[float]:
+        db = Db(SimpleNamespace(name=name, league=league))
+        return calibration.net_tops_of(db, SimpleNamespace(team_id=1))  # type: ignore[arg-type]
+
+    men, women = [calibration.NET_TOP_MEN], [calibration.NET_TOP_WOMEN]
+    assert tops("H3", "Herren 3. Liga Gruppe B") == men
+    assert tops("Legends", "Herren 4. Liga Gruppe A") == men
+    assert tops("HU23-1", "Männer U23 Gruppe A") == men
+    assert tops("D1", "Frauen 3. Liga Gruppe A") == women
+    assert tops("H3", "2L") == men and tops("D1", "2L") == women
+    assert tops("Mixed", "Plausch") == men + women
 
 
 def test_a_coachs_court_wins_and_gains_the_setups(
