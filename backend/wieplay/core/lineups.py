@@ -355,6 +355,7 @@ def serve_observations(
     """Per rally of ours the servers seen: a coach's serve tag with a number, else WiePlay's
     player at a serve (`event_player`, the image attribution: a card the coach named, or the
     number read on it with the team's number prior). Never the memory's own writing."""
+    from wieplay.core import tagging
     from wieplay.core.players import EventPlayer, PlayerCluster
     from wieplay.ml import team_prior as tp
 
@@ -373,7 +374,7 @@ def serve_observations(
     ).all()
     for ev, ep, card in rows:
         assert ev.segment_id is not None
-        coach = ev.source != "model" or ev.review in ("confirmed", "corrected")
+        coach = ev.source in ("manual", "import") or ev.review in tagging.HUMAN_REVIEWS
         mine = ev.number is not None and (ep is None or ev.number != ep.applied_number)
         if coach and mine and ev.number is not None:
             out.setdefault(ev.segment_id, []).append((int(ev.number), COACH_SEEN))
@@ -405,7 +406,7 @@ def prior_for_video(
         return None
     mem = team_memory.get(db, video.team_id)
     prior = team_memory.order_prior(mem)
-    numbers = team_memory.number_prior(db, video.team_id, mem) if mem is not None else {}
+    numbers = team_memory.number_prior(db, video.team_id, mem, video.id) if mem is not None else {}
     periods = list(
         db.scalars(
             select(Period)

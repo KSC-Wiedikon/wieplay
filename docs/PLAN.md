@@ -551,7 +551,10 @@ segments, without audio unless a task needs it, with no names or IDs, deleted af
 ### 5.7 Things WiePlay never does
 
 - No face recognition, no face embeddings, no person re-identification across videos.
-  Player attribution uses **jersey numbers and position on court only**. (Biometric data used
+  Player attribution uses **jersey numbers and position on court only**. Across a team's
+  games only its shirt numbers, the roster links and its usual lineups carry over (the team's
+  memory, §10.5b, 20.10.2026): never a picture, a colour or a look of a person, never the
+  opponents'. (Biometric data used
   for unique identification is sensitive personal data under the revDSG; avoid it entirely.)
 - Within one video, the players job links the pieces of one person by where and when they
   were seen, the shirt number read on them, their team and the colour of their clothes
@@ -2758,7 +2761,8 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 - Ultralytics YOLO person detector (AGPL-3.0, compatible with WiePlay's licence) + ByteTrack
   (MIT), masked to the court polygon + margin, at 25 fps on live segments (tracker fills in).
 - Team assignment: side of the net (volleyball); kit-colour clustering (basketball).
-- No identity across videos (§5.7). Track IDs are per video.
+- No identity across videos by looks (§5.7). Track IDs are per video; since 20.10.2026 the
+  team's memory (§10.5b) recognises the numbers its earlier games named.
 - **Built 17.10.2026** (`players` job, `wieplay/ml/{people,bytetrack,players}.py`, migration
   `0011`): see "Players in a video" below.
 
@@ -3060,6 +3064,71 @@ check even then, and there are no coach-tagged numbers yet to measure the attrib
 Switch it on once the court job calibrates most videos itself and a coach-named game shows
 the attribution's agreement (`metrics.attribution.vs_coach`).
 
+### 10.5b What WiePlay knows about a team (per-team memory and learning)
+
+**Built 20.10.2026** (`wieplay/core/team_memory.py`, `wieplay/ml/team_prior.py`, migration
+`0030`; research note `docs/research/team-memory-2026-10.md`). The owner: "save per team the
+players, rotation, and training", and "training" as per-team learning: every game a team
+reviews makes WiePlay better for that team.
+
+- **What is kept, per season's team row** (`team_player`, `team_memory`):
+  - our shirt numbers, the member wearing each (the roster's link; several members on one
+    number: the one who plays, not a guest or staff; else marked unclear), how many of the
+    team's games named it (a typed sheet's six or substitution, a coach's starting six, a card
+    or a tag a coach named), sets in the lineup, the last game;
+  - the usual service orders (each set's starting six turned to start at the roster's setter),
+    the numbers per place of the order, where the setter starts (the starting rotation), the
+    liberos; an earlier season of the lineage counts half;
+  - how well the usual rotation names our server on the team's own sheets (each game left out
+    in turn), and the models' scores for the team (below).
+
+  Learnt anew on use whenever its inputs change (a fingerprint of the team's sheets, starting
+  sixes, roster, fixes and trainings; the coaches' answers at most once a minute), and by
+  `python -m wieplay.cli team-memory --all`.
+- **Privacy (§5.7):** shirt numbers, the roster and the coaches' and sheets' facts only. No
+  faces, no face or body embeddings, no picture, colour or look of a person is stored or
+  compared across videos. The opponents have no memory. A guest team's memory is its own.
+- **The players of a new game** (§10.5): a card of ours whose read number the team's games
+  named (the reading at least 0.6, with the team's number prior at least 0.95 sure) is
+  **recognised** (the video's own answers never count as an earlier game for it):
+  "Identify players" lists those cards apart and "Accept all" names them in one
+  step, as the coach's answers (Undo as for any answer). Every card of ours with a read number
+  carries the memory's confidence (`GET …/players` → `memory`) for the review's "sure" flags;
+  the queue offers the memory's number first and, without a sheet, the six the usual rotation
+  expects.
+- **Rotations where the sheet is missing** (`core/lineups.py prior_for_video`): per set the
+  posterior over the starting rotation from the usual order, the set's starting six or setter
+  zone (the coach's, Sets bar) and the servers seen (a coach's serve tag with a number, the card
+  WiePlay picked at our serve: named, or read with the number prior); per rally our likely
+  server and six. A serve gets that server from p ≥ 0.9 (`event_player.method` "memory"; written
+  into WiePlay's serve like the sheet's), the players job gets it as a server label from 0.95
+  (`rallies[].prior`, weighed by p). Measured on the two typed H3 sheets, the memory from the
+  other game: our server right at 42 % of our serves from the memory alone, 68 % with the
+  setter zone, 82 % with readings at a quarter of our serves (61 % without the memory), 61 % of
+  our serves at p ≥ 0.9 with 97 % of them right.
+- **Per-team learning** (§10.1, §10.4a, §11): `train_rallies` weighs, for each team with two or
+  more reviewed games, on each of its games held out (split by match), the pooled model, the
+  team's games weighted 3× and the pooled model with the team's own threshold; `train_actions`
+  the weighted variant. A variant beating the pooled model by 0.01 (boundary F1, action F1) and
+  the rules is the team's own model: its videos are analysed and suggested with it. Guest clubs:
+  their games train nothing without the club's OK. Per team in each training's metrics
+  (`teams`) and on the team page. Not measurable yet: no game is reviewed on prod, and H3 is the
+  only team with games.
+- **The team page** ("What WiePlay knows about this team", `GET /api/teams/{id}/memory`): our
+  players with their numbers and games, the usual orders and starting zones, the server check,
+  the models' scores. Coaches and helpers fix who wears a number, or that a number is none of
+  ours (`PUT`/`DELETE /api/teams/{id}/memory/players/{number}`, audited `team_number_fixed`):
+  the season's games follow (their roster snapshots, our tags and cards with the number).
+- **Measured on the players** (the prod cards of the two v3 games, the memory from the other
+  game's sheet): on H1–H3 (no calibration, no sure card) 8 cards of ours recognised, 16 % of
+  our footage, and the answers to name half / 60 % of our footage 31 → 25 / 48 → 41 (an upper
+  bound without by-eye labels); on Legends (calibrated) no change. 56–76 % of our footage is on
+  pieces cards without a number, which no number memory names.
+- **Not built: appearance across videos.** Only a person's look (a re-identification embedding:
+  biometric under the nDSG once used to recognise someone) could name the pieces cards of a
+  second game. Not measured, not stored; the owner decides (the note has a measurement that
+  stores nothing).
+
 ### 10.6 Court homography
 
 - The camera is fixed, so **one homography per video**: a calibration UI (click 6–8 court
@@ -3326,6 +3395,8 @@ preferred automatically once there; OpenVolley as a third source (§10.8).
    `wieplay/datasets/<name>/`. Models record their dataset manifest. Once a raw file is deleted
    under §5.5, only these windows remain (minimisation).
 7. **Evaluation split by match**, never by frame, with held-out matches from other halls.
+   Since 20.10.2026 also per team: a team with two reviewed games gets its own variant of the
+   rally and action finders where its held-out games say it helps (§10.5b).
 8. **Training happens on the Framework 16** (RTX 5070 Laptop, 8 GB): fine-tuning TrackNet and
    small YOLO variants fits with modest batch sizes. Runs that do not fit use the test-GPU
    budget line (§16).

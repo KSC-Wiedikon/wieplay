@@ -47,6 +47,8 @@ def upgrade() -> None:
         sa.Column("answers", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("sets", sa.Float(), nullable=False, server_default="0"),
         sa.Column("last_on", sa.Date(), nullable=True),
+        # Those games' video ids: a video's own facts never count as "earlier games" for it.
+        sa.Column("videos", JSONB(), nullable=False, server_default="[]"),
         # roster (Wiedisync / the guest roster) | learned (only the games name it) | coach
         sa.Column("source", sa.String(length=16), nullable=False, server_default="roster"),
         # Several roster members wear the number and nobody said which one plays.
@@ -80,6 +82,7 @@ def upgrade() -> None:
             index=True,
         ),
         sa.Column("games", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("named_videos", JSONB(), nullable=False, server_default="[]"),
         sa.Column("rotations", JSONB(), nullable=False, server_default="{}"),
         sa.Column("models", JSONB(), nullable=False, server_default="{}"),
         sa.Column("fingerprint", sa.String(length=64), nullable=True),

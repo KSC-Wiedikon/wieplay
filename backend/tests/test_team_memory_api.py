@@ -182,8 +182,8 @@ def test_nothing_of_the_opponent_and_no_appearance_is_kept(
         # Numbers, counts and rotations only: no colour, crop or embedding fields.
         assert set(TeamPlayer.__table__.columns.keys()) <= {
             "id", "team_id", "lineage_id", "number", "member_id", "libero", "games", "answers",
-            "sets", "last_on", "source", "ambiguous", "fixed", "hidden", "fixed_by", "fixed_at",
-            "updated_at",
+            "sets", "last_on", "videos", "source", "ambiguous", "fixed", "hidden", "fixed_by",
+            "fixed_at", "updated_at",
         }  # fmt: skip
 
 

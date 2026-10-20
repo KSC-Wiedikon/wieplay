@@ -49,6 +49,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID, insert
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
+from wieplay.core import tagging
 from wieplay.core.db import Base
 from wieplay.core.models import (
     Event,
@@ -98,6 +99,8 @@ class TeamPlayer(Base):
     answers: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     sets: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
     last_on: Mapped[date | None] = mapped_column(Date)
+    # The video ids of those games (a video's own facts never count as "earlier games" for it).
+    videos: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     source: Mapped[str] = mapped_column(String(16), default="roster", server_default="roster")
     ambiguous: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     fixed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
@@ -122,6 +125,7 @@ class TeamMemory(Base):
         UUID, ForeignKey("team_lineage.id", ondelete="CASCADE"), index=True
     )
     games: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    named_videos: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     rotations: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
     models: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, server_default="{}")
     fingerprint: Mapped[str | None] = mapped_column(String(64))
@@ -234,14 +238,14 @@ def game_facts(db: Session, video: Video, setters: set[int]) -> GameFacts:
     ):
         if n is not None:
             facts.answers[int(n)] += 1
-    # A person's tags with a number (a model's suggestion a coach took counts as the model's).
+    # A person's tags with a number (made, imported, or WiePlay's that a person answered).
     for n in db.scalars(
         select(Event.number).where(
             Event.video_id == video.id,
             Event.side == "us",
             Event.number.is_not(None),
             Event.deleted_at.is_(None),
-            Event.source != "model",
+            tagging.event_fact(),
         )
     ):
         if n is not None:
@@ -434,7 +438,7 @@ def fingerprint(db: Session, team: WdTeam) -> str:
                     Event.video_id.in_(ids),
                     Event.side == "us",
                     Event.number.is_not(None),
-                    Event.source != "model",
+                    tagging.event_fact(),
                 )
             ).one()
         )
@@ -529,7 +533,9 @@ def refresh(db: Session, team: WdTeam, fp: str | None = None) -> TeamMemory:
     rotations["check"] = check_rotations(facts, earlier)
     mem.rotations = rotations
     # The games the memory learnt from: those that named any of our numbers.
-    mem.games = sum(1 for f in facts if f.named or f.starts)
+    learnt = [f for f in facts if f.named or f.starts]
+    mem.games = len(learnt)
+    mem.named_videos = sorted(str(f.video_id) for f in learnt)
     mem.models = team_scores(db, team, videos)
     mem.fingerprint = fp
     mem.refreshed_at = datetime.now(UTC)
@@ -562,6 +568,7 @@ def _store_players(db: Session, team: WdTeam, facts: Sequence[GameFacts]) -> Non
         row.answers = sum(f.answers.get(n, 0) for f in facts)
         row.sets = round(sum(f.sets.get(n, 0.0) for f in facts), 2)
         row.last_on = max((f.on for f in games), default=None)
+        row.videos = sorted(str(f.video_id) for f in games)
         row.libero = n in roster_libero or any(n in f.liberos for f in facts)
         member_id, ambiguous = resolve(roster.get(n, []))
         if not row.fixed:
@@ -703,15 +710,29 @@ def players(db: Session, team_id: int) -> list[TeamPlayer]:
     )
 
 
-def number_prior(db: Session, team_id: int, mem: TeamMemory | None = None) -> dict[int, float]:
+def games_of(row: TeamPlayer, exclude: uuid.UUID | None) -> int:
+    """The games that named the number, the video `exclude` left out (its own facts)."""
+    return row.games - int(exclude is not None and str(exclude) in (row.videos or []))
+
+
+def number_prior(
+    db: Session,
+    team_id: int,
+    mem: TeamMemory | None = None,
+    exclude: uuid.UUID | None = None,
+) -> dict[int, float]:
     """Per number of ours how likely a person of ours on a video wears it (the games that
-    named it, smoothed); hidden numbers 0. Empty: no memory yet."""
+    named it, smoothed; `exclude`: the video it is for, whose own facts do not count); hidden
+    numbers 0. Empty: no memory yet."""
     mem = mem if mem is not None else get(db, team_id)
     if mem is None:
         return {}
     rows = [r for r in players(db, team_id) if not r.hidden]
-    named = max(mem.games, max((r.games for r in rows), default=0))
-    prior = tp.number_prior((tp.NumberFacts(r.number, games=r.games) for r in rows), named)
+    named = mem.games - int(exclude is not None and str(exclude) in (mem.named_videos or []))
+    named = max(named, max((games_of(r, exclude) for r in rows), default=0))
+    prior = tp.number_prior(
+        (tp.NumberFacts(r.number, games=games_of(r, exclude)) for r in rows), named
+    )
     for r in players(db, team_id):
         if r.hidden:
             prior[r.number] = 0.0
@@ -752,7 +773,11 @@ class CardMemory:
 
 
 def card_memory(
-    rows: Sequence[TeamPlayer], prior: dict[int, float], number: int | None, read_conf: float | None
+    rows: Sequence[TeamPlayer],
+    prior: dict[int, float],
+    number: int | None,
+    read_conf: float | None,
+    exclude: uuid.UUID | None = None,
 ) -> CardMemory | None:
     """A card of ours with a read number: how sure that number is given how often the team
     plays it (`team_prior.reading_confidence`). None: no number, or no memory of it."""
@@ -763,7 +788,7 @@ def card_memory(
     if p is None:
         p = min(prior.values(), default=0.5) / 2  # a number the team never played
     conf = tp.reading_confidence(float(read_conf or 0.0), p)
-    games = row.games if row is not None else 0
+    games = games_of(row, exclude) if row is not None else 0  # earlier games only
     hidden = row is not None and row.hidden
     return CardMemory(
         number,

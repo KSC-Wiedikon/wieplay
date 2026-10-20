@@ -245,12 +245,12 @@ def _memory_of(db: Session, video: Video) -> Any:
     if mem is None:
         return lambda _c: None
     rows = team_memory.players(db, video.team_id)
-    prior = team_memory.number_prior(db, video.team_id, mem)
+    prior = team_memory.number_prior(db, video.team_id, mem, video.id)
 
     def of(c: PlayerCluster) -> team_memory.CardMemory | None:
         if c.team != "us" or c.kind != players.PERSON or c.not_player:
             return None
-        return team_memory.card_memory(rows, prior, c.ocr_number, c.ocr_confidence)
+        return team_memory.card_memory(rows, prior, c.ocr_number, c.ocr_confidence, video.id)
 
     return of
 
