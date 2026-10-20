@@ -5,10 +5,13 @@ validation (wieplay/core/actions.py)."""
 from __future__ import annotations
 
 import hashlib
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
 from tests.test_actions import path
 from tests.test_trajectory import signals
@@ -135,3 +138,78 @@ def test_the_training_on_reviewed_games(worker_settings: WorkerSettings) -> None
     inputs = {**games[0], "model": {**model, "sha256": "0" * 64}}
     out = HANDLERS["actions"](context(worker_settings, FakeApi(inputs), job("actions")))
     assert out["finder"] == "v0" and out["model_run_id"] is None
+
+
+# --- the player at the ball (wieplay/ml/contact_pose.py) ---------------------------------------
+
+
+def test_without_pose_weights_the_finder_goes_on_with_the_ball(
+    worker_settings: WorkerSettings,  # noqa: F811
+) -> None:
+    root = worker_settings.analysis_root
+    assert root is not None
+    x, y, vis = path()
+    inputs = {
+        "features": store_signals(root, "np", signals(x, y, vis)),
+        "fps": 60.0, "aspect": 16 / 9, "camera": None, "rallies": rallies(1, 9.5), "model": None,
+        "parts": [{"path": "nowhere.mp4", "offset_ms": 0, "duration_ms": 9000}],
+    }  # fmt: skip
+    settings = worker_settings.model_copy(update={"players_weights": root / "no-weights"})
+    out = HANDLERS["actions"](context(settings, FakeApi(inputs), job("actions")))
+    assert out["stats"]["pose"] == "no weights"
+    assert ActionsResult.model_validate(out).actions
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
+def test_the_pose_cue_reads_the_frames_once_and_keeps_them(
+    worker_settings: WorkerSettings,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wieplay.ml import contact_pose as cp
+    from wieplay.worker import actions as wa
+
+    root, raw = worker_settings.analysis_root, worker_settings.raw_root
+    assert root is not None
+    raw.mkdir(parents=True)
+    clip = raw / "cam.mp4"
+    args = ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30",
+            "-t", "11", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(clip)]  # fmt: skip
+    subprocess.run(args, check=True)  # noqa: S603 - a generated test clip, ffmpeg from PATH
+    weights = root / "weights"
+    weights.mkdir(parents=True)
+    (weights / cp.POSE_FILE).write_bytes(b"not a model")
+    calls: list[tuple[int, int]] = []
+
+    class FakePose:
+        def __init__(self, path: Path, threads: int = 4) -> None:
+            self.path = path
+
+        @property
+        def sha256(self) -> str:
+            return "f" * 64
+
+        def people(self, crop: np.ndarray) -> list[cp.Person]:
+            calls.append(crop.shape[:2])
+            k = np.zeros((17, 3), np.float32)
+            k[:, :2] = 320
+            k[:, 2] = 0.9
+            return [(np.array([300, 200, 340, 400], np.float32), 0.9, k)]
+
+    monkeypatch.setattr(cp, "PoseModel", FakePose)
+    x, y, vis = path()
+    inputs = {
+        "features": store_signals(root, "p", signals(x, y, vis)),
+        "fps": 30.0, "aspect": 16 / 9, "camera": None, "rallies": rallies(1, 9.5), "model": None,
+        "parts": [{"path": str(clip), "offset_ms": 0, "duration_ms": 11_000}],
+    }  # fmt: skip
+    settings = worker_settings.model_copy(update={"players_weights": weights})
+    out = HANDLERS["actions"](context(settings, FakeApi(inputs), job("actions")))
+    stats = out["stats"]
+    assert stats["pose"] == cp.POSE_NAME and stats["pose_candidates"] > 0
+    assert stats["pose_new"] == len(calls) > 0 and all(c == (cp.CROP, cp.CROP) for c in calls)
+    assert wa._cache_path(root, inputs["features"]).is_file()
+    # Again: every frame comes from the cache next to the signals.
+    calls.clear()
+    out = HANDLERS["actions"](context(settings, FakeApi(inputs), job("actions")))
+    assert out["stats"]["pose_new"] == 0 and calls == []
+    assert out["stats"]["pose_seen"] == stats["pose_seen"]

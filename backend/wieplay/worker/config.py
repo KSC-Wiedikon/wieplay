@@ -51,6 +51,9 @@ class WorkerSettings(BaseSettings):
     # The official scoresheet's labels (who served, who was on court; PLAN §10.5): used when
     # the API sends them (a sheet lined up with the rallies).
     players_sheet: bool = True
+    # The action finder's player-at-the-ball cue (PLAN §10.4a): a pose model on the frames
+    # of the contact candidates (the camera files on the NAS; weights next to the players').
+    actions_pose: bool = True
 
     # The busy guard of a GPU worker (gpu_guard.py, PLAN §8.2): before every claim and
     # between frames, nobody else may need the card.

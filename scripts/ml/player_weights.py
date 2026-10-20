@@ -10,6 +10,8 @@ worker image gets the ONNX files only), or by hand in a venv with the same packa
   asset, exported here to ONNX with a dynamic input size (the worker feeds the court's crop
   at 1280 px on its longer side). The export is not byte-identical from one build to the
   next (ONNX metadata), so the job records the file's SHA-256 with every run.
+- yolo26s-pose.onnx: Ultralytics YOLO26s-pose, COCO keypoints (AGPL-3.0), exported the same
+  way, for the action finder's player-at-the-ball cue (PLAN §10.4a, wieplay/ml/contact_pose.py).
 - en_PP-OCRv3_det_mobile.onnx, en_PP-OCRv5_rec_mobile.onnx: PaddleOCR's text detector and
   English recogniser (Apache-2.0) as converted to ONNX by RapidOCR (Apache-2.0), for the
   shirt-number suggestion.
@@ -30,6 +32,12 @@ YOLO = {
     "name": "yolo26s.pt",
     "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s.pt",
     "sha256": "646f8bc3fe0a656803d95c294f7852321748cb29d13466a1af8862e2db384a1b",
+    "licence": "AGPL-3.0 (Ultralytics)",
+}
+POSE = {
+    "name": "yolo26s-pose.pt",
+    "url": "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26s-pose.pt",
+    "sha256": "a083adb42303728ae14c4bd6bd56d80da46f82fb2564dbd6f31dcc92ea321646",
     "licence": "AGPL-3.0 (Ultralytics)",
 }
 RAPIDOCR = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx"
@@ -89,14 +97,18 @@ def main() -> None:
     fetch(YOLO, pt)
     from ultralytics import YOLO as Yolo  # the build stage only
 
-    exported = Path(Yolo(str(pt)).export(format="onnx", dynamic=True, simplify=True, opset=17))
-    target = out / "yolo26s.onnx"
-    exported.replace(target)
-    manifest[target.name] = {
-        "source": f"{YOLO['url']} (sha256 {YOLO['sha256']}), exported to ONNX (dynamic, opset 17)",
-        "licence": YOLO["licence"],
-        "sha256": sha256(target),
-    }
+    for item, name in ((YOLO, "yolo26s.onnx"), (POSE, "yolo26s-pose.onnx")):
+        pt = work / item["name"]
+        if not pt.exists():
+            fetch(item, pt)
+        exported = Path(Yolo(str(pt)).export(format="onnx", dynamic=True, simplify=True, opset=17))
+        target = out / name
+        exported.replace(target)
+        manifest[target.name] = {
+            "source": f"{item['url']} (sha256 {item['sha256']}), exported to ONNX (dynamic, opset 17)",
+            "licence": item["licence"],
+            "sha256": sha256(target),
+        }
     shutil.rmtree(work)
     (out / "MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))
