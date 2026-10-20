@@ -728,7 +728,7 @@ period           id, video_id, no (set or quarter), start_ms, end_ms, start_us, 
                  -- the scoring's (§10.3): model_first_serve, model_court_side, confidence,
                  -- model_missed_us/them (points after the last rally), model_run_id
 segment          id, video_id, period_id NULL,
-                 kind 'rally'|'possession'|'timeout'|'set_break'|'warmup'|'stoppage'|'other_dead',
+                 kind 'rally'|'possession'|'timeout'|'set_break'|'warmup'|'stoppage'|'substitution'|'other_dead',
                  start_ms, end_ms,
                  serving 'us'|'them' NULL (facts only), serving_manual NULL (called in review),
                  won_by 'us'|'them' NULL (the coach's),
@@ -1653,8 +1653,10 @@ games), v0 keeps proposing, and a rerun never proposes again where a coach rejec
   at most four a set), else a `stoppage` from 40 s (substitutions, an injury, ball
   retrieval). Ordinary dead time stays unlabelled. Proposals like the rallies' (source
   "model", review "unreviewed", a confidence), answered in the review (accept, relabel `W B T
-  D O`, reject), replaced on every scoring unless answered; never over a coach's own label
-  or one a coach rejected. Condensed playback plays rallies only; the video page marks the
+  D O` or the buttons, Sub for a `substitution`, a coach's label only; reject; "It's a rally"),
+  relabelled on every scoring unless answered, a label that stays (same kind, about the same
+  stretch) keeping its row and id (20.10.2026: the review may have it on screen); never over a
+  coach's own label or one a coach rejected. Condensed playback plays rallies only; the video page marks the
   warm-up, set starts and timeouts and starts at the first serve.
 - **Still to do**: telling our referee's pitch from the next court's in tournament halls, and
   a court mask against the neighbours' balls.

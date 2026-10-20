@@ -60,7 +60,9 @@ from wieplay.ml import tracks as tr
 
 SPORTS = frozenset({"volleyball"})
 MODEL_NAME = "wieplay-scoring"
-GAP_KINDS = gaps.KINDS
+# The model's gap labels, and a coach's substitution (the review's "Sub"): every label of dead
+# time keeps the model's labels off its span.
+GAP_KINDS = (*gaps.KINDS, "substitution")
 SET_LEAD_MS = 3000  # a proposed set starts this long before its first rally
 SET_TAIL_MS = 3000
 OVERLAP = 0.5  # a proposal covering this much of something a coach rejected is dropped
@@ -846,27 +848,39 @@ def _label_gaps(
     by_period: dict[uuid.UUID, list[int]],
     act: gaps.Activity,
 ) -> dict[str, int]:
-    """Replace the model's untouched gap labels with new ones; never over a coach's own dead
-    time label or one a coach rejected."""
-    db.execute(
-        delete(Segment).where(
-            Segment.video_id == video.id,
-            Segment.kind.in_(GAP_KINDS),
-            Segment.source == "model",
-            Segment.review == "unreviewed",
-            Segment.updated_by.is_(None),
-            Segment.deleted_at.is_(None),
+    """Label the gaps again: the model's untouched labels follow the new ones; never over a
+    coach's own dead time label or one a coach rejected.
+
+    Every decision in the review scores again (PLAN §10.1), so a label that stays (the same
+    kind over about the same stretch) keeps its row and its id: the review may have it on
+    screen. Only labels that changed are created or removed."""
+    untouched = list(
+        db.scalars(
+            select(Segment).where(
+                Segment.video_id == video.id,
+                Segment.kind.in_(GAP_KINDS),
+                Segment.source == "model",
+                Segment.review == "unreviewed",
+                Segment.updated_by.is_(None),
+                Segment.deleted_at.is_(None),
+            )
         )
     )
+    mine = {s.id for s in untouched}
     others = db.execute(
         select(
-            Segment.start_ms, Segment.end_ms, Segment.source, Segment.review, Segment.deleted_at
+            Segment.id,
+            Segment.start_ms,
+            Segment.end_ms,
+            Segment.source,
+            Segment.review,
+            Segment.deleted_at,
         ).where(Segment.video_id == video.id, Segment.kind.in_(GAP_KINDS))
     ).all()
     blocked = [
         (int(s), int(e))
-        for s, e, source, review, deleted in others
-        if deleted is None or (source == "model" and review == "rejected")
+        for id_, s, e, source, review, deleted in others
+        if id_ not in mine and (deleted is None or (source == "model" and review == "rejected"))
     ]
     sets = [
         gaps.SetRange(rallies[by_period[p.id][0]].start_ms, rallies[by_period[p.id][-1]].end_ms)
@@ -875,10 +889,19 @@ def _label_gaps(
     labels = gaps.classify(
         [(r.start_ms, r.end_ms) for r in rallies], sets, video.duration_ms or 0, act
     )
-    counts: dict[str, int] = dict.fromkeys(GAP_KINDS, 0)
+    counts: dict[str, int] = dict.fromkeys(gaps.KINDS, 0)
     for label in labels:
         span = (label.start_ms, label.end_ms)
         if span[1] <= span[0] or any(_overlap(span, b) >= OVERLAP for b in blocked):
+            continue
+        counts[label.kind] += 1
+        same = next((s for s in untouched if s.kind == label.kind and _same_stretch(span, s)), None)
+        if same is not None:
+            untouched.remove(same)
+            # The model's own fields: the version stays, so an answer on its way still fits.
+            same.start_ms, same.end_ms = span
+            same.confidence = label.confidence
+            same.model_run_id = run.id
             continue
         db.add(
             Segment(
@@ -894,8 +917,16 @@ def _label_gaps(
                 version=1,
             )
         )
-        counts[label.kind] += 1
+    for gone in untouched:
+        db.delete(gone)
+    db.flush()
     return counts
+
+
+def _same_stretch(span: tuple[int, int], segment: Segment) -> bool:
+    """About the same stretch of the video: either covers most of the other."""
+    other = (segment.start_ms, segment.end_ms)
+    return _overlap(span, other) >= OVERLAP or _overlap(other, span) >= OVERLAP
 
 
 def _vs_coach(set_ins: Sequence[sc.SetIn], match: sc.MatchOut) -> dict[str, Any] | None:
