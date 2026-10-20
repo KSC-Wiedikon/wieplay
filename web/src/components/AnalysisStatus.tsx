@@ -1,6 +1,7 @@
 import '../i18n/pages'
 import { useId, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { measuredText } from '../lib/actions'
 import { isBusy, proposalTotal, useAnalyse, useAnalysis, useSetActionsReviewed, useSetRalliesReviewed } from '../lib/analysis'
 import { cx } from '../lib/cx'
 import { formatDateTime } from '../lib/format'
@@ -195,9 +196,9 @@ function ScoringSummary({ scoring }: { scoring: Scoring }) {
 }
 
 /**
- * The suggested actions (PLAN §10.4a): below the bar, why there are none yet; else how many
- * and how many are open; the score against the coach's tags; "Actions reviewed", which makes a
- * game the coach tagged teach WiePlay.
+ * The suggested actions (PLAN §10.4a): how many and how many are open (switched off: why there
+ * are none); what is measured on hand-checked rallies and against the coach's tags; "Actions
+ * reviewed", which makes a game the coach tagged teach WiePlay.
  */
 function ActionsSummary({ videoId, actions, tags }: { videoId: string; actions: ActionsState; tags: number }) {
   const { t } = useTranslation()
@@ -208,11 +209,13 @@ function ActionsSummary({ videoId, actions, tags }: { videoId: string; actions: 
   const vs = actions.vs_coach
   const at = actions.reviewed_at
   const canMark = tags > 0 || total - s.unreviewed > 0 || at !== null
+  const measured = measuredText(t, actions.gate)
   return (
     <section aria-label={t('actions.card.title')} className="mt-2 flex flex-col gap-1 border-t border-hairline pt-2 text-sm">
       <h3 className="font-semibold">{t('actions.card.title')}</h3>
       <ActionGateNote gate={actions.gate} />
       {total > 0 && <p>{t('actions.card.counts', { count: total, open: s.unreviewed })}</p>}
+      {measured && <p className="text-muted">{measured}</p>}
       {vs && (
         <p className="text-muted">{t('actions.card.measured', { score: formatPercent(vs.action_precision ?? null), recall: formatPercent(vs.recall) })}</p>
       )}

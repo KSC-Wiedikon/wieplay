@@ -2,10 +2,25 @@ import type { TFunction } from 'i18next'
 import { useMemo, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../../components/Button'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, SparkleIcon, UndoIcon } from '../../components/icons'
 import { EmptyState } from '../../components/Message'
 import { ProgressBar } from '../../components/ProgressBar'
-import { actionItems, actionProgress, factTags, gateText, GRADE_KEYS, isReviewedSuggestion, isSuggestedTag, openInRally } from '../../lib/actions'
+import {
+  actionItems,
+  actionProgress,
+  alternativeOf,
+  factTags,
+  gateText,
+  GRADE_KEYS,
+  isReviewedSuggestion,
+  isSureAction,
+  isSuggestedTag,
+  measuredText,
+  needsYouActions,
+  openInRally,
+  sureActions,
+} from '../../lib/actions'
 import { useAnalysis, useSetActionsReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
 import { skillByCode } from '../../lib/grammar'
@@ -63,16 +78,19 @@ function noticeText(t: TFunction, notice: ActionNotice, taxonomy: Taxonomy, name
       return t('actions.notice.moved', { time })
     case 'acceptedRally':
       return t('actions.notice.acceptedRally', { count: Number(p.count) })
+    case 'acceptedSure':
+      return t('actions.notice.acceptedSure', { count: Number(p.count), left: Number(p.left) })
     default:
       return t(`actions.notice.${notice.key}`)
   }
 }
 
-/** "Suggested · 87%" while open; a small marker once accepted or corrected. */
+/** "Suggested · 87%" (or "Sure · 97%") while open; a small marker once accepted or corrected. */
 export function ActionChip({ tag, className }: { tag: Tag; className?: string }) {
   const { t } = useTranslation()
   if (isSuggestedTag(tag)) {
     const confidence = formatPercent(tag.confidence)
+    const sure = isSureAction(tag)
     return (
       <span
         data-action-suggestion="open"
@@ -82,6 +100,7 @@ export function ActionChip({ tag, className }: { tag: Tag; className?: string })
         )}
       >
         <SparkleIcon className="size-3.5" />
+        {sure && `${t('actions.sureChip')} · `}
         {confidence ? t('actions.suggestedConfidence', { confidence }) : t('actions.suggested')}
       </span>
     )
@@ -101,7 +120,9 @@ export function ActionChip({ tag, className }: { tag: Tag; className?: string })
 /**
  * The review of the actions WiePlay suggested (PLAN §10.4a): the action on screen with its skill,
  * grade, side, player and contact time, each a key (or a big button on a tablet), the progress,
- * "accept the rest of this rally", and "actions reviewed" once everything is answered.
+ * "accept the rest of this rally", and "actions reviewed" once everything is answered. Like the
+ * rally review, the ones that need the coach come first ("Needs you"), each with WiePlay's other
+ * likely answer; one button accepts every sure one.
  */
 export function ActionReviewPanel() {
   const { t } = useTranslation()
@@ -120,6 +141,9 @@ export function ActionReviewPanel() {
   const set = current ? periodAt(view.periods, current.t_ms) : null
   const progressText = t('actions.progressLabel', { done: progress.done, total: progress.total })
   const reviewedAt = useActionsReviewedAt()
+  const sure = useMemo(() => sureActions(view.events), [view.events])
+  const waiting = useMemo(() => needsYouActions(view.events).length, [view.events])
+  const alternative = current && isSuggestedTag(current) && !isSureAction(current) ? alternativeOf(current) : null
 
   return (
     <section aria-labelledby="actions-review-title" className="flex flex-col gap-3 rounded-card border border-hairline bg-surface p-4 shadow-card">
@@ -134,6 +158,7 @@ export function ActionReviewPanel() {
         </p>
       </div>
       {progress.total > 0 && <ProgressBar value={progress.done / progress.total} label={progressText} />}
+      {waiting > 0 && <p className="text-sm font-semibold">{t('actions.needsYou', { count: waiting })}</p>}
 
       {current ? (
         <>
@@ -153,6 +178,13 @@ export function ActionReviewPanel() {
               </h3>
               <ActionChip tag={current} />
             </div>
+            {alternative && (
+              <p data-action-alternative className="text-sm text-muted">
+                {alternative === 'none'
+                  ? t('actions.alternativeNone')
+                  : t('actions.alternative', { skill: skillName(t, taxonomy, alternative.code), side: sideLabel(t, alternative.side, names) })}
+              </p>
+            )}
             <Facts tag={current} number={state.number} />
           </div>
 
@@ -201,11 +233,36 @@ export function ActionReviewPanel() {
         {state.notice ? noticeText(t, state.notice, taxonomy, names) : t('actions.hint')}
       </p>
 
+      {progress.total > 0 && (
+        <div className="flex flex-col gap-2 border-t border-hairline pt-3">
+          {sure.length > 0 ? (
+            <Button variant="primary" size="touch" className="w-full whitespace-normal" onClick={press(actions.askAcceptSure)}>
+              <CheckIcon className="size-4" />
+              {t('actions.acceptSure', { count: sure.length })}
+            </Button>
+          ) : (
+            waiting > 0 && <p className="text-sm text-muted">{t('actions.sureNone')}</p>
+          )}
+          <p className="text-xs text-muted">{t('actions.missing')}</p>
+        </div>
+      )}
+
       {!narrow && (
         <div className="border-t border-hairline pt-3">
           <KeyLegend />
         </div>
       )}
+
+      <ConfirmDialog
+        open={state.confirmSure}
+        title={t('actions.acceptSureTitle', { count: sure.length })}
+        confirmLabel={t('actions.acceptSureConfirm', { count: sure.length })}
+        onCancel={actions.cancelAcceptSure}
+        onConfirm={actions.confirmAcceptSure}
+      >
+        {t('actions.acceptSureBody')}
+        {waiting > 0 && ` ${t('actions.acceptSureLeft', { count: waiting })}`}
+      </ConfirmDialog>
     </section>
   )
 }
@@ -306,8 +363,8 @@ function Facts({ tag, number }: { tag: Tag; number: string }) {
 }
 
 /**
- * Nothing suggested: below the bar (PLAN §10.4a) the reason plainly, and "actions reviewed" for
- * a game the coach tagged, which is how WiePlay learns to suggest.
+ * Nothing suggested: why (switched off, or not analysed yet), what is measured, and "actions
+ * reviewed" for a game the coach tagged, which is how WiePlay learns to suggest better.
  */
 function Empty({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   const { t } = useTranslation()
@@ -318,6 +375,7 @@ function Empty({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
   const tagged = factTags(view.events).length > 0
   const done = reviewed || mark.isSuccess
   const text = gateText(t, gate)
+  const measured = measuredText(t, gate)
   return (
     <EmptyState
       icon={<SparkleIcon />}
@@ -331,6 +389,7 @@ function Empty({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
       }
     >
       {text ?? t('actions.emptyBody')}
+      {measured && <span className="mt-1 block">{measured}</span>}
       {done && tagged && <span className="mt-1 block">{t('actions.doneReviewed')}</span>}
     </EmptyState>
   )

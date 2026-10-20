@@ -704,6 +704,9 @@ class Event(Base):
     source: Mapped[str] = mapped_column(String(16), default="manual")
     model_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
     confidence: Mapped[float | None] = mapped_column(Float)
+    # A suggested action: sure (the coach accepts it in bulk), else the likeliest other answer.
+    model_sure: Mapped[bool | None] = mapped_column(Boolean)
+    model_alternative: Mapped[str | None] = mapped_column(String(16))
     review: Mapped[str] = mapped_column(String(16), default="unreviewed")
     supersedes_id: Mapped[uuid.UUID | None] = mapped_column(UUID)
     track_ref: Mapped[str | None] = mapped_column(String(64))

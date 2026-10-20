@@ -80,6 +80,10 @@ class EventOut(BaseModel):
     ball_y: float | None = None
     court_x: float | None = None
     court_y: float | None = None
+    # ... and whether it is sure (accepted in bulk), else the likeliest other answer
+    # ("D:us", "E:them"; "none": maybe no contact at all).
+    model_sure: bool | None = None
+    model_alternative: str | None = None
     review: str
     version: int
     updated_at: datetime

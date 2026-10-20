@@ -45,7 +45,7 @@ export const actionsEn = {
     doneReviewed: 'The actions are marked reviewed. WiePlay learns from this game.',
     markReviewed: 'Mark actions reviewed',
     emptyTitle: 'No suggested actions',
-    emptyBody: 'WiePlay suggests serves, receptions, sets, attacks, blocks, digs and freeballs once the video is analysed.',
+    emptyBody: 'WiePlay suggests serves, receptions, sets, attacks, blocks, digs and freeballs once the video is analysed and its rallies are found.',
     reviewedOn: 'Actions marked reviewed. WiePlay learns from this game.',
     reviewedOff: 'The actions are no longer marked reviewed.',
     reviewedFailed: "Couldn't save: {{detail}}",
@@ -63,6 +63,8 @@ export const actionsEn = {
       moved: 'Moved to {{time}}.',
       acceptedRally_one: 'Accepted {{count}} action of this rally.',
       acceptedRally_other: 'Accepted {{count}} actions of this rally.',
+      acceptedSure_one: 'Accepted {{count}} sure action. {{left}} need you.',
+      acceptedSure_other: 'Accepted {{count}} sure actions. {{left}} need you.',
       noneInRally: 'Nothing left to accept in this rally.',
       undone: 'Undone.',
       redone: 'Redone.',
@@ -93,12 +95,29 @@ export const actionsEn = {
     },
     legend: 'Suggested action',
     gate: {
-      closed_one: 'Action suggestions start once WiePlay gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: {{count}} game, last score {{score}}).',
-      closed_other: 'Action suggestions start once WiePlay gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: {{count}} games, last score {{score}}).',
-      closedNoScore_one: 'Action suggestions start once WiePlay gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: {{count}} game).',
-      closedNoScore_other: 'Action suggestions start once WiePlay gets them right often enough — it learns from games where you tag the actions and mark them reviewed (now: {{count}} games).',
       off: 'Action suggestions are switched off.',
     },
+    // What is measured (docs/research/actions-2026-10.md), shown as it is.
+    measured_one:
+      'Measured on {{count}} hand-checked rally: {{precision}} of the suggestions are fully right (time, skill and side) and {{found}} of the contacts get one. Of {{sure}} sure ones, {{wrong}} were wrong.',
+    measured_other:
+      'Measured on {{count}} hand-checked rallies: {{precision}} of the suggestions are fully right (time, skill and side) and {{found}} of the contacts get one. Of {{sure}} sure ones, {{wrong}} were wrong.',
+    // Accept all sure actions, like the rally review: the rest needs the coach.
+    needsYou: 'Needs you: {{count}}',
+    acceptSure: 'Accept all sure actions ({{count}})',
+    acceptSureTitle_one: 'Accept {{count}} sure action?',
+    acceptSureTitle_other: 'Accept {{count}} sure actions?',
+    acceptSureBody:
+      'Every suggested action WiePlay is sure of becomes a tag as it is: its time, skill and side. You can still change any of them. U undoes it.',
+    acceptSureLeft_one: '{{count}} action needs you.',
+    acceptSureLeft_other: '{{count}} actions need you.',
+    acceptSureConfirm_one: 'Accept {{count}}',
+    acceptSureConfirm_other: 'Accept {{count}}',
+    sureNone: 'No sure actions left: the rest needs you.',
+    sureChip: 'Sure',
+    alternative: 'Or maybe: {{skill}}, {{side}}',
+    alternativeNone: 'Maybe no contact here: reject it with X.',
+    missing: 'WiePlay misses contacts it cannot see: tag them as usual.',
     card: {
       title: 'Suggested actions',
       counts_one: 'WiePlay suggested {{count}} action; {{open}} still to review.',

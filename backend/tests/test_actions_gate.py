@@ -1,7 +1,7 @@
-"""The bar for suggested actions (PLAN §10.4a): written only once the action finder's held-out
-score on games whose actions a coach reviewed passes it (auto), always (on), never (off).
-Below it the finder still runs and measures itself where a coach tagged; the first training
-that passes it brings suggestions to every game nobody has reviewed."""
+"""Whether suggested actions are written (PLAN §10.4a): since 20.10.2026 from the start (auto, on),
+each with a "sure" flag and the likeliest other answer, never when switched off (off). A
+training that beats the rules brings its suggestions to every game nobody has reviewed; its
+held-out score on reviewed games is reported with the gate, like the measured numbers."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from tests.test_actions_api import (
     claim,
     inputs,
     plan,
-    post_events,
     suggested,
     through_trajectory,
 )
@@ -89,7 +88,7 @@ def queue_training(app: FastAPI) -> None:
         db.commit()
 
 
-# --- the bar itself -----------------------------------------------------------------------------
+# --- the gate itself ---------------------------------------------------------------------------
 
 
 def run(accepted: bool, precision: float | None, recall: float | None, games: int) -> ModelRun:
@@ -109,64 +108,69 @@ def run(accepted: bool, precision: float | None, recall: float | None, games: in
 
 
 @pytest.mark.parametrize(
-    ("mode", "the_run", "is_open", "reason"),
+    ("mode", "the_run", "is_open", "finder", "games"),
     [
-        ("auto", None, False, "no_training"),
-        ("auto", run(True, 0.9, 0.9, 1), False, "too_few_games"),
-        ("auto", run(True, 0.69, 0.9, 3), False, "below_bar"),
-        ("auto", run(True, 0.9, 0.5, 3), False, "below_bar"),
-        ("auto", run(False, None, 0.9, 3), False, "below_bar"),
-        ("auto", run(True, 0.7, 0.6, 2), True, "passed"),
-        ("auto", run(False, 0.8, 0.7, 2), True, "passed"),  # the rules can pass it too
-        ("on", None, True, "on"),
-        ("off", run(True, 0.95, 0.95, 5), False, "off"),
+        ("auto", None, True, "v0", 0),  # no coach tagged anything: the rules suggest
+        ("auto", run(False, 0.3, 0.6, 1), True, "v0", 1),
+        ("auto", run(True, 0.8, 0.7, 3), True, "v1", 3),
+        ("on", None, True, "v0", 0),
+        ("off", run(True, 0.95, 0.95, 5), False, "v1", 5),
     ],
 )
-def test_the_bar(
-    settings: Settings, mode: str, the_run: ModelRun | None, is_open: bool, reason: str
+def test_the_gate(
+    settings: Settings,
+    mode: str,
+    the_run: ModelRun | None,
+    is_open: bool,
+    finder: str,
+    games: int,
 ) -> None:
     g = actions.gate_of(the_run, settings.model_copy(update={"action_suggestions": mode}))
-    assert (g.open, g.reason) == (is_open, reason)
-    assert (g.min_precision, g.min_recall) == (0.70, 0.6)
-    stricter = settings.model_copy(
-        update={"action_suggest_min_precision": 0.95, "action_suggestions": "auto"}
-    )
-    if reason == "passed":
-        assert actions.gate_of(the_run, stricter).open is False
+    assert (g.open, g.reason, g.finder, g.games) == (is_open, mode, finder, games)
+    assert "min_precision" not in g.as_dict()
 
 
 # --- through the API --------------------------------------------------------------------------
 
 
-def test_below_the_bar_nothing_is_written_but_the_finder_measures_itself(
+def test_suggestions_from_the_start_with_sure_flags(
     ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
 ) -> None:
     coach = club["coach"]
     job = through_trajectory(analyser, store)
-    rallies = inputs(analyser, job)["rallies"][:3]
-    # The coach tagged the first rally by hand.
-    post_events(
-        coach,
-        ready,
-        *(
-            {"id": str(uuid.uuid4()), "code": a["code"], "t_ms": a["t_ms"] + 50,
-             "side": "us" if a["side"] == "near" else "them", "attributes": {},
-             "time_precision": "live"}
-            for a in plan(rallies[0])
-        ),
-    )  # fmt: skip
-    complete(analyser, job, body([a for r in rallies for a in plan(r)]))
-    assert suggested(coach, ready) == []
+    found = inputs(analyser, job)
+    rallies = found["rallies"][:2]
+    assert "parts" in found  # the camera files, for the player-at-the-ball cue
+    items = [a for r in rallies for a in plan(r)]
+    items[0] = {**items[0], "sure": True, "confidence": 0.98}
+    items[1] = {**items[1], "alternative": f"D:{items[1]['side']}"}  # a dig on the same side
+    items[2] = {**items[2], "alternative": "none"}
+    complete(analyser, job, body(items))
+    rows = sorted(suggested(coach, ready), key=lambda e: e["t_ms"])
+    assert len(rows) == 8  # no training, no reviewed game: written anyway
+    assert rows[0]["model_sure"] is True and rows[0]["code"] == "S"
+    assert rows[1]["model_sure"] is False
+    # The alternative in the coach's terms: the reception's side, the other skill.
+    assert rows[1]["model_alternative"] in ("D:us", "D:them")
+    assert rows[1]["model_alternative"].split(":")[1] == rows[1]["side"]
+    assert rows[2]["model_alternative"] == "none"
     state = coach.get(f"/api/videos/{ready['id']}/analysis").json()["actions"]
-    assert state["proposed"] == 0 and state["gate"]["open"] is False
-    assert state["gate"]["reason"] == "no_training" and state["gate"]["games"] == 0
-    # Measured where the coach tagged: the four tags matched.
-    assert state["vs_coach"]["coach"] == 4 and state["vs_coach"]["matched"] == 4
+    assert state["proposed"] == 8 and state["gate"]["open"] is True
+    assert state["gate"]["reason"] == "auto" and state["gate"]["games"] == 0
+    assert set(state["gate"]["measured"]) >= {"rallies", "precision", "sure", "sure_wrong"}
     stats = coach.get(f"/api/videos/{ready['id']}/stats").json()
-    assert stats["suggested"] == 0 and stats["actions_gate"]["open"] is False
+    assert stats["suggested"] == 8 and stats["actions_gate"]["open"] is True
 
 
-def test_a_training_below_the_bar_keeps_it_closed_one_above_opens_it(
+def test_a_bad_alternative_is_refused(ready: Any, analyser: TestClient, store: FakeStore) -> None:
+    job = through_trajectory(analyser, store)
+    rallies = inputs(analyser, job)["rallies"][:1]
+    items = [{**a, "alternative": "X:left"} for a in plan(rallies[0])]
+    r = analyser.post(f"/api/worker/jobs/{job['id']}/complete", json=body(items))
+    assert r.status_code in (400, 422), r.text
+
+
+def test_a_training_that_beats_the_rules_suggests_for_every_game_nobody_reviewed(
     app: FastAPI, ready: Any, club: dict[str, TestClient], analyser: TestClient, store: FakeStore
 ) -> None:
     coach = club["coach"]
@@ -174,19 +178,18 @@ def test_a_training_below_the_bar_keeps_it_closed_one_above_opens_it(
     complete(
         analyser, job, body([a for r in inputs(analyser, job)["rallies"][:2] for a in plan(r)])
     )
-    assert suggested(coach, ready) == []
+    assert len(suggested(coach, ready)) == 8
 
     queue_training(app)
-    train(analyser, training(accepted=True, precision=0.5, recall=0.8, games=3))
+    train(analyser, training(accepted=False, precision=0.3, recall=0.8, games=3))
     g = gate_of(coach, ready)
-    assert (g["open"], g["reason"], g["games"], g["precision"]) == (False, "below_bar", 3, 0.5)
-    assert claim(analyser) is None  # no new suggestions for anyone
+    assert (g["open"], g["finder"], g["games"], g["precision"]) == (True, "v0", 3, 0.3)
+    assert claim(analyser) is None  # the rules stay: nothing new to suggest
 
     queue_training(app)
     train(analyser, training(accepted=True, precision=0.8, recall=0.7, games=3))
     g = gate_of(coach, ready)
-    assert (g["open"], g["reason"], g["finder"]) == (True, "passed", "v1")
-    # The bar passed for the first time: every game nobody reviewed gets suggestions.
+    assert (g["open"], g["finder"]) == (True, "v1")
     job = claim(analyser, "actions")
     assert job is not None and job["params"]["reason"] == "train_actions"
     found = inputs(analyser, job)
@@ -195,22 +198,8 @@ def test_a_training_below_the_bar_keeps_it_closed_one_above_opens_it(
                                  model_run_id=found["model"]["model_run_id"]))  # fmt: skip
     assert len(suggested(coach, ready)) == 8
 
-    # A later training that keeps v0 (the rules below the bar) closes it again: the
-    # untouched suggestions go with the next run, nothing new is written.
-    queue_training(app)
-    train(analyser, training(accepted=False, precision=0.3, recall=0.7, games=3))
-    assert gate_of(coach, ready)["open"] is False
-    r = coach.post(f"/api/videos/{ready['id']}/actions")
-    assert r.status_code == 202
-    job = claim(analyser, "actions")
-    assert job is not None
-    complete(
-        analyser, job, body([a for r in inputs(analyser, job)["rallies"][:2] for a in plan(r)])
-    )
-    assert suggested(coach, ready) == []
 
-
-def test_off_writes_nothing_even_above_the_bar(
+def test_off_writes_nothing(
     app: FastAPI,
     ready: Any,
     club: dict[str, TestClient],
