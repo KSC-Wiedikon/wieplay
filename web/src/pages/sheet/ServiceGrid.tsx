@@ -385,6 +385,12 @@ function Subs({
   const id = useId()
   const team = sideLabel(t, side, names)
   const rows = set.subs.map((sub, k) => ({ sub, k })).filter(({ sub }) => sub.side === side)
+  // OUT is the starting player of a position: their shirt number once the lineup is typed.
+  const lineup = side === 'us' ? set.lineup_us : set.lineup_them
+  const outLabel = (position: number) => {
+    const number = lineup?.[position - 1]
+    return number == null ? POSITIONS[position - 1] : `#${number} (${POSITIONS[position - 1]})`
+  }
   const put = (k: number, sub: SubDoc | null) => {
     const subs = set.subs.flatMap((s, i) => (i === k ? (sub ? [sub] : []) : [s]))
     onChange({ ...set, subs })
@@ -402,7 +408,7 @@ function Subs({
         {rows.map(({ sub, k }) => (
           <div key={k} role="group" aria-label={`${t('sheet.subs')} ${k + 1}`} className="flex flex-wrap items-end gap-x-4 gap-y-2 text-sm">
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">{t('sheet.sub.position')}</span>
+              <span className="text-xs font-semibold text-muted">{t('sheet.sub.out')}</span>
               <select
                 value={sub.position}
                 disabled={readOnly}
@@ -411,13 +417,13 @@ function Subs({
               >
                 {POSITIONS.map((roman, i) => (
                   <option key={roman} value={i + 1}>
-                    {roman}
+                    {outLabel(i + 1)}
                   </option>
                 ))}
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">{t('sheet.sub.number')}</span>
+              <span className="text-xs font-semibold text-muted">{t('sheet.sub.in')}</span>
               <input
                 {...readProps(read, subField(side, sub.position, 'number')).attrs}
                 onFocus={readProps(read, subField(side, sub.position, 'number')).onFocus}

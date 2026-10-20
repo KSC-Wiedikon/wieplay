@@ -34,7 +34,15 @@ export function Tabs<T extends string>({ label, id, value, options, onChange, cl
     list.current?.ownerDocument.getElementById(tabId(id, next.value))?.focus()
   }
   return (
-    <div ref={list} role="tablist" aria-label={label} onKeyDown={onKeyDown} className={cx('flex gap-1 overflow-x-auto border-b border-hairline', className)}>
+    // Scrolls sideways when the tabs don't fit (a phone), never up and down: the line under the tabs
+    // is an inset shadow the chosen tab's underline covers, so nothing reaches past the box.
+    <div
+      ref={list}
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className={cx('flex gap-1 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--color-hairline)]', className)}
+    >
       {options.map((option) => {
         const on = option.value === value
         return (
@@ -48,7 +56,7 @@ export function Tabs<T extends string>({ label, id, value, options, onChange, cl
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(option.value)}
             className={cx(
-              '-mb-px inline-flex min-h-11 cursor-pointer items-center border-b-2 px-3 text-sm font-semibold whitespace-nowrap sm:min-h-10',
+              'inline-flex min-h-11 cursor-pointer items-center border-b-2 px-3 text-sm font-semibold whitespace-nowrap sm:min-h-10',
               'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
               on ? 'border-accent text-fg' : 'border-transparent text-muted hover:border-hairline-strong hover:text-fg',
             )}

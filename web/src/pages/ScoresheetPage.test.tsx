@@ -134,6 +134,16 @@ describe('ScoresheetPage', () => {
     expect(await screen.findByText('Saved.')).toBeInTheDocument()
   }, 30_000) // ~70 boxes typed into the form: slow in jsdom when the suite runs in parallel
 
+  it('a substitution is OUT, the starting player by shirt number, and IN', async () => {
+    show()
+    expect(await screen.findByRole('tab', { name: /Set 1/ })).toHaveAttribute('aria-selected', 'true')
+    // Our six from the last match are filled in, so OUT names them by number.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add a substitution' })[0] as HTMLElement)
+    const out = screen.getByRole('combobox', { name: 'OUT' })
+    expect(within(out).getAllByRole('option').map((o) => o.textContent)).toEqual(['#7 (I)', '#3 (II)', '#11 (III)', '#5 (IV)', '#9 (V)', '#1 (VI)'])
+    expect(screen.getByRole('textbox', { name: 'IN' })).toHaveValue('')
+  })
+
   it('names the box that does not fit and applies the server’s repair', async () => {
     show(empty(), {
       [`POST /api/videos/${ID}/scoresheet/check`]: {

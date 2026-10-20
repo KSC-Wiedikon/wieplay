@@ -58,10 +58,10 @@ export const sheetDe: typeof sheetEn = {
     opp: 'Anderes Team',
     subs: 'Spielerwechsel',
     subsHint:
-      'Unter jedem Startspieler: wer eingewechselt wurde, und die Spielstände (dieses Team zuerst) beim Einwechseln und bei der Rückkehr des Startspielers.',
+      'RAUS: der Startspieler, der rausging. REIN: wer reinkam. Die Spielstände nennen dieses Team zuerst: beim Einwechseln und bei der Rückkehr des Startspielers.',
     sub: {
-      position: 'Position',
-      number: 'Rein (Rückennummer)',
+      out: 'RAUS',
+      in: 'REIN',
       at: 'Stand rein',
       back: 'Stand zurück',
       add: 'Spielerwechsel hinzufügen',
