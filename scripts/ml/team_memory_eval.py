@@ -86,8 +86,11 @@ def our_serves(s: sh.SheetSet, d: sh.Decoded) -> list[tuple[int, int]]:
     return out
 
 
+SURE = 0.9
+
+
 def accuracy(post: tp.SetPosterior, serves: list[tuple[int, int]]) -> tuple[int, int, int, int]:
-    """(right, total, right among the sure ones (p >= 0.9), sure ones)."""
+    """(right, total, right among the sure ones (p >= SURE), sure ones)."""
     right = total = sure_right = sure = 0
     for r, n in serves:
         best = post.best(r)
@@ -95,7 +98,7 @@ def accuracy(post: tp.SetPosterior, serves: list[tuple[int, int]]) -> tuple[int,
         if best is None:
             continue
         right += int(best[0] == n)
-        if best[1] >= 0.9:
+        if best[1] >= SURE:
             sure += 1
             sure_right += int(best[0] == n)
     return right, total, sure_right, sure
@@ -154,8 +157,8 @@ def lineups(args: argparse.Namespace) -> None:
             for _ in range(args.seeds):
                 seen = []
                 for r, n in serves:
-                    if rng.random() < READ_SHARE:
-                        number = n if rng.random() < READ_RIGHT else rng.choice(roster)
+                    if rng.random() < args.read_share:
+                        number = n if rng.random() < args.read_right else rng.choice(roster)
                         seen.append(tp.Seen(r, number))
                 acc = accuracy(tp.posterior(prior, seen), serves)
                 for i, v in enumerate(acc):
@@ -177,7 +180,7 @@ def lineups(args: argparse.Namespace) -> None:
         pct = 100 * right / total if total else 0
         spct = 100 * sure_right / sure if sure else 0
         print(
-            f"  {label:14s} servers right {pct:.1f} % ({right}/{total}); sure (p >= 0.9) "
+            f"  {label:14s} servers right {pct:.1f} % ({right}/{total}); sure (p >= {SURE}) "
             f"{100 * sure / total if total else 0:.1f} % of serves, {spct:.1f} % of them right"
         )
     if places[1]:
@@ -267,16 +270,22 @@ def cards(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    global SURE
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("lineups")
     a.add_argument("sheets", type=Path, nargs="+")
     a.add_argument("--setters", default="")
     a.add_argument("--seeds", type=int, default=300)
+    a.add_argument("--read-share", type=float, default=READ_SHARE, help="serves with a reading")
+    a.add_argument("--read-right", type=float, default=READ_RIGHT, help="readings right")
     b = sub.add_parser("cards")
     b.add_argument("cards", type=Path, nargs="+")
     b.add_argument("--sheets", type=Path, nargs="*")
+    a.add_argument("--sure", type=float, default=SURE, help="a server this probable is sure")
     args = parser.parse_args()
+    if args.cmd == "lineups":
+        SURE = args.sure
     {"lineups": lineups, "cards": cards}[args.cmd](args)
 
 

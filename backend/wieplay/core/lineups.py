@@ -298,9 +298,13 @@ def by_setter(db: Session, video: Video, found: VideoLineups) -> bool:
 # --- the team's memory where the sheet is missing (PLAN §10.5b) ----------------------------------
 
 # A serve's player from the memory is written into a model's serve from this probability on
-# (a suggestion the coach reviews with the serve), and given to the players job as a label.
-MEMORY_APPLY = 0.8
-MEMORY_LABEL = 0.9
+# (a suggestion the coach reviews with the serve), and given to the players job as a label
+# from MEMORY_LABEL on. On the two typed H3 sheets, the memory from the other game and
+# simulated readings at a quarter of our serves (docs/research/team-memory-2026-10.md): 61 %
+# of our serves at 0.9 with 97 % of them right, 59 % at 0.95 (97 %); at 0.8 a coach's setter
+# zone alone made 56 % sure but only 83 % right.
+MEMORY_APPLY = 0.9
+MEMORY_LABEL = 0.95
 # What a serve's observed player is worth: a coach's tag, a card the coach named, a number the
 # reader read on the card (its own confidence, with the team's number prior).
 COACH_SEEN = 0.97
