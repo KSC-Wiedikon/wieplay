@@ -11,9 +11,9 @@ const VIDEO = '00000000-0000-4000-8000-0000000000ee'
 const R1 = '00000000-0000-4000-8000-0000000001a1'
 const R2 = '00000000-0000-4000-8000-0000000001a2'
 const action = (id: string, t_ms: number, code: string, patch: Partial<Tag> = {}) =>
-  tag({ id, t_ms, code, number: null, member_id: null, source: 'model', confidence: 0.8, model_run_id: 'run-a', ...patch })
+  tag({ id, t_ms, code, number: null, member_id: null, source: 'model', review: 'check', confidence: 0.8, model_run_id: 'run-a', ...patch })
 
-/** Two rallies: serve, reception, set suggested in the first (the set already accepted), a serve in the second. */
+/** Two rallies: serve, reception, set to check in the first (the set already accepted), a serve in the second. */
 function data() {
   return bundle({
     segments: [rally({ id: R1, start_ms: 10_000, end_ms: 20_000 }), rally({ id: R2, start_ms: 30_000, end_ms: 40_000 })],
@@ -56,8 +56,7 @@ function server(initial: Tag[]) {
 
 let video: HTMLVideoElement
 
-async function setup({ onLeave = () => {} } = {}) {
-  const initial = data()
+async function setup({ onLeave = () => {} } = {}, initial = data()) {
   const api = server(initial.events)
   const send = vi.fn(async (body: ChangesIn) => api(body))
   const store = new TaggingStore(VIDEO, initial)
@@ -90,12 +89,12 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('ActionReviewController', () => {
-  it('starts at the first open suggestion, 1 s before its contact', async () => {
+  it('starts at the first action to check, 1 s before its contact', async () => {
     const { actions } = await setup()
     expect(actions.getState()).toMatchObject({ active: true, currentId: 's1', number: '' })
     expect(video.currentTime).toBe(10)
-    // e1 answered, two rejected before this session.
-    expect(actions.progress()).toEqual({ done: 3, total: 7 })
+    // Four to check (e1 answered), two rejected before this session.
+    expect(actions.progress()).toEqual({ done: 2, total: 6 })
   })
 
   it('Enter accepts ("confirmed") and moves on; X rejects (deleted, "rejected")', async () => {
@@ -106,7 +105,7 @@ describe('ActionReviewController', () => {
     press('x')
     expect(event('r1')).toBeUndefined()
     expect(actions.getState().currentId).toBe('a1') // e1 is answered already
-    expect(actions.progress()).toEqual({ done: 5, total: 7 })
+    expect(actions.progress()).toEqual({ done: 4, total: 6 })
     const out = await sent()
     expect(out.find((e) => e.id === 's1')).toMatchObject({ review: 'confirmed', code: 'S', base_version: 1 })
     expect(out.find((e) => e.id === 'r1')).toMatchObject({ review: 'rejected', deleted: true })
@@ -157,10 +156,10 @@ describe('ActionReviewController', () => {
     const { actions, press, event } = await setup()
     press('Enter', { shiftKey: true })
     expect(['s1', 'r1', 'a1'].map((id) => event(id)?.review)).toEqual(['confirmed', 'confirmed', 'confirmed'])
-    expect(event('s2')?.review).toBe('unreviewed')
+    expect(event('s2')?.review).toBe('check')
     expect(actions.getState().currentId).toBe('s2')
     press('u')
-    expect(['s1', 'r1', 'a1'].map((id) => event(id)?.review)).toEqual(['unreviewed', 'unreviewed', 'unreviewed'])
+    expect(['s1', 'r1', 'a1'].map((id) => event(id)?.review)).toEqual(['check', 'check', 'check'])
     expect(actions.getState().currentId).toBe('s1')
     expect(actions.getState().notice?.key).toBe('undone')
   })
@@ -186,11 +185,34 @@ describe('ActionReviewController', () => {
     press('x')
     expect(event('s1')).toBeUndefined()
     press('u')
-    expect(event('s1')).toMatchObject({ source: 'model', review: 'unreviewed', confidence: 0.8 })
+    expect(event('s1')).toMatchObject({ source: 'model', review: 'check', confidence: 0.8 })
     for (let i = 0; i < 4; i++) press('Enter')
     expect(actions.getState().currentId).toBeNull()
-    expect(actions.progress()).toEqual({ done: 7, total: 7 })
+    expect(actions.progress()).toEqual({ done: 6, total: 6 })
     press('Enter')
     expect(actions.getState().notice?.key).toBe('nothingSelected')
+  })
+
+  it("leaves the sure ones out of the walk and takes WiePlay's other answer with one button", async () => {
+    const sure = bundle({
+      segments: [rally({ id: R1, start_ms: 10_000, end_ms: 20_000 })],
+      events: [
+        action('s1', 11_000, 'S', { segment_id: R1, review: 'auto', model_sure: true }),
+        action('r1', 12_200, 'R', { segment_id: R1, side: 'them', model_alternative: 'D:us' }),
+        action('x1', 13_000, 'E', { segment_id: R1, model_alternative: 'none' }),
+      ],
+    })
+    const { actions, event, sent } = await setup({}, sure)
+    expect(actions.getState().currentId).toBe('r1')
+    actions.takeAlternative()
+    expect(event('r1')).toMatchObject({ code: 'D', side: 'us', review: 'corrected' })
+    expect(actions.getState().currentId).toBe('x1')
+    actions.takeAlternative()
+    expect(event('x1')).toBeUndefined()
+    expect(actions.getState().currentId).toBeNull()
+    expect(event('s1')?.review).toBe('auto')
+    const out = await sent()
+    expect(out.find((e) => e.id === 'r1')).toMatchObject({ code: 'D', side: 'us', review: 'corrected' })
+    expect(out.find((e) => e.id === 'x1')).toMatchObject({ review: 'rejected', deleted: true })
   })
 })
