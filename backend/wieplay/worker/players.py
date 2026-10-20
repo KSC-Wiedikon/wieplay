@@ -854,7 +854,16 @@ def run(ctx: Context) -> dict[str, Any]:
                 "ocr": reader.sha256 if reader is not None else None,
                 "roster_checked": sorted(k for k, v in roster.items() if v),
                 # The official scoresheet's labels (serve_labels.py): what was used.
-                "sheet": sorted(serve_labels.USE) if sheet is not None else None,
+                "sheet": sorted(serve_labels.USE)
+                if sheet is not None
+                and any(r is not None and r.weight == 1.0 for r in sheet.rallies)
+                else None,
+                # Our servers from the team's memory where the sheet is missing (PLAN §10.5b).
+                "memory_servers": sum(
+                    1
+                    for r in (sheet.rallies if sheet is not None else [])
+                    if r and r.source == "memory"
+                ),
                 "merge_distance": pl.MERGE_DISTANCE,
                 "geometry": setups.as_dict(),
                 "providers": used,

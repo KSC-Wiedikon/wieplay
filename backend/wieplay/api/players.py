@@ -104,6 +104,10 @@ class ClusterOut(BaseModel):
     actions: int  # actions attributed to this person
     source: str  # model | split
     tracks: list[TrackOut]
+    # Ours with a read number: what the team's memory says of it (PLAN §10.5b): {number,
+    # member_id, games (the team's games that named it), confidence (0..1: the reading and
+    # how often the team plays the number)}. A signal for "sure" flags, never a coach's answer.
+    memory: dict[str, Any] | None = None
 
 
 class SheetsOut(BaseModel):
@@ -233,6 +237,24 @@ def refresh(db: Session, video: Video, store: ObjectStore | None) -> dict[str, A
     return found if isinstance(found, dict) else players.summary(db, video)
 
 
+def _memory_of(db: Session, video: Video) -> Any:
+    """Per card of ours with a read number: the team's memory of it (core/team_memory.py)."""
+    from wieplay.core import team_memory
+
+    mem = team_memory.get(db, video.team_id)
+    if mem is None:
+        return lambda _c: None
+    rows = team_memory.players(db, video.team_id)
+    prior = team_memory.number_prior(db, video.team_id, mem)
+
+    def of(c: PlayerCluster) -> team_memory.CardMemory | None:
+        if c.team != "us" or c.kind != players.PERSON or c.not_player:
+            return None
+        return team_memory.card_memory(rows, prior, c.ocr_number, c.ocr_confidence)
+
+    return of
+
+
 def players_out(
     db: Session,
     video: Video,
@@ -262,6 +284,7 @@ def players_out(
     roster = _roster_out(db, roster_rows)
     names: dict[tuple[str, int], str | None] = {(r.side, r.number): r.name for r in roster}
     per_cluster = (summary or {}).get("per_cluster", {})
+    memory = _memory_of(db, video)
     fps = float((run.params or {}).get("detect_fps") or 10.0) if run is not None else 10.0
     manager = _manages(viewer, access)
     if job is not None:
@@ -336,6 +359,7 @@ def players_out(
                     )
                     for t in c.tracks
                 ],
+                memory=m.as_json() if (m := memory(c)) is not None else None,
             )
             for c in rows
         ],
@@ -550,11 +574,15 @@ def apply(
 
 class QueueItemOut(BaseModel):
     card: uuid.UUID
-    # The numbers to offer first: on court for its team in its rallies (the scoresheet), then
-    # the liberos.
+    # The numbers to offer first: on court for its team in its rallies (the scoresheet, else
+    # the team's usual rotation), then the liberos; a card of ours whose read number the
+    # team's memory backs leads with it.
     on_court: list[int]
     # Cards that may be the same person (its team, never seen at once, a likely number).
     same_as: list[uuid.UUID]
+    # The team's memory on the read number (PLAN §10.5b): {number, member_id, games,
+    # confidence}; None without a read number or a memory.
+    memory: dict[str, Any] | None = None
 
 
 class TeamsSideOut(BaseModel):
@@ -633,15 +661,21 @@ def _uncertain_teams(run: Any) -> bool:
 def _queue_out(db: Session, video: Video) -> QueueOut:
     rows = players.clusters(db, video.id)
     found = lineups.for_video(db, video)
-    spans = identify.rally_spans(db, video) if found is not None else []
+    prior = lineups.prior_for_video(db, video, found)
+    spans = identify.rally_spans(db, video) if found is not None or prior is not None else []
+    memory = _memory_of(db, video)
     items = []
     for c in identify.queue(rows):
-        on_court = identify.on_court_numbers(c, rows, found, spans)
+        on_court = identify.on_court_numbers(c, rows, found, spans, prior)
+        mem = memory(c)
+        if mem is not None and mem.number not in on_court[:1] and c.team == "us":
+            on_court = [mem.number, *(n for n in on_court if n != mem.number)]
         items.append(
             QueueItemOut(
                 card=c.id,
                 on_court=on_court,
                 same_as=[o.id for o in identify.same_as(c, rows, on_court[:3])],
+                memory=mem.as_json() if mem is not None else None,
             )
         )
     run = players.latest_run(db, video.id)

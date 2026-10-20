@@ -588,6 +588,12 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
                 "sheet": {**run.metrics["sheet"], "notes": sheet_notes.summary(notes)},
             }
         found_players.attribute_serves(db, video)
+    else:
+        # The serves' players from the team's usual rotation (PLAN §10.5b) where it is sure.
+        from wieplay.core import players as found_players
+
+        db.flush()
+        found_players.attribute_serves(db, video)
     run.timing = {"wall_s": round(time.perf_counter() - started, 3), "rallies": len(rallies)}
     from wieplay.core import actions  # the suggested actions follow the new sides (PLAN §10.4a)
 
