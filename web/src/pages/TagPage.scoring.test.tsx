@@ -69,14 +69,14 @@ const scoring = (patch: Partial<Scoring> = {}): Scoring => ({
 const analysis = (patch: Partial<Analysis> = {}): Analysis => ({
   status: 'done',
   model_run: { id: 'run-1', model_name: 'rally-finder', model_version: 'v0', created_at: '2026-10-16T18:00:00Z', params: {}, metrics: {} },
-  proposals: { unreviewed: 1, confirmed: 2, corrected: 0, rejected: 0 },
+  proposals: { auto: 0, check: 1, confirmed: 2, corrected: 0, rejected: 0 },
   metrics_vs_human: null,
   scoring: scoring(),
   ...patch,
 })
 
 const set1 = period({ no: 1, start_ms: 0, first_serve: 'us', our_court_side_at_start: 'near' })
-const model = { source: 'model', model_run_id: 'run-1', version: 1 } as const
+const model = { source: 'model', review: 'check', model_run_id: 'run-1', version: 1 } as const
 
 const R1 = '00000000-0000-4000-8000-0000000006a1'
 const R2 = '00000000-0000-4000-8000-0000000006a2'
@@ -127,6 +127,7 @@ const data = (): Tagging =>
         score_source: 'model',
         score_conflict: true,
         score_note: 'missing_before',
+        score_sure: false,
       }),
       rally({ ...model, id: G2, kind: 'stoppage', confidence: 0.7, start_ms: 70_000, end_ms: 130_000, period_id: set1.id }),
       rally({ ...model, id: G3, kind: 'other_dead', confidence: 0.55, start_ms: 140_000, end_ms: 200_000, period_id: set1.id }),
@@ -159,7 +160,7 @@ function fakeServer(initial: Tagging, { regap = false } = {}) {
     const touched = new Set([...input.segments.map((s) => s.id), ...input.periods.map((p) => p.id)])
     if (regap) {
       for (const s of [...segments.values()]) {
-        if (s.kind === 'rally' || s.source !== 'model' || s.review !== 'unreviewed' || s.deleted_at || touched.has(s.id)) continue
+        if (s.kind === 'rally' || s.source !== 'model' || s.review !== 'check' || s.deleted_at || touched.has(s.id)) continue
         segments.delete(s.id)
         const id = `${s.id.slice(0, 24)}${(posts.length % 16).toString(16)}${s.id.slice(25)}`
         segments.set(id, { ...s, id, version: 1 })
@@ -211,7 +212,7 @@ function keys(...list: string[]) {
   for (const key of list) fireEvent.keyDown(document.body, { key })
 }
 
-const panel = () => screen.getByRole('region', { name: 'Review suggestions' })
+const panel = () => screen.getByRole('region', { name: 'To check' })
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory())
@@ -235,8 +236,8 @@ describe('TagPage, automatic scoring', () => {
     expect(first).toHaveTextContent('1:0')
     // WiePlay's score and winner; the server is a fact (the previous winner). The winner is a
     // choice of the teams' names: none yet, so WiePlay's shows in the empty choice.
-    expect(suggested(second)).toEqual(['1:1 (suggested)'])
-    expect(second.querySelector('[data-suggested]')).toHaveAttribute('title', 'Suggested by WiePlay')
+    expect(suggested(second)).toEqual(['1:1 (WiePlay)'])
+    expect(second.querySelector('[data-suggested]')).toHaveAttribute('title', 'WiePlay’s, counts like a person’s')
     expect(within(second).getAllByText('KSCW H3')[0]?.closest('td')?.querySelector('select')).toBeNull() // served: a fact
     const point = within(second).getByRole('combobox', { name: 'Point of rally 2' })
     expect(point).toHaveValue('')
@@ -244,7 +245,7 @@ describe('TagPage, automatic scoring', () => {
     expect(within(second).getByTitle("The serve doesn't fit the score.")).toHaveTextContent('Check')
     expect(second).toHaveAttribute('data-check', 'true')
     // An open suggestion: its server is WiePlay's too.
-    expect(suggested(third)).toEqual(['Smash 05 (suggested)', '1:2 (suggested)'])
+    expect(suggested(third)).toEqual(['Smash 05 (WiePlay)', '1:2 (WiePlay)'])
     // The score's order is in the column's head.
     expect(within(table).getByRole('columnheader', { name: 'Score: KSCW H3 – Smash 05' })).toBeInTheDocument()
     // The coach saw KSCW H3 win rally 2: a fact, the score follows; the accepted proposal is corrected.
@@ -256,22 +257,22 @@ describe('TagPage, automatic scoring', () => {
     expect(within(third).getByTitle('A point seems to be missing before this rally.')).toBeInTheDocument()
   })
 
-  it('draws the breaks as labelled bands, suggestions dashed, and marks where the sets start', async () => {
+  it('draws the breaks as labelled bands, those to check outlined, and marks where the sets start', async () => {
     const { container } = show()
     await screen.findByRole('region', { name: 'Tag entry' })
-    const timeout = container.querySelector(`[data-gap="timeout"][data-suggestion="open"]`)
+    const timeout = container.querySelector(`[data-gap="timeout"][data-suggestion="check"]`)
     expect(timeout).not.toBeNull()
-    expect(timeout?.className).toContain('border-dashed')
+    expect(timeout?.className).toContain('ring-danger')
     expect(container.querySelector('[data-set-start="1"]')).not.toBeNull()
-    expect(screen.getByText('Suggested break')).toBeInTheDocument()
+    expect(screen.getByText('To check')).toBeInTheDocument()
     expect(screen.getByText('Set start')).toBeInTheDocument()
   })
 
   it('reviews the breaks with the rallies: accept, relabel with T, reject; 1 calls the server', async () => {
     const { server, fetch, scored } = show(data(), { url: `/videos/${ID}/tag?mode=review` })
-    await screen.findByRole('region', { name: 'Review suggestions' })
-    // Rally proposals and break labels together: the accepted rally is answered.
-    expect(within(panel()).getByText('1 of 5 suggestions reviewed')).toBeInTheDocument()
+    await screen.findByRole('region', { name: 'To check' })
+    // Rallies and break labels to check together (the accepted rally is not to check).
+    expect(within(panel()).getByText('0 of 4 checked')).toBeInTheDocument()
 
     // First the timeout (in time order): a break, labelled, without merge or split.
     expect(within(panel()).getByRole('heading', { name: /Timeout at 0:25\.0/ })).toBeInTheDocument()
@@ -284,10 +285,10 @@ describe('TagPage, automatic scoring', () => {
 
     // Then the rally: WiePlay's server and winner as suggestions, and why to check it.
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
-    expect(within(panel()).getByText('Smash 05 (suggested, 87%, far court)')).toBeInTheDocument()
-    expect(within(panel()).getByText('Smash 05 (suggested, 91%)')).toBeInTheDocument()
-    expect(within(panel()).getByText('KSCW H3 1:2 Smash 05 (suggested)')).toBeInTheDocument()
-    expect(within(panel()).getByText('Check: A point seems to be missing before this rally.')).toBeInTheDocument()
+    expect(within(panel()).getByText('Smash 05 (WiePlay, 87%, far court)')).toBeInTheDocument()
+    expect(within(panel()).getByText('Smash 05 (WiePlay, 91%)')).toBeInTheDocument()
+    expect(within(panel()).getByText('KSCW H3 1:2 Smash 05 (WiePlay)')).toBeInTheDocument()
+    expect(within(panel()).getByText('A point seems to be missing before this rally.')).toBeInTheDocument()
     keys('1')
     expect(within(panel()).getByText('Serve: KSCW H3, your call.')).toBeInTheDocument()
     expect(within(panel()).getByRole('button', { name: /KSCW H3 serves/ })).toHaveAttribute('aria-pressed', 'true')
@@ -301,12 +302,13 @@ describe('TagPage, automatic scoring', () => {
     // The last break is no break at all: X.
     expect(within(panel()).getByRole('heading', { name: /Other break at 2:20\.0/ })).toBeInTheDocument()
     keys('x')
-    expect(within(panel()).getByText('5 of 5 suggestions reviewed')).toBeInTheDocument()
+    expect(within(panel()).getByText('4 of 4 checked')).toBeInTheDocument()
 
     await waitFor(() => expect(server.sentSegments().get(G3)).toBeDefined(), { timeout: 3000 })
     const sent = server.sentSegments()
     expect(sent.get(G1)).toMatchObject({ kind: 'timeout', review: 'confirmed' })
-    expect(sent.get(S1)).toMatchObject({ review: 'confirmed', serving_manual: 'us' })
+    // Enter took WiePlay's winner: a fact now.
+    expect(sent.get(S1)).toMatchObject({ review: 'confirmed', serving_manual: 'us', won_by: 'them' })
     expect(sent.get(G2)).toMatchObject({ kind: 'timeout', review: 'corrected' })
     expect(sent.get(G3)).toMatchObject({ review: 'rejected', deleted: true })
     expect(scored).toHaveLength(0)
@@ -327,18 +329,18 @@ describe('TagPage, automatic scoring', () => {
         : s,
     )
     show(initial, { url: `/videos/${ID}/tag?mode=review` })
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     keys('Enter') // the timeout first
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
     const line = within(panel()).getByText('Scoreboard log: point to KSCW H3 (2:1)')
     expect(line).toHaveAttribute('title', 'Pressed on the club scoreboard 3.5 s after the rally’s end')
-    expect(within(panel()).getByText('KSCW H3 (suggested, Scoreboard log)')).toBeInTheDocument()
-    expect(within(panel()).getByText('Check: The club scoreboard’s log says otherwise.')).toBeInTheDocument()
+    expect(within(panel()).getByText('KSCW H3 (WiePlay, Scoreboard log)')).toBeInTheDocument()
+    expect(within(panel()).getByText('The club scoreboard’s log says otherwise.')).toBeInTheDocument()
   })
 
   it('sets who won with 3 and 4 or the buttons: a fact, the score at once, U takes it back', async () => {
     const { server } = show(data(), { url: `/videos/${ID}/tag?mode=review` })
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     keys('Enter') // the timeout first
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:00\.0/ })).toBeInTheDocument()
     const won = within(panel()).getByRole('group', { name: 'Who won the rally' })
@@ -352,23 +354,23 @@ describe('TagPage, automatic scoring', () => {
     expect(within(won).getByRole('button', { name: /Point KSCW H3/ })).toHaveAttribute('aria-pressed', 'true')
     expect(within(panel()).getByText('KSCW H3 (your call)')).toBeInTheDocument()
     // The score line follows at once (WiePlay's winner of the rally before still counts: suggested).
-    expect(within(panel()).getByText('KSCW H3 2:1 Smash 05 (suggested)')).toBeInTheDocument()
+    expect(within(panel()).getByText('KSCW H3 2:1 Smash 05 (WiePlay)')).toBeInTheDocument()
     await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: 'us', review: 'corrected' }), { timeout: 3000 })
 
     // The button does the same: Smash 05 after all.
     fireEvent.click(within(won).getByRole('button', { name: /Point Smash 05/ }))
     expect(within(panel()).getByText('Point: Smash 05, your call.')).toBeInTheDocument()
-    expect(within(panel()).getByText('KSCW H3 1:2 Smash 05 (suggested)')).toBeInTheDocument()
+    expect(within(panel()).getByText('KSCW H3 1:2 Smash 05 (WiePlay)')).toBeInTheDocument()
     await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: 'them', review: 'corrected' }), { timeout: 3000 })
 
-    // U: back to KSCW H3; U again: no call, the suggestion open again.
+    // U: back to KSCW H3; U again: no call, to check again.
     keys('u')
     expect(within(won).getByRole('button', { name: /Point KSCW H3/ })).toHaveAttribute('aria-pressed', 'true')
     await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: 'us' }), { timeout: 3000 })
     keys('u')
     expect(within(won).getByRole('button', { name: /Point KSCW H3/ })).toHaveAttribute('aria-pressed', 'false')
-    expect(within(panel()).getByText('Smash 05 (suggested, 91%)')).toBeInTheDocument()
-    await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: null, review: 'unreviewed' }), { timeout: 3000 })
+    expect(within(panel()).getByText('Smash 05 (WiePlay, 91%)')).toBeInTheDocument()
+    await waitFor(() => expect(server.sentSegments().get(S1)).toMatchObject({ won_by: null, review: 'check' }), { timeout: 3000 })
     // The same key twice takes the call back too.
     keys('4', '4')
     expect(within(panel()).getByText('Point call taken back.')).toBeInTheDocument()
@@ -377,15 +379,15 @@ describe('TagPage, automatic scoring', () => {
 
   it("doesn't score again when the review is left without a change", async () => {
     const { scored } = show(data(), { url: `/videos/${ID}/tag?mode=review` })
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     keys('ArrowDown', 'Escape')
     await screen.findByRole('region', { name: 'Tag entry' })
     expect(scored).toHaveLength(0)
   })
 
-  it('goes on with the review when the scoring labels the break on screen again (not "every suggestion is reviewed")', async () => {
+  it('goes on with the review when the scoring labels the break on screen again (not "every rally and break is checked")', async () => {
     const { server } = show(data(), { url: `/videos/${ID}/tag?mode=review`, regap: true })
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     keys('Enter') // the timeout
     keys('Enter') // the rally
     expect(within(panel()).getByRole('heading', { name: /Stoppage at 1:10\.0/ })).toBeInTheDocument()
@@ -393,21 +395,21 @@ describe('TagPage, automatic scoring', () => {
     await waitFor(() => expect(server.posts.length).toBeGreaterThan(0), { timeout: 3000 })
     await waitFor(() => expect(server.current().segments.some((s) => s.id === G2)).toBe(false))
     await waitFor(() => expect(within(panel()).getByRole('heading', { name: /Stoppage at 1:10\.0/ })).toBeInTheDocument())
-    expect(within(panel()).queryByText('Every suggestion is reviewed')).not.toBeInTheDocument()
-    expect(within(panel()).getByText('3 of 5 suggestions reviewed')).toBeInTheDocument()
+    expect(within(panel()).queryByText('Every rally and break is checked')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('2 of 4 checked')).toBeInTheDocument()
     // A break that is play after all: "It's a rally" (R) makes one there to set and accept.
     fireEvent.click(within(panel()).getByRole('button', { name: 'It’s a rally' }))
     expect(within(panel()).getByRole('heading', { name: /Rally at 1:\d\d\.\d/ })).toBeInTheDocument()
-    expect(within(panel()).getByText('4 of 6 suggestions reviewed')).toBeInTheDocument() // the new rally waits
+    expect(within(panel()).getByText('3 of 5 checked')).toBeInTheDocument() // the new rally waits
     keys('Enter')
     keys('x') // the last break: no break at all
-    expect(within(panel()).getByText('5 of 5 suggestions reviewed')).toBeInTheDocument()
-    expect(within(panel()).getByText('Every suggestion is reviewed')).toBeInTheDocument()
+    expect(within(panel()).getByText('4 of 4 checked')).toBeInTheDocument()
+    expect(within(panel()).getByText('Every rally and break is checked')).toBeInTheDocument()
   })
 
   it('lists the new review keys with ?', async () => {
     show(data(), { url: `/videos/${ID}/tag?mode=review` })
-    await screen.findByRole('region', { name: 'Review suggestions' })
+    await screen.findByRole('region', { name: 'To check' })
     keys('?')
     const dialog = screen.getByRole('dialog', { name: 'Keys' })
     expect(within(dialog).getByText('KSCW H3 serves, Smash 05 serves; the same key again takes the call back')).toBeInTheDocument()
@@ -417,8 +419,8 @@ describe('TagPage, automatic scoring', () => {
 })
 
 describe('TagPage, sets bar and the automatic score', () => {
-  const one = period({ id: '00000000-0000-4000-8000-0000000007a1', no: 1, start_ms: 0, end_ms: 1_500_000, final_us: 25, final_them: 21, ...{ source: 'model', review: 'unreviewed', confidence: 0.82, model_first_serve: 'them', model_court_side: 'near' } })
-  const two = period({ id: '00000000-0000-4000-8000-0000000007a2', no: 2, start_ms: 1_600_000, end_ms: 3_000_000, final_us: 23, final_them: 25, source: 'model', review: 'unreviewed', confidence: 0.6 })
+  const one = period({ id: '00000000-0000-4000-8000-0000000007a1', no: 1, start_ms: 0, end_ms: 1_500_000, final_us: 25, final_them: 21, ...{ source: 'model', review: 'check', confidence: 0.82, model_first_serve: 'them', model_court_side: 'near' } })
+  const two = period({ id: '00000000-0000-4000-8000-0000000007a2', no: 2, start_ms: 1_600_000, end_ms: 3_000_000, final_us: 23, final_them: 25, source: 'model', review: 'check', confidence: 0.6 })
   const sets = () =>
     bundle({
       periods: [one, two],
@@ -428,18 +430,18 @@ describe('TagPage, sets bar and the automatic score', () => {
       ],
     })
 
-  it("shows WiePlay's sets as suggestions to accept or reject, with the official score against WiePlay's", async () => {
+  it("shows WiePlay's sets to check, to accept or reject, with the official score against WiePlay's", async () => {
     const { server } = show(sets())
     await screen.findByRole('region', { name: 'Tag entry' })
     const bar = screen.getByRole('region', { name: 'Sets' })
-    expect(within(bar).getByRole('button', { name: 'Edit set 1' })).toHaveTextContent('Suggested · 82%')
+    expect(within(bar).getByRole('button', { name: 'Edit set 1' })).toHaveTextContent('To check · 82%')
     const details = within(bar).getByRole('table', { name: 'Serve, side and rotation per set' })
     expect(within(details).getByText('Official 25:21 · WiePlay 25:21')).toBeInTheDocument()
     expect(within(details).getAllByText('Same as the official score')).toHaveLength(1)
     expect(within(details).getByText('Official 25:23 · WiePlay 23:25')).toBeInTheDocument()
 
     fireEvent.click(within(bar).getByRole('button', { name: 'Accept set 1' }))
-    expect(within(bar).getByRole('button', { name: 'Edit set 1' })).not.toHaveTextContent('Suggested')
+    expect(within(bar).getByRole('button', { name: 'Edit set 1' })).not.toHaveTextContent('To check')
     expect(within(bar).queryByRole('button', { name: 'Accept set 1' })).not.toBeInTheDocument()
     fireEvent.click(within(bar).getByRole('button', { name: 'Reject set 2' }))
     expect(within(bar).queryByRole('button', { name: 'Edit set 2' })).not.toBeInTheDocument()
@@ -455,23 +457,23 @@ describe('TagPage, sets bar and the automatic score', () => {
     const { server } = show(sets())
     await screen.findByRole('region', { name: 'Tag entry' })
     const serve = screen.getByRole('group', { name: 'First serve in set 1' })
-    const guess = within(serve).getByRole('button', { name: 'Smash 05 (suggested)' })
+    const guess = within(serve).getByRole('button', { name: 'Smash 05 (WiePlay)' })
     expect(guess).toHaveAttribute('aria-pressed', 'false')
     expect(guess).toHaveAttribute('title', 'WiePlay guesses Smash 05. Click to confirm.')
     fireEvent.click(guess)
     expect(within(serve).getByRole('button', { name: 'Smash 05' })).toHaveAttribute('aria-pressed', 'true')
 
     const side = screen.getByRole('group', { name: 'Where KSCW H3 starts set 1' })
-    expect(within(side).getByRole('button', { name: 'Near (suggested)' })).toBeInTheDocument()
+    expect(within(side).getByRole('button', { name: 'Near (WiePlay)' })).toBeInTheDocument()
     fireEvent.click(within(side).getByRole('button', { name: 'Far' }))
     expect(within(side).getByRole('button', { name: 'Far' })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(side).queryByRole('button', { name: /suggested/ })).not.toBeInTheDocument()
+    expect(within(side).queryByRole('button', { name: /WiePlay/ })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Starting rotation of set 2' }), { target: { value: '4' } })
 
     await waitFor(() => expect(server.sentPeriods().some((p) => p.start_rotation === 4)).toBe(true), { timeout: 3000 })
     const sent = new Map(server.sentPeriods().map((p) => [p.id, p]))
-    expect(sent.get(one.id)).toMatchObject({ first_serve: 'them', our_court_side_at_start: 'far', review: 'unreviewed', start_rotation: null })
+    expect(sent.get(one.id)).toMatchObject({ first_serve: 'them', our_court_side_at_start: 'far', review: 'check', start_rotation: null })
     expect(sent.get(two.id)).toMatchObject({ start_rotation: 4, first_serve: null })
   })
 

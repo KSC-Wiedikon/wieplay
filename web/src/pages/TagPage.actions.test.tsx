@@ -52,7 +52,7 @@ const video: Video = {
 
 const set1 = period({ no: 1, start_ms: 0, first_serve: 'us' })
 const action = (id: string, t_ms: number, code: string, patch: Partial<Tag> = {}) =>
-  tag({ id, t_ms, code, number: null, member_id: null, segment_id: R1, source: 'model', confidence: 0.8, model_run_id: 'run-a', ...patch })
+  tag({ id, t_ms, code, number: null, member_id: null, segment_id: R1, source: 'model', review: 'check', confidence: 0.8, model_run_id: 'run-a', ...patch })
 
 const data = (): Tagging =>
   bundle({
@@ -70,14 +70,14 @@ const data = (): Tagging =>
 const analysis: Analysis = {
   status: 'done',
   model_run: null,
-  proposals: { unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0 },
+  proposals: { auto: 0, check: 0, confirmed: 0, corrected: 0, rejected: 0 },
   metrics_vs_human: null,
   actions: {
     status: 'done',
     run_id: 'run-a',
     created_at: '2026-10-17T08:00:00Z',
     finder: 'v0',
-    suggestions: { unreviewed: 4, confirmed: 0, corrected: 0, rejected: 0 },
+    suggestions: { auto: 0, check: 4, confirmed: 0, corrected: 0, rejected: 0 },
     counts: { S: 1, R: 1, E: 1, A: 1, B: 0, D: 0, F: 0 },
     proposed: 4,
     rallies: 1,
@@ -142,7 +142,7 @@ function keys(...list: (string | { key: string; shiftKey?: boolean })[]) {
   for (const k of list) fireEvent.keyDown(document.body, typeof k === 'string' ? { key: k } : k)
 }
 
-const panel = () => screen.getByRole('region', { name: 'Review actions' })
+const panel = () => screen.getByRole('region', { name: 'Actions to check' })
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory())
@@ -151,31 +151,31 @@ beforeEach(() => {
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
 })
 
-describe('TagPage, suggested actions', () => {
-  it('shows suggested actions apart in the tag list and on the timeline', async () => {
+describe("TagPage, WiePlay's actions to check", () => {
+  it('marks the actions to check in the tag list and on the timeline', async () => {
     const { container, server } = show()
     await screen.findByRole('region', { name: 'Tag entry' })
     const table = screen.getByRole('table', { name: 'Tags' })
     const open = within(table)
       .getAllByRole('row')
-      .filter((r) => r.getAttribute('data-action-suggestion') === 'open')
+      .filter((r) => r.getAttribute('data-action-suggestion') === 'check')
     expect(open).toHaveLength(4)
-    expect(within(table).getAllByText('Suggested · 80%')).toHaveLength(4)
-    expect(screen.getByText(/· 4 suggested/)).toBeInTheDocument()
-    expect(container.querySelectorAll('[data-action-suggestion="open"]').length).toBeGreaterThan(4) // + timeline
+    expect(within(table).getAllByText('To check · 80%')).toHaveLength(4)
+    expect(screen.getByText(/· 4 to check/)).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-action-suggestion="check"]').length).toBeGreaterThan(4) // + timeline
     // Accepted right in the list.
     fireEvent.click(within(table).getByRole('button', { name: 'Accept S' }))
     await waitFor(() => expect(server.sent().get(S1)).toMatchObject({ review: 'confirmed' }), { timeout: 3000 })
   })
 
-  it('reviews the actions with the keys and marks them reviewed', async () => {
+  it('goes on into the actions when no rally is left to check, and checks them with the keys', async () => {
     const { server, router, reviewed } = show()
     await screen.findByRole('region', { name: 'Tag entry' })
-    fireEvent.click(screen.getByRole('button', { name: 'Review suggestions (4)' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Actions (4)' }))
-    expect(router.state.location.search).toBe('?mode=review&queue=actions')
+    // No rally to check: "To check" opens on the actions at once.
+    fireEvent.click(screen.getByRole('button', { name: 'To check (4)' }))
+    await waitFor(() => expect(router.state.location.search).toBe('?mode=review&queue=actions'))
     expect(within(panel()).getByRole('heading', { name: /Serve at 0:11\.0/ })).toBeInTheDocument()
-    expect(within(panel()).getByText('0 of 4 suggested actions reviewed')).toBeInTheDocument()
+    expect(within(panel()).getByText('0 of 4 actions checked')).toBeInTheDocument()
     const player = document.querySelector('video') as HTMLVideoElement
     expect(player.currentTime).toBe(10)
 
@@ -190,8 +190,8 @@ describe('TagPage, suggested actions', () => {
     keys('d', 'Tab')
     expect(within(panel()).getByRole('button', { name: 'D · Dig' })).toHaveAttribute('aria-pressed', 'true')
     keys('Enter')
-    expect(within(panel()).getByText('4 of 4 suggested actions reviewed')).toBeInTheDocument()
-    expect(within(panel()).getByText('Every suggested action is reviewed')).toBeInTheDocument()
+    expect(within(panel()).getByText('4 of 4 actions checked')).toBeInTheDocument()
+    expect(within(panel()).getByText('Every action is checked')).toBeInTheDocument()
 
     await waitFor(() => expect(server.sent().get(A)).toBeDefined(), { timeout: 3000 })
     expect(server.sent().get(S1)).toMatchObject({ number: 7, review: 'confirmed' })
@@ -206,7 +206,7 @@ describe('TagPage, suggested actions', () => {
 
   it('opens the actions queue from the address and leaves the review with Esc', async () => {
     const { router } = show(`/videos/${ID}/tag?mode=review&queue=actions`)
-    await screen.findByRole('region', { name: 'Review actions' })
+    await screen.findByRole('region', { name: 'Actions to check' })
     keys('ArrowDown')
     expect(within(panel()).getByRole('heading', { name: /Reception at 0:12\.2/ })).toBeInTheDocument()
     keys('?')
@@ -220,7 +220,7 @@ describe('TagPage, suggested actions', () => {
 
   it('accepts the rest of a rally at once', async () => {
     const { server } = show(`/videos/${ID}/tag?mode=review&queue=actions`)
-    await screen.findByRole('region', { name: 'Review actions' })
+    await screen.findByRole('region', { name: 'Actions to check' })
     fireEvent.click(within(panel()).getByRole('button', { name: /Accept the rest of this rally \(4\)/ }))
     expect(within(panel()).getByText('Accepted 4 actions of this rally.')).toBeInTheDocument()
     await waitFor(() => expect(server.sent().size).toBe(4), { timeout: 3000 })
@@ -228,46 +228,40 @@ describe('TagPage, suggested actions', () => {
   })
 })
 
-describe('TagPage, sure actions and the ones that need you', () => {
-  // The serve and the set are sure; the reception and the attack need the coach.
+describe('TagPage, sure actions and the ones to check', () => {
+  // The serve and the set are sure; the reception and the attack are to check.
   const mixed = (): Tagging => {
     const base = data()
     return {
       ...base,
       events: base.events.map((e) =>
-        e.id === S1 || e.id === E ? { ...e, model_sure: true } : e.id === R ? { ...e, model_sure: false, model_alternative: 'D:them' } : e,
+        e.id === S1 || e.id === E ? { ...e, review: 'auto' as const, model_sure: true } : e.id === R ? { ...e, model_sure: false, model_alternative: 'D:them' } : e,
       ),
     }
   }
 
-  it('walks the ones that need you first, with WiePlay\'s other answer', async () => {
-    show(`/videos/${ID}/tag?mode=review&queue=actions`, mixed())
-    const region = await screen.findByRole('region', { name: 'Review actions' })
-    expect(await within(region).findByText('Needs you: 2')).toBeInTheDocument()
-    expect(within(region).getByRole('heading', { name: /Reception at/ })).toBeInTheDocument()
-    expect(within(region).getByText('Or maybe: Dig, Them')).toBeInTheDocument()
-  })
-
-  it('accepts every sure action in one step, after asking', async () => {
+  it("walks only those to check, and takes WiePlay's other answer with its button", async () => {
     const { server } = show(`/videos/${ID}/tag?mode=review&queue=actions`, mixed())
-    const region = await screen.findByRole('region', { name: 'Review actions' })
-    fireEvent.click(await within(region).findByRole('button', { name: 'Accept all sure actions (2)' }))
-    const dialog = await screen.findByRole('alertdialog', { name: 'Accept 2 sure actions?' })
-    expect(within(dialog).getByText(/2 actions need you\./)).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Accept 2' }))
-    expect(await within(region).findByText('Accepted 2 sure actions. 2 need you.')).toBeInTheDocument()
-    await waitFor(() => expect(server.sent().size).toBe(2), { timeout: 3000 })
-    expect(server.sent().get(S1)?.review).toBe('confirmed')
-    expect(server.sent().get(E)?.review).toBe('confirmed')
+    const region = await screen.findByRole('region', { name: 'Actions to check' })
+    expect(await within(region).findByText('2 actions still to check')).toBeInTheDocument()
+    expect(within(region).getByRole('heading', { name: /Reception at/ })).toBeInTheDocument()
+    expect(within(region).getByText('WiePlay is 80% sure of this action.')).toBeInTheDocument()
+    // No button accepts many at once: the sure ones count already.
+    expect(within(region).queryByRole('button', { name: /Accept all/ })).not.toBeInTheDocument()
+    fireEvent.click(within(region).getByRole('button', { name: 'Or: Dig, Them' }))
+    expect(within(region).getByRole('heading', { name: /Attack at/ })).toBeInTheDocument()
+    await waitFor(() => expect(server.sent().get(R)).toBeDefined(), { timeout: 3000 })
+    expect(server.sent().get(R)).toMatchObject({ code: 'D', side: 'them', review: 'corrected' })
+    expect(server.sent().get(S1)).toBeUndefined()
   })
 })
 
-describe('TagPage, action suggestions switched off', () => {
+describe("TagPage, WiePlay's action tagging switched off", () => {
   const off: Analysis = {
     ...analysis,
     actions: {
       ...(analysis.actions as NonNullable<Analysis['actions']>),
-      suggestions: { unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0 },
+      suggestions: { auto: 0, check: 0, confirmed: 0, corrected: 0, rejected: 0 },
       proposed: 0,
       gate: {
         mode: 'off', open: false, reason: 'off', finder: 'v0', games: 0, precision: null, contact_recall: null, trained_at: null,
@@ -280,9 +274,9 @@ describe('TagPage, action suggestions switched off', () => {
 
   it('says why in the Actions queue, what is measured, and keeps "Mark actions reviewed" for a tagged game', async () => {
     const { reviewed } = show(`/videos/${ID}/tag?mode=review&queue=actions`, tagged(), off)
-    const region = await screen.findByRole('region', { name: 'Review actions' })
-    expect(await within(region).findByText('Action suggestions are switched off.')).toBeInTheDocument()
-    expect(within(region).getByText(/Measured on 61 hand-checked rallies: 58% of the suggestions are fully right/)).toBeInTheDocument()
+    const region = await screen.findByRole('region', { name: 'Actions to check' })
+    expect(await within(region).findByText('WiePlay’s action tagging is switched off.')).toBeInTheDocument()
+    expect(within(region).getByText(/Measured on 61 hand-checked rallies: 58% of WiePlay’s actions are fully right/)).toBeInTheDocument()
     fireEvent.click(within(region).getByRole('button', { name: 'Mark actions reviewed' }))
     await waitFor(() => expect(reviewed).toHaveBeenCalled())
   })
@@ -290,8 +284,8 @@ describe('TagPage, action suggestions switched off', () => {
   it('says it on the analysis card too, with the switch', async () => {
     show(`/videos/${ID}/tag`, tagged(), off)
     const card = await screen.findByRole('region', { name: 'Automatic rallies' })
-    const actions = within(card).getByRole('region', { name: 'Suggested actions' })
-    expect(within(actions).getByText('Action suggestions are switched off.')).toBeInTheDocument()
+    const actions = within(card).getByRole('region', { name: 'Actions' })
+    expect(within(actions).getByText('WiePlay’s action tagging is switched off.')).toBeInTheDocument()
     expect(within(actions).getByText(/Of 40 sure ones, 0 were wrong\./)).toBeInTheDocument()
     expect(within(actions).getByRole('switch', { name: 'Actions reviewed' })).not.toBeChecked()
   })

@@ -447,6 +447,8 @@ function RallyFacts({ rally }: { rally: Segment }) {
                 </li>
               ))}
             </ul>
+          ) : rally.score_conflict ? (
+            <p data-check="true">{scoreNoteText(t, rally.score_note)}</p>
           ) : (
             <p>{t('tagging.review.whyRally', { confidence: formatPercent(rally.score_confidence ?? rally.confidence) || '–' })}</p>
           )}
