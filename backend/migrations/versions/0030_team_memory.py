@@ -1,7 +1,7 @@
 """team memory: what WiePlay knows about a team's players and rotations (PLAN §10.5b)
 
-Revision ID: 0029
-Revises: 0028
+Revision ID: 0030
+Revises: 0029
 Create Date: 2026-10-20 20:00:00.000000
 """
 
@@ -11,8 +11,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision: str = "0029"
-down_revision: str | None = "0028"
+revision: str = "0030"
+down_revision: str | None = "0029"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
