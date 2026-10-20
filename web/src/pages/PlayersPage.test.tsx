@@ -26,7 +26,7 @@ const calls = (fetch: ReturnType<typeof vi.fn>, method: string, path: string) =>
 describe('PlayersPage', () => {
   it('shows the cards by team with their pictures, readings and how far the actions are identified', async () => {
     show(playersState())
-    expect(await screen.findByRole('heading', { name: /Players in this video/ })).toHaveTextContent('beta')
+    expect(await screen.findByRole('heading', { name: /Players in this video/ })).toHaveTextContent('Beta')
     expect(screen.getByText('25% of actions identified')).toBeInTheDocument()
     expect(screen.getByText('3 cards: 2 ours, 1 theirs')).toBeInTheDocument()
     expect(screen.getByText(/0 of 3 cards named/)).toBeInTheDocument()

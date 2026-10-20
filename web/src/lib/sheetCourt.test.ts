@@ -68,10 +68,10 @@ describe('the scoresheet in the video', () => {
   })
 
   it('says what a note is without naming a person', () => {
-    expect(noteText(t, note({}))).toBe('Timeout (them) at 5:4')
+    expect(noteText(t, note({}))).toBe('Timeout (Them) at 5:4')
     expect(noteText(t, note({ kind: 'sanction', sanction: 'W' }), { us: 'KSCW H3', them: 'Volero' })).toBe('Yellow card (Volero) at 5:4')
     expect(noteText(t, note({ kind: 'sanction', sanction: 'P', side: 'us' }), { us: 'KSCW H3', them: 'Volero' })).toBe('Red card (KSCW H3): point to Volero at 5:4')
-    expect(noteText(t, note({ kind: 'sub', number_in: 17, side: 'us' }))).toBe('Substitution (us): #17 in at 5:4')
+    expect(noteText(t, note({ kind: 'sub', number_in: 17, side: 'us' }))).toBe('Substitution (Us): #17 in at 5:4')
     expect(cardTone('W')).toBe('yellow')
     expect(cardTone('DP')).toBe('red')
     expect(cardTone('E')).toBe('dark')
@@ -79,8 +79,8 @@ describe('the scoresheet in the video', () => {
 
   it('says what disagrees at the break', () => {
     const n = note({ issues: ['score_line', 'log', 'short_break'], line: [4, 4], log: [3, 4], start_ms: 0, end_ms: 12_000 })
-    expect(issueText(t, n, 'score_line')).toBe('the score line says 4:4 here')
-    expect(issueText(t, n, 'log')).toBe('the scoreboard’s log says 3:4 here')
+    expect(issueText(t, n, 'score_line')).toBe('The score line says 4:4 here')
+    expect(issueText(t, n, 'log')).toBe('The scoreboard’s log says 3:4 here')
     expect(issueText(t, n, 'short_break')).toMatch(/only 12 s/)
   })
 })

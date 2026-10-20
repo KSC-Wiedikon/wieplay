@@ -130,7 +130,7 @@ describe('a sheet read from the photo', () => {
     // "Next cell to check" goes to the first doubtful one (ours first); "It is right" accepts it.
     fireEvent.click(screen.getByRole('button', { name: 'Next cell to check' }))
     await waitFor(() => expect(box('KSCW H3', 'II', 2)).toHaveFocus())
-    expect(screen.getByText(/Read: 14 \(11\?\) · not sure/)).toBeInTheDocument()
+    expect(screen.getByText(/Read: 14 \(11\?\) · Not sure/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'It is right' }))
     expect(await screen.findByText('Read from the photo, already used by the scoring; optional: check 1 cell')).toBeInTheDocument()
     expect(box('KSCW H3', 'II', 2)).not.toHaveAttribute('data-read')

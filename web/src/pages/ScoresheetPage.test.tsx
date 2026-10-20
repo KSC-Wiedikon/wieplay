@@ -377,7 +377,7 @@ describe('ScoresheetPage', () => {
       expect(pdfPages).toHaveBeenCalledWith(scan)
 
       for (const page of [1, 2]) {
-        const editor = await screen.findByRole('dialog', { name: new RegExp(`^Black out the dates of birth and licence numbers\\W+page ${page} of 2$`) })
+        const editor = await screen.findByRole('dialog', { name: new RegExp(`^Black out the dates of birth and licence numbers\\W+Page ${page} of 2$`) })
         const img = within(editor).getByRole('img', { name: 'The photo to black out' })
         Object.defineProperty(img, 'naturalWidth', { value: 3200 })
         Object.defineProperty(img, 'naturalHeight', { value: 2262 })

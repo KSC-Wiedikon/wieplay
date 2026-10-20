@@ -26,7 +26,7 @@ export function isSuggestion(segment: Kind): boolean {
   return segment.kind === 'rally' && segment.source === 'model' && segment.review === 'unreviewed'
 }
 
-export const GAP_KINDS: readonly GapKind[] = ['warmup', 'set_break', 'timeout', 'stoppage', 'other_dead']
+export const GAP_KINDS: readonly GapKind[] = ['warmup', 'set_break', 'timeout', 'stoppage', 'substitution', 'other_dead']
 
 /** Dead time with a label (warm-up, set break, timeout, stoppage, after the match). */
 export function isGap(kind: SegmentKind): kind is GapKind {
@@ -194,16 +194,21 @@ export function gapProgress(segments: readonly Segment[], seen: ReadonlySet<stri
   return { done: Math.max(0, seen.size - open), total: seen.size }
 }
 
-/** The review's progress: rallies and gap labels together. */
+/**
+ * The review's progress: rallies and gap labels together, and the parts split off or made in
+ * this session (`pending`) that still wait: open is what the review's walk still visits.
+ */
 export function allProgress(
   segments: readonly Segment[],
   seen: ReadonlySet<string>,
   seenGaps: ReadonlySet<string>,
   rejectedBefore: number,
+  pending: ReadonlySet<string> = new Set(),
 ): ReviewProgress {
   const rallies = reviewProgress(segments, seen, rejectedBefore)
   const gaps = gapProgress(segments, seenGaps)
-  return { done: rallies.done + gaps.done, total: rallies.total + gaps.total }
+  const waiting = pending.size === 0 ? 0 : segments.filter((s) => pending.has(s.id) && !isProposal(s)).length
+  return { done: rallies.done + gaps.done, total: rallies.total + gaps.total + waiting }
 }
 
 // Who served and who won: the coach's facts, else the model's suggestions (PLAN §10.3).
@@ -230,6 +235,24 @@ export function effectiveWinner(rally: Pick<Segment, 'won_by' | 'model_won_by'>)
 export function scoreAfter(rally: Pick<Segment, 'score_us_after' | 'score_them_after' | 'score_source'>): { text: string; suggested: boolean } | null {
   if (rally.score_us_after === null || rally.score_them_after === null) return null
   return { text: `${rally.score_us_after}:${rally.score_them_after}`, suggested: rally.score_source === 'model' }
+}
+
+/**
+ * Where the suggestions nobody reviewed lie between the rallies of a list (in time order): rally
+ * id → how many come before it (after the rally above), `after`: how many after the last. The
+ * score line counts them, so the score of the list jumps there.
+ */
+export function openBetween(rallies: readonly Segment[], suggestions: readonly Segment[]): { before: Map<string, number>; after: number } {
+  const before = new Map<string, number>()
+  if (rallies.length === 0) return { before, after: 0 }
+  const sorted = [...suggestions].sort((a, b) => a.start_ms - b.start_ms)
+  let next = 0
+  for (const rally of rallies) {
+    const from = next
+    while (next < sorted.length && (sorted[next] as Segment).start_ms < rally.start_ms) next += 1
+    if (next > from) before.set(rally.id, next - from)
+  }
+  return { before, after: sorted.length - next }
 }
 
 /** A model's set that nobody has accepted or rejected yet. */

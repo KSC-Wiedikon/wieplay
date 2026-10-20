@@ -15,12 +15,15 @@
 //              won, lost (gewonnen, verloren): who won the rally; break (we served),
 //              side-out (they served)
 //
-// Words of one kind are alternatives ("attack block": either), kinds together must all hold.
+// Any case reads ("Attack", "attack"); the hints and the words written back for a chip are
+// capitalised. Words of one kind are alternatives ("attack block": either), kinds together must
+// all hold.
 // A tag matches when its own terms and its rally's hold; a rally when its terms hold and, with
 // tag terms, one of its tags matches them. The server reads the same `TagSearch` for the stats
 // and smart reels (backend/wieplay/core/search.py) and counts the same way.
 
 import { parseEntry, skillByCode } from './grammar'
+import { capitalize } from './labels'
 import { periodAt, ralliesOf } from './rallies'
 import type { Period, RosterEntry, Segment, Side, Tag, Taxonomy } from './types'
 
@@ -370,28 +373,29 @@ export function searchParam(search: TagSearch | null): string | null {
 
 // --- writing terms back as words -----------------------------------------------------------------
 
+// Written capitalised, as the hints offer them (the parser reads any case).
 const WORDS: Record<'en' | 'de', { side: Record<Side, string>; skill: Record<string, string>; ungraded: string; outcome: Record<Outcome, string>; set: string; rotation: string; zone: Record<ZoneEnd, string>; won: Record<Side, string>; serving: Record<Side, string> }> = {
   en: {
-    side: { us: 'us', them: 'them' },
-    skill: { serve: 'serve', reception: 'reception', set: 'set', attack: 'attack', block: 'block', dig: 'dig', freeball: 'freeball' },
-    ungraded: 'ungraded',
-    outcome: { point: 'point', error: 'error', play: 'in play' },
-    set: 'set',
-    rotation: 'rotation',
-    zone: { from: 'from', to: 'to', any: 'zone' },
-    won: { us: 'won', them: 'lost' },
-    serving: { us: 'break', them: 'side-out' },
+    side: { us: 'Us', them: 'Them' },
+    skill: { serve: 'Serve', reception: 'Reception', set: 'Set', attack: 'Attack', block: 'Block', dig: 'Dig', freeball: 'Freeball' },
+    ungraded: 'Ungraded',
+    outcome: { point: 'Point', error: 'Error', play: 'In play' },
+    set: 'Set',
+    rotation: 'Rotation',
+    zone: { from: 'From', to: 'To', any: 'Zone' },
+    won: { us: 'Won', them: 'Lost' },
+    serving: { us: 'Break', them: 'Side-out' },
   },
   de: {
-    side: { us: 'wir', them: 'gegner' },
-    skill: { serve: 'aufschlag', reception: 'annahme', set: 'zuspiel', attack: 'angriff', block: 'block', dig: 'abwehr', freeball: 'freeball' },
-    ungraded: 'unbewertet',
-    outcome: { point: 'punkt', error: 'fehler', play: 'im spiel' },
-    set: 'satz',
-    rotation: 'rotation',
-    zone: { from: 'von', to: 'nach', any: 'zone' },
-    won: { us: 'gewonnen', them: 'verloren' },
-    serving: { us: 'break', them: 'side-out' },
+    side: { us: 'Wir', them: 'Gegner' },
+    skill: { serve: 'Aufschlag', reception: 'Annahme', set: 'Zuspiel', attack: 'Angriff', block: 'Block', dig: 'Abwehr', freeball: 'Freeball' },
+    ungraded: 'Unbewertet',
+    outcome: { point: 'Punkt', error: 'Fehler', play: 'Im Spiel' },
+    set: 'Satz',
+    rotation: 'Rotation',
+    zone: { from: 'Von', to: 'Nach', any: 'Zone' },
+    won: { us: 'Gewonnen', them: 'Verloren' },
+    serving: { us: 'Break', them: 'Side-out' },
   },
 }
 
@@ -574,60 +578,61 @@ export interface HintOptions {
   limit?: number
 }
 
-const KEYWORDS: Record<'en' | 'de', [string, HintKind][]> = {
+/** What the hints offer, capitalised ("Set" the skill, "Set …" the set number); every one parses. */
+export const SEARCH_KEYWORDS: Readonly<Record<'en' | 'de', readonly (readonly [string, HintKind])[]>> = {
   en: [
-    ['attack', 'skill'],
-    ['serve', 'skill'],
-    ['reception', 'skill'],
-    ['set', 'skill'],
-    ['block', 'skill'],
-    ['dig', 'skill'],
-    ['freeball', 'skill'],
-    ['set ', 'set'],
-    ['rotation ', 'rotation'],
-    ['from ', 'zoneFrom'],
-    ['to ', 'zoneTo'],
-    ['zone ', 'zone'],
-    ['us', 'side'],
-    ['them', 'side'],
-    ['kill', 'skillGrade'],
-    ['ace', 'skillGrade'],
-    ['blocked', 'skillGrade'],
-    ['point', 'outcome'],
-    ['error', 'outcome'],
-    ['in play', 'outcome'],
-    ['ungraded', 'grade'],
-    ['won', 'won'],
-    ['lost', 'won'],
-    ['side-out', 'serving'],
-    ['break', 'serving'],
+    ['Attack', 'skill'],
+    ['Serve', 'skill'],
+    ['Reception', 'skill'],
+    ['Set', 'skill'],
+    ['Block', 'skill'],
+    ['Dig', 'skill'],
+    ['Freeball', 'skill'],
+    ['Set ', 'set'],
+    ['Rotation ', 'rotation'],
+    ['From ', 'zoneFrom'],
+    ['To ', 'zoneTo'],
+    ['Zone ', 'zone'],
+    ['Us', 'side'],
+    ['Them', 'side'],
+    ['Kill', 'skillGrade'],
+    ['Ace', 'skillGrade'],
+    ['Blocked', 'skillGrade'],
+    ['Point', 'outcome'],
+    ['Error', 'outcome'],
+    ['In play', 'outcome'],
+    ['Ungraded', 'grade'],
+    ['Won', 'won'],
+    ['Lost', 'won'],
+    ['Side-out', 'serving'],
+    ['Break', 'serving'],
   ],
   de: [
-    ['angriff', 'skill'],
-    ['aufschlag', 'skill'],
-    ['annahme', 'skill'],
-    ['zuspiel', 'skill'],
-    ['block', 'skill'],
-    ['abwehr', 'skill'],
-    ['freeball', 'skill'],
-    ['satz ', 'set'],
-    ['rotation ', 'rotation'],
-    ['von ', 'zoneFrom'],
-    ['nach ', 'zoneTo'],
-    ['zone ', 'zone'],
-    ['wir', 'side'],
-    ['gegner', 'side'],
-    ['kill', 'skillGrade'],
-    ['ass', 'skillGrade'],
-    ['geblockt', 'skillGrade'],
-    ['punkt', 'outcome'],
-    ['fehler', 'outcome'],
-    ['im spiel', 'outcome'],
-    ['unbewertet', 'grade'],
-    ['gewonnen', 'won'],
-    ['verloren', 'won'],
-    ['side-out', 'serving'],
-    ['break', 'serving'],
+    ['Angriff', 'skill'],
+    ['Aufschlag', 'skill'],
+    ['Annahme', 'skill'],
+    ['Zuspiel', 'skill'],
+    ['Block', 'skill'],
+    ['Abwehr', 'skill'],
+    ['Freeball', 'skill'],
+    ['Satz ', 'set'],
+    ['Rotation ', 'rotation'],
+    ['Von ', 'zoneFrom'],
+    ['Nach ', 'zoneTo'],
+    ['Zone ', 'zone'],
+    ['Wir', 'side'],
+    ['Gegner', 'side'],
+    ['Kill', 'skillGrade'],
+    ['Ass', 'skillGrade'],
+    ['Geblockt', 'skillGrade'],
+    ['Punkt', 'outcome'],
+    ['Fehler', 'outcome'],
+    ['Im Spiel', 'outcome'],
+    ['Unbewertet', 'grade'],
+    ['Gewonnen', 'won'],
+    ['Verloren', 'won'],
+    ['Side-out', 'serving'],
+    ['Break', 'serving'],
   ],
 }
 
@@ -661,7 +666,7 @@ export function searchHints(text: string, { lang, roster = [], sets = [1, 2, 3, 
     return choices
       .filter((n) => String(n).startsWith(typed))
       .slice(0, 9)
-      .map((n) => ({ insert: String(n), label: `${words(before).at(-1) ?? ''} ${n}`, kind: NUMBER_HINT[numberKind] }))
+      .map((n) => ({ insert: String(n), label: `${capitalize(words(before).at(-1) ?? '')} ${n}`, kind: NUMBER_HINT[numberKind] }))
   }
   if (/^#?\d{0,2}$/.test(typed) && (typed.startsWith('#') || typed !== '')) {
     const digits = typed.replace('#', '')
@@ -671,8 +676,8 @@ export function searchHints(text: string, { lang, roster = [], sets = [1, 2, 3, 
       .slice(0, limit)
       .map((r) => ({ insert: `#${r.number}`, label: `#${r.number}`, kind: 'player' as const, detail: r.name ?? undefined }))
   }
-  const first = KEYWORDS[lang]
-  const other = KEYWORDS[lang === 'en' ? 'de' : 'en']
+  const first = SEARCH_KEYWORDS[lang]
+  const other = SEARCH_KEYWORDS[lang === 'en' ? 'de' : 'en']
   const seen = new Set<string>()
   const out: SearchHint[] = []
   for (const [keyword, kind] of [...first, ...other]) {

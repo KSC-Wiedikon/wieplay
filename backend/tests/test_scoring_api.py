@@ -386,6 +386,59 @@ def test_model_sets_and_gaps_are_answered_like_proposals(
     ]
 
 
+def test_gap_labels_keep_their_ids_from_one_scoring_to_the_next(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    played, _ = match()
+    analysed(analyser, played)
+
+    def labels() -> dict[str, tuple[str, int, int]]:
+        segments = tagging(club["coach"], ready)["segments"]
+        return {
+            s["id"]: (s["kind"], s["start_ms"], s["end_ms"])
+            for s in segments
+            if s["kind"] != "rally" and s["source"] == "model" and s["review"] == "unreviewed"
+        }
+
+    before = labels()
+    assert len(before) >= 3  # warm-up, set breaks, after the match
+    # The review shows one of them while every decision scores again (/changes, /scoring):
+    # the same labels keep their ids, so it stays on screen.
+    club["coach"].post(f"/api/videos/{ready['id']}/scoring")
+    assert labels() == before
+    rally = rallies_of(tagging(club["coach"], ready))[3]
+    change(club["coach"], ready, {**_seg_in(rally), "review": "confirmed", "won_by": "them"})
+    after = labels()
+    assert set(after) == set(before)
+    # One answered: it leaves the model's open labels, the others stay as they were.
+    first = next(iter(before))
+    seg = next(s for s in tagging(club["coach"], ready)["segments"] if s["id"] == first)
+    change(club["coach"], ready, {**_seg_in(seg), "review": "confirmed"})
+    club["coach"].post(f"/api/videos/{ready['id']}/scoring")
+    assert set(labels()) == set(before) - {first}
+
+
+def test_a_substitution_is_a_coachs_break_label(
+    ready: Any, club: dict[str, TestClient], analyser: TestClient
+) -> None:
+    played, _ = match()
+    analysed(analyser, played)
+    gap = next(s for s in tagging(club["coach"], ready)["segments"] if s["kind"] == "set_break")
+    # The review's "Sub" on the model's break: relabelled, and kept by every scoring after it.
+    change(club["coach"], ready, {**_seg_in(gap), "kind": "substitution", "review": "corrected"})
+    club["coach"].post(f"/api/videos/{ready['id']}/scoring")
+    there = [
+        (s["kind"], s["review"])
+        for s in tagging(club["coach"], ready)["segments"]
+        if s["start_ms"] < gap["end_ms"] and s["end_ms"] > gap["start_ms"] and s["kind"] != "rally"
+    ]
+    assert there == [("substitution", "corrected")]
+    # Not a kind the API makes up.
+    bad = {**_seg_in(gap), "id": str(uuid.uuid4()), "base_version": 0, "kind": "sub"}
+    r = club["coach"].post(f"/api/videos/{ready['id']}/changes", json={"segments": [bad]})
+    assert r.status_code == 422
+
+
 def test_timeouts_from_the_benches(
     ready: Any, club: dict[str, TestClient], analyser: TestClient
 ) -> None:

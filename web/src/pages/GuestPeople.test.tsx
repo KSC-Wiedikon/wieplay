@@ -94,7 +94,7 @@ describe('a guest team page', () => {
     const [gina, paul] = within(people).getAllByRole('row').slice(1) as [HTMLElement, HTMLElement]
     expect(gina).toHaveTextContent('Gina Gast')
     expect(gina).toHaveTextContent('(you)')
-    expect(gina).toHaveTextContent('Set up · last')
+    expect(gina).toHaveTextContent('Set up · Last')
     expect(paul).toHaveTextContent('7Paul Gast')
     expect(paul).toHaveTextContent('Not yet')
     // Nobody removes themselves.
@@ -242,7 +242,7 @@ describe('a guest team\'s seasons', () => {
     const take = within(dialog).getByRole('button', { name: 'Take along' })
     expect(take).toBeDisabled()
     const box = await within(dialog).findByRole('checkbox', { name: /9 · Pia Gast/ })
-    expect(dialog).toHaveTextContent('Player · last in 2025/26')
+    expect(dialog).toHaveTextContent('Player · Last in 2025/26')
     fireEvent.click(box)
     fireEvent.click(take)
     await waitFor(() => expect(requests(fetch, 'POST', `${PEOPLE}/earlier`)).toEqual([{ member_ids: [pia.member_id] }]))

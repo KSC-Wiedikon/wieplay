@@ -35,8 +35,16 @@ Side = Literal["us", "them"]
 Review = Literal["unreviewed", "confirmed", "corrected", "rejected", "merged"]
 # A serve tag may sit slightly before the rally marker (the toss).
 SERVE_SLACK_MS = 2000
+# substitution: a coach's label only (the review's "Sub"); the model calls such a break a stoppage.
 SegmentKind = Literal[
-    "rally", "possession", "timeout", "set_break", "warmup", "stoppage", "other_dead"
+    "rally",
+    "possession",
+    "timeout",
+    "set_break",
+    "warmup",
+    "stoppage",
+    "substitution",
+    "other_dead",
 ]
 
 

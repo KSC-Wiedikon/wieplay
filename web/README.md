@@ -129,7 +129,12 @@ The wordmark is the text "WiePlay" in Bricolage Grotesque ExtraBold, self-hosted
     `Enter` accept, `X` reject, `←/→` start and `Shift+←/→` end by 0.25 s (`Alt`: one frame), `M`
     merge with the next, `S` split at the playhead, `1`/`2` who served, `3`/`4` who won (the
     rally's `won_by`, a fact the server scores again around), `U` undo, `↑/↓` move, `Esc` back
-    to tagging.
+    to tagging. Under Accept and Reject a row of buttons says "Not a rally, it's a:" Timeout `T`,
+    Sub (a substitution, its own kind, no key), Set break `B`, Warm-up `W`, Stoppage `D`, Other
+    `O`; on a break WiePlay labelled the same buttons say which break it is, and "It's a rally"
+    (`R`) rejects the label and makes a rally there to set and accept. The item on screen that
+    leaves the data (the server's scoring replaced it) is found again by place; "Every suggestion
+    is reviewed" shows only when nothing is open.
     Every answer is an ordinary segment change through the outbox: accept sets `review:
     "confirmed"`, a moved boundary `"corrected"`, reject deletes with `review: "rejected"` (kept by
     the server as a negative); merge corrects the first and rejects the second; a split adds a

@@ -14,7 +14,7 @@ export const playersEn = {
       failed: 'Finding the players failed.',
       done: 'Players found',
     },
-    beta: 'beta',
+    beta: 'Beta',
     find: 'Find players (beta, takes about {{time}})',
     findHint:
       'WiePlay follows the people on the court through every set and groups them into cards by their shirt numbers. It takes about {{time}} per match; check the cards it marks as unsure.',
@@ -122,7 +122,7 @@ export const playersEn = {
     again: 'Show the skipped ones',
     toGallery: 'To the gallery',
     seconds: '{{n}} s on court',
-    read: 'reads #{{number}}',
+    read: 'Reads #{{number}}',
     crops: 'More pictures',
     answers: 'Answer',
     whoIsIt: 'Who is it?',

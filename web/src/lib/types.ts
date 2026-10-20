@@ -437,12 +437,12 @@ export type Side = 'us' | 'them'
 /** merged: a proposal folded into another one (merged_into); neither a rally nor a negative. */
 export type Review = 'unreviewed' | 'confirmed' | 'corrected' | 'rejected' | 'merged'
 export type TimePrecision = 'live' | 'adjusted' | 'frame'
-export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'other_dead'
+export type SegmentKind = 'rally' | 'possession' | 'timeout' | 'set_break' | 'warmup' | 'stoppage' | 'substitution' | 'other_dead'
 /**
  * Dead time worth a label (PLAN §6.6): before the first serve, between sets, a team timeout, a
  * long mid-set interruption, after the match. Normal short dead time between rallies has none.
  */
-export type GapKind = 'warmup' | 'set_break' | 'timeout' | 'stoppage' | 'other_dead'
+export type GapKind = 'warmup' | 'set_break' | 'timeout' | 'stoppage' | 'substitution' | 'other_dead'
 /** Where on the video a team stands: near is the camera's end. */
 export type CourtSide = 'near' | 'far'
 /**
@@ -881,7 +881,8 @@ export interface Scoring {
    * 0.9 the sets bar asks the coach to set both for set 1 (the rules derive the other sets).
    */
   sides_confidence?: number | null
-  gaps: Record<GapKind, number>
+  /** The model's labels (a substitution is a coach's only). */
+  gaps: Partial<Record<GapKind, number>>
   first_serve_ms: number | null
   vs_coach: ScoringVsCoach | null
 }

@@ -66,8 +66,8 @@ describe('Team page: helpers', () => {
     expect(within(row).getByText('D1')).toBeInTheDocument()
     expect(within(row).getAllByText('17.10.2026 by Jo Trainer')[0]).toBeInTheDocument()
     expect(within(row).getAllByText('Reviews the home games')[0]).toBeInTheDocument()
-    expect(within(section).getByText('download videos')).toBeInTheDocument()
-    expect(within(section).getByText('review WiePlay’s suggestions, tag, correct scores')).toBeInTheDocument()
+    expect(within(section).getByText('Download videos')).toBeInTheDocument()
+    expect(within(section).getByText('Review WiePlay’s suggestions, tag, correct scores')).toBeInTheDocument()
     expect(within(section).getByRole('link', { name: /How to help/ })).toHaveAttribute('href', '/how-to-help')
   })
 

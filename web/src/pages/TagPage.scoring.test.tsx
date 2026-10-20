@@ -133,8 +133,12 @@ const data = (): Tagging =>
     ],
   })
 
-/** /changes like the API: rows keep what the request doesn't name (source, the model's fields, the serve call). */
-function fakeServer(initial: Tagging) {
+/**
+ * /changes like the API: rows keep what the request doesn't name (source, the model's fields, the
+ * serve call). `regap`: like the server before 20.10.2026, every scoring labels the open breaks
+ * again under new ids.
+ */
+function fakeServer(initial: Tagging, { regap = false } = {}) {
   const segments = new Map(initial.segments.map((s) => [s.id, s]))
   const periods = new Map(initial.periods.map((p) => [p.id, p]))
   const posts: ChangesIn[] = []
@@ -153,6 +157,14 @@ function fakeServer(initial: Tagging) {
       periods.set(p.id, { ...prev, ...rest, version: prev.version + 1, deleted_at: stamp(deleted) } as Period)
     }
     const touched = new Set([...input.segments.map((s) => s.id), ...input.periods.map((p) => p.id)])
+    if (regap) {
+      for (const s of [...segments.values()]) {
+        if (s.kind === 'rally' || s.source !== 'model' || s.review !== 'unreviewed' || s.deleted_at || touched.has(s.id)) continue
+        segments.delete(s.id)
+        const id = `${s.id.slice(0, 24)}${(posts.length % 16).toString(16)}${s.id.slice(25)}`
+        segments.set(id, { ...s, id, version: 1 })
+      }
+    }
     return {
       events: [],
       segments: [...segments.values()].filter((s) => !s.deleted_at || touched.has(s.id)),
@@ -170,8 +182,8 @@ function fakeServer(initial: Tagging) {
   return { posts, changes, current, sentSegments, sentPeriods }
 }
 
-function show(initial = data(), { url = `/videos/${ID}/tag`, state = { analysis: analysis() } } = {}) {
-  const server = fakeServer(initial)
+function show(initial = data(), { url = `/videos/${ID}/tag`, state = { analysis: analysis() }, regap = false } = {}) {
+  const server = fakeServer(initial, { regap })
   const scored: unknown[] = []
   const fetch = vi.fn(
     stubFetch({
@@ -263,7 +275,9 @@ describe('TagPage, automatic scoring', () => {
 
     // First the timeout (in time order): a break, labelled, without merge or split.
     expect(within(panel()).getByRole('heading', { name: /Timeout at 0:25\.0/ })).toBeInTheDocument()
-    expect(within(panel()).getByRole('button', { name: 'Label as Timeout' })).toHaveAttribute('aria-pressed', 'true')
+    const breaks = within(panel()).getByRole('group', { name: 'This break is a:' })
+    expect(within(breaks).getByRole('button', { name: 'Timeout' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(breaks).getByRole('button', { name: 'Stoppage' })).toHaveAttribute('aria-pressed', 'false')
     expect(within(panel()).queryByRole('button', { name: /Merge with next/ })).not.toBeInTheDocument()
     keys('Enter')
     expect(within(panel()).getByText('Accepted: Timeout at 0:25.0.')).toBeInTheDocument()
@@ -283,7 +297,7 @@ describe('TagPage, automatic scoring', () => {
     // The stoppage is a timeout: T relabels it (corrected) and goes on.
     expect(within(panel()).getByRole('heading', { name: /Stoppage at 1:10\.0/ })).toBeInTheDocument()
     keys('t')
-    expect(within(panel()).getByText('Now a Timeout: 1:10.0.')).toBeInTheDocument()
+    expect(within(panel()).getByText('Now a timeout: 1:10.0.')).toBeInTheDocument()
     // The last break is no break at all: X.
     expect(within(panel()).getByRole('heading', { name: /Other break at 2:20\.0/ })).toBeInTheDocument()
     keys('x')
@@ -369,6 +383,28 @@ describe('TagPage, automatic scoring', () => {
     expect(scored).toHaveLength(0)
   })
 
+  it('goes on with the review when the scoring labels the break on screen again (not "every suggestion is reviewed")', async () => {
+    const { server } = show(data(), { url: `/videos/${ID}/tag?mode=review`, regap: true })
+    await screen.findByRole('region', { name: 'Review suggestions' })
+    keys('Enter') // the timeout
+    keys('Enter') // the rally
+    expect(within(panel()).getByRole('heading', { name: /Stoppage at 1:10\.0/ })).toBeInTheDocument()
+    // The answers reach the server, whose scoring gives the open breaks new ids.
+    await waitFor(() => expect(server.posts.length).toBeGreaterThan(0), { timeout: 3000 })
+    await waitFor(() => expect(server.current().segments.some((s) => s.id === G2)).toBe(false))
+    await waitFor(() => expect(within(panel()).getByRole('heading', { name: /Stoppage at 1:10\.0/ })).toBeInTheDocument())
+    expect(within(panel()).queryByText('Every suggestion is reviewed')).not.toBeInTheDocument()
+    expect(within(panel()).getByText('3 of 5 suggestions reviewed')).toBeInTheDocument()
+    // A break that is play after all: "It's a rally" (R) makes one there to set and accept.
+    fireEvent.click(within(panel()).getByRole('button', { name: 'It’s a rally' }))
+    expect(within(panel()).getByRole('heading', { name: /Rally at 1:\d\d\.\d/ })).toBeInTheDocument()
+    expect(within(panel()).getByText('4 of 6 suggestions reviewed')).toBeInTheDocument() // the new rally waits
+    keys('Enter')
+    keys('x') // the last break: no break at all
+    expect(within(panel()).getByText('5 of 5 suggestions reviewed')).toBeInTheDocument()
+    expect(within(panel()).getByText('Every suggestion is reviewed')).toBeInTheDocument()
+  })
+
   it('lists the new review keys with ?', async () => {
     show(data(), { url: `/videos/${ID}/tag?mode=review` })
     await screen.findByRole('region', { name: 'Review suggestions' })
@@ -376,7 +412,7 @@ describe('TagPage, automatic scoring', () => {
     const dialog = screen.getByRole('dialog', { name: 'Keys' })
     expect(within(dialog).getByText('KSCW H3 serves, Smash 05 serves; the same key again takes the call back')).toBeInTheDocument()
     expect(within(dialog).getByText('KSCW H3 won the rally, Smash 05 won it; the same key again takes it back')).toBeInTheDocument()
-    expect(within(dialog).getByText('A break is a warm-up, set break, timeout, stoppage or other break; on a rally: no rally, that break')).toBeInTheDocument()
+    expect(within(dialog).getByText('Which break: warm-up, set break, timeout, stoppage, other (a substitution: the “Sub” button); on a rally: not a rally, that break')).toBeInTheDocument()
   })
 })
 

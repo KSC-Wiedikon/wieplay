@@ -435,8 +435,8 @@ function DeskLayout({
   const rallyProgress = useMemo(() => reviewProgress(view.segments, review.seen, review.rejectedBefore), [view.segments, review.seen, review.rejectedBefore])
   const live = useMemo(() => ({ total: rallyProgress.total, open: rallyProgress.total - rallyProgress.done }), [rallyProgress])
   const progress = useMemo(
-    () => allProgress(view.segments, review.seen, review.seenGaps, review.rejectedBefore),
-    [view.segments, review.seen, review.seenGaps, review.rejectedBefore],
+    () => allProgress(view.segments, review.seen, review.seenGaps, review.rejectedBefore, review.pending),
+    [view.segments, review.seen, review.seenGaps, review.rejectedBefore, review.pending],
   )
   const byHand = rallies.length - suggestionCount(view.segments)
   const actionCount = useMemo(() => actionItems(view.events).length, [view.events])

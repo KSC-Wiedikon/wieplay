@@ -2,7 +2,15 @@
 
 import type { TFunction } from 'i18next'
 import type { SideNames } from './sides'
-import type { RosterEntry, ScoreNote, ScoreReason, Segment, SegmentKind, Side, TaxonomySkill } from './types'
+import type { GapKind, RosterEntry, ScoreNote, ScoreReason, Segment, SegmentKind, Side, TaxonomySkill } from './types'
+
+/**
+ * The first letter big, for a word shown on its own (a value from the API or the taxonomy in a
+ * cell, a chip, a list). Words inside a sentence keep their own case.
+ */
+export function capitalize(text: string): string {
+  return text.charAt(0).toLocaleUpperCase() + text.slice(1)
+}
 
 /** Volleyball's skills; their names double as the categories that have grade meanings. */
 const VOLLEYBALL = ['serve', 'reception', 'set', 'attack', 'block', 'dig', 'freeball'] as const
@@ -63,6 +71,12 @@ export function periodLabel(t: TFunction, sport: string, no: number): string {
 export function segmentKindLabel(t: TFunction, kind: SegmentKind, sport: string): string {
   if (sport === 'basketball' && kind === 'set_break') return t('tagging.basketball.quarterBreak')
   return t(`tagging.segment.kind.${kind}`)
+}
+
+/** A break inside a sentence: "a timeout", "another break" ("ein Timeout" in German). */
+export function aSegmentKind(t: TFunction, kind: GapKind, sport: string): string {
+  if (sport === 'basketball' && kind === 'set_break') return t('tagging.basketball.aQuarterBreak')
+  return t(`tagging.segment.aKind.${kind}`)
 }
 
 /**

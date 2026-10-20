@@ -75,20 +75,22 @@ describe('SearchBar', () => {
     // Empty: a few words to start with.
     expect(within(screen.getByRole('listbox', { name: 'Suggestions' })).getAllByRole('option')).toHaveLength(6)
     fireEvent.change(input(), { target: { value: 'rot' } })
-    expect(screen.getByRole('option', { name: /rotation …/ })).toHaveAttribute('aria-selected', 'true')
+    // Capitalised, as the chips say it.
+    expect(screen.getByRole('option', { name: /Rotation …/ })).toHaveAttribute('aria-selected', 'true')
     fireEvent.keyDown(input(), { key: 'Enter' })
-    expect(text()).toBe('rotation ')
+    expect(text()).toBe('Rotation ')
     // After the keyword, its numbers.
     const options = within(screen.getByRole('listbox')).getAllByRole('option')
-    expect(options.map((o) => o.textContent)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `rotation ${n}Our rotation (setter zone 1–6)`))
+    expect(options.map((o) => o.textContent)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `Rotation ${n}Our rotation (setter zone 1–6)`))
     fireEvent.keyDown(input(), { key: 'ArrowDown' })
     fireEvent.keyDown(input(), { key: 'Enter' })
-    expect(text()).toBe('rotation 2 ')
-    expect(screen.getByText('Rotation 2')).toBeInTheDocument()
+    expect(text()).toBe('Rotation 2 ')
+    // The chip (the box's text reads the same now).
+    expect(screen.getByText('Rotation 2', { selector: 'span' })).toBeInTheDocument()
     // # suggests our players by name.
-    fireEvent.change(input(), { target: { value: 'rotation 2 #' } })
+    fireEvent.change(input(), { target: { value: 'Rotation 2 #' } })
     fireEvent.mouseDown(screen.getByRole('option', { name: /#7Luca Brunner/ }))
-    expect(text()).toBe('rotation 2 #7 ')
+    expect(text()).toBe('Rotation 2 #7 ')
     expect(screen.getByText('#7 Luca Brunner')).toBeInTheDocument()
     // Escape closes the list.
     fireEvent.keyDown(input(), { key: 'Escape' })
@@ -101,7 +103,7 @@ describe('SearchBar', () => {
     expect(screen.getByText('# Kill')).toBeInTheDocument()
     expect(screen.getByText('Them')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove “Attack”' }))
-    expect(text()).toBe('# them')
+    expect(text()).toBe('# Them')
     expect(screen.getByText('Grade #')).toBeInTheDocument()
   })
 

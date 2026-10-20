@@ -41,7 +41,7 @@ describe('PlayersStep', () => {
   it('says how many players were found and named, and leads to the gallery', async () => {
     show(summary())
     expect(await screen.findByRole('region', { name: 'Players in this video' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: /Players in this video/ })).toHaveTextContent('beta')
+    expect(screen.getByRole('heading', { name: /Players in this video/ })).toHaveTextContent('Beta')
     expect(screen.getByText('14 cards (8 ours, 6 theirs) · 3 named')).toBeInTheDocument()
     expect(screen.getByText('25% of actions with a player')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Name the players' })).toHaveAttribute('href', `/videos/${ID}/players`)

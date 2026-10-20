@@ -233,7 +233,7 @@ describe('clips on the video page', () => {
     const table = await screen.findByRole('table', { name: 'Clips' })
     expect(within(table).getByText('Arm high')).toBeInTheDocument()
     // Whose a team clip is, unless it is mine.
-    expect(within(table).getByText('by Mia Keller')).toBeInTheDocument()
+    expect(within(table).getByText('By Mia Keller')).toBeInTheDocument()
     expect(within(table).queryByText('by Luca Brunner')).not.toBeInTheDocument()
     expect(within(table).queryByRole('button', { name: 'Edit Kill by Mia' })).not.toBeInTheDocument()
     expect(within(table).queryByRole('button', { name: 'Delete Kill by Mia' })).not.toBeInTheDocument()
@@ -499,7 +499,7 @@ describe('comments', () => {
     fireEvent.change(within(list).getByDisplayValue('Thanks'), { target: { value: 'Thanks a lot' } })
     fireEvent.click(within(list).getByRole('button', { name: 'Save' }))
     expect(await within(list).findByText('Thanks a lot', { selector: 'span' })).toBeInTheDocument()
-    expect(within(list).getByText(/edited/)).toBeInTheDocument()
+    expect(within(list).getByText(/Edited/)).toBeInTheDocument()
     expect(sent(fetch, 'PATCH', `/api/comments/${(comments[3] as Comment).id}`)).toEqual([{ body: 'Thanks a lot' }])
 
     fireEvent.click(within(list).getAllByRole('button', { name: 'Delete comment' })[0] as HTMLElement)

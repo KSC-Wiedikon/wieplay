@@ -271,7 +271,7 @@ describe('TeamPage season stats', () => {
     expect(within(section).queryByRole('button', { name: /^Play/ })).not.toBeInTheDocument()
     expect(within(four).getByRole('link', { name: 'Open Rotation 4, Attacks as a reel: 12' })).toHaveAttribute(
       'href',
-      '/reels/new?team=92&season=2026%2F27&side=us&codes=A&q=rotation+4',
+      '/reels/new?team=92&season=2026%2F27&side=us&codes=A&q=Rotation+4',
     )
     expect(within(section).getByText('Setter #3')).toBeInTheDocument()
 
@@ -315,7 +315,7 @@ describe('TeamPage season stats', () => {
     expect(await within(section).findByText(/4 tags match/)).toBeInTheDocument()
     expect(within(section).getByRole('link', { name: 'Download CSV' })).toHaveAttribute('href', `/api/teams/92/stats.csv?lang=en${searched.replace('?', '&')}`)
     const kills = within(section).getByRole('link', { name: 'Open #7 Luca Brunner, Kills (#) as a reel: 3' })
-    expect(kills).toHaveAttribute('href', '/reels/new?team=92&season=2026%2F27&member=107&codes=A&grades=%23&q=set+3')
+    expect(kills).toHaveAttribute('href', '/reels/new?team=92&season=2026%2F27&member=107&codes=A&grades=%23&q=Set+3')
 
     fireEvent.click(within(section).getByRole('tab', { name: 'Zones' }))
     fireEvent.change(await within(section).findByRole('combobox', { name: 'Who' }), { target: { value: 'player:107' } })
@@ -323,7 +323,7 @@ describe('TeamPage season stats', () => {
     const five = within(court).getByRole('link', { name: 'Open Zone 5: 6 serves, 2 aces, 1 errors, efficiency +16.7% as a reel: 6' })
     fireEvent.click(five)
     expect(router.state.location.pathname).toBe('/reels/new')
-    expect(new URLSearchParams(router.state.location.search).get('q')).toBe('set 3 to 5')
+    expect(new URLSearchParams(router.state.location.search).get('q')).toBe('Set 3 To 5')
   })
 
   it('says when nothing of the season is tagged yet', async () => {

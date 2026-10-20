@@ -448,7 +448,7 @@ function Legend() {
   )
 }
 
-const KINDS: SegmentKind[] = ['rally', 'timeout', 'set_break', 'warmup', 'stoppage', 'other_dead']
+const KINDS: SegmentKind[] = ['rally', 'timeout', 'substitution', 'set_break', 'warmup', 'stoppage', 'other_dead']
 
 /** The selected rally, timeout or break: kind, start, end, point; nudge or set to the playhead. */
 export function SegmentPanel({ id }: { id: string }) {

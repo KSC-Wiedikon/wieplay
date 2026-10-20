@@ -23,7 +23,7 @@ export const libraryEn = {
     watch: 'Watch',
     watchFor: 'Watch {{title}}',
     nowPlaying: 'Playing {{title}}',
-    by: 'by {{name}}',
+    by: 'By {{name}}',
     queuePosition: '{{n}} of {{total}}',
     stop: 'Stop',
     columns: {
@@ -100,7 +100,7 @@ export const libraryEn = {
     toPerson: 'To {{name}}',
     someone: 'someone',
     unknownAuthor: 'Someone',
-    edited: 'edited',
+    edited: 'Edited',
     edit: 'Edit comment',
     delete: 'Delete comment',
     deleteTitle: 'Delete this comment?',
