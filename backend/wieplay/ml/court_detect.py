@@ -77,8 +77,10 @@ CONFIDENT = 0.6
 class CourtGuess:
     points: dict[str, tuple[float, float]]  # landmark → (u, v), those inside the frame
     court_to_image: court.Mat3
-    confidence: float  # share of the visible model lines on line pixels; halved if ambiguous
+    confidence: float  # 0..1; v1: share of the visible model lines on line pixels, halved if
+    # ambiguous; v3 (court_find.py): sure exactly from court_find.SURE_CONFIDENCE
     stats: dict[str, Any] = field(default_factory=dict)
+    sure: bool = False  # v3: the court may be used without a coach's look
 
 
 # --- line pixels ---------------------------------------------------------------------------
