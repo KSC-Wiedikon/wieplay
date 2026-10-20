@@ -192,6 +192,8 @@ function Numbers({ data, video, tagging, onPlay, tab, onTab, filter, search, tax
         number: tag.number,
         player_name: playerName(tagging?.roster ?? [], tag.side, tag.number, tag.member_id),
         video_title: null,
+        us_name: sides?.us,
+        them_name: sides?.them,
       },
       skill,
     )

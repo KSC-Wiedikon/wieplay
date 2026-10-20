@@ -1088,6 +1088,9 @@ export interface Piece {
   number: number | null
   member_id: number | null
   player_name: string | null
+  /** The teams' short names in the piece's video ("KSCW H3", "Volero"); them_name null when the opponent isn't known. */
+  us_name?: string | null
+  them_name?: string | null
   /** The score after the rally the moment belongs to, when it is tagged. */
   score_us: number | null
   score_them: number | null

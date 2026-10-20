@@ -33,6 +33,8 @@ describe('pieceLabel', () => {
     expect(pieceLabel(t, piece({}), attack)).toBe('#7 Alex Muster · Attack · # Kill')
     expect(pieceLabel(t, piece({ player_name: null }), attack)).toBe('#7 · Attack · # Kill')
     expect(pieceLabel(t, piece({ side: 'them', number: 12, player_name: null }), attack)).toBe('Them #12 · Attack · # Kill')
+    expect(pieceLabel(t, piece({ side: 'them', number: 12, player_name: null, them_name: 'Volero' }), attack)).toBe('Volero #12 · Attack · # Kill')
+    expect(pieceLabel(t, piece({ number: null, us_name: 'KSCW H3' }), attack)).toBe('KSCW H3 · Attack · # Kill')
   })
 
   it('prefers the caption, else the video for a piece without a tag', () => {

@@ -162,6 +162,7 @@ export const libraryEn = {
       anyone: 'Anyone',
       side: 'Side',
       bothSides: 'Both',
+      opponents: 'Opponents',
       skills: 'Skills',
       grades: 'Grades',
       noGrade: 'No grade',
