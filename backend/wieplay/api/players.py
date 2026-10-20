@@ -601,11 +601,26 @@ class TeamsQuestionOut(BaseModel):
     far_team: str | None
 
 
+class RecognisedOut(BaseModel):
+    """A card of ours whose read number the team's earlier games back (PLAN §10.5b): offered
+    as named, accepted in one step ("Accept all")."""
+
+    card: uuid.UUID
+    number: int
+    member_id: int | None
+    name: str | None
+    games: int  # the team's games that named the number
+    confidence: float
+    crops: list[list[int]]
+
+
 class QueueOut(BaseModel):
     items: list[QueueItemOut]  # the cards to check, the most footage named per answer first
     named: int  # cards the coach answered
     sure_share: float  # the players' footage on sure cards (0..1)
     teams: TeamsQuestionOut | None
+    # Cards of ours the team's memory recognises (not in `items`): "Accept all" names them.
+    recognised: list[RecognisedOut] = []
 
 
 class AnswerIn(BaseModel):
@@ -665,9 +680,23 @@ def _queue_out(db: Session, video: Video) -> QueueOut:
     spans = identify.rally_spans(db, video) if found is not None or prior is not None else []
     memory = _memory_of(db, video)
     items = []
+    recognised = []
     for c in identify.queue(rows):
-        on_court = identify.on_court_numbers(c, rows, found, spans, prior)
         mem = memory(c)
+        if mem is not None and mem.sure:
+            recognised.append(
+                RecognisedOut(
+                    card=c.id,
+                    number=mem.number,
+                    member_id=mem.member_id,
+                    name=_member_name(db, mem.member_id),
+                    games=mem.games,
+                    confidence=round(mem.confidence, 3),
+                    crops=c.crops[:4],
+                )
+            )
+            continue
+        on_court = identify.on_court_numbers(c, rows, found, spans, prior)
         if mem is not None and mem.number not in on_court[:1] and c.team == "us":
             on_court = [mem.number, *(n for n in on_court if n != mem.number)]
         items.append(
@@ -685,6 +714,7 @@ def _queue_out(db: Session, video: Video) -> QueueOut:
         named=sum(1 for c in identify.live(rows) if identify.named(c)),
         sure_share=identify.sure_share(rows),
         teams=TeamsQuestionOut.model_validate(question) if question else None,
+        recognised=recognised,
     )
 
 
@@ -764,6 +794,65 @@ def answer(
         db, actor, "player_identified", "video", str(video.id),
         cluster=str(row.id), kind=body.kind, number=body.number, team=body.team,
         into=str(body.into) if body.into else None, relinked=len(relinked),
+    )  # fmt: skip
+    db.commit()
+    return AnsweredOut(
+        players=players_out(db, video, viewer, access, _store(request), _minutes(request)),
+        queue=_queue_out(db, video),
+        undo=undo,
+        relinked=relinked,
+    )
+
+
+def _member_name(db: Session, member_id: int | None) -> str | None:
+    from wieplay.core.models import WdMember
+
+    m = db.get(WdMember, member_id) if member_id is not None else None
+    return m.display_name if m is not None else None
+
+
+class AcceptRecognisedIn(BaseModel):
+    # The cards to name (those the queue offered); None: every recognised card now.
+    cards: list[uuid.UUID] | None = Field(default=None, max_length=1000)
+
+
+@router.post("/videos/{video_id}/players/accept-recognised", response_model=AnsweredOut)
+def accept_recognised(
+    video_id: uuid.UUID,
+    body: AcceptRecognisedIn,
+    request: Request,
+    viewer: ViewerDep,
+    db: DbDep,
+) -> AnsweredOut:
+    """ "Accept all": the coach names the cards the team's memory recognises with their read
+    numbers (PLAN §10.5b), as if answered one by one; the cards are then linked anew."""
+    video, access = _editable(db, viewer, video_id)
+    rows = players.clusters(db, video.id)
+    before = identify.snapshot(
+        db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id))
+    )
+    memory = _memory_of(db, video)
+    wanted = set(body.cards) if body.cards is not None else None
+    named = []
+    for c in identify.queue(rows):
+        mem = memory(c)
+        if mem is None or not mem.sure or (wanted is not None and c.id not in wanted):
+            continue
+        try:
+            players.assign(
+                db, video, c, number=mem.number, not_player=False, actor=viewer.member_id
+            )
+        except players.GalleryError:
+            continue  # the number left the roster snapshot since
+        named.append({"card": str(c.id), "number": mem.number})
+    db.flush()
+    relinked = identify.relink(db, video, players.clusters(db, video.id), viewer.member_id)
+    all_rows = list(db.scalars(select(PlayerCluster).where(PlayerCluster.video_id == video.id)))
+    undo = _changed(before, all_rows)
+    _reattribute(db, video, _store(request))
+    audit(
+        db, viewer.member_id, "players_recognised_accepted", "video", str(video.id),
+        cards=named, relinked=len(relinked),
     )  # fmt: skip
     db.commit()
     return AnsweredOut(

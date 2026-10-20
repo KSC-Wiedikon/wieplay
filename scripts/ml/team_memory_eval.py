@@ -240,9 +240,12 @@ def cards(args: argparse.Namespace) -> None:
         for c in players:
             if c["kind"] != "person" or c.get("ocr_number") is None or c["id"] in sure0:
                 continue
-            p = prior.get(int(c["ocr_number"]), 0.0)
-            conf = tp.reading_confidence(float(c.get("ocr_confidence") or 0), p)
-            if conf >= args.min_conf:
+            p = prior.get(int(c["ocr_number"]))
+            if (
+                p is not None
+                and known.get(int(c["ocr_number"]))
+                and tp.recognised(c.get("ocr_confidence"), p)
+            ):
                 memory.add(c["id"])
         share0 = sum(c["detections"] for c in players if c["id"] in sure0) / total
         share1 = sum(c["detections"] for c in players if c["id"] in memory) / total
@@ -252,10 +255,9 @@ def cards(args: argparse.Namespace) -> None:
             f"  footage of ours on sure cards: {100 * share0:.1f} % -> {100 * share1:.1f} % "
             f"({len(memory) - len(sure0)} cards named by the memory)"
         )
-        print(
-            f"  answers to 50/60/70 %: {answers_to(players, sure0, targets)} -> "
-            f"{answers_to(players, memory, targets)}"
-        )
+        batch = 1 if memory - sure0 else 0  # "Accept all" for the recognised ones
+        after = [None if a is None else a + batch for a in answers_to(players, memory, targets)]
+        print(f"  answers to 50/60/70 %: {answers_to(players, sure0, targets)} -> {after}")
         for c in sorted(players, key=lambda c: -c["detections"]):
             if c["id"] in memory - sure0:
                 print(
@@ -274,7 +276,6 @@ def main() -> None:
     b = sub.add_parser("cards")
     b.add_argument("cards", type=Path, nargs="+")
     b.add_argument("--sheets", type=Path, nargs="*")
-    b.add_argument("--min-conf", type=float, default=0.9)
     args = parser.parse_args()
     {"lineups": lineups, "cards": cards}[args.cmd](args)
 

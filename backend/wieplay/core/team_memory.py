@@ -527,7 +527,8 @@ def refresh(db: Session, team: WdTeam, fp: str | None = None) -> TeamMemory:
     rotations["liberos"] = sorted({n for f in facts for n in f.liberos})
     rotations["check"] = check_rotations(facts, earlier)
     mem.rotations = rotations
-    mem.games = len(videos)
+    # The games the memory learnt from: those that named any of our numbers.
+    mem.games = sum(1 for f in facts if f.named or f.starts)
     mem.models = team_scores(db, team, videos)
     mem.fingerprint = fp
     mem.refreshed_at = datetime.now(UTC)
@@ -735,6 +736,9 @@ class CardMemory:
     member_id: int | None
     games: int
     confidence: float
+    # Offered as recognised: the team's games named the number and the reading is good
+    # (team_prior.recognised); a coach accepts these in one step.
+    sure: bool = False
 
     def as_json(self) -> dict[str, Any]:
         return {
@@ -742,6 +746,7 @@ class CardMemory:
             "member_id": self.member_id,
             "games": self.games,
             "confidence": round(self.confidence, 3),
+            "sure": self.sure,
         }
 
 
@@ -757,11 +762,14 @@ def card_memory(
     if p is None:
         p = min(prior.values(), default=0.5) / 2  # a number the team never played
     conf = tp.reading_confidence(float(read_conf or 0.0), p)
+    games = row.games if row is not None else 0
+    hidden = row is not None and row.hidden
     return CardMemory(
         number,
-        row.member_id if row is not None and not row.hidden else None,
-        row.games if row is not None else 0,
+        row.member_id if row is not None and not hidden else None,
+        games,
         conf,
+        sure=games > 0 and not hidden and tp.recognised(read_conf, p),
     )
 
 

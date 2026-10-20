@@ -393,3 +393,16 @@ def reading_confidence(read_conf: float, prior: float, roster_size: int = WRONG_
     right = read_conf * prior
     wrong = (1.0 - read_conf) * (1.0 / roster_size)
     return right / (right + wrong) if right + wrong > 0 else 0.0
+
+
+# A card of ours is offered as recognised (named in one step with "Accept all") when its read
+# number is this sure with the team's prior and the reader itself read it at least this well.
+MEMORY_SURE = 0.95
+MEMORY_MIN_READ = 0.6
+
+
+def recognised(read_conf: float | None, prior: float | None) -> bool:
+    """A card's read number the team's memory backs enough to offer it as named."""
+    if read_conf is None or prior is None or read_conf < MEMORY_MIN_READ:
+        return False
+    return reading_confidence(read_conf, prior) >= MEMORY_SURE

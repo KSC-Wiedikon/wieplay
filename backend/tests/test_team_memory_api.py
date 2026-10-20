@@ -185,3 +185,81 @@ def test_nothing_of_the_opponent_and_no_appearance_is_kept(
             "sets", "last_on", "source", "ambiguous", "fixed", "hidden", "fixed_by", "fixed_at",
             "updated_at",
         }  # fmt: skip
+
+
+def put_cards(app: FastAPI, video: Any, cards: list[dict[str, Any]]) -> dict[int, uuid.UUID]:
+    """A players run's cards as the job leaves them (no pictures needed here)."""
+    from wieplay.core.models import ModelRun
+    from wieplay.core.players import PlayerCluster
+
+    out = {}
+    with app.state.sessionmaker() as db:
+        run = ModelRun(
+            id=uuid.uuid4(), kind="players", video_id=uuid.UUID(video["id"]),
+            model_name="wieplay-players", model_version="test",
+        )  # fmt: skip
+        db.add(run)
+        db.flush()
+        for k, c in enumerate(cards, start=1):
+            row = PlayerCluster(
+                id=uuid.uuid4(), video_id=run.video_id, model_run_id=run.id, key=k,
+                team=c["team"], kind=c.get("kind", "person"),
+                tracks=[{"id": k, "t0": 1000 * k, "t1": 1000 * k + 500, "n": c["n"],
+                         "side": "near", "number": c.get("number"), "number_conf": 0.0,
+                         "crop": [0, k], "h": 100.0, "foot": None}],
+                crops=[[0, k]], detections=c["n"], ocr_number=c.get("number"),
+                ocr_confidence=c.get("conf"), confidence=c.get("sure", 0.3), source="model",
+            )  # fmt: skip
+            db.add(row)
+            out[k] = row.id
+        db.commit()
+    return out
+
+
+def test_a_second_game_s_cards_the_memory_recognises_are_named_in_one_step(
+    app: FastAPI, club: dict[str, TestClient], store: FakeStore, analyser: TestClient
+) -> None:
+    from wieplay.core.players import PlayerCluster
+
+    game_with_sheet(app, club, store, analyser)  # #7 and #11 start every set of the first game
+    second = make_ready(app, club, store, k=1)
+    ids = put_cards(
+        app,
+        second,
+        [
+            {"team": "us", "n": 400, "number": 7, "conf": 0.8},  # recognised
+            {"team": "us", "n": 300, "number": 11, "conf": 0.4},  # read too weakly
+            {"team": "us", "n": 200, "number": 2, "conf": 0.9},  # a number no game named
+            {"team": "them", "n": 500, "number": 7, "conf": 0.9},  # the opponent: never
+            {"team": "us", "n": 900, "kind": "pieces"},
+        ],
+    )
+    coach = club["coach"]
+    r = coach.get(f"/api/videos/{second['id']}/players/queue")
+    assert r.status_code == 200, r.text
+    found = r.json()
+    [rec] = found["recognised"]
+    assert rec["card"] == str(ids[1]) and rec["number"] == 7 and rec["games"] == 1
+    assert rec["confidence"] >= 0.95 and rec["name"]
+    assert str(ids[1]) not in {i["card"] for i in found["items"]}
+    weak = next(i for i in found["items"] if i["card"] == str(ids[2]))
+    assert weak["memory"]["number"] == 11 and weak["memory"]["sure"] is False
+    assert weak["on_court"][0] == 11  # offered first
+    state = coach.get(f"/api/videos/{second['id']}/players").json()
+    by_id = {c["id"]: c for c in state["clusters"]}
+    assert by_id[str(ids[3])]["memory"]["sure"] is False  # #2: no game named it
+    assert by_id[str(ids[4])]["memory"] is None and by_id[str(ids[5])]["memory"] is None
+
+    r = coach.post(f"/api/videos/{second['id']}/players/accept-recognised", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["queue"]["recognised"] == []
+    with app.state.sessionmaker() as db:
+        named = db.get(PlayerCluster, ids[1])
+        assert named is not None and named.number == 7 and named.assigned_by is not None
+    undo = coach.post(
+        f"/api/videos/{second['id']}/players/restore", json={"cards": r.json()["undo"]}
+    )
+    assert undo.status_code == 200, undo.text
+    with app.state.sessionmaker() as db:
+        back = db.get(PlayerCluster, ids[1])
+        assert back is not None and back.number is None
