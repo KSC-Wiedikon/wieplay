@@ -82,7 +82,12 @@ def test_a_long_rally_follows_volleyball() -> None:
         "near", "far", "far", "far", "near", "far", "far", "far", "near", "near", "near"
     ]  # fmt: skip
     assert out[-1][2] == "#"  # the winner's last attack: a kill
-    assert all(g is None for _, _, g in out[:-1])
+    # The rest from what follows each one: receptions, digs and sets attacked from "+", the
+    # serve the reception's mirror, the attack into the block covered "!", the block back to
+    # the attackers "!", the attack the other side dug and countered from "-".
+    assert [g for _, _, g in out] == ["-", "+", "+", "!", "!", "+", "+", "-", "+", "+", "#"]
+    guessed = [a.grade_guess for a in ac.label(rally(won="near"), cands, FPS, VIEW)]
+    assert guessed == [True] * 10 + [False]
 
 
 def test_noise_between_contacts_is_skipped() -> None:
@@ -149,7 +154,7 @@ def test_an_attack_out_and_a_block_point() -> None:
     # A dig of the winner's attack that failed: the attack is a kill.
     killed = [*attack, cand(4.5, "near", kind=ac.LOW)]
     out = run(rally(won="far", end_s=6.5), killed)
-    assert out[-2:] == [("A", "far", "#"), ("D", "near", None)]
+    assert out[-2:] == [("A", "far", "#"), ("D", "near", "=")]
 
 
 def test_an_overpass_and_a_freeball() -> None:
@@ -171,6 +176,37 @@ def test_an_overpass_and_a_freeball() -> None:
         cand(5.5, "near", kind=ac.LOW),
     ]
     assert [c for c, _, _ in run(rally(), freeball)] == ["S", "R", "E", "F", "D"]
+
+
+def test_grades_from_what_follows() -> None:
+    # Only a freeball back: the reception and the set "-", the serve "+"; the freeball and
+    # the dig wait for a winner.
+    freeball = [
+        cand(1.0, "near"),
+        cand(2.2, "far", kind=ac.LOW),
+        cand(3.2, "far"),
+        cand(4.0, "far", s_out=3.0, vy_out=-3.0),
+        cand(5.5, "near", kind=ac.LOW),
+    ]
+    assert [g for _, _, g in run(rally(), freeball)] == ["+", "-", "-", None, None]
+    # The rally dies on the receivers' side after the reception: the set that failed "=", the
+    # reception "-"; without a sure winner nothing is guessed there.
+    died = [cand(1.0, "near"), cand(2.2, "far", kind=ac.LOW), cand(3.2, "far")]
+    assert [g for _, _, g in run(rally(won="near", end_s=8.0), died)] == ["+", "-", "="]
+    assert [g for _, _, g in run(rally(won=None, end_s=8.0), died)] == [None, None, None]
+
+
+def test_a_guessed_grade_leaves_sure_as_it_is(monkeypatch: pytest.MonkeyPatch) -> None:
+    cands = [
+        cand(1.0, "near"),
+        cand(2.2, "far", kind=ac.LOW),
+        cand(3.2, "far"),
+        cand(4.0, "far", s_out=12.0, vy_out=4.0),
+    ]
+    monkeypatch.setattr(ac, "is_sure", lambda *_: True)
+    out = ac.label_sure(rally(won="far", end_s=6.0), cands, FPS, VIEW)
+    assert [a.grade for a in out] == ["-", "+", "+", "#"]
+    assert all(a.sure for a in out)
 
 
 def test_the_serve_comes_from_the_servers_side() -> None:

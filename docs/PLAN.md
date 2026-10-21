@@ -2689,7 +2689,17 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   unless lobbed, a first touch straight over an overpass `/`). Grade hints only when the
   scoring is sure who won: ace `#` (with `=` on the reception that touched it last), serve
   error `=`, kill `#` for the winner's last attack, `/` and `#` for an attack blocked for a
-  point, `=` for the loser's last attack; else no grade.
+  point, `=` for the loser's last attack. Every other action (21.10.2026, the owner: "already
+  grade them no?") gets the grade the next contacts give it (`sequence_grades`): a reception,
+  dig or set its side attacks from `+` (the order of contacts cannot tell `#` from `+`), one
+  only sent back as a freeball `-`, one the rally dies after on its side `=` (its first touch
+  `-`); the serve the mirror of the reception (R# R+ S-, R! S!, R- S+, R/ S/), an attack or
+  freeball the mirror of the other side's first touch (their overpass `+`), an attack into a
+  block `!` when the attackers cover, `-` when the blockers play it; a block touch `+` when
+  the blockers play next, `!` back to the attackers, `=` out. A guessed grade leaves the
+  action's "sure" as it is (time, skill and side): it adds nothing to check, and the coach
+  corrects it in the review or the regrade queue. Not yet measured against the coaches'
+  grades.
 - **v1, learned**: two gradient-boosted classifiers over every candidate (position, turn,
   speeds, the flights' depth, the side evidence, its place in the rally, v0's role): the skill
   or "no action", and the side. Labels: the tags of games whose actions a coach marked done,
