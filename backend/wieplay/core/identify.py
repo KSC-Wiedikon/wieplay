@@ -251,11 +251,13 @@ def name_pieces(
     number: int | None,
     not_player: bool,
     actor: int,
+    team: str | None = None,
 ) -> PlayerCluster:
     """Some pieces of a card are one person (a number, or not a player): they move to the card
     of that number (`holder`: the coach's, else the one the job is sure of; never seen at the
     same time), else to a new card named so. All of a card's pieces: the card itself is
-    named."""
+    named. `team`: the person plays for the other team than the card (a kit WiePlay took for
+    the other's): the pieces move there first."""
     from wieplay.core.players import assign
 
     wanted = {int(p) for p in pieces}
@@ -266,6 +268,8 @@ def name_pieces(
     else:
         part = split(db, card, sorted(wanted), actor)
         rows.append(part)
+    if team is not None and team != part.team:
+        set_team(db, video, part, team, actor)
     target = None
     if number is not None and not not_player:
         target = holder(rows, part, number)

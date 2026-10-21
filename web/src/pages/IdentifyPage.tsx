@@ -10,6 +10,7 @@ import { LoadError, Message } from '../components/Message'
 import { Modal } from '../components/Modal'
 import { PageHeader } from '../components/PageHeader'
 import { ProgressBar } from '../components/ProgressBar'
+import { Segmented } from '../components/Segmented'
 import { PageSpinner } from '../components/Spinner'
 import { ApiError } from '../lib/api'
 import { cx } from '../lib/cx'
@@ -548,8 +549,9 @@ function NamePieces({ count, offer, onName }: { count: number; offer: Offer; onN
       <p className="text-sm font-semibold">{t('identify.piecesAre', { count })}</p>
       <div className="flex flex-wrap gap-1.5">
         {offer.map((o) => (
-          <Button key={o.number} variant={o.onCourt ? 'primary' : 'secondary'} disabled={!some} title={o.name ?? undefined} onClick={() => onName(o.number)}>
-            #{o.number}
+          <Button key={o.number} variant={o.onCourt ? 'primary' : 'secondary'} disabled={!some} onClick={() => onName(o.number)} className="flex-col gap-0 leading-tight">
+            <span className="font-bold tabular-nums">#{o.number}</span>
+            {o.name && <span className="max-w-32 truncate text-xs font-normal">{o.name}</span>}
           </Button>
         ))}
         <input
@@ -641,13 +643,15 @@ function PiecesQuestion({ players, sheets, card, item, busy, canUndo, onAnswer, 
   const names = useSideNames()
   const [picked, setPicked] = useState<number[]>([])
   const [all, setAll] = useState(false)
-  const offer = numbersToOffer(card.team, item.on_court, players.roster)
+  // Whose kit the ticked pieces wear: the card's team, or the other (WiePlay mixed the kits up).
+  const [team, setTeam] = useState<Side>(card.team)
+  const offer = numbersToOffer(team, team === card.team ? item.on_court : [], players.roster)
   const tracks = [...card.tracks].sort((a, b) => b.n - a.n)
   const shown = all ? tracks : tracks.slice(0, PIECES_SHOWN)
   const toggle = (id: number) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
   const name = (number: number | null, notPlayer = false) => {
     if (busy || picked.length === 0) return
-    onAnswer({ kind: 'pieces', tracks: picked, number, not_player: notPlayer })
+    onAnswer({ kind: 'pieces', tracks: picked, number, not_player: notPlayer, ...(team !== card.team && { team }) })
   }
 
   // Keys: K or → skip, U undo (numbers are tapped: the pieces are ticked first).
@@ -688,7 +692,14 @@ function PiecesQuestion({ players, sheets, card, item, busy, canUndo, onAnswer, 
       )}
       {/* Kept in view while ticking down a long list of pieces (a phone). */}
       <div className="sticky bottom-0 z-10 -mx-3 -mb-3 flex flex-col gap-2 rounded-b-card border-t border-hairline bg-surface p-3 sm:-mx-4 sm:-mb-4 sm:p-4">
-        <NamePieces count={picked.length} offer={offer} onName={name} />
+        <Segmented
+          label={t('identify.piecesTeam')}
+          value={team}
+          options={(['us', 'them'] as const).map((side) => ({ value: side, label: t('identify.otherTeam', { team: sideLabel(t, side, names) }) }))}
+          onChange={(side) => setTeam(side)}
+          className="self-start"
+        />
+        <NamePieces key={team} count={picked.length} offer={offer} onName={name} />
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" disabled={busy} onClick={onSkip}>
             {t('identify.skip')}

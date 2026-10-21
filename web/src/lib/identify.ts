@@ -75,7 +75,8 @@ export type Answer =
   | { kind: 'team'; team: Side }
   | { kind: 'same_as'; into: string }
   | { kind: 'split'; tracks: number[] }
-  | { kind: 'pieces'; tracks: number[]; number: number | null; not_player: boolean }
+  // team: the person plays for the other team than the card's
+  | { kind: 'pieces'; tracks: number[]; number: number | null; not_player: boolean; team?: Side }
 
 export interface Moment {
   t_ms: number

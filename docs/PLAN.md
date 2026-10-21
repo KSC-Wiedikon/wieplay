@@ -3021,6 +3021,9 @@ all its footage, a pieces card half of its 24 biggest pieces (it shows those; "S
 the rest). A pieces card asks to tick the pieces of one person and tap the number: they join
 that number's card (the coach's, or the one the job is sure of, never seen at the same time),
 and the rest comes back for the next answer; naming the whole card makes it a person.
+"Whose kit" (21.10.2026, the owner: "how do I tell it's from team KSCW?") switches the
+numbers offered to the other team's (ours: the Wiedisync roster, with names): the ticked
+pieces move to that team first (`name_pieces` with `team`), then join the number's card.
 
 Measured on the job's own stages and local copies (`scripts/ml/players_eval.py`, the inputs
 the API hands the job with the sheet) against **by-eye labels of detections drawn uniformly
