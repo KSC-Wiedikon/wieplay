@@ -115,6 +115,7 @@ export class ActionReviewController {
     this.unsubscribe = this.store.subscribe(() => {
       const seen = modelIds(this.store.getView().events, this.state.seen)
       if (seen !== this.state.seen) this.set({ seen })
+      this.keepOneOnScreen()
     })
     return () => {
       this.unsubscribe()
@@ -183,6 +184,17 @@ export class ActionReviewController {
 
   stop = (): void => {
     if (this.state.active) this.set({ active: false, number: '' })
+  }
+
+  /**
+   * While actions are still to check one of them is on screen: when the one shown is gone from
+   * the data (a reload, a new run), the next one to check from where the video is takes its place.
+   */
+  private keepOneOnScreen(): void {
+    if (!this.state.active || this.current()) return
+    const now = this.playhead.video ? Math.round(this.playhead.video.currentTime * 1000) : 0
+    const next = nextOpenAction(this.items(), { id: '', t_ms: now })
+    if (next) this.go(next, { play: !(this.playhead.video?.paused ?? true) })
   }
 
   /** Shows an action: the player jumps to 1 s before its contact and plays (the loop is useLoopPlayback). */

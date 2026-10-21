@@ -193,6 +193,14 @@ describe('ActionReviewController', () => {
     expect(actions.getState().notice?.key).toBe('nothingSelected')
   })
 
+  it('keeps an action to check on screen when the one shown is gone from the data', async () => {
+    const { store, actions } = await setup()
+    expect(actions.getState().currentId).toBe('s1')
+    const fresh = data()
+    store.replaceBase({ ...fresh, events: fresh.events.filter((e) => e.id !== 's1') })
+    expect(actions.getState().currentId).toBe('r1')
+  })
+
   it("leaves the sure ones out of the walk and takes WiePlay's other answer with one button", async () => {
     const sure = bundle({
       segments: [rally({ id: R1, start_ms: 10_000, end_ms: 20_000 })],

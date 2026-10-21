@@ -238,6 +238,10 @@ export function ActionReviewPanel() {
             </span>
           </div>
         </>
+      ) : waiting > 0 ? (
+        <Button variant="primary" size="touch" className="self-start" onClick={press(actions.start)}>
+          {t('actions.resume')}
+        </Button>
       ) : progress.total > 0 || items.length > 0 ? (
         <Done videoId={video.id} reviewed={Boolean(reviewedAt)} />
       ) : (
@@ -287,11 +291,11 @@ function Facts({ tag, number }: { tag: Tag; number: string }) {
                 variant={on ? 'primary' : 'secondary'}
                 aria-pressed={on}
                 aria-label={t('actions.skillAs', { code: s.code, skill: skillLabel(t, s) })}
-                title={skillLabel(t, s)}
-                className="min-w-11 px-2 font-mono"
+                className="px-2.5"
                 onClick={press(() => actions.setSkill(s.code))}
               >
-                {s.code}
+                {skillLabel(t, s)}
+                <Kbd hidden={narrow}>{s.code}</Kbd>
               </Button>
             )
           })}
