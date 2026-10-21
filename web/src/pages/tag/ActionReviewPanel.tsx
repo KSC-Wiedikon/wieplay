@@ -84,8 +84,8 @@ function noticeText(t: TFunction, notice: ActionNotice, taxonomy: Taxonomy, name
 }
 
 /**
- * "To check · 62%" on WiePlay's unsure action; a small WiePlay mark on a sure one, and once a
- * person accepted or corrected it.
+ * "To check · 62%" on WiePlay's unsure action; a small WiePlay mark on a sure one, on a guess it
+ * did not ask about, and once a person accepted or corrected it.
  */
 export function ActionChip({ tag, className }: { tag: Tag; className?: string }) {
   const { t } = useTranslation()
@@ -105,7 +105,7 @@ export function ActionChip({ tag, className }: { tag: Tag; className?: string })
     )
   }
   if (isAutoTag(tag)) {
-    const full = t('actions.auto')
+    const full = tag.model_sure === false ? t('actions.guess') : t('actions.auto')
     return (
       <span data-action-suggestion="auto" title={full} className={cx('inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted', className)}>
         <SparkleIcon className="size-3.5" />

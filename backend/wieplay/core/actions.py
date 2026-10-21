@@ -5,9 +5,13 @@ coaches' answers.
     trajectory done, a training, rallies done, a set or serve changed ──actions job──▶
         tags (source "model", review "auto" when sure, else "check": to check) in every rally
         nobody tagged; in the rallies a coach tagged, only their score against the coach's
-    coach marks the actions done ──train_actions (debounced)──▶ v1 learned from every
-        reviewed game, kept only when it beats v0 on held-out games; new suggestions for
-        every game nobody has done yet
+    coach answers or tags actions ──train_actions (debounced)──▶ v1 learned from every
+        finished rally (finished_rallies), kept only when it beats v0 on held-out games;
+        new suggestions for every game nobody has done yet
+
+What WiePlay asks (choose_checks): in a team's first game every action it is unsure of; in
+every later one only ASK_RALLIES rallies, those it is least sure of. Its other unsure actions
+are its guesses: they count, "Sure only" leaves them out, and no training learns from them.
 
 The worker (wieplay/worker/actions.py, wieplay/ml/actions.py) works in the camera's terms (near
 and far); the sides of the rallies (which end we play at, PLAN §10.3) turn them into us and
@@ -32,6 +36,7 @@ from __future__ import annotations
 import uuid
 from bisect import bisect_left, bisect_right
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -84,11 +89,28 @@ def coach_event_filter() -> Any:
 
 
 def label_event_filter() -> Any:
-    """The tags of a game a coach marked done (training labels): the coach's and WiePlay's
-    sure ones ("done" is refused while any is still to check)."""
+    """The tags of a finished rally (training labels): the coach's and WiePlay's sure ones
+    (not its guesses nobody was asked about)."""
     return coach_event_filter() | (
-        Event.deleted_at.is_(None) & (Event.source == "model") & (Event.review == "auto")
+        Event.deleted_at.is_(None)
+        & (Event.source == "model")
+        & (Event.review == "auto")
+        & Event.model_sure.is_not(False)
     )
+
+
+def answered_event_filter() -> Any:
+    """A person's answer about an action: the coach's tags and a rejection of WiePlay's."""
+    return coach_event_filter() | ((Event.source == "model") & (Event.review == "rejected"))
+
+
+def unsure_untouched(e: Event) -> bool:
+    """WiePlay's action nobody answered and it is not sure of: asked (review "check") or its
+    guess (review "auto", `model_sure` false). Older rows have no `model_sure`: "auto" was
+    sure then."""
+    if e.source != "model" or e.deleted_at is not None or e.review not in tagging.MODEL_OWN:
+        return False
+    return e.model_sure is False or (e.model_sure is None and e.review != "auto")
 
 
 def _untouched() -> Any:
@@ -231,16 +253,20 @@ def coach_events(
 ) -> dict[uuid.UUID, list[Event]]:
     """The coach's tags per rally (a serve up to 2 s before the rally belongs to it); with
     `labels`, a done game's training labels (label_event_filter)."""
-    events = list(
-        db.scalars(
-            select(Event)
-            .where(
-                Event.video_id == video.id,
-                label_event_filter() if labels else coach_event_filter(),
-            )
-            .order_by(Event.t_ms)
+    events = db.scalars(
+        select(Event)
+        .where(
+            Event.video_id == video.id,
+            label_event_filter() if labels else coach_event_filter(),
         )
+        .order_by(Event.t_ms)
     )
+    return per_rally(rallies, events)
+
+
+def per_rally(rallies: list[Segment], events: Iterable[Event]) -> dict[uuid.UUID, list[Event]]:
+    """Tags per rally, by time (a serve up to 2 s before the rally belongs to it)."""
+    events = sorted(events, key=lambda e: e.t_ms)
     out: dict[uuid.UUID, list[Event]] = {}
     for rally in rallies:
         lo = rally.start_ms - tagging.SERVE_SLACK_MS
@@ -248,6 +274,72 @@ def coach_events(
         if found:
             out[rally.id] = found
     return out
+
+
+# --- what WiePlay asks --------------------------------------------------------------------------
+
+# A later game of a team asks about this many rallies: those WiePlay is least sure of.
+ASK_RALLIES = 5
+
+
+def first_game(db: Session, video: Video) -> bool:
+    """Whether this is the team's first game: no other game of the team has an answered
+    action, or this is the earliest that has. There WiePlay learns the team, so it asks about
+    every action it is unsure of."""
+    answered = select(Event.video_id).where(Event.code.in_(SKILLS), answered_event_filter())
+    earliest = db.scalars(
+        select(Video.id)
+        .where(
+            Video.lineage_id == video.lineage_id,
+            Video.sport.in_(SPORTS),
+            Video.deleted_at.is_(None),
+            Video.actions_reviewed_at.is_not(None) | Video.id.in_(answered),
+        )
+        .order_by(Video.recorded_on, Video.created_at, Video.id)
+        .limit(1)
+    ).first()
+    return earliest is None or earliest == video.id
+
+
+def choose_checks(db: Session, video: Video) -> int:
+    """Which of WiePlay's unsure actions it asks about (review "check"); the others stay its
+    guess (review "auto", `model_sure` false: they count, "Sure only" leaves them out). The
+    team's first game: every one. A later game: the rallies a person started on, then up to
+    ASK_RALLIES rallies in all, those with the most doubt (the most to learn from). Every
+    rally a person finishes trains WiePlay (_training_events). Returns how many are asked."""
+    unsure = [
+        e
+        for e in db.scalars(
+            select(Event).where(
+                Event.video_id == video.id, Event.source == "model", Event.deleted_at.is_(None)
+            )
+        )
+        if unsure_untouched(e)
+    ]
+    if not unsure:
+        return 0
+    asked: set[uuid.UUID | None]
+    if first_game(db, video):
+        asked = {e.segment_id for e in unsure}
+    else:
+        rallies = _live_rallies(db, video)
+        answered = db.scalars(
+            select(Event).where(
+                Event.video_id == video.id, Event.code.in_(SKILLS), answered_event_filter()
+            )
+        )
+        started = set(per_rally(rallies, answered))
+        doubt: dict[uuid.UUID, float] = {}
+        for e in unsure:
+            if e.segment_id is not None and e.segment_id not in started:
+                doubt[e.segment_id] = doubt.get(e.segment_id, 0) + 1 - float(e.confidence or 0)
+        room = max(0, ASK_RALLIES - len(started))
+        fresh = sorted(doubt, key=lambda r: (-doubt[r], str(r)))[:room]
+        asked = {*started, *fresh}
+    for e in unsure:
+        e.review = "check" if e.segment_id in asked else "auto"
+    db.flush()
+    return sum(e.review == "check" for e in unsure)
 
 
 # --- queueing --------------------------------------------------------------------------------
@@ -505,15 +597,34 @@ def video_inputs(db: Session, video: Video) -> dict[str, Any] | None:
     }
 
 
+def finished_rallies(db: Session, video: Video, rallies: list[Segment]) -> set[uuid.UUID]:
+    """The rallies whose actions are training labels: nothing in them left to WiePlay's doubt
+    (no unsure action of its nobody answered), and a person answered in them, or marked the
+    whole game's actions reviewed (then its rallies of sure actions count too)."""
+    live = db.scalars(select(Event).where(Event.video_id == video.id, Event.code.in_(SKILLS))).all()
+    doubt = set(per_rally(rallies, (e for e in live if unsure_untouched(e))))
+    if video.actions_reviewed_at is not None:
+        tagged = set(per_rally(rallies, (e for e in live if e.deleted_at is None)))
+    else:
+        answered = db.scalars(
+            select(Event).where(
+                Event.video_id == video.id, Event.code.in_(SKILLS), answered_event_filter()
+            )
+        )
+        tagged = set(per_rally(rallies, answered))
+    return tagged - doubt
+
+
 def _training_events(db: Session, video: Video) -> list[list[Any]]:
-    """The coach's tags of a reviewed game in the camera's terms: [t_ms, code, near|far,
-    rally id] for every tag in a rally whose sides are known."""
+    """The labels of a game's finished rallies (finished_rallies) in the camera's terms:
+    [t_ms, code, near|far, rally id] for every tag in a rally whose sides are known."""
     rallies = _live_rallies(db, video)
     sides = near_is_us(db, video, rallies)
+    finished = finished_rallies(db, video, rallies)
     out: list[list[Any]] = []
     for rally_id, events in coach_events(db, video, rallies, labels=True).items():
         near_us = sides.get(rally_id)
-        if near_us is None:
+        if near_us is None or rally_id not in finished:
             continue
         for e in events:
             if e.code not in SKILLS:
@@ -525,7 +636,8 @@ def _training_events(db: Session, video: Video) -> list[list[Any]]:
 
 def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     """What an actions job needs, read when it runs: the video's rallies with their sides,
-    the court, the current model; for a training, every reviewed game with its tags."""
+    the court, the current model; for a training, every game with finished rallies, with
+    their tags."""
     if job.kind == "actions":
         video = db.get(Video, job.video_id) if job.video_id else None
         if video is None:
@@ -540,26 +652,24 @@ def job_inputs(db: Session, job: Job) -> dict[str, Any]:
     skipped: list[dict[str, Any]] = []
     videos = db.scalars(
         select(Video)
-        .where(
-            Video.sport.in_(SPORTS), Video.status == "ready", Video.actions_reviewed_at.is_not(None)
-        )
+        .where(Video.sport.in_(SPORTS), Video.status == "ready")
         .order_by(Video.recorded_on, Video.id)
     )
     # Guest clubs that have not agreed to train the shared models (PLAN §4.5).
     no_training = guests.no_training_lineages(db)
     for video in videos:
+        reviewed = video.actions_reviewed_at is not None
         if video.lineage_id in no_training:
-            skipped.append({"video_id": str(video.id), "reason": "guest club, no training"})
-            continue
-        entry = video_inputs(db, video)
-        if entry is None:
-            continue
-        if actions_to_check(db, video.id):
-            skipped.append({"video_id": str(video.id), "reason": "to check"})
+            if reviewed:
+                skipped.append({"video_id": str(video.id), "reason": "guest club, no training"})
             continue
         events = _training_events(db, video)
         if not events:
-            skipped.append({"video_id": str(video.id), "reason": "no tags"})
+            if reviewed:
+                skipped.append({"video_id": str(video.id), "reason": "no tags"})
+            continue
+        entry = video_inputs(db, video)
+        if entry is None:
             continue
         # The team (its lineage): the training weighs a variant of its own (PLAN §10.5b).
         train.append({**entry, "team": str(video.lineage_id), "events": events})
@@ -762,6 +872,7 @@ def apply_actions(
         graded += int(bool(attributes))
         room -= 1
     db.flush()
+    asked = choose_checks(db, video)
     out: dict[str, Any] = {
         "finder": result.finder,
         "action_model_run": str(result.model_run_id) if result.model_run_id else None,
@@ -771,6 +882,7 @@ def apply_actions(
         "replaced": replaced,
         "skipped": dict(skipped),
         "sure": sure,
+        "asked": asked,
         "rallies": len(sides),
         "coach_rallies": len(locked),
         "stats": result.stats,
@@ -878,20 +990,21 @@ def complete_train(
     db.flush()
     after = gate_of(run, settings or get_settings())
     run.metrics = {**run.metrics, "gate": after.as_dict()}
-    if after.open and (result.accepted or own or not before.open):
+    renew = after.open and (result.accepted or own or not before.open)
+    for video in db.scalars(
+        select(Video).where(
+            Video.sport.in_(SPORTS),
+            Video.status == "ready",
+            Video.actions_reviewed_at.is_(None),
+        )
+    ):
+        # The games nobody has done yet: a team's first game may have become one it has
+        # answers of, so its later games ask less (choose_checks).
+        choose_checks(db, video)
         # A new model that is good enough (for every team, or a team's own), or the bar passed
-        # for the first time: suggestions for every game nobody has done yet.
-        trained = {str(v.get("video_id")) for v in result.dataset}
-        for video in db.scalars(
-            select(Video).where(
-                Video.sport.in_(SPORTS),
-                Video.status == "ready",
-                Video.actions_reviewed_at.is_(None),
-            )
-        ):
-            changed = result.accepted or not before.open or str(video.lineage_id) in own
-            if str(video.id) not in trained and changed:
-                queue_actions(db, video, reason="train_actions")
+        # for the first time: new suggestions (the rallies a person answered in stay).
+        if renew and (result.accepted or not before.open or str(video.lineage_id) in own):
+            queue_actions(db, video, reason="train_actions")
     return run
 
 
@@ -927,9 +1040,10 @@ def mark_reviewed(
     db: Session, video: Video, actor: int, reviewed: bool, train_delay: timedelta
 ) -> dict[str, Any]:
     """The coach says the video's actions are complete and right (or takes that back). Not
-    while actions are still to check: each one is answered first, so the coach stands behind
-    every label (WiePlay's sure ones included). Either way the training set changed: a
-    (debounced) training is queued."""
+    while actions are still to check: each one is answered first. WiePlay learns from every
+    finished rally anyway; a reviewed game adds its rallies of sure actions nobody answered
+    in (finished_rallies). Either way the training set changed: a (debounced) training is
+    queued."""
     if reviewed:
         if count := actions_to_check(db, video.id):
             raise ToCheck(count)

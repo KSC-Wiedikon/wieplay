@@ -9,7 +9,7 @@ PUT  /api/videos/{id}/roster    the roster snapshot (numbers, liberos, opponents
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -18,8 +18,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from wieplay.api.access import TeamAccess, visible_video
-from wieplay.api.deps import DbDep, ViewerDep, audit
-from wieplay.core import scoring, tagging
+from wieplay.api.deps import DbDep, SettingsDep, ViewerDep, audit
+from wieplay.core import actions, scoring, tagging
+from wieplay.core.config import Settings
 from wieplay.core.models import (
     Event,
     Period,
@@ -422,7 +423,9 @@ def _last_by_id[C: (tagging.EventIn, tagging.SegmentIn, tagging.PeriodIn)](
 
 
 @router.post("/videos/{video_id}/changes", response_model=ChangesOut)
-def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: DbDep) -> ChangesOut:
+def post_changes(
+    video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> ChangesOut:
     """Apply a batch from the outbox. Each item is an upsert by its id, based on the version
     the browser last saw; stale changes are skipped and reported. Every applied change
     lands in the revision log."""
@@ -456,6 +459,7 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
         tagging.rescore(db, video)
         if rescore_model:
             scoring.score_video(db, video, reason="changes")
+        _learn(db, video, settings, [i.code for i in items])
     except tagging.TaggingError as exc:
         db.rollback()
         raise HTTPException(422, str(exc)) from exc
@@ -466,6 +470,14 @@ def post_changes(video_id: uuid.UUID, body: ChangesIn, viewer: ViewerDep, db: Db
         periods=_periods(db, video, {p.id for p in periods}),
         stale=stale,
     )
+
+
+def _learn(db: Session, video: Video, settings: Settings, codes: list[str]) -> None:
+    """An action was tagged or answered: WiePlay learns from every rally a person finishes
+    (core/actions.finished_rallies), so a training follows (debounced: the next answer moves
+    it)."""
+    if video.sport in actions.SPORTS and any(code in actions.SKILLS for code in codes):
+        actions.queue_training(db, timedelta(seconds=settings.analysis_train_delay_seconds))
 
 
 SCORING_PERIOD_FIELDS = (
@@ -512,7 +524,9 @@ def _changes_scoring(
 
 
 @router.put("/events/{event_id}", response_model=EventOut)
-def put_event(event_id: uuid.UUID, body: EventPutIn, viewer: ViewerDep, db: DbDep) -> EventOut:
+def put_event(
+    event_id: uuid.UUID, body: EventPutIn, viewer: ViewerDep, db: DbDep, settings: SettingsDep
+) -> EventOut:
     if body.id != event_id:
         raise HTTPException(422, "Path and body ids differ")
     video, tax = _writable(db, viewer, body.video_id)
@@ -524,6 +538,7 @@ def put_event(event_id: uuid.UUID, body: EventPutIn, viewer: ViewerDep, db: DbDe
             db.rollback()
             return EventOut.model_validate(exc.row, from_attributes=True)
         tagging.rescore(db, video)
+        _learn(db, video, settings, [body.code])
     except tagging.TaggingError as exc:
         db.rollback()
         raise HTTPException(422, str(exc)) from exc

@@ -201,7 +201,7 @@ describe("TagPage, WiePlay's actions to check", () => {
 
     fireEvent.click(within(panel()).getByRole('button', { name: 'Mark actions reviewed' }))
     await waitFor(() => expect(reviewed).toHaveBeenCalled())
-    expect(await within(panel()).findByText('The actions are marked reviewed. WiePlay learns from this game.')).toBeInTheDocument()
+    expect(await within(panel()).findByText('The actions are marked reviewed. WiePlay learns from the whole game.')).toBeInTheDocument()
   })
 
   it('opens the actions queue from the address and leaves the review with Esc', async () => {
@@ -229,13 +229,20 @@ describe("TagPage, WiePlay's actions to check", () => {
 })
 
 describe('TagPage, sure actions and the ones to check', () => {
-  // The serve and the set are sure; the reception and the attack are to check.
+  // The serve is sure; the set is a guess WiePlay did not ask about; the reception and the
+  // attack are to check.
   const mixed = (): Tagging => {
     const base = data()
     return {
       ...base,
       events: base.events.map((e) =>
-        e.id === S1 || e.id === E ? { ...e, review: 'auto' as const, model_sure: true } : e.id === R ? { ...e, model_sure: false, model_alternative: 'D:them' } : e,
+        e.id === S1
+          ? { ...e, review: 'auto' as const, model_sure: true }
+          : e.id === E
+            ? { ...e, review: 'auto' as const, model_sure: false }
+            : e.id === R
+              ? { ...e, model_sure: false, model_alternative: 'D:them' }
+              : e,
       ),
     }
   }
@@ -246,6 +253,9 @@ describe('TagPage, sure actions and the ones to check', () => {
     expect(await within(region).findByText('2 actions still to check')).toBeInTheDocument()
     expect(within(region).getByRole('heading', { name: /Reception at/ })).toBeInTheDocument()
     expect(within(region).getByText('WiePlay is 80% sure of this action.')).toBeInTheDocument()
+    // The guess is not walked; its mark says so.
+    expect(document.querySelector('[title="Tagged by WiePlay, not sure but not asked"]')).not.toBeNull()
+    expect(document.querySelector('[title="Tagged by WiePlay, sure"]')).not.toBeNull()
     // No button accepts many at once: the sure ones count already.
     expect(within(region).queryByRole('button', { name: /Accept all/ })).not.toBeInTheDocument()
     fireEvent.click(within(region).getByRole('button', { name: 'Or: Dig, Them' }))

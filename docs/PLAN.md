@@ -2702,9 +2702,9 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   grades.
 - **v1, learned**: two gradient-boosted classifiers over every candidate (position, turn,
   speeds, the flights' depth, the side evidence, its place in the rally, v0's role): the skill
-  or "no action", and the side. Labels: the tags of games whose actions a coach marked done,
-  matched to candidates within ±0.3 s. `train_actions` (ten minutes after the last "actions
-  done") scores v0 and v1 on each game left out (split by match, §11) and keeps v1 only when
+  or "no action", and the side. Labels: the tags of every finished rally (below, "Asking the
+  minimum"), matched to candidates within ±0.3 s. `train_actions` (ten minutes after the last
+  answer or action tag, or "actions done") scores v0 and v1 on each game left out (split by match, §11) and keeps v1 only when
   its mean action F1 (contact within ±0.3 s with the coach's skill and side) beats v0's; a
   kept model suggests again for every game nobody has done. Also reported: the contact
   recall (the coaches' tags with a candidate within ±0.3 s: what the ball's path can find).
@@ -2731,8 +2731,24 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
     its server): a near serve timed from its toss, and the reception right after a serve
     (0.6-1.6 s later, posterior ≥ 0.85, someone's hands at the ball). Set so that none of the
     sure ones was wrong on the labelled rallies; every other skill was wrong too often.
-  - The coach's answers still make a game "actions reviewed", which trains v1; v1 takes over
-    once it beats the rules on held-out reviewed games, as before.
+  - The coach's answers train v1 (below); v1 takes over once it beats the rules on held-out
+    games, as before.
+- **Asking the minimum** (21.10.2026; the owner, after a first game with 640 actions to check:
+  "try really to only give the minimum amount to check, except the very first game";
+  `core/actions.choose_checks`): in a team's first game (no other game of the team has an
+  answered action, or it is the earliest that has) WiePlay asks about every action it is unsure
+  of: there it learns the team. In every later game it asks only about the rallies a person
+  started on and up to `ASK_RALLIES` = 5 rallies in all, those with the most doubt (the sum of
+  1 − confidence of their unsure actions): about 20 actions a game. Its other unsure actions
+  are its guesses: review `auto` with `model_sure` false, counted, marked "not sure but not
+  asked", left out by "Sure only", never a training label. The choice is made when the actions
+  are written and again after every action training (a team's first game may have got its
+  first answers since).
+- **Every finished rally trains** (`finished_rallies`): a rally is a label when nothing in it is
+  left to WiePlay's doubt (no unsure action of its unanswered) and a person answered in it (a
+  tag, an accepted, corrected or rejected action), or the game is "actions reviewed" (then its
+  rallies of sure actions count too). A tag or answer about an action queues the (debounced)
+  training. "Actions reviewed" is no longer needed for WiePlay to learn.
 - **Rules for writing**: never into a rally that has a person's tags (made, imported, or a
   suggestion accepted or corrected): there the run only scores itself against them
   (precision, recall, F1 of contacts at ±0.3 s, skill and side accuracy, action F1; in
@@ -2748,10 +2764,11 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
   after), `Enter` accept, `X` reject, `S R E A B D F` the skill, `# + ! - / =` the grade (again:
   none), a number then `Enter` the player, `Tab` the side, `←/→` one frame, `Shift+Enter` the
   rest of the rally, `U` undo; "actions reviewed" (`POST /api/videos/{id}/actions-reviewed`,
-  `video.actions_reviewed_at`, refused while suggestions are open) makes the game training
-  data. A changed skill, side, grade or time is a correction; naming the player is not.
+  `video.actions_reviewed_at`, refused while suggestions are open) makes every rally of the
+  game training data. A changed skill, side, grade or time is a correction; naming the player is not.
 - **Counted from the start** (§10.0, 20.10.2026): stats and smart reels count WiePlay's actions
-  (`tagging.event_stands`; "Sure only" leaves out those to check); the score and the serving team
+  (`tagging.event_stands`; "Sure only" leaves out those to check and the guesses nobody was
+  asked about); the score and the serving team
   still take only a person's serve tags (`tagging.event_fact`).
 - **First real run, 17.10.2026** (the H3 vs Volero Legends match of §10.1, v0 rallies and the
   scoring, outside the workers, the court clicked by hand; the nominal camera gives nearly the
