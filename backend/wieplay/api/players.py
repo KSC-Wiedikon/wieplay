@@ -626,6 +626,7 @@ class QueueOut(BaseModel):
 class AnswerIn(BaseModel):
     kind: str = Field(pattern=r"^(number|not_player|team|same_as|split|pieces)$")
     number: int | None = Field(default=None, ge=0, le=99)
+    # team: the card's new team; pieces: the team the person plays for (when not the card's)
     team: str | None = Field(default=None, pattern=r"^(us|them)$")
     into: uuid.UUID | None = None  # same_as
     # split: the other person's pieces; pieces: those that are `number` (or not a player)
@@ -778,8 +779,9 @@ def answer(
             players.merge(db, target, [row], actor)
         elif body.kind == "pieces":
             identify.name_pieces(
-                db, video, rows, row, body.tracks or [], body.number, body.not_player, actor
-            )
+                db, video, rows, row, body.tracks or [], body.number, body.not_player, actor,
+                team=body.team,
+            )  # fmt: skip
         else:  # split
             new = players.split(db, row, body.tracks or [], actor)
             rows.append(new)

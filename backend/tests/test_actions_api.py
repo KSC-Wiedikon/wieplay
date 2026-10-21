@@ -20,6 +20,7 @@ from tests.test_analysis_api import ANALYSE_CAPS, complete, make_ready
 from tests.test_court_api import result as trajectory_result
 from tests.test_court_api import stored
 from tests.test_scoring_api import analysed, match, rallies_of, tagging
+from wieplay.core.actions import ASK_RALLIES
 from wieplay.core.config import Settings
 
 KINDS = ["analyse", "train_rallies", "trajectory", "actions", "train_actions"]
@@ -44,7 +45,9 @@ def analyser(app: FastAPI, club: dict[str, TestClient]) -> TestClient:
 
 
 def claim(w: TestClient, kind: str | None = None) -> dict[str, Any] | None:
-    r = w.post("/api/worker/claim", json={"caps": ANALYSE_CAPS, "wait": False, "kinds": KINDS})
+    """The next job (of `kind`: a training an answer queued may come first otherwise)."""
+    kinds = [kind] if kind else KINDS
+    r = w.post("/api/worker/claim", json={"caps": ANALYSE_CAPS, "wait": False, "kinds": kinds})
     assert r.status_code == 200, r.text
     jobs = r.json()["jobs"]
     if kind is None and not jobs:
@@ -392,6 +395,53 @@ def test_actions_done_waits_for_every_answer_and_trains(
     # Taking "done" back works and retrains.
     undone = coach.post(url, json={"reviewed": False})
     assert undone.status_code == 200 and undone.json()["actions_reviewed_at"] is None
+
+
+def test_a_later_game_asks_about_a_few_rallies_and_each_finished_one_trains(
+    ready: Any,
+    club: dict[str, TestClient],
+    analyser: TestClient,
+    store: FakeStore,
+    db_engine: Engine,
+) -> None:
+    coach = club["coach"]
+    with db_engine.begin() as conn:  # the team's first game, a week earlier, done
+        conn.execute(
+            text(
+                "INSERT INTO video (id, team_id, lineage_id, kind, title, sport, recorded_on,"
+                " source, status, created_by, actions_reviewed_at)"
+                " SELECT gen_random_uuid(), team_id, lineage_id, kind, 'First', sport,"
+                " recorded_on - 7, source, 'ready', created_by, now() FROM video"
+            )
+        )
+    job = through_trajectory(analyser, store)
+    rallies = inputs(analyser, job)["rallies"][:8]
+    # WiePlay grows less sure rally by rally: the last five are the ones it asks about.
+    actions = [
+        {**a, "confidence": round(0.9 - 0.1 * n, 1)} for n, r in enumerate(rallies) for a in plan(r)
+    ]
+    complete(analyser, job, body(actions))
+    events = suggested(coach, ready)
+    asked = [e for e in events if e["review"] == "check"]
+    assert {e["segment_id"] for e in asked} == {r["id"] for r in rallies[3:]}
+    assert len(asked) == 4 * ASK_RALLIES
+    guesses = [e for e in events if e["review"] == "auto"]
+    assert len(guesses) == 12 and not any(e["model_sure"] for e in guesses)
+    state = coach.get(f"/api/videos/{ready['id']}/analysis").json()["actions"]
+    assert (state["suggestions"]["check"], state["suggestions"]["auto"]) == (20, 12)
+    # The guesses count; "Sure only" leaves them out.
+    assert coach.get(f"/api/videos/{ready['id']}/stats").json()["tags"] == 32
+    assert coach.get(f"/api/videos/{ready['id']}/stats?sure=true").json()["tags"] == 0
+
+    # One rally answered (three accepted, one rejected) is a training label, without "done".
+    last = [e for e in asked if e["segment_id"] == rallies[-1]["id"]]
+    post_events(coach, ready, *(event_in(e, review="confirmed") for e in last[:3]))
+    post_events(coach, ready, {**event_in(last[3]), "deleted": True})
+    job = claim(analyser, "train_actions")
+    assert job is not None
+    [entry] = inputs(analyser, job)["train"]
+    assert entry["video_id"] == ready["id"]
+    assert {e[3] for e in entry["events"]} == {rallies[-1]["id"]} and len(entry["events"]) == 3
 
 
 def test_a_training_outside_its_folder_is_refused(

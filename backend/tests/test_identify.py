@@ -339,6 +339,15 @@ def test_a_pieces_card_names_one_person_at_a_time(
     assert back[3].kind == "pieces" and sorted(int(t["id"]) for t in back[3].tracks) == [3, 5]
     bad = [{"id": str(rows[3].id), "kind": "everyone"}]
     assert coach.post(f"{url}/restore", json={"cards": bad}).status_code == 422
+    # A piece in the other team's kit: named with that team, it leaves ours for a card there.
+    r = coach.post(
+        f"{url}/clusters/{rows[3].id}/answer",
+        json={"kind": "pieces", "tracks": [5], "number": 9, "team": "them"},
+    )
+    assert r.status_code == 200, r.text
+    moved = [c for c in cards(app, ready).values() if [int(t["id"]) for t in c.tracks] == [5]]
+    assert len(moved) == 1 and moved[0].team == "them" and moved[0].number == 9
+    assert cards(app, ready)[3].team == "us"
 
 
 def test_the_queue_puts_the_most_footage_named_per_answer_first() -> None:

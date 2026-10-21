@@ -84,8 +84,8 @@ function noticeText(t: TFunction, notice: ActionNotice, taxonomy: Taxonomy, name
 }
 
 /**
- * "To check · 62%" on WiePlay's unsure action; a small WiePlay mark on a sure one, and once a
- * person accepted or corrected it.
+ * "To check · 62%" on WiePlay's unsure action; a small WiePlay mark on a sure one, on a guess it
+ * did not ask about, and once a person accepted or corrected it.
  */
 export function ActionChip({ tag, className }: { tag: Tag; className?: string }) {
   const { t } = useTranslation()
@@ -105,7 +105,7 @@ export function ActionChip({ tag, className }: { tag: Tag; className?: string })
     )
   }
   if (isAutoTag(tag)) {
-    const full = t('actions.auto')
+    const full = tag.model_sure === false ? t('actions.guess') : t('actions.auto')
     return (
       <span data-action-suggestion="auto" title={full} className={cx('inline-flex items-center gap-1 text-xs whitespace-nowrap text-muted', className)}>
         <SparkleIcon className="size-3.5" />
@@ -238,6 +238,10 @@ export function ActionReviewPanel() {
             </span>
           </div>
         </>
+      ) : waiting > 0 ? (
+        <Button variant="primary" size="touch" className="self-start" onClick={press(actions.start)}>
+          {t('actions.resume')}
+        </Button>
       ) : progress.total > 0 || items.length > 0 ? (
         <Done videoId={video.id} reviewed={Boolean(reviewedAt)} />
       ) : (
@@ -287,11 +291,11 @@ function Facts({ tag, number }: { tag: Tag; number: string }) {
                 variant={on ? 'primary' : 'secondary'}
                 aria-pressed={on}
                 aria-label={t('actions.skillAs', { code: s.code, skill: skillLabel(t, s) })}
-                title={skillLabel(t, s)}
-                className="min-w-11 px-2 font-mono"
+                className="px-2.5"
                 onClick={press(() => actions.setSkill(s.code))}
               >
-                {s.code}
+                {skillLabel(t, s)}
+                <Kbd hidden={narrow}>{s.code}</Kbd>
               </Button>
             )
           })}

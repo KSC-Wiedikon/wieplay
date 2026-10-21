@@ -689,7 +689,7 @@ export interface Tag {
   /** The floor below it in metres, with a calibrated court only. */
   court_x?: number | null
   court_y?: number | null
-  /** Sure: review "auto"; else review "check" (to check). */
+  /** Sure: review "auto". Else review "check" (to check), or "auto" as a guess WiePlay did not ask about. */
   model_sure?: boolean | null
   /** The likeliest other answer: "D:us", "E:them", or "none" (maybe no contact at all). */
   model_alternative?: string | null

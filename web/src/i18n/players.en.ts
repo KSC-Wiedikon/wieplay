@@ -131,6 +131,7 @@ export const playersEn = {
     save: 'Save',
     notPlayer: 'Not a player',
     otherTeam: 'Plays for {{team}}',
+    piecesTeam: 'Whose kit',
     sameAs: 'Same as…',
     sameAsTitle: 'The same person as',
     mixed: 'Two people',

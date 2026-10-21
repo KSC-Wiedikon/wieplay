@@ -137,7 +137,9 @@ describe('IdentifyPage', () => {
     renderRoute(<IdentifyPage />, { path: '/videos/:id/identify', url: `/videos/${ID}/identify` })
     const region = await screen.findByRole('region', { name: 'Answer' })
     expect(within(region).getByRole('heading', { name: /Pieces 5/ })).toBeInTheDocument()
-    const tiles = within(region).getAllByRole('button', { pressed: false })
+    const tiles = within(region)
+      .getAllByRole('button', { pressed: false })
+      .filter((b) => !b.textContent?.startsWith('Plays for'))
     expect(tiles).toHaveLength(24) // the biggest 24 of 30
     expect(within(region).getByRole('button', { name: 'Show all 30' })).toBeInTheDocument()
     expect(within(region).getByRole('button', { name: '#11' })).toBeDisabled() // nothing ticked yet
@@ -146,6 +148,43 @@ describe('IdentifyPage', () => {
     fireEvent.click(within(region).getByRole('button', { name: '#11' }))
     await waitFor(() =>
       expect(posted(fetch, `/api/videos/${ID}/players/clusters/c5/answer`)).toEqual([{ kind: 'pieces', tracks: [529, 527], number: 11, not_player: false }]),
+    )
+  })
+
+  it('a pieces card: pieces in the other team’s kit are named for that team', async () => {
+    const pieces = cluster({
+      key: 5,
+      kind: 'pieces',
+      team: 'them',
+      seconds: 400,
+      confidence: 0,
+      uncertain: true,
+      tracks: Array.from({ length: 3 }, (_, i) => ({ id: 500 + i, t0: i * 10_000, t1: i * 10_000 + 5_000, n: 10 + i, side: 'far' as const, number: null, crop: [0, i] as [number, number] })),
+    })
+    const state = players()
+    const fetch = vi.fn(
+      stubFetch({
+        [`/api/videos/${ID}`]: { body: readyVideo() },
+        [`/api/videos/${ID}/players`]: { body: { ...state, clusters: [pieces, ...state.clusters] } },
+        [`/api/videos/${ID}/players/queue`]: { body: { ...queue(['c5', 'c1']), items: [{ card: 'c5', on_court: [3], same_as: [] }, { card: 'c1', on_court: [11], same_as: [] }] } },
+        [`POST /api/videos/${ID}/players/clusters/c5/answer`]: { body: answered(['c1']) },
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    renderRoute(<IdentifyPage />, { path: '/videos/:id/identify', url: `/videos/${ID}/identify` })
+    const region = await screen.findByRole('region', { name: 'Answer' })
+    expect(within(region).getByRole('button', { name: '#3' })).toBeInTheDocument() // theirs on court
+    const kits = within(region).getAllByRole('button', { name: /^Plays for/ })
+    fireEvent.click(kits[0] as HTMLElement) // ours: the roster's numbers instead
+    expect(within(region).queryByRole('button', { name: '#3' })).not.toBeInTheDocument()
+    const tile = within(region)
+      .getAllByRole('button', { pressed: false })
+      .find((b) => !b.textContent?.startsWith('Plays for'))
+    fireEvent.click(tile as HTMLElement)
+    fireEvent.change(within(region).getByRole('textbox', { name: 'Number' }), { target: { value: '9' } })
+    fireEvent.click(within(region).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(posted(fetch, `/api/videos/${ID}/players/clusters/c5/answer`)).toEqual([{ kind: 'pieces', tracks: [502], number: 9, not_player: false, team: 'us' }]),
     )
   })
 

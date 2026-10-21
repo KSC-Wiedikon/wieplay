@@ -163,10 +163,12 @@ def stands(sure_only: bool = False) -> Any:
 
 def event_stands(sure_only: bool = False) -> Any:
     """Tags that count (with the live filter of the caller): everything but what a person
-    rejected (PLAN §10.4a). `sure_only`: without the ones still to check."""
+    rejected (PLAN §10.4a). `sure_only`: without the ones still to check, nor WiePlay's
+    guesses it did not ask about (core/actions.choose_checks)."""
     out: Any = Event.review.not_in(GONE)
     if sure_only:
-        out = out & (Event.review != "check")
+        guess = (Event.source == "model") & (Event.review == "auto") & Event.model_sure.is_(False)
+        out = out & (Event.review != "check") & ~guess
     return out
 
 

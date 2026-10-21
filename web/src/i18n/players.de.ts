@@ -132,6 +132,7 @@ export const playersDe: typeof playersEn = {
     save: 'Speichern',
     notPlayer: 'Kein Spieler',
     otherTeam: 'Spielt für {{team}}',
+    piecesTeam: 'Welches Trikot',
     sameAs: 'Gleich wie…',
     sameAsTitle: 'Dieselbe Person wie',
     mixed: 'Zwei Personen',

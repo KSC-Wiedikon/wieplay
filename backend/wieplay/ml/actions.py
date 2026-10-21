@@ -35,7 +35,15 @@ that sends the ball over an attack (fast or downwards) or a freeball (else); a f
 that goes straight over is an overpass (grade `/`). Grade hints come from who won the rally:
 an ace (`#`) when the serve's side won without a touch of the receivers (or `=` on the
 reception that touched it last), a kill (`#`) for the winner's last attack, `/` for an attack
-blocked for a point, `=` for the loser's last attack; else no grade.
+blocked for a point, `=` for the loser's last attack. Every other action gets the grade that
+what follows it says (`sequence_grades`, marked `grade_guess` for measuring); the action's
+"sure" stays about its time, skill and side, so the guess adds nothing to check. A
+reception, dig or set its side attacks from `+` (the order of the contacts cannot tell a
+perfect one from a good one), one they can only send back as a freeball `-`, one the rally
+dies after on their side `=` (the first touch `-` then); the serve is the mirror of the
+reception (DataVolley: R# R+ S-, R! S!, R- S+, R/ S/), an attack or freeball the mirror of
+the other side's first touch, a block touch `+` when the blockers play the ball next, `!`
+when it goes back to the attackers, `=` when it goes out.
 
 **v1, learned.** Two gradient-boosted classifiers over every candidate (where it is, how the
 ball turned, how fast, the flights' depth, the side evidence, its place in the rally and v0's
@@ -489,6 +497,7 @@ class Action:
     posterior: float | None = None
     alternative: str = ""
     sure: bool = False  # right without a look (is_sure): accepted in bulk by the coach
+    grade_guess: bool = False  # the grade follows from the next contacts only (sequence_grades)
 
 
 # Roles of a used candidate: S serve, 1-3 the touch of a side, B block, END the floor.
@@ -966,6 +975,7 @@ def label(
             )
         )  # fmt: skip
     grade_hints(actions, rally, fps)
+    sequence_grades(actions, rally)
     return actions
 
 
@@ -1088,6 +1098,67 @@ def grade_hints(actions: list[Action], rally: RallyIn, fps: float) -> None:
             before.grade = "#"
 
 
+# The serve's grade from the reception's (DataVolley); an attack's or freeball's from the
+# other side's first touch the same way, their overpass a good attack (not a blocked one).
+SERVE_MIRROR = {"#": "-", "+": "-", "!": "!", "-": "+", "/": "/", "=": "#"}
+ATTACK_MIRROR = {**SERVE_MIRROR, "/": "+"}
+
+
+def sequence_grades(actions: list[Action], rally: RallyIn) -> None:
+    """Grades for the actions the end of the rally says nothing about (`grade_hints`), from
+    the contacts that follow (module docstring), each marked a guess. First the touches graded
+    by their own side's play, then those graded by the other side's answer."""
+    winner = None
+    if rally.won_near is not None and max(rally.won_near, 1 - rally.won_near) >= SURE_WINNER:
+        winner = NEAR if rally.won_near >= 0.5 else FAR
+
+    def guess(a: Action, grade: str | None) -> None:
+        if a.grade is None and grade is not None:
+            a.grade, a.grade_guess = grade, True
+
+    def split(n: int) -> tuple[list[Action], Action | None]:
+        """The side's own touches after action n, and the other side's next one."""
+        side = actions[n].side
+        own = list(itertools.takewhile(lambda b: b.side == side, actions[n + 1 :]))
+        rest = actions[n + 1 + len(own) :]
+        return own, rest[0] if rest else None
+
+    for n, a in enumerate(actions):
+        if a.grade is not None or a.code not in ("R", "D", "E"):
+            continue
+        own, over = split(n)
+        lost = over is None and winner is not None and winner != a.side
+        if any(b.code == "A" for b in own):
+            guess(a, "+")
+        elif own and own[-1].code == "F" and over is not None:
+            guess(a, "-")
+        elif lost:
+            guess(a, "=" if not own else "-")
+    for n, a in enumerate(actions):
+        if a.grade is not None or a.code not in ("S", "A", "F", "B"):
+            continue
+        own, over = split(n)
+        if a.code == "B":
+            nxt = actions[n + 1] if n + 1 < len(actions) else None
+            if nxt is not None:
+                guess(a, "+" if nxt.side == a.side else "!")
+            elif winner is not None and winner != a.side:
+                guess(a, "=")
+            continue
+        if own or over is None:
+            continue
+        if a.code == "A" and over.code == "B":
+            after = actions[n + 2] if n + 2 < len(actions) else None
+            if after is not None:
+                guess(a, "!" if after.side == a.side else "-")
+        elif over.grade is None:
+            continue
+        elif a.code == "S" and over.code == "R":
+            guess(a, SERVE_MIRROR[over.grade])
+        elif a.code in ("A", "F") and over.code in ("D", "R"):
+            guess(a, ATTACK_MIRROR[over.grade])
+
+
 def in_rally(cands: Sequence[Candidate], rally: RallyIn, fps: float) -> list[Candidate]:
     a = (rally.start_ms / 1000 - LEAD_S) * fps
     b = (rally.end_ms / 1000 + TAIL_S) * fps
@@ -1199,6 +1270,7 @@ class ActionModel:
             if a.code in ("R", "D") and nxt is not None and nxt.side != a.side:
                 a.grade = "/"
         grade_hints(actions, rally, fps)
+        sequence_grades(actions, rally)
         return actions
 
     def dumps(self) -> bytes:
