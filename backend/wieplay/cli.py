@@ -558,6 +558,33 @@ def actions_cmd(video: str | None, all_ready: bool, dry_run: bool) -> int:
     return 0
 
 
+def asks_cmd(dry_run: bool) -> int:
+    """Choose again what WiePlay asks in every game nobody marked reviewed (choose_checks),
+    without suggesting again: after a deploy that changes the choice."""
+    from wieplay.core import actions
+    from wieplay.core.models import Video
+
+    settings = get_settings()
+    sessions = make_sessionmaker(make_engine(settings.database_url))
+    with sessions() as db:
+        query = select(Video).where(
+            Video.status == "ready",
+            Video.sport.in_(actions.SPORTS),
+            Video.deleted_at.is_(None),
+            Video.actions_reviewed_at.is_(None),
+        )
+        for row in db.scalars(query.order_by(Video.recorded_on, Video.created_at)):
+            first = actions.first_game(db, row)
+            asked = actions.choose_checks(db, row)
+            label = f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id})"
+            print(f"{label}: {asked} to check{' (first game)' if first else ''}")
+        if dry_run:
+            db.rollback()
+        else:
+            db.commit()
+    return 0
+
+
 def train_actions() -> int:
     from datetime import timedelta
 
@@ -857,6 +884,8 @@ def main(argv: list[str] | None = None) -> int:
     which_actions.add_argument("--video", help="one video id")
     which_actions.add_argument("--all-ready", action="store_true", help="every analysed video")
     actions_parser.add_argument("--dry-run", action="store_true")
+    asks_parser = sub.add_parser("asks", help="choose again which actions WiePlay asks about")
+    asks_parser.add_argument("--dry-run", action="store_true")
     sub.add_parser("train-actions", help="train the action proposer now")
     action_evaluation = sub.add_parser("action-eval", help="per-game scores of the proposers")
     action_evaluation.add_argument("--run", help="a training run id (default: the latest)")
@@ -889,6 +918,8 @@ def main(argv: list[str] | None = None) -> int:
         return players(args.video, args.all_ready, args.force, args.dry_run)
     if args.command == "actions":
         return actions_cmd(args.video, args.all_ready, args.dry_run)
+    if args.command == "asks":
+        return asks_cmd(args.dry_run)
     if args.command == "train-actions":
         return train_actions()
     if args.command == "action-eval":

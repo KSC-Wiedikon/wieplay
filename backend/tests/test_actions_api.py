@@ -444,6 +444,39 @@ def test_a_later_game_asks_about_a_few_rallies_and_each_finished_one_trains(
     assert {e[3] for e in entry["events"]} == {rallies[-1]["id"]} and len(entry["events"]) == 3
 
 
+def test_before_any_answer_only_the_earliest_game_wiePlay_tagged_asks_everything(
+    ready: Any,
+    club: dict[str, TestClient],
+    analyser: TestClient,
+    store: FakeStore,
+    db_engine: Engine,
+) -> None:
+    with db_engine.begin() as conn:  # a week earlier: tagged by WiePlay, nobody answered
+        conn.execute(
+            text(
+                "INSERT INTO video (id, team_id, lineage_id, kind, title, sport, recorded_on,"
+                " source, status, created_by)"
+                " SELECT gen_random_uuid(), team_id, lineage_id, kind, 'First', sport,"
+                " recorded_on - 7, source, 'ready', created_by FROM video"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO event (id, video_id, sport, taxonomy_version, code, t_ms,"
+                " time_precision, side, attributes, source, review, version)"
+                " SELECT gen_random_uuid(), id, sport, 1, 'S', 1000, 'live', 'us', '{}',"
+                " 'model', 'check', 1 FROM video WHERE title = 'First'"
+            )
+        )
+    job = through_trajectory(analyser, store)
+    rallies = inputs(analyser, job)["rallies"][:8]
+    actions = [{**a, "confidence": 0.5} for r in rallies for a in plan(r)]
+    complete(analyser, job, body(actions))
+    events = suggested(club["coach"], ready)
+    asked = {e["segment_id"] for e in events if e["review"] == "check"}
+    assert len(asked) == ASK_RALLIES
+
+
 def test_a_training_outside_its_folder_is_refused(
     ready: Any, club: dict[str, TestClient], analyser: TestClient
 ) -> None:
