@@ -2735,15 +2735,16 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
     games, as before.
 - **Asking the minimum** (21.10.2026; the owner, after a first game with 640 actions to check:
   "try really to only give the minimum amount to check, except the very first game";
-  `core/actions.choose_checks`): in a team's first game (no other game of the team has an
-  answered action, or it is the earliest that has) WiePlay asks about every action it is unsure
-  of: there it learns the team. In every later game it asks only about the rallies a person
+  `core/actions.choose_checks`): in a team's first game (the earliest a person answered an
+  action in; while there is none, the earliest WiePlay tagged: one game only, 23.10.2026, after
+  722 to check in a later game) WiePlay asks about every action it is unsure of: there it
+  learns the team. In every other game it asks only about the rallies a person
   started on and up to `ASK_RALLIES` = 5 rallies in all, those with the most doubt (the sum of
   1 − confidence of their unsure actions): about 20 actions a game. Its other unsure actions
   are its guesses: review `auto` with `model_sure` false, counted, marked "not sure but not
   asked", left out by "Sure only", never a training label. The choice is made when the actions
-  are written and again after every action training (a team's first game may have got its
-  first answers since).
+  are written, again after every action training (a team's first game may have got its
+  first answers since), and on `python -m wieplay.cli asks` (after a deploy that changes it).
 - **Every finished rally trains** (`finished_rallies`): a rally is a label when nothing in it is
   left to WiePlay's doubt (no unsure action of its unanswered) and a person answered in it (a
   tag, an accepted, corrected or rejected action), or the game is "actions reviewed" (then its

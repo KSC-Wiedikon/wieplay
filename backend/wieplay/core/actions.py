@@ -9,8 +9,9 @@ coaches' answers.
         finished rally (finished_rallies), kept only when it beats v0 on held-out games;
         new suggestions for every game nobody has done yet
 
-What WiePlay asks (choose_checks): in a team's first game every action it is unsure of; in
-every later one only ASK_RALLIES rallies, those it is least sure of. Its other unsure actions
+What WiePlay asks (choose_checks): in a team's first game (first_game: the earliest a person
+answered in, else the earliest WiePlay tagged) every action it is unsure of; in every other
+one only ASK_RALLIES rallies, those it is least sure of. Its other unsure actions
 are its guesses: they count, "Sure only" leaves them out, and no training learns from them.
 
 The worker (wieplay/worker/actions.py, wieplay/ml/actions.py) works in the camera's terms (near
@@ -283,21 +284,29 @@ ASK_RALLIES = 5
 
 
 def first_game(db: Session, video: Video) -> bool:
-    """Whether this is the team's first game: no other game of the team has an answered
-    action, or this is the earliest that has. There WiePlay learns the team, so it asks about
-    every action it is unsure of."""
-    answered = select(Event.video_id).where(Event.code.in_(SKILLS), answered_event_filter())
-    earliest = db.scalars(
+    """Whether this is the team's first game: the earliest one a person answered actions in
+    (or marked reviewed); while there is none, the earliest one WiePlay tagged. There WiePlay
+    learns the team, so it asks about every action it is unsure of. One game only: every
+    other asks about ASK_RALLIES rallies."""
+    games = (
         select(Video.id)
         .where(
             Video.lineage_id == video.lineage_id,
             Video.sport.in_(SPORTS),
             Video.deleted_at.is_(None),
-            Video.actions_reviewed_at.is_not(None) | Video.id.in_(answered),
         )
         .order_by(Video.recorded_on, Video.created_at, Video.id)
         .limit(1)
+    )
+    answered = select(Event.video_id).where(Event.code.in_(SKILLS), answered_event_filter())
+    earliest = db.scalars(
+        games.where(Video.actions_reviewed_at.is_not(None) | Video.id.in_(answered))
     ).first()
+    if earliest is None:
+        tagged = select(Event.video_id).where(
+            Event.code.in_(SKILLS), Event.source == "model", Event.deleted_at.is_(None)
+        )
+        earliest = db.scalars(games.where(Video.id.in_(tagged))).first()
     return earliest is None or earliest == video.id
 
 
