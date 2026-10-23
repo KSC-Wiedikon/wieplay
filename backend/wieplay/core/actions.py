@@ -11,7 +11,7 @@ coaches' answers.
 
 What WiePlay asks (choose_checks): in a team's first game (first_game: the earliest a person
 answered in, else the earliest WiePlay tagged) every action it is unsure of; in every other
-one only ASK_RALLIES rallies, those it is least sure of. Its other unsure actions
+one only about ASK_ACTIONS actions, in the rallies it is least sure of. Its other unsure actions
 are its guesses: they count, "Sure only" leaves them out, and no training learns from them.
 
 The worker (wieplay/worker/actions.py, wieplay/ml/actions.py) works in the camera's terms (near
@@ -279,15 +279,17 @@ def per_rally(rallies: list[Segment], events: Iterable[Event]) -> dict[uuid.UUID
 
 # --- what WiePlay asks --------------------------------------------------------------------------
 
-# A later game of a team asks about this many rallies: those WiePlay is least sure of.
-ASK_RALLIES = 5
+# A later game of a team asks about this many actions at most, in whole rallies: those
+# WiePlay is least sure of on average (by the sum, a long rally, often several the rally
+# finder merged, would win: 23.10.2026, 162 to check in five rallies).
+ASK_ACTIONS = 20
 
 
 def first_game(db: Session, video: Video) -> bool:
     """Whether this is the team's first game: the earliest one a person answered actions in
     (or marked reviewed); while there is none, the earliest one WiePlay tagged. There WiePlay
     learns the team, so it asks about every action it is unsure of. One game only: every
-    other asks about ASK_RALLIES rallies."""
+    other asks about ASK_ACTIONS actions."""
     games = (
         select(Video.id)
         .where(
@@ -313,9 +315,10 @@ def first_game(db: Session, video: Video) -> bool:
 def choose_checks(db: Session, video: Video) -> int:
     """Which of WiePlay's unsure actions it asks about (review "check"); the others stay its
     guess (review "auto", `model_sure` false: they count, "Sure only" leaves them out). The
-    team's first game: every one. A later game: the rallies a person started on, then up to
-    ASK_RALLIES rallies in all, those with the most doubt (the most to learn from). Every
-    rally a person finishes trains WiePlay (_training_events). Returns how many are asked."""
+    team's first game: every one. A later game: the rallies a person started on, then whole
+    rallies by their average doubt (the most to learn from) while they fit in ASK_ACTIONS,
+    at least one. Every rally a person finishes trains WiePlay (_training_events). Returns
+    how many are asked."""
     unsure = [
         e
         for e in db.scalars(
@@ -338,13 +341,18 @@ def choose_checks(db: Session, video: Video) -> int:
             )
         )
         started = set(per_rally(rallies, answered))
-        doubt: dict[uuid.UUID, float] = {}
+        doubt: dict[uuid.UUID, list[float]] = {}
         for e in unsure:
             if e.segment_id is not None and e.segment_id not in started:
-                doubt[e.segment_id] = doubt.get(e.segment_id, 0) + 1 - float(e.confidence or 0)
-        room = max(0, ASK_RALLIES - len(started))
-        fresh = sorted(doubt, key=lambda r: (-doubt[r], str(r)))[:room]
-        asked = {*started, *fresh}
+                doubt.setdefault(e.segment_id, []).append(1 - float(e.confidence or 0))
+        asked = set(started)
+        room = ASK_ACTIONS - sum(e.segment_id in started for e in unsure)
+        for rally in sorted(doubt, key=lambda r: (-sum(doubt[r]) / len(doubt[r]), str(r))):
+            if len(doubt[rally]) <= room:
+                asked.add(rally)
+                room -= len(doubt[rally])
+        if not asked and doubt:  # every rally longer than the budget: the shortest
+            asked.add(min(doubt, key=lambda r: (len(doubt[r]), str(r))))
     for e in unsure:
         e.review = "check" if e.segment_id in asked else "auto"
     db.flush()

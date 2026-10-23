@@ -20,7 +20,7 @@ from tests.test_analysis_api import ANALYSE_CAPS, complete, make_ready
 from tests.test_court_api import result as trajectory_result
 from tests.test_court_api import stored
 from tests.test_scoring_api import analysed, match, rallies_of, tagging
-from wieplay.core.actions import ASK_RALLIES
+from wieplay.core.actions import ASK_ACTIONS
 from wieplay.core.config import Settings
 
 KINDS = ["analyse", "train_rallies", "trajectory", "actions", "train_actions"]
@@ -424,7 +424,7 @@ def test_a_later_game_asks_about_a_few_rallies_and_each_finished_one_trains(
     events = suggested(coach, ready)
     asked = [e for e in events if e["review"] == "check"]
     assert {e["segment_id"] for e in asked} == {r["id"] for r in rallies[3:]}
-    assert len(asked) == 4 * ASK_RALLIES
+    assert len(asked) == ASK_ACTIONS
     guesses = [e for e in events if e["review"] == "auto"]
     assert len(guesses) == 12 and not any(e["model_sure"] for e in guesses)
     state = coach.get(f"/api/videos/{ready['id']}/analysis").json()["actions"]
@@ -450,7 +450,9 @@ def test_before_any_answer_only_the_earliest_game_wiePlay_tagged_asks_everything
     analyser: TestClient,
     store: FakeStore,
     db_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("wieplay.core.actions.ASK_ACTIONS", 8)
     with db_engine.begin() as conn:  # a week earlier: tagged by WiePlay, nobody answered
         conn.execute(
             text(
@@ -471,10 +473,15 @@ def test_before_any_answer_only_the_earliest_game_wiePlay_tagged_asks_everything
     job = through_trajectory(analyser, store)
     rallies = inputs(analyser, job)["rallies"][:8]
     actions = [{**a, "confidence": 0.5} for r in rallies for a in plan(r)]
+    # WiePlay is least sure of the first rally, but it has more actions than the 8 it may
+    # ask (often several rallies the rally finder merged): two rallies of four instead.
+    actions += [{**a, "confidence": 0.1} for a in plan(rallies[0], shift=400)]
+    actions += [{**a, "confidence": 0.1} for a in plan(rallies[0], shift=1100)]
     complete(analyser, job, body(actions))
     events = suggested(club["coach"], ready)
-    asked = {e["segment_id"] for e in events if e["review"] == "check"}
-    assert len(asked) == ASK_RALLIES
+    asked = [e for e in events if e["review"] == "check"]
+    assert len(asked) == 8
+    assert rallies[0]["id"] not in {e["segment_id"] for e in asked}
 
 
 def test_a_training_outside_its_folder_is_refused(
