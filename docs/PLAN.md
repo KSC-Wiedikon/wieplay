@@ -2736,11 +2736,13 @@ usual contact height (`court_x`, `court_y`). The player (`number`) stays empty.
 - **Asking the minimum** (21.10.2026; the owner, after a first game with 640 actions to check:
   "try really to only give the minimum amount to check, except the very first game";
   `core/actions.choose_checks`): in a team's first game (the earliest a person answered an
-  action in; while there is none, the earliest WiePlay tagged: one game only, 23.10.2026, after
-  722 to check in a later game) WiePlay asks about every action it is unsure of: there it
-  learns the team. In every other game it asks only about the rallies a person
-  started on and up to `ASK_RALLIES` = 5 rallies in all, those with the most doubt (the sum of
-  1 − confidence of their unsure actions): about 20 actions a game. Its other unsure actions
+  action in; while there is none, the earliest WiePlay tagged: one game only, 23.10.2026,
+  every game asked about everything while none had answers) WiePlay asks about every action it
+  is unsure of: there it learns the team. In every other game it asks only about the rallies a
+  person started on, then whole rallies by their average doubt (1 − confidence of their unsure
+  actions) while they fit in `ASK_ACTIONS` = 20 actions, at least one rally. Not by the sum
+  (23.10.2026, five rallies asked about up to 162 actions): the sum prefers the longest
+  rallies, often several the rally finder merged. Its other unsure actions
   are its guesses: review `auto` with `model_sure` false, counted, marked "not sure but not
   asked", left out by "Sure only", never a training label. The choice is made when the actions
   are written, again after every action training (a team's first game may have got its
