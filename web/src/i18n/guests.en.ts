@@ -196,7 +196,7 @@ export const guestsEn = {
         },
         where: {
           title: 'Where it is',
-          body: 'On the club’s server and object storage at Hetzner in Germany, and the original files on club hardware in Switzerland. Video is processed on club hardware. Nothing is public: every video link works for minutes only and only with a login.',
+          body: 'The database is on the club’s server at Infomaniak in Switzerland, the videos in the club’s object storage at Hetzner in Germany, and the original files on club hardware in Switzerland. Video is processed on club hardware. Nothing is public: every video link works for minutes only and only with a login.',
         },
         guests: {
           title: 'Guest clubs',

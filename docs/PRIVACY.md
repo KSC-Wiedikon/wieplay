@@ -1,7 +1,9 @@
 # WiePlay: data protection
 
 **Draft, 15.10.2026, updated 17.10.2026** (guest clubs, §11), **18.10.2026** (a guest
-club's next season, §8 and §11) **and 19.10.2026** (official scoresheets, their photos and their reading on club hardware, §6),
+club's next season, §8 and §11), **19.10.2026** (official scoresheets, their photos and their reading on club hardware, §6)
+**and 26.10.2026** (the server moved to Infomaniak in Switzerland; video storage stays at Hetzner
+in Germany, §7, §9, §11, §12),
 for review by the club's privacy contact before
 WiePlay is used beyond the pilot teams. Not legal advice. It describes what WiePlay does today and
 what the plan adds later; design background in `docs/PLAN.md` §5 and §10.1.
@@ -176,7 +178,8 @@ would get only short, temporary, court-cropped copies of the rallies, with no na
 
 | Where / who | What | Place | Note |
 |---|---|---|---|
-| Hetzner (server and object storage), the club's own account since 16.10.2026 | Database; playable video (renditions), thumbnails, exports, upload staging, scoresheet photos in the buckets | Germany (Nuremberg, nbg1) | Processor; DPA with Hetzner needed |
+| Infomaniak (server: Infomaniak Network SA, Les Acacias, Geneva), since 26.10.2026 | The WiePlay API and its database | Switzerland (data centre in the canton of Geneva) | Processor; Infomaniak's DPA is part of its general terms ([DPA](https://www.infomaniak.com/documents/privacy/DPA/Data_Processing_Agreement_(DPA).pdf)) |
+| Hetzner (object storage), the club's own account since 16.10.2026 | Playable video (renditions), thumbnails, exports, upload staging, scoresheet photos in the buckets | Germany (Nuremberg, nbg1) | Processor; DPA with Hetzner needed |
 | NAS of the club's IT admin | Original camera files and imported files, the camera inbox, analysis signals and models | Switzerland, private home | Club-controlled hardware at a volunteer's home; access for the NAS administrators only; not copied offsite |
 | Cloudflare | Web pages and API answers pass through; **no video bytes** (those come straight from object storage) | Global network | Already the club's provider for Wiedisync |
 | Club hardware (Lenovo server; later a GPU laptop) | Converting videos, imports, automatic analysis, reading scoresheet photos (in memory, nothing kept there) | Switzerland, same home | No third party |
@@ -220,7 +223,7 @@ A nightly job enforces this and logs what it deleted.
   logged. Scoresheet photos are seen by the team's coaches and admins only, and every view is
   logged.
 - Encrypted connections everywhere (HTTPS; an SSH tunnel between the club's server and the
-  Hetzner server).
+  Infomaniak server).
 
 ## 10. Rights
 
@@ -242,7 +245,8 @@ for their own matches (`docs/PLAN.md` §4.5; how an admin sets one up:
   their requests. It agrees to this in writing with KSC Wiedikon before its team is created,
   including whether its games may train WiePlay (below).
 - **KSC Wiedikon hosts it** with the same processors and rules as its own footage (§7): the
-  Hetzner server and storage in Germany, the club's hardware in Switzerland, no third party in
+  Infomaniak server in Switzerland, the Hetzner object storage in Germany, the club's hardware
+  in Switzerland, no third party in
   the browser, no public links, the same retention (§8).
 - **Adults only**: WiePlay has no birthdates of a guest club's people. Before the first upload
   of each season a coach of the guest team confirms: "Everyone we film — our players, coaches
@@ -272,8 +276,9 @@ for their own matches (`docs/PLAN.md` §4.5; how an admin sets one up:
 
 ## 12. Open points for the privacy contact
 
-1. Sign or record the DPA with Hetzner (the club's own account since 16.10.2026; server and
-   object storage).
+1. Sign or record the DPA with Hetzner (the club's own account since 16.10.2026; object
+   storage). Record Infomaniak's DPA for the server (since 26.10.2026; part of its general
+   terms: https://www.infomaniak.com/documents/privacy/DPA/Data_Processing_Agreement_(DPA).pdf).
 2. Agree that originals, analysis signals and models may stay on the club admin's home NAS,
    or name another place.
 3. Confirm the legal basis in §4: Art. 86 of the Volleyballreglement as the frame for
