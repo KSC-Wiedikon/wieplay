@@ -196,7 +196,7 @@ export const guestsDe: Messages<typeof guestsEn> = {
         },
         where: {
           title: 'Wo es liegt',
-          body: 'Auf dem Server und im Objektspeicher des Vereins bei Hetzner in Deutschland, die Originaldateien auf Vereins-Hardware in der Schweiz. Videos werden auf Vereins-Hardware verarbeitet. Nichts ist öffentlich: Jeder Videolink funktioniert nur Minuten und nur mit Login.',
+          body: 'Die Datenbank liegt auf dem Server des Vereins bei Infomaniak in der Schweiz, die Videos im Objektspeicher des Vereins bei Hetzner in Deutschland und die Originaldateien auf Vereins-Hardware in der Schweiz. Videos werden auf Vereins-Hardware verarbeitet. Nichts ist öffentlich: Jeder Videolink funktioniert nur Minuten und nur mit Login.',
         },
         guests: {
           title: 'Gastvereine',
