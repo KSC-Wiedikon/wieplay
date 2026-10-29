@@ -72,7 +72,7 @@ pauses excluded), `providers` and `gpu_paused_s` in its `model_run`.
 2. **Workers in the API** (one per environment) and their tokens on the laptop:
 
    ```bash
-   ssh hetzner "sudo docker exec wieplay-prod-api-1 python -m wieplay.cli create-worker fw16-prod cuda,ml" \
+   ssh kscw-server "sudo docker exec wieplay-prod-api-1 python -m wieplay.cli create-worker fw16-prod cuda,ml" \
      | ssh fw16-remote 'umask 077; cat > ~/wieplay-gpu/prod.token'
    ```
 

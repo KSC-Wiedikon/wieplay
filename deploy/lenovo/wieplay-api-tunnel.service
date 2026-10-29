@@ -1,7 +1,7 @@
 # /etc/systemd/system/wieplay-api-tunnel.service on the Lenovo server: how the media workers
 # reach the WiePlay APIs on the VPS (PLAN §8.1).
 #
-# Since 16.10.2026 the VPS belongs to the club's Hetzner account and is on no tailnet; the
+# Since 16.10.2026 the VPS belongs to the club (Infomaniak `kscw-server` since 26.10.2026) and is on no tailnet; the
 # APIs listen on its loopback only (127.0.0.1:8090 dev, 127.0.0.1:8091 prod). This unit
 # connects out from the Lenovo server and forwards both to the Docker bridge (docker0), where
 # the worker containers reach them:
@@ -10,7 +10,7 @@
 # The VPS has no way into the home network. Requests through the tunnel carry no
 # CF-Connecting-IP, so the worker routes accept them; from the internet they stay unreachable.
 #
-# Needs: User= has a key-only login to the VPS under the ssh alias `hetzner` (BatchMode: it
+# Needs: User= has a key-only login to the VPS under the ssh alias `kscw-server` (BatchMode: it
 # never prompts) and the VPS host key in known_hosts. ControlMaster=no and ControlPath=none
 # matter when the ssh config multiplexes connections: without them the unit hands its
 # forwards to a shared connection and exits.
@@ -27,7 +27,7 @@ Wants=network-online.target
 
 [Service]
 User=lucanepa
-ExecStart=/usr/bin/ssh -N -o ControlMaster=no -o ControlPath=none -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -L 172.17.0.1:18090:127.0.0.1:8090 -L 172.17.0.1:18091:127.0.0.1:8091 hetzner
+ExecStart=/usr/bin/ssh -N -o ControlMaster=no -o ControlPath=none -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -L 172.17.0.1:18090:127.0.0.1:8090 -L 172.17.0.1:18091:127.0.0.1:8091 kscw-server
 Restart=always
 RestartSec=10
 
