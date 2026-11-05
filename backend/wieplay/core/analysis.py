@@ -793,9 +793,10 @@ def complete(db: Session, video: Video | None, job: Job, payload: dict[str, Any]
 
 
 def rallies_to_check(db: Session, video_id: uuid.UUID) -> int:
-    """WiePlay's rallies still to check (review "check"): what "rallies done" waits for. The
-    rally list is the finder's label; a winner still to check (tagging.rally_to_check) is the
-    scoring's and does not hold it up."""
+    """WiePlay's rallies nobody stands behind yet (to check, or its guesses it did not ask
+    about): what "rallies done" waits for, and what keeps a game out of the training. The rally
+    list is the finder's label; a person's own rally whose winner is still to check
+    (tagging.rally_to_check) is the scoring's and does not hold it up."""
     return int(
         db.scalar(
             select(func.count())
@@ -804,7 +805,7 @@ def rallies_to_check(db: Session, video_id: uuid.UUID) -> int:
                 Segment.video_id == video_id,
                 Segment.deleted_at.is_(None),
                 Segment.kind == "rally",
-                Segment.review == "check",
+                (Segment.review == "check") | tagging.rally_guess(),
             )
         )
         or 0
@@ -821,9 +822,10 @@ def mark_reviewed(
     db: Session, video: Video, actor: int, reviewed: bool, train_delay: timedelta
 ) -> dict[str, Any]:
     """The coach says the rally list is complete and right (or takes that back). Not while
-    rallies are still to check (ToCheck): the coach answers each one first, so the coach
-    stands behind every label (WiePlay's sure rallies included). Either way the training set
-    changed, so a (debounced) training is queued."""
+    rallies are still to check or WiePlay's guesses (ToCheck): the coach answers each one first,
+    so the coach stands behind every label (WiePlay's sure rallies included). A game WiePlay
+    guessed part of is finished without this: nothing is left to check, and it teaches nothing.
+    Either way the training set changed, so a (debounced) training is queued."""
     if reviewed:
         if count := rallies_to_check(db, video.id):
             raise ToCheck(count)

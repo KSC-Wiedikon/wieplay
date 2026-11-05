@@ -38,7 +38,8 @@ What it writes, always next to the coach's work and never in its place (PLAN §1
 - per rally whether the joint decode is sure (`score_sure`) and why the coach is asked
   (`score_reasons`, the first one also as `score_note`), the likeliest other answer
   (`model_alternative`); WiePlay's rallies nobody answered follow it: "auto" when sure, else
-  "check" (PLAN §10: everything WiePlay assigns counts, the unsure part is "to check").
+  "check" where it asks about them, else its guess (`choose_rally_checks`; PLAN §10.0: everything
+  WiePlay assigns counts, what it asks about is "to check").
 """
 
 from __future__ import annotations
@@ -494,9 +495,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
             rally.model_alternative = _alternative(out)
             if out.missed != (0, 0):
                 rally.model_missed_us, rally.model_missed_them = out.missed
-    for rally in rallies:
-        # WiePlay's rallies nobody answered: sure ones count as they are, the rest is to check.
-        tagging.keep_model_state(rally, rally.score_sure)
+    # WiePlay's rallies nobody answered: sure ones count as they are, the rest is to check or
+    # WiePlay's guess.
+    choose_rally_checks(db, video, rallies, periods, log_ev)
     for period in periods:
         period.model_missed_us = period.model_missed_them = None
     for period, so in zip(scored, match.sets, strict=True):
@@ -599,6 +600,110 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
     actions.after_scoring(db, video, reason)
     return run
+
+
+# A game without a trusted board log asks about this many rallies at most. Measured on two games
+# with the log hidden (docs/research/rally-asks-2026-11.md): 20 answers put 92 % of the winners
+# right; the answers hardly spread to the rallies around them, so asking every rally (about 155
+# a game) would be the only way to 100 %. Nobody does that, so the game would stay unfinished.
+ASK_RALLIES = 20
+
+
+def ask_rallies(
+    rallies: Sequence[Segment], periods: Sequence[Period], gone_ms: Sequence[int]
+) -> set[uuid.UUID]:
+    """Which unsure rallies WiePlay asks about: those a person touched and left open (an undo, so
+    it is not lost), then one at a time the most doubtful of the sets with the fewest answers so
+    far, while the answers and questions fit in ASK_RALLIES. Rallies outside every set come last.
+    `gone_ms`: where a person took a rally away (an answer too)."""
+
+    def set_no(start_ms: int) -> int | None:
+        period = _period_of(periods, start_ms)
+        return period.no if period is not None else None
+
+    spent: Counter[int | None] = Counter(set_no(ms) for ms in gone_ms)
+    open_: dict[int | None, list[Segment]] = {}
+    asked: set[uuid.UUID] = set()
+    for rally in rallies:
+        no = set_no(rally.start_ms)
+        if rally.source != "model" or rally.review in tagging.HUMAN_REVIEWS or rally.won_by:
+            spent[no] += 1
+        elif not rally.score_sure:
+            if rally.updated_by is not None:
+                asked.add(rally.id)
+                spent[no] += 1
+            else:
+                open_.setdefault(no, []).append(rally)
+    room = ASK_RALLIES - sum(spent.values())
+    while room > 0:
+        sets: list[int | None] = [no for no, rows in open_.items() if rows and no is not None]
+        if not sets and open_.get(None):
+            sets = [None]
+        if not sets:
+            break
+        fewest = min(spent[no] for no in sets)
+        no, pick = min(
+            ((no, r) for no in sets if spent[no] == fewest for r in open_[no]),
+            key=lambda x: (
+                x[1].score_confidence if x[1].score_confidence is not None else 1.0,
+                x[1].start_ms,
+            ),
+        )
+        open_[no].remove(pick)
+        asked.add(pick.id)
+        spent[no] += 1
+        room -= 1
+    return asked
+
+
+def choose_rally_checks(
+    db: Session,
+    video: Video,
+    rallies: Sequence[Segment],
+    periods: Sequence[Period],
+    log_ev: Any,
+) -> int:
+    """WiePlay's rallies nobody answered, sure or not: "auto" when sure; an unsure one is to check
+    ("check") where WiePlay asks about it, else its guess ("auto" with `score_sure` not true: it
+    counts, marked, tagging.rally_guess; `score_conflict` off, nobody is asked). With a trusted
+    board log every unsure rally is asked (there are few), and in a game a person marked done (a
+    rally that turns unsure there is a surprise); else ask_rallies. Chosen again on every scoring:
+    each answer leaves room for the next one. Returns how many are asked."""
+    asked: set[uuid.UUID] | None = None
+    if video.rallies_reviewed_at is None and (log_ev is None or not log_ev.any_trusted):
+        gone = db.scalars(
+            select(Segment.start_ms).where(
+                Segment.video_id == video.id,
+                Segment.kind == "rally",
+                Segment.review.in_(tagging.GONE),
+            )
+        ).all()
+        asked = ask_rallies(rallies, periods, gone)
+    for rally in rallies:
+        ask = not rally.score_sure and (asked is None or rally.id in asked)
+        tagging.keep_model_state(rally, not ask)
+        guess = rally.source == "model" and rally.review == "auto" and not rally.score_sure
+        rally.score_conflict = rally.score_note is not None and not guess
+    return sum(1 for r in rallies if r.source == "model" and r.review == "check")
+
+
+def rally_checks_again(db: Session, video: Video) -> int:
+    """choose_rally_checks without scoring again: after a deploy that changes the choice."""
+    from wieplay.core import scorelog
+
+    rallies = list(
+        db.scalars(
+            select(Segment)
+            .where(
+                Segment.video_id == video.id,
+                Segment.kind == "rally",
+                Segment.deleted_at.is_(None),
+            )
+            .order_by(Segment.start_ms, Segment.id)
+        )
+    )
+    log_ev = scorelog.evidence_for(db, video, rallies)
+    return choose_rally_checks(db, video, rallies, _live_periods(db, video), log_ev)
 
 
 def _alternative(out: sc.RallyOut) -> str | None:

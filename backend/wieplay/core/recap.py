@@ -155,7 +155,7 @@ def _events(db: Session, video: Video, sure_only: bool = False) -> list[Event]:
 
 
 def _rally_to_check(r: Segment) -> bool:
-    """tagging.rally_to_check, on a row."""
+    """What a recap names as unsure: tagging.rally_to_check on a row, and WiePlay's guesses."""
     if r.review in tagging.GONE:
         return False
     return r.review == "check" or (

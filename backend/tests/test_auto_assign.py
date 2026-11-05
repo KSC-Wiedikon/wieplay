@@ -6,6 +6,7 @@ the chain runs by itself, also past a failed step, and says how far it is."""
 from __future__ import annotations
 
 import uuid
+from collections import Counter
 from typing import Any
 
 import pytest
@@ -21,7 +22,7 @@ from tests.test_analysis_api import complete, make_ready
 from tests.test_court_api import result as trajectory_result
 from tests.test_court_api import stored
 from tests.test_scoring_api import OFFICIAL, analysed, match, rallies_of, tagging
-from wieplay.core import chain
+from wieplay.core import chain, scoring
 from wieplay.core import tagging as core_tagging
 from wieplay.core.config import Settings
 from wieplay.core.models import Job, Segment, Video
@@ -84,9 +85,12 @@ def test_wieplays_rallies_sets_and_breaks_count_and_say_what_to_check(
     analysed(analyser, played)
     data = tagging(coach, ready)
     rallies = rallies_of(data)
-    # The video and the official score alone: never sure (PLAN §10.3), so every rally is to
-    # check; the sets after long breaks are sure; a short warm-up and the end are not.
-    assert {r["review"] for r in rallies} == {"check"}
+    # The video and the official score alone: never sure (PLAN §10.3). WiePlay asks about a few
+    # rallies, the rest are its guesses (PLAN §10.0, tests/test_rally_asks.py); the sets after long
+    # breaks are sure; a short warm-up and the end are not.
+    asked = scoring.ASK_RALLIES
+    assert Counter(r["review"] for r in rallies) == {"check": asked, "auto": len(played) - asked}
+    assert not any(r["score_sure"] for r in rallies)
     assert {p["review"] for p in data["periods"]} == {"auto"}
     gaps = {s["kind"]: s["review"] for s in data["segments"] if s["kind"] != "rally"}
     assert gaps == {"warmup": "check", "set_break": "auto", "other_dead": "check"}
@@ -95,15 +99,16 @@ def test_wieplays_rallies_sets_and_breaks_count_and_say_what_to_check(
     assert all(r["model_alternative"] != r["model_won_by"] for r in rallies)
 
     state = analysis(coach, ready)
-    assert state["proposals"]["check"] == len(played) and state["proposals"]["auto"] == 0
+    assert state["proposals"]["check"] == asked
+    assert state["proposals"]["auto"] == len(played) - asked
     assert state["to_check"] == {
-        "rallies": len(played), "breaks": 2, "sets": 0, "actions": 0, "players": 0,
-        "total": len(played) + 2,
+        "rallies": asked, "breaks": 2, "sets": 0, "actions": 0, "players": 0, "total": asked + 2,
     }  # fmt: skip
 
     # They count: the sets, the rallies and WiePlay's winners; the stats say what is to check.
     found = stats(coach, ready)
-    assert found["to_check"] == len(played) + 2 and found["sure_only"] is False
+    assert found["to_check"] == asked + 2 and found["sure_only"] is False
+    assert found["rally_guesses"] == len(played) - asked
     assert [(s["score_us"], s["score_them"]) for s in found["sets"]] == OFFICIAL
     assert found["rallies"] == len(played)
     assert found["match"]["summary"]["won"] == sum(us for us, _ in OFFICIAL)
@@ -112,10 +117,11 @@ def test_wieplays_rallies_sets_and_breaks_count_and_say_what_to_check(
     assert sure["sure_only"] is True and sure["rallies"] == 0 and len(sure["sets"]) == 4
     assert sure["to_check"] == found["to_check"]
     season = coach.get(f"/api/teams/{ready['team_id']}/stats").json()
-    assert season["to_check"] == len(played) + 2
+    assert season["to_check"] == asked + 2
+    assert season["rally_guesses"] == len(played) - asked
     # The video list says the same.
     brief = coach.get(f"/api/videos/{ready['id']}").json()["analysis"]
-    assert brief["to_check"] == brief["open"] == len(played) + 2
+    assert brief["to_check"] == brief["open"] == asked + 2
 
 
 def test_a_persons_answer_wins_and_wieplay_follows_its_own_sureness(
@@ -124,13 +130,13 @@ def test_a_persons_answer_wins_and_wieplay_follows_its_own_sureness(
     coach = club["coach"]
     played, _ = match()
     analysed(analyser, played)
-    first, second = rallies_of(tagging(coach, ready))[:2]
+    first, second = [r for r in rallies_of(tagging(coach, ready)) if r["review"] == "check"][:2]
     # Enter in "To check": the bounds and WiePlay's winner are the coach's now.
     out = changes(coach, ready, seg_in(first, review="confirmed", won_by=first["model_won_by"]))
     done = next(s for s in out["segments"] if s["id"] == first["id"])
     assert done["review"] == "confirmed" and done["won_by"] == first["model_won_by"]
     left = analysis(coach, ready)["to_check"]["rallies"]
-    assert left == len(played) - 1
+    assert left == scoring.ASK_RALLIES - 1
     # An undo sends WiePlay's state back: WiePlay's own again, to check.
     out = changes(coach, ready, seg_in(done, review="unreviewed", won_by=None))
     assert next(s for s in out["segments"] if s["id"] == first["id"])["review"] == "check"
