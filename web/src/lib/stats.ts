@@ -221,6 +221,8 @@ export interface VideoStats {
    * left out of the numbers); absent from older servers.
    */
   to_check?: number
+  /** Rallies WiePlay is unsure of and does not ask about (not in to_check); absent from older servers. */
+  rally_guesses?: number
   /** The numbers are from sure and person-checked tags only (?sure=true). */
   sure_only?: boolean
   /** Whether WiePlay tags actions. */
@@ -262,6 +264,7 @@ export interface TeamStats {
   rotation_columns?: StatColumn[]
   /** Still to check over the matches (with ?sure=true: left out of the numbers). */
   to_check?: number
+  rally_guesses?: number
   sure_only?: boolean
   actions_gate?: ActionGate | null
   /** With ?search=: the tags it kept over the matches; null (or absent) without one. */

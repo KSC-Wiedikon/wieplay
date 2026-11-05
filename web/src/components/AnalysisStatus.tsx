@@ -143,7 +143,7 @@ export function AnalysisStatus({ video, rallies, live, reviewHref, onReviewed, a
         )}
       </div>
       {!isBusy(data) && (total > 0 || rallies > 0 || video.rallies_reviewed_at) ? (
-        <Reviewed video={video} open={open} total={total} onReviewed={onReviewed} />
+        <Reviewed video={video} open={open} guesses={data.rally_guesses ?? 0} total={total} onReviewed={onReviewed} />
       ) : null}
     </Frame>
   )
@@ -252,13 +252,23 @@ function ActionsSummary({ videoId, actions, tags }: { videoId: string; actions: 
 }
 
 /** "Rallies reviewed": a switch with what it does, or a nudge once nothing is left to check. */
-function Reviewed({ video, open, total, onReviewed }: { video: Video; open: number; total: number; onReviewed?: () => void }) {
+function Reviewed({ video, open, guesses, total, onReviewed }: { video: Video; open: number; guesses: number; total: number; onReviewed?: () => void }) {
   const { t } = useTranslation()
   const id = useId()
   const mark = useSetRalliesReviewed(video.id)
   const save = (on: boolean) => mark.mutate(on, { onSuccess: () => onReviewed?.() })
   const at = video.rallies_reviewed_at ?? null
   const reviewed = at !== null
+
+  if (!reviewed && guesses > 0) {
+    // WiePlay asks about a few rallies only: the others stay its guesses, so nobody can say that
+    // every rally of this game is right, and nothing is left to do but what is still to check.
+    return (
+      <p data-guesses={guesses} className="flex-[1_1_20rem] border-t border-hairline pt-3 text-sm text-muted md:border-t-0 md:border-l md:pt-0 md:pl-3">
+        {open > 0 ? t('tagging.analysis.guessesOpen', { count: guesses }) : t('tagging.analysis.guesses', { count: guesses })}
+      </p>
+    )
+  }
 
   if (!reviewed && total > 0 && open === 0) {
     return (

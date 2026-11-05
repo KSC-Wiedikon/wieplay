@@ -31,6 +31,8 @@ export function analysisState(analysis: Analysis | undefined, video: Pick<Video,
   if (analysis.status === 'none') return 'todo'
   if ((analysis.to_check?.rallies ?? proposalsToCheck(analysis.proposals)) > 0) return 'attention'
   if (video.rallies_reviewed_at) return 'done'
+  // WiePlay asked what it asks about; the rest stays its guess, so "rallies reviewed" is not left.
+  if ((analysis.rally_guesses ?? 0) > 0) return 'done'
   // Nothing left to check (or the coach's own rallies): "rallies reviewed" is left.
   return proposalTotal(analysis.proposals) > 0 || rallies > 0 ? 'todo' : 'done'
 }
@@ -79,6 +81,14 @@ export function sheetState(sheet: Scoresheet | undefined, video: Pick<Video, 'ga
   if (!sheet.exists) return video.no_scoresheet ? 'done' : video.game_id !== null ? 'todo' : 'optional'
   if (sheet.trusted) return 'done'
   return sheet.checks.some((c) => c.status === 'inconsistent') ? 'attention' : 'todo'
+}
+
+/**
+ * The review asks for the scoresheet first (PLAN §10.0): in a league game without the board's log
+ * nobody has entered or ruled out. It helps more than any number of answers about rallies.
+ */
+export function asksForSheet(sheet: Scoresheet | undefined, video: Pick<Video, 'game_id' | 'no_scoresheet'>, trustedLog: boolean): boolean {
+  return sheet?.exists === false && sheet.can_edit && video.game_id !== null && !video.no_scoresheet && !trustedLog
 }
 
 export function playersState(players: PlayersSummary): StepState {

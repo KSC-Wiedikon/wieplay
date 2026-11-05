@@ -66,6 +66,7 @@ export const guideDe: Guide = {
     body: [
       'Ist nichts mehr zu prüfen, bietet das Prüfen «Ballwechsel als geprüft markieren» an; die Videoseite hat denselben Schalter. Erst dann lernt WiePlay aus dem Spiel: aus jedem Ballwechsel darin und vor allem aus jedem, den du verworfen hast, damit es diese Art toter Zeit nicht mehr für einen Ballwechsel hält.',
       'Solange noch Ballwechsel zu prüfen sind, wartet der Schalter. Später einen Fehler gefunden? Korrigier ihn einfach: Das Spiel bleibt als geprüft markiert.',
+      'Ein Spiel ohne Protokoll der Anzeigetafel fragt nach höchstens 20 Ballwechseln. Die anderen bleiben WiePlays Schätzungen, markiert mit «Geschätzt»: Sie zählen in der Statistik, «Nur sichere» lässt sie weg, und WiePlay lernt nicht aus so einem Spiel. Antworten verbessern die Ballwechsel daneben kaum; das Matchblatt schon, darum fragt das Prüfen zuerst danach.',
     ],
   },
   tag: {

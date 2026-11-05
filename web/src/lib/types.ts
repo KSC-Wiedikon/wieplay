@@ -1016,6 +1016,8 @@ export interface Analysis {
   can_run?: boolean
   /** Still to check; absent from older servers. */
   to_check?: ToCheck | null
+  /** Rallies WiePlay is unsure of and does not ask about; absent from older servers. */
+  rally_guesses?: number
   /** The analysis chain step by step; absent from older servers. */
   steps?: AnalysisSteps | null
 }
