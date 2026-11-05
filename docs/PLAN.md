@@ -1584,7 +1584,7 @@ exports like a person's tag. Its review state says how sure WiePlay is:
 
 | `review` | Meaning | Counts | In "To check" |
 |---|---|---|---|
-| `auto` | WiePlay's, sure: accepted by itself, marked as WiePlay's | yes | no |
+| `auto` | WiePlay's, sure: accepted by itself, marked as WiePlay's; or, on a rally with `score_sure` not true, its guess it does not ask about, marked "Guess" (below) | yes | no |
 | `check` | WiePlay's, unsure: "to check" | yes, marked | yes |
 | `confirmed` | a person accepted WiePlay's answer | yes | no |
 | `corrected` | a person changed it | yes | no |
@@ -1600,9 +1600,16 @@ exports like a person's tag. Its review state says how sure WiePlay is:
   WiePlay's own switch between `auto` and `check` as derived (no revision row); a person's answer
   is a revision as before.
 - **To check** (one predicate on the server, `tagging.*_to_check`, and in the web): WiePlay's
-  tags marked `check`, and any rally whose winner the scoring is unsure of that nobody gave (a
-  person's own rally too), unless a person answered it; the players are the identify queue's
-  cards (§10.5).
+  tags marked `check`, and a person's own rally whose winner the scoring is unsure of and nobody
+  gave; the players are the identify queue's cards (§10.5).
+- **How many rallies it asks about** (05.11.2026, measured in
+  [rally-asks](research/rally-asks-2026-11.md)): with a trusted board log, every unsure rally (few).
+  Without one, sheet or no sheet, `ASK_RALLIES` = 20 at most, the most doubtful per set
+  (`scoring.choose_rally_checks`); each answer leaves room for the next. The others stay WiePlay's
+  guesses (`tagging.rally_guess`): they count, marked, the stats name them, "Sure only" leaves
+  them out. Answers hardly improve the rallies around them, so asking all of them (about 155 a
+  game) only left every game unfinished. The review of a league game without a log asks for the
+  scoresheet first: it does more than 20 answers.
 - **A person's answer always wins**: confirmed, corrected, rejected and merged rows, and rows a
   person edited, are never replaced; a rerun replaces only WiePlay's untouched tags (`auto`,
   `check`, `updated_by` empty), as before. A client that sends `unreviewed` for WiePlay's tag
@@ -1617,7 +1624,8 @@ exports like a person's tag. Its review state says how sure WiePlay is:
   point; a break's other kind) and indexes the actions to check per video.
 - **"Rallies done" and "actions done"** still make a game training data; they are refused while
   anything of the kind is still to check, and a done game's labels include WiePlay's sure tags
-  (the coach stands behind the whole list).
+  (the coach stands behind the whole list). A game with rally guesses left has nothing to mark and
+  teaches the finder nothing: nobody stands behind those rallies.
 
 **One review: "To check".** One queue per video, ordered by what matters most: the rallies (and
 the breaks and sets between them, in time order) first, then the actions, then the player
