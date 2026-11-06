@@ -153,12 +153,24 @@ class TaggingError(ValueError):
 def stands(sure_only: bool = False) -> Any:
     """Segments that count (with the live filter of the caller): everything but what a person
     rejected or merged (PLAN §10: WiePlay's rallies and breaks count from the start, the
-    unsure ones marked "to check"). `sure_only`: without those still to check (a rally whose
-    winner alone is unsure still counts; its winner is left out, stats_input.rally_in)."""
+    unsure ones marked "to check"). `sure_only`: without those still to check, nor WiePlay's
+    guesses it did not ask about (a person's rally whose winner alone is unsure still counts;
+    its winner is left out, stats_input.rally_in)."""
     out: Any = Segment.review.not_in(GONE)
     if sure_only:
-        out = out & (Segment.review != "check")
+        out = out & (Segment.review != "check") & ~rally_guess()
     return out
+
+
+def rally_guess() -> Any:
+    """WiePlay's rally it is not sure of and did not ask about (scoring.choose_rally_checks):
+    it counts, marked; "Sure only" leaves it out, and it is no training label."""
+    return (
+        (Segment.kind == "rally")
+        & (Segment.source == "model")
+        & (Segment.review == "auto")
+        & Segment.score_sure.is_not(True)
+    )
 
 
 def event_stands(sure_only: bool = False) -> Any:
@@ -187,9 +199,9 @@ def period_stands(sure_only: bool = False) -> Any:
 
 
 def rally_to_check() -> Any:
-    """A live rally that waits for a person (with the live filter of the caller): WiePlay's
-    unsure rally, or any rally whose winner the scoring is unsure of and nobody gave
-    (a person's own rally too), unless a person answered it."""
+    """A live rally that waits for a person (with the live filter of the caller): the unsure
+    rally WiePlay asks about, or a person's own rally whose winner the scoring is unsure of and
+    nobody gave. WiePlay's guesses (rally_guess) wait for nobody."""
     return (
         (Segment.kind == "rally")
         & Segment.review.not_in(GONE)
@@ -198,7 +210,7 @@ def rally_to_check() -> Any:
             | (
                 Segment.score_sure.is_(False)
                 & Segment.won_by.is_(None)
-                & Segment.review.not_in(HUMAN_REVIEWS)
+                & Segment.review.not_in((*HUMAN_REVIEWS, "auto"))
             )
         )
     )
@@ -244,6 +256,20 @@ def to_check_counts(db: Session, video_ids: list[uuid.UUID]) -> dict[uuid.UUID, 
 
 def to_check_total(db: Session, video_ids: list[uuid.UUID]) -> int:
     return sum(sum(c.values()) for c in to_check_counts(db, video_ids).values())
+
+
+def rally_guesses(db: Session, video_ids: list[uuid.UUID]) -> int:
+    """How many rallies of these videos are WiePlay's guesses (rally_guess)."""
+    if not video_ids:
+        return 0
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Segment)
+            .where(Segment.video_id.in_(video_ids), Segment.deleted_at.is_(None), rally_guess())
+        )
+        or 0
+    )
 
 
 def model_state(sure: bool | None) -> str:

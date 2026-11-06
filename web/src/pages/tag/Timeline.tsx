@@ -13,7 +13,7 @@ import { useComments } from '../../lib/library'
 import { usePlayhead } from '../../lib/playhead'
 import { cardTone, noteText, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { useSideNames } from '../../lib/sides'
-import { GAP_KINDS, isAuto, isGap, isReviewedProposal, isToCheck, isWiePlays, scoreAfter, setToCheck } from '../../lib/suggestions'
+import { GAP_KINDS, isAuto, isGap, isReviewedProposal, isToCheck, isWiePlays, rallyGuess, scoreAfter, setToCheck } from '../../lib/suggestions'
 import type { Segment, SegmentKind, Side, Tag } from '../../lib/types'
 import { useActionReview, useReview, useUi, useView, useWorkspace } from './context'
 
@@ -31,6 +31,7 @@ const TO_CHECK_RING = 'ring-2 ring-inset ring-danger'
 
 function suggestionState(segment: Segment): string | undefined {
   if (isToCheck(segment)) return 'check'
+  if (rallyGuess(segment)) return 'guess'
   if (isAuto(segment)) return 'auto'
   return isReviewedProposal(segment) ? segment.review : undefined
 }

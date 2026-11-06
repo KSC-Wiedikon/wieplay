@@ -24,6 +24,10 @@ export const statsEn = {
     hintSeason: 'Every number opens its moments as a reel.',
     // Every tag counts, WiePlay's too; "Sure only" leaves out what is still to check.
     sureOnly: 'Sure only',
+    guesses_one: '{{count}} rally is WiePlay’s guess',
+    guesses_other: '{{count}} rallies are WiePlay’s guesses',
+    guessesLeftOut_one: '{{count}} rally that is WiePlay’s guess, left out',
+    guessesLeftOut_other: '{{count}} rallies that are WiePlay’s guesses, left out',
     toCheck_one: '{{count}} still to check',
     toCheck_other: '{{count}} still to check',
     toCheckLeftOut_one: '{{count}} still to check, left out',

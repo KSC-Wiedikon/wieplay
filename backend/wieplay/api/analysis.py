@@ -296,6 +296,8 @@ class AnalysisOut(BaseModel):
     actions: ActionsOut | None = None
     players: PlayersSummaryOut | None = None
     to_check: ToCheckOut = Field(default_factory=ToCheckOut)
+    # Rallies WiePlay is unsure of and does not ask about (tagging.rally_guess).
+    rally_guesses: int = 0
     steps: StepsOut | None = None
 
 
@@ -570,6 +572,7 @@ def analysis_out(
         actions=_actions(db, video, settings),
         players=found_players,
         to_check=to_check_out(db, video, found_players),
+        rally_guesses=tagging.rally_guesses(db, [video.id]),
         steps=steps_out(chain.steps(db, video, settings)),
     )
 

@@ -559,9 +559,10 @@ def actions_cmd(video: str | None, all_ready: bool, dry_run: bool) -> int:
 
 
 def asks_cmd(dry_run: bool) -> int:
-    """Choose again what WiePlay asks in every game nobody marked reviewed (choose_checks),
-    without suggesting again: after a deploy that changes the choice."""
-    from wieplay.core import actions
+    """Choose again what WiePlay asks in every game nobody marked reviewed (its actions,
+    choose_checks; its rallies, choose_rally_checks), without suggesting or scoring again: after
+    a deploy that changes the choice."""
+    from wieplay.core import actions, scoring
     from wieplay.core.models import Video
 
     settings = get_settings()
@@ -578,6 +579,15 @@ def asks_cmd(dry_run: bool) -> int:
             asked = actions.choose_checks(db, row)
             label = f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id})"
             print(f"{label}: {asked} to check{' (first game)' if first else ''}")
+        rallies = select(Video).where(
+            Video.status == "ready",
+            Video.sport.in_(scoring.SPORTS),
+            Video.deleted_at.is_(None),
+            Video.rallies_reviewed_at.is_(None),
+        )
+        for row in db.scalars(rallies.order_by(Video.recorded_on, Video.created_at)):
+            asked = scoring.rally_checks_again(db, row)
+            print(f"{row.recorded_on:%d.%m.%Y} {row.title} ({row.id}): {asked} rallies to check")
         if dry_run:
             db.rollback()
         else:
@@ -884,7 +894,9 @@ def main(argv: list[str] | None = None) -> int:
     which_actions.add_argument("--video", help="one video id")
     which_actions.add_argument("--all-ready", action="store_true", help="every analysed video")
     actions_parser.add_argument("--dry-run", action="store_true")
-    asks_parser = sub.add_parser("asks", help="choose again which actions WiePlay asks about")
+    asks_parser = sub.add_parser(
+        "asks", help="choose again which actions and rallies WiePlay asks about"
+    )
     asks_parser.add_argument("--dry-run", action="store_true")
     sub.add_parser("train-actions", help="train the action proposer now")
     action_evaluation = sub.add_parser("action-eval", help="per-game scores of the proposers")

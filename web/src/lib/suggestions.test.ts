@@ -17,6 +17,7 @@ import {
   logVerdict,
   loopRestart,
   nextOpen,
+  rallyGuess,
   rallyToCheck,
   reviewItems,
   reviewProgress,
@@ -36,6 +37,29 @@ const sure = rally({ id: 'e', start_ms: 46_000, end_ms: 49_000, source: 'model',
 const timeout = rally({ id: 't', kind: 'timeout', start_ms: 50_000, end_ms: 80_000, source: 'model', review: 'check', confidence: 0.6 })
 const setBreak = rally({ id: 'sb', kind: 'set_break', start_ms: 90_000, end_ms: 200_000, source: 'model', review: 'auto', confidence: 0.9 })
 const all = [check2, manual, fixed, check1, done, timeout, sure, setBreak]
+
+describe('WiePlay’s guesses', () => {
+  const guess = rally({ id: 'g', start_ms: 1_000, end_ms: 2_000, source: 'model', review: 'auto', score_sure: false })
+  const asked = rally({ id: 'q', start_ms: 3_000, end_ms: 4_000, source: 'model', review: 'check', score_sure: false })
+  const sure = rally({ id: 's', start_ms: 5_000, end_ms: 6_000, source: 'model', review: 'auto', score_sure: true })
+  const own = rally({ id: 'o', start_ms: 7_000, end_ms: 8_000, score_sure: false })
+
+  it('an unsure rally WiePlay does not ask about waits for nobody', () => {
+    expect(rallyGuess(guess)).toBe(true)
+    expect(rallyToCheck(guess)).toBe(false)
+    expect(isToCheck(guess)).toBe(false)
+  })
+
+  it('tells it from an asked rally, a sure one and a person’s own', () => {
+    expect([asked, sure, own].map(rallyGuess)).toEqual([false, false, false])
+    expect(rallyToCheck(asked)).toBe(true)
+    expect(rallyToCheck(own)).toBe(true) // who won is still open on a person's own rally
+  })
+
+  it('a break of WiePlay’s is never a guess', () => {
+    expect(rallyGuess(rally({ id: 'b', kind: 'timeout', start_ms: 1_000, end_ms: 2_000, source: 'model', review: 'auto', score_sure: null }))).toBe(false)
+  })
+})
 
 describe('WiePlay’s rallies and what is still to check', () => {
   it('tells WiePlay’s own (sure or to check) from answered ones and from rallies marked by hand', () => {

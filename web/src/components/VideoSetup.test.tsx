@@ -4,7 +4,7 @@ import type { CourtState } from '../lib/court'
 import type { PlayersSummary } from '../lib/players'
 import type { ScoreboardState, ScoreLogState } from '../lib/scoreboard'
 import type { Scoresheet } from '../lib/scoresheet'
-import { analysisState, ballState, courtState as courtStepState, namesState, playersState, scoreboardState, sheetState } from '../lib/setup'
+import { analysisState, asksForSheet, ballState, courtState as courtStepState, namesState, playersState, scoreboardState, sheetState } from '../lib/setup'
 import type { Analysis, TeamNames, Video } from '../lib/types'
 import { CORNER_POINTS, courtState, savedCalibration } from '../test/court'
 import { PLAYERS_VIDEO_ID as ID, readyVideo } from '../test/players'
@@ -176,6 +176,24 @@ const steps = () => [...document.querySelectorAll('[data-step-state]')].map((li)
 
 afterEach(() => vi.unstubAllGlobals())
 
+describe('the review asks for the scoresheet first', () => {
+  const none = { exists: false, can_edit: true } as Scoresheet
+  const league = { game_id: 501, no_scoresheet: false }
+
+  it('in a league game nobody entered or ruled out, without the board’s log', () => {
+    expect(asksForSheet(none, league, false)).toBe(true)
+  })
+
+  it('not with a log, a sheet, "no scoresheet", a friendly, or for someone who cannot enter it', () => {
+    expect(asksForSheet(none, league, true)).toBe(false)
+    expect(asksForSheet({ ...none, exists: true }, league, false)).toBe(false)
+    expect(asksForSheet(none, { ...league, no_scoresheet: true }, false)).toBe(false)
+    expect(asksForSheet(none, { ...league, game_id: null }, false)).toBe(false)
+    expect(asksForSheet({ ...none, can_edit: false }, league, false)).toBe(false)
+    expect(asksForSheet(undefined, league, false)).toBe(false)
+  })
+})
+
 describe('the states of the steps', () => {
   it('reads the analysis: running, failed, to start, to review, to mark reviewed, done', () => {
     const video = { rallies_reviewed_at: null }
@@ -186,6 +204,7 @@ describe('the states of the steps', () => {
     expect(analysisState(analysis({ proposals: { unreviewed: 3, confirmed: 0, corrected: 0, rejected: 0 } }), video, 0)).toBe('attention')
     expect(analysisState(analysis(), video, 5)).toBe('todo') // all answered: "rallies reviewed" is left
     expect(analysisState(analysis(), { rallies_reviewed_at: '2026-10-16T19:00:00Z' }, 5)).toBe('done')
+    expect(analysisState(analysis({ rally_guesses: 40 }), video, 5)).toBe('done') // the rest stays WiePlay's guess
     expect(analysisState(analysis({ proposals: { unreviewed: 0, confirmed: 0, corrected: 0, rejected: 0 } }), video, 0)).toBe('done') // nothing found
   })
 

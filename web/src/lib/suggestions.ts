@@ -31,7 +31,7 @@ export function isWiePlays(segment: Pick<Segment, 'source' | 'review'>): boolean
   return segment.source === 'model' && UNTOUCHED.includes(segment.review)
 }
 
-/** WiePlay's rally or break that is sure: it counts, nobody needs to check it. */
+/** WiePlay's rally or break nobody needs to check: it is sure, or (a rally) a guess it does not ask about. */
 export function isAuto(segment: Pick<Segment, 'source' | 'review'>): boolean {
   return segment.source === 'model' && segment.review === 'auto'
 }
@@ -46,14 +46,22 @@ export function isGap(kind: SegmentKind): kind is GapKind {
 type CheckFields = Pick<Segment, 'kind' | 'source' | 'review' | 'deleted_at'> & Partial<Pick<Segment, 'score_sure' | 'won_by'>>
 
 /**
- * A rally still to check: WiePlay's unsure rally (review "check"), or one whose winner the
- * scoring is not sure of while nobody has said who won or answered the rally (a person's own
- * rally too). Rejected and merged ones are gone.
+ * A rally still to check: the unsure rally WiePlay asks about (review "check"), or a person's own
+ * rally whose winner the scoring is not sure of while nobody has said who won. WiePlay's guesses
+ * (rallyGuess) wait for nobody. Rejected and merged ones are gone.
  */
 export function rallyToCheck(segment: CheckFields): boolean {
   if (segment.kind !== 'rally' || segment.deleted_at || segment.review === 'rejected' || segment.review === 'merged') return false
   if (segment.review === 'check') return true
-  return segment.score_sure === false && !segment.won_by && !ANSWERED.includes(segment.review)
+  return segment.score_sure === false && !segment.won_by && !ANSWERED.includes(segment.review) && segment.review !== 'auto'
+}
+
+/**
+ * WiePlay's rally it is not sure of and does not ask about: a game without the board's log asks
+ * about a few rallies only (PLAN §10.0). It counts, marked; "Sure only" leaves it out.
+ */
+export function rallyGuess(segment: CheckFields): boolean {
+  return segment.kind === 'rally' && !segment.deleted_at && isAuto(segment) && segment.score_sure !== true
 }
 
 /** A break WiePlay labelled and is not sure of. */

@@ -103,7 +103,7 @@ export function SeasonStats({ team }: { team: TeamDetail }) {
           ) : null
         }
       />
-      <ToCheckLine count={data?.to_check ?? 0} sure={sure} onSure={setSure} />
+      <ToCheckLine count={data?.to_check ?? 0} guesses={data?.rally_guesses ?? 0} sure={sure} onSure={setSure} />
       <ActionGateNote gate={data?.actions_gate} />
       {stats.isPending ? (
         <Spinner />

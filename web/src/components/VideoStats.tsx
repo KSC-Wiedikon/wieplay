@@ -101,7 +101,7 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
           ) : null
         }
       />
-      <ToCheckLine count={stats.data?.to_check ?? 0} sure={sure} onSure={setSure} />
+      <ToCheckLine count={stats.data?.to_check ?? 0} guesses={stats.data?.rally_guesses ?? 0} sure={sure} onSure={setSure} />
       <ActionGateNote gate={stats.data?.actions_gate} />
       {stats.isPending ? (
         <Spinner />
@@ -139,9 +139,10 @@ export function VideoStats({ video, tagging, onPlay }: VideoStatsProps) {
 
 /**
  * Every tag counts, WiePlay's too (PLAN §10): "N still to check" says how many of them nobody has
- * checked yet, and "Sure only" shows the numbers from sure and checked tags only.
+ * checked yet, "N guesses" how many rallies WiePlay is unsure of and does not ask about, and
+ * "Sure only" shows the numbers from sure and checked tags only.
  */
-export function ToCheckLine({ count, sure, onSure }: { count: number; sure: boolean; onSure: (on: boolean) => void }) {
+export function ToCheckLine({ count, guesses = 0, sure, onSure }: { count: number; guesses?: number; sure: boolean; onSure: (on: boolean) => void }) {
   const { t } = useTranslation()
   const id = useId()
   return (
@@ -154,6 +155,11 @@ export function ToCheckLine({ count, sure, onSure }: { count: number; sure: bool
         {count > 0 && <AlertIcon className="size-4 shrink-0" />}
         {count > 0 ? (sure ? t('stats.toCheckLeftOut', { count }) : t('stats.toCheck', { count })) : sure ? t('stats.sureOnlyHint') : t('stats.allChecked')}
       </p>
+      {guesses > 0 && (
+        <p data-guesses={guesses} className="text-muted">
+          {sure ? t('stats.guessesLeftOut', { count: guesses }) : t('stats.guesses', { count: guesses })}
+        </p>
+      )}
     </div>
   )
 }

@@ -115,6 +115,7 @@ export const guideEn: Guide = {
     body: [
       'When nothing is left to check, the review offers “Mark rallies reviewed”; the video page has the same switch. Only then does WiePlay learn from the game: from every rally in it and, most of all, from every rally you rejected, so it stops mistaking that kind of dead time for a rally.',
       'While rallies are still to check, the switch waits. Found a mistake later? Just correct it: the game stays marked reviewed.',
+      'A game without the scoreboard’s log asks about 20 rallies at most. The others stay WiePlay’s guesses, marked “Guess”: they count in the stats, “Sure only” leaves them out, and such a game doesn’t teach WiePlay. Answers hardly improve the rallies around them; the scoresheet does, so the review asks for it first.',
     ],
   },
   tag: {

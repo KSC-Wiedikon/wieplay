@@ -2,15 +2,19 @@ import '../../i18n/pages'
 import type { TFunction } from 'i18next'
 import { useId, useMemo, type MouseEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button } from '../../components/Button'
+import { Button, ButtonLink } from '../../components/Button'
 import { AlertIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon, MergeIcon, SparkleIcon, SplitIcon, UndoIcon } from '../../components/icons'
 import { EmptyState } from '../../components/Message'
 import { ProgressBar } from '../../components/ProgressBar'
 import { SuggestionChip } from '../../components/SuggestionChip'
+import { ApiError } from '../../lib/api'
 import { useSetRalliesReviewed } from '../../lib/analysis'
 import { cx } from '../../lib/cx'
 import { aSegmentKind, formatClock, reasonText, scoreNoteText, segmentKindLabel, sideLabel } from '../../lib/labels'
 import { periodAt } from '../../lib/rallies'
+import { useScoresheet } from '../../lib/scoresheet'
+import { asksForSheet, useVideoSetup } from '../../lib/setup'
+import { useToast } from '../../lib/toast'
 import { cardTone, courtByRally, issueText, notesAfter, notesToShow, noteText, noteTime, useSheetCourt, type SheetNote } from '../../lib/sheetCourt'
 import { fullNameOf, useSideNames, type SideNames } from '../../lib/sides'
 import {
@@ -20,8 +24,10 @@ import {
   formatPercent,
   formatSeconds,
   gapToCheck,
+  hasTrustedLog,
   isGap,
   isOpen,
+  rallyGuess,
   rallyToCheck,
   reviewItems,
   scoreAfter,
@@ -127,6 +133,8 @@ export function ReviewPanel() {
         </p>
       </div>
       {progress.total > 0 && <ProgressBar value={progress.done / progress.total} label={progressText} />}
+
+      <SheetFirst />
 
       {current ? (
         <>
@@ -238,7 +246,7 @@ export function ReviewPanel() {
           {t('tagging.review.stillOpenBody')}
         </EmptyState>
       ) : progress.total > 0 || items.length > 0 ? (
-        <Done videoId={video.id} reviewed={Boolean(video.rallies_reviewed_at)} />
+        <Done videoId={video.id} reviewed={Boolean(video.rallies_reviewed_at)} guesses={view.segments.filter(rallyGuess).length} />
       ) : (
         <EmptyState icon={<SparkleIcon />} title={t('tagging.review.emptyTitle')}>
           {t('tagging.review.emptyBody')}
@@ -649,11 +657,55 @@ function BreakButtons({ segment }: { segment: Segment }) {
   )
 }
 
-/** Every rally and break is checked: the way to "rallies reviewed", which teaches WiePlay. */
-function Done({ videoId, reviewed }: { videoId: string; reviewed: boolean }) {
+/** Before the rallies: the scoresheet, which helps more than answers about them (PLAN §10.0). */
+function SheetFirst() {
+  const { t } = useTranslation()
+  const toast = useToast()
+  const { video } = useWorkspace()
+  const view = useView()
+  const sheet = useScoresheet(video.id, video.sport === 'volleyball')
+  const setup = useVideoSetup(video.id)
+  if (!asksForSheet(sheet.data, video, hasTrustedLog(view.segments))) return null
+  return (
+    <div data-sheet-first="true" className="flex flex-col gap-2 rounded-xl border border-accent bg-accent-soft p-3 text-sm text-on-accent-soft">
+      <p className="font-semibold">{t('tagging.review.sheetFirstTitle')}</p>
+      <p>{t('tagging.review.sheetFirstBody')}</p>
+      <div className="flex flex-wrap gap-2">
+        <ButtonLink to={`/videos/${video.id}/scoresheet`} variant="primary">
+          {t('tagging.review.sheetFirstOpen')}
+        </ButtonLink>
+        <Button
+          variant="ghost"
+          disabled={setup.isPending}
+          onClick={() =>
+            setup.mutate(
+              { no_scoresheet: true },
+              { onError: (error) => toast.error(t('sheet.saveFailed', { detail: error instanceof ApiError ? error.detail : '' })) },
+            )
+          }
+        >
+          {t('setupSheet.noSheet')}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Everything WiePlay asks about is checked: the way to "rallies reviewed", which teaches WiePlay,
+ * unless part of the game stays its guess (then there is nothing to mark, and nothing to learn).
+ */
+function Done({ videoId, reviewed, guesses }: { videoId: string; reviewed: boolean; guesses: number }) {
   const { t } = useTranslation()
   const { reload } = useWorkspace()
   const mark = useSetRalliesReviewed(videoId)
+  if (!reviewed && guesses > 0) {
+    return (
+      <EmptyState icon={<CheckIcon />} title={t('tagging.review.guessTitle')}>
+        {t('tagging.review.guessBody', { count: guesses })}
+      </EmptyState>
+    )
+  }
   return (
     <EmptyState
       icon={<CheckIcon />}

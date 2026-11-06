@@ -153,9 +153,10 @@ def test_an_analysis_scores_the_match(
         assert (seg["model_serving"], seg["model_won_by"]) == (server, won)
         assert seg["won_by"] is None and seg["serving"] is None  # facts only
         assert seg["score_source"] == "model"
-        # The video and the official score alone: right, but never sure (PLAN §10.3): the
-        # coach is asked, with why.
-        assert seg["score_sure"] is False and seg["score_conflict"] is True
+        # The video and the official score alone: right, but never sure (PLAN §10.3): with why;
+        # the coach is asked about a few (PLAN §10.0), the flag says which.
+        assert seg["score_sure"] is False
+        assert seg["score_conflict"] is (seg["review"] == "check")
         assert seg["score_reasons"] and seg["score_note"] == seg["score_reasons"][0]["code"]
         assert seg["serving_court"] in ("near", "far") and seg["serve_confidence"] > 0.9
     assert (rallies[-1]["score_us_after"], rallies[-1]["score_them_after"]) == OFFICIAL[-1]

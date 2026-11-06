@@ -128,6 +128,7 @@ function keys(...list: (string | { key: string; shiftKey?: boolean; altKey?: boo
 }
 
 const panel = () => screen.getByRole('region', { name: 'To check' })
+const waitPanel = () => screen.findByRole('region', { name: 'To check' })
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory())
@@ -322,5 +323,70 @@ describe('TagPage, to check', () => {
     const dialog = screen.getByRole('dialog', { name: 'Keys' })
     expect(within(dialog).getByText('Merge with the next rally')).toBeInTheDocument()
     expect(within(dialog).getByText('With the arrows: one frame instead of 0.25 s')).toBeInTheDocument()
+  })
+})
+
+describe('a game WiePlay asks a few rallies about', () => {
+  const guess = (id: string, start_ms: number) => suggestion(id, start_ms, 0.62, { review: 'auto' })
+
+  it('marks the guesses, does not walk them, and has nothing to mark when the rest is answered', async () => {
+    const initial = bundle({ periods: [set1], segments: [suggestion(S1, 10_000, 0.6), guess(S2, 30_000), guess(S3, 50_000)] })
+    show(`/videos/${ID}/tag?mode=review`, initial)
+    expect(await within(await waitPanel()).findByRole('heading', { name: /Rally at 0:10\.0/ })).toBeInTheDocument()
+    keys('Enter')
+    expect(await within(panel()).findByText('WiePlay has no more questions about this game')).toBeInTheDocument()
+    expect(within(panel()).getByText(/2 more rallies stay WiePlay’s guesses/)).toBeInTheDocument()
+    expect(within(panel()).queryByRole('button', { name: 'Mark rallies reviewed' })).not.toBeInTheDocument()
+  })
+})
+
+describe('the review asks for the scoresheet first', () => {
+  const noSheet = { exists: false, can_edit: true, trusted: false, checks: [], sets: [] }
+
+  function withSheet(sheet: unknown, patched: unknown[] = []) {
+    const initial = data()
+    const server = fakeServer(initial)
+    let current = { ...video, no_scoresheet: false }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        stubFetch({
+          [`/api/videos/${ID}`]: { body: () => current },
+          [`/api/videos/${ID}/tagging`]: { body: () => server.current() },
+          [`POST /api/videos/${ID}/changes`]: { body: server.changes },
+          [`/api/videos/${ID}/analysis`]: { body: analysis },
+          [`/api/videos/${ID}/comments`]: { body: [] },
+          [`/api/videos/${ID}/scoresheet`]: { body: sheet },
+          [`PATCH /api/videos/${ID}/setup`]: {
+            body: ({ body }: { body: unknown }) => {
+              patched.push(body)
+              current = { ...current, ...(body as object) }
+              return current
+            },
+          },
+          '/api/reels': { body: [] },
+        }),
+      ),
+    )
+    renderRoute(<TagPage />, { path: '/videos/:id/tag', url: `/videos/${ID}/tag?mode=review`, routes: [{ path: '/videos/:id', element: <p>Video page</p> }] })
+  }
+
+  it('above the rally, and one tap says there is none', async () => {
+    const patched: unknown[] = []
+    withSheet(noSheet, patched)
+    const box = await within(await waitPanel()).findByText('First: the scoresheet')
+    expect(box).toBeInTheDocument()
+    // The rally questions stay reachable: the sheet does not block them.
+    expect(within(panel()).getByRole('heading', { name: /Rally at/ })).toBeInTheDocument()
+    fireEvent.click(within(panel()).getByRole('button', { name: 'No scoresheet' }))
+    await waitFor(() => expect(within(panel()).queryByText('First: the scoresheet')).not.toBeInTheDocument())
+    expect(patched).toEqual([{ no_scoresheet: true }])
+  })
+
+  it('not once a sheet is there', async () => {
+    withSheet({ ...noSheet, exists: true })
+    expect(await within(await waitPanel()).findByRole('heading', { name: /Rally at/ })).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(within(panel()).queryByText('First: the scoresheet')).not.toBeInTheDocument()
   })
 })

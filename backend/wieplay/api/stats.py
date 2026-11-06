@@ -227,6 +227,7 @@ class VideoStatsOut(BaseModel):
     # What is still to check (PLAN §10: rallies, breaks, sets and actions WiePlay is unsure
     # of): counted above, marked; with ?sure=true left out of the numbers.
     to_check: int = 0
+    rally_guesses: int = 0  # WiePlay's rallies it is unsure of and does not ask about
     sure_only: bool = False
     # How WiePlay finds the actions (PLAN §10.4a); null for older servers.
     actions_gate: ActionGateOut | None = None
@@ -259,6 +260,7 @@ class TeamStatsOut(BaseModel):
     rotation_columns: list[ColumnOut] = Field(default_factory=list)
     # What is still to check over the matches (counted above; left out with ?sure=true).
     to_check: int = 0
+    rally_guesses: int = 0  # WiePlay's rallies it is unsure of and does not ask about
     sure_only: bool = False
     actions_gate: ActionGateOut | None = None
     # With ?search=: the tags it kept over the matches; null without one.
@@ -594,6 +596,7 @@ def video_stats(
         ],
         rotation_columns=_columns(rot_cols),
         to_check=tagging.to_check_total(db, [video.id]),
+        rally_guesses=tagging.rally_guesses(db, [video.id]),
         sure_only=sure,
         actions_gate=gate_out(db, settings),
         selected=result.tags if query is not None else None,
@@ -775,6 +778,7 @@ def team_stats(
             for m in result.matches
         ],
         to_check=tagging.to_check_total(db, ids),
+        rally_guesses=tagging.rally_guesses(db, ids),
         sure_only=sure,
         actions_gate=gate_out(db, settings),
         selected=sum(result.box.team.counts.values()) + sum(result.box.opponent.counts.values())
