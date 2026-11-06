@@ -19,7 +19,7 @@ from tests.fakes import FakeStore
 from tests.media_helpers import worker_client
 from tests.test_analysis_api import ANALYSE_CAPS, change, make_ready
 from tests.test_scoring_api import _seg_in, analysed, match, rallies_of, tagging
-from wieplay.core import analysis, scoring
+from wieplay.core import analysis, recap, scoring
 from wieplay.core import tagging as core_tagging
 from wieplay.core.config import Settings
 from wieplay.core.models import Segment, Video
@@ -133,6 +133,24 @@ def test_choosing_again_without_scoring(scored: Any, db_engine: Engine) -> None:
         db.flush()
         assert scoring.rally_checks_again(db, video) == scoring.ASK_RALLIES
         db.rollback()
+
+
+def test_a_persons_winner_does_not_make_the_score_after_it_a_fact() -> None:
+    after = (7, 5)
+
+    def row(**extra: Any) -> Any:
+        fields = {"score_sure": True, "source": "model", "review": "confirmed", "sheet_point": None}
+        return NS(**{**fields, "log_score_us": None, "log_score_them": None, **extra})
+
+    # Answered, nothing names the score: the winner is a fact, the score after it is not.
+    assert not recap._line_sure(row(), after)
+    assert not recap._line_sure(row(log_score_us=7, log_score_them=6), after)
+    # The log or the sheet names it.
+    assert recap._line_sure(row(log_score_us=7, log_score_them=5), after)
+    assert recap._line_sure(row(sheet_point=12), after)
+    # WiePlay's own sure rally: sure means with its score line. Its guess is not.
+    assert recap._line_sure(row(review="auto"), after)
+    assert not recap._line_sure(row(review="auto", score_sure=False), after)
 
 
 # --- the choice, pure -------------------------------------------------------------------------

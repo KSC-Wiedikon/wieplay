@@ -229,11 +229,23 @@ def _board_check(db: Session, video: Video) -> Any:
     return shows
 
 
+def _line_sure(r: Segment, after: tuple[int, int]) -> bool:
+    """The joint decode is sure of the score after this rally. A rally of WiePlay's it is sure of:
+    yes, sure means with its score line. A rally a person answered counts as sure too, but that
+    only makes its winner a fact: without the log or the sheet naming that score, the finder's
+    missed rallies leave it wrong more often than not (docs/research/rally-asks-2026-11.md)."""
+    if not r.score_sure:
+        return False
+    if r.source == "model" and r.review in tagging.MODEL_OWN:
+        return True
+    return r.sheet_point is not None or (r.log_score_us, r.log_score_them) == after
+
+
 def _scores(db: Session, video: Video, rallies: list[Segment]) -> dict[uuid.UUID, RallyFacts]:
     """Per rally the facts the bug may show: its set (a coach's set, or Wiedisync's official
     score at its end), the score before and after it when every point up to it is a fact (the
     coach's winners, the rallies marked done without a check, or the scoreboard showing that
-    score, sure and without a check, or the joint decode sure of the rally), and whether it
+    score, sure and without a check, or the joint decode sure of that score), and whether it
     ended its set or the match."""
     from wieplay.core import scoring
 
@@ -262,7 +274,7 @@ def _scores(db: Session, video: Video, rallies: list[Segment]) -> dict[uuid.UUID
                 nxt = rs[i + 1] if i + 1 < len(rs) else None
                 fact = (
                     r.score_source == "tags"
-                    or bool(r.score_sure)
+                    or _line_sure(r, after)
                     or (reviewed and not r.score_conflict)
                     or (
                         board is not None

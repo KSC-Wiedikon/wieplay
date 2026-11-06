@@ -28,11 +28,16 @@ correction was made from the log.
 | 20 answers, most doubtful per set | 160 (92 %) | 77 (45 %) | 109 (92 %) | 32 (27 %) |
 | 40 answers, most doubtful per set | 164 (95 %) | 78 (45 %) | 112 (94 %) | 14 (12 %) |
 | 60 answers, most doubtful per set | 170 (98 %) | 54 (31 %) | 116 (97 %) | 41 (34 %) |
+| **20 answers, as built** (below) | **158 (91 %)** | **79 (46 %)** | **107 (90 %)** | **35 (29 %)** |
 | Every rally answered | 173 (100 %) | 75 (43 %) | 119 (100 %) | 39 (33 %) |
 | Every rally, and every missed rally | 173 (100 %) | 130 (75 %) | 119 (100 %) | 111 (93 %) |
 | Typed sheet, no answers | 159 (92 %) | 147 (85 %) | 110 (92 %) | 107 (90 %) |
 | Typed sheet, 20 answers | 165 (95 %) | 153 (88 %) | 117 (98 %) | 113 (95 %) |
 | Typed sheet, 40 answers | 168 (97 %) | 159 (92 %) | 117 (98 %) | 113 (95 %) |
+| **Typed sheet, 20 answers, as built** | **165 (95 %)** | **153 (88 %)** | **116 (97 %)** | **112 (94 %)** |
+
+"As built": the real `ask_rallies` after each answer, answered in time order as the review walks
+them. The other rows pick one rally at a time by doubt, a little better than a person can follow.
 
 Side-out % against the log, in percentage points (us / them): nothing asked 3.3 / 5.3 and
 3.1 / 6.3; every rally answered 1.9 / 3.1 and 0.0 / 1.2; typed sheet alone 1.4 / 0.8 and 0.1 / 1.7.
@@ -58,6 +63,21 @@ winners 88 % and 94 %, score line 76 % and 84 %. The reader is much weaker on ot
 
 Limits: two games, one team; the serve reader may have trained on them; the sets and, on game 509,
 the corrected rally bounds are kept as they are, so a real blind game is a bit worse off.
+
+## Can "sure" be trusted with a sheet and answers?
+
+The first count said no (3 of 25, 1 of 12), but it mixed WiePlay's own sure rallies with the ones
+the simulated coach had answered. Separated, on the games above, up to 60 answers:
+
+- **WiePlay's own sure rallies: no wrong winner, in any run.**
+- Their score line was wrong in one rally on game 509 with the paper's sheet, at 7:6 against the
+  log's 7:5: the scorer's known slip in set 4, gone with the corrected sheet. On game 409, one rally
+  from 40 answers on, past the limit, one point off.
+- **A rally a person answered counts as sure too, and there it means only its winner.** Its score
+  line was often wrong: at 20 answers 12 of 14 and 16 of 17 without a sheet, 5 of 10 and 1 of 11 with
+  the paper's sheet. The recap's score bug took such a rally's score as a fact. Now it takes the score
+  of an answered rally only where the log or the sheet names it (`core/recap.py` `_line_sure`).
+  The rest of the app shows a score from the decode as WiePlay's anyway (`score_source` "model").
 
 ## What was built
 

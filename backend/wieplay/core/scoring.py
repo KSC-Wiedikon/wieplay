@@ -603,9 +603,9 @@ def score_video(db: Session, video: Video, *, reason: str) -> ModelRun | None:
 
 
 # A game without a trusted board log asks about this many rallies at most. Measured on two games
-# with the log hidden (docs/research/rally-asks-2026-11.md): 20 answers put 92 % of the winners
-# right; the answers hardly spread to the rallies around them, so asking every rally (about 155
-# a game) would be the only way to 100 %. Nobody does that, so the game would stay unfinished.
+# with the log hidden (docs/research/rally-asks-2026-11.md): 20 answers put 90 % of the winners
+# right, from 87 %; the answers hardly spread to the rallies around them, so asking every rally
+# (about 155 a game) would be the only way to 100 %. Nobody does that: the game stays unfinished.
 ASK_RALLIES = 20
 
 
