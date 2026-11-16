@@ -14,7 +14,7 @@ case "$env" in
   prod) db=wieplay ;;
   *) echo "usage: scripts/deploy.sh dev|prod" >&2; exit 2 ;;
 esac
-host="${WIEPLAY_DEPLOY_HOST:-hetzner}"
+host="${WIEPLAY_DEPLOY_HOST:-kscw-server}"
 dir="/opt/wieplay-$env"
 cd "$(dirname "$0")/.."
 
