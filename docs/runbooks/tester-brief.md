@@ -1,21 +1,25 @@
 # Brief: testing WiePlay with another team
 
 WiePlay analyses a team's volleyball match videos: it finds rallies, asks the coach about the
-few it is unsure of, and builds a recap. Another club's team can try it as a **guest club**.
+few it is unsure of, and builds a recap. Another team of our own club can try it.
 
 ## What the testing team gets
-- A team page on https://wieplay.kscw.ch, reached by a one-time invite link (14 days).
-- Their own logins; they see only their team. KSCW members never see them.
+- Their own KSCW team, with the same Wiedisync login they use everywhere else. No invite link,
+  no guest club and no separate agreement are needed: it is the same club.
+- Coaches and team managers of the team see it at https://wieplay.kscw.ch; players see
+  their own team's recaps.
 
-## Before the link is sent (club admin, in the app)
-1. Get the club's written OK (see [guest-club.md](guest-club.md): they film their own adult
-   matches, inform their players, everyone filmed is 18+, training yes/no, video limit).
-2. Admin → Teams → Guest clubs → *Create a guest team*, then copy the invite link (shown once)
-   and send it to the coach directly.
+## Before the test (a full admin, in the app)
+1. Admin → Teams: switch the team on. WiePlay then mirrors its roster from Wiedisync on the
+   next sync (run the sync from the same page to see it at once).
+2. Check the roster: everyone filmed must be 18 or older. A team with under-18 players stays
+   off (like DU23-1) and its matches are not filmed.
+3. Tell the coach to log in with Wiedisync and open the team. Anyone else who should analyse
+   (not coach) gets the *analyst* role from the coach or an admin (People → Grant analyst).
 
 ## What to ask the testers to do
-1. Open the link, set email and password, confirm that everyone filmed is 18 or older.
-2. Add players under People (name, number, role).
+1. Log in with Wiedisync and open the team page.
+2. Check the roster under People (it comes from Wiedisync, so fix names there).
 3. Upload one match (a date and a title). Filming tips: [FILMING_GUIDE.md](../FILMING_GUIDE.md).
 4. When analysis finishes, answer the questions under "To check" (about 20 rallies), then open
    the recap.
